@@ -1,0 +1,307 @@
+"""Egress profiles: deny by default, services, extend, built-ins, validation."""
+
+import pytest
+
+from support import agent, anthropic_profile, profile, spec
+
+DEPLOY_HOSTS = ["api.deploy.example.com"]
+DEPLOY_INJECT = {"header": "Authorization", "value": "Bearer {secret}"}
+
+
+def deploy_api(**fields):
+    return {"hosts": DEPLOY_HOSTS, "inject": DEPLOY_INJECT, **fields}
+
+
+# --- defaults: nothing is allowed unless declared ---------------------------------------------
+
+
+@pytest.mark.todo
+def test_without_any_egress_an_agent_gets_an_empty_default_profile(project):
+    resolved = project.resolved(spec(agents={"coder": agent()}))
+    assert resolved["agents"]["coder"]["egress"] == "default"
+    assert profile(resolved, "default")["allow"] == []
+    assert profile(resolved, "default")["services"] == {}
+
+
+@pytest.mark.todo
+def test_an_agent_naming_no_profile_gets_default(project):
+    resolved = project.resolved(spec(egress={"default": anthropic_profile()}, agents={"coder": agent()}))
+    assert resolved["agents"]["coder"]["egress"] == "default"
+    assert "platform.claude.com" in profile(resolved, "default")["allow"]
+
+
+@pytest.mark.todo
+def test_an_agent_links_to_one_named_profile(project):
+    resolved = project.resolved(
+        spec(
+            egress={"default": anthropic_profile(), "strict": {}},
+            agents={"coder": agent(egress="strict")},
+        )
+    )
+    assert resolved["agents"]["coder"]["egress"] == "strict"
+
+
+@pytest.mark.todo
+def test_an_unknown_profile_is_an_error(project):
+    result = project.config(spec(agents={"coder": agent(egress="ghost")}))
+    assert result.returncode != 0
+    assert "ghost" in result.stderr
+
+
+@pytest.mark.todo
+def test_there_is_no_deny_key_and_no_default_key(project):
+    for key, value in (("deny", ["example.com"]), ("default", "deny")):
+        result = project.config(spec(egress={"default": {key: value}}))
+        assert result.returncode != 0, key
+        assert key in result.stderr
+
+
+@pytest.mark.todo
+def test_egress_must_be_a_map_of_profiles(project):
+    result = project.config(spec(egress={"allow": ["example.com"]}))
+    assert result.returncode != 0
+
+
+@pytest.mark.todo
+def test_unknown_profile_keys_are_rejected(project):
+    result = project.config(spec(egress={"default": {"nonsense": 1}}))
+    assert result.returncode != 0
+    assert "nonsense" in result.stderr
+
+
+@pytest.mark.todo
+def test_allow_star_grants_the_whole_internet(project):
+    resolved = project.resolved(spec(egress={"default": {"allow": ["*"]}}))
+    assert profile(resolved, "default")["allow"] == ["*"]
+
+
+@pytest.mark.todo
+def test_allow_accepts_hosts_and_globs(project):
+    resolved = project.resolved(spec(egress={"default": {"allow": ["example.com", "*.pypi.org"]}}))
+    assert set(profile(resolved, "default")["allow"]) == {"example.com", "*.pypi.org"}
+
+
+# --- services ----------------------------------------------------------------------------------
+
+
+@pytest.mark.todo
+def test_the_anthropic_service_is_built_in(project):
+    service = profile(project.resolved(spec(egress={"default": anthropic_profile()})), "default")["services"]["anthropic"]
+    assert service["hosts"] == ["api.anthropic.com"]
+    assert service["inject"]["header"] == "x-api-key"
+    assert service["secret"] == "main/ANTHROPIC_API_KEY"
+
+
+@pytest.mark.todo
+def test_the_github_service_is_built_in(project):
+    resolved = project.resolved(spec(egress={"default": {"services": {"github": "main/GITHUB_TOKEN"}}}))
+    service = profile(resolved, "default")["services"]["github"]
+    assert set(service["hosts"]) == {"github.com", "api.github.com"}
+    assert service["secret"] == "main/GITHUB_TOKEN"
+
+
+@pytest.mark.todo
+def test_an_object_defines_a_custom_service(project):
+    resolved = project.resolved(
+        spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}}})
+    )
+    service = profile(resolved, "default")["services"]["deploy-api"]
+    assert service["hosts"] == DEPLOY_HOSTS
+    assert service["secret"] == "main/DEPLOY_TOKEN"
+
+
+@pytest.mark.todo
+def test_a_service_object_needs_hosts(project):
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": {"inject": DEPLOY_INJECT}}}}))
+    assert result.returncode != 0
+    assert "hosts" in result.stderr
+
+
+@pytest.mark.todo
+def test_a_service_that_injects_needs_a_secret(project):
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api()}}}))
+    assert result.returncode != 0
+    assert "deploy-api" in result.stderr
+
+
+@pytest.mark.todo
+def test_a_service_without_inject_is_a_pure_allowlist_and_needs_no_secret(project):
+    resolved = project.resolved(
+        spec(egress={"default": {"services": {"pypi": {"hosts": ["pypi.org", "files.pythonhosted.org"]}}}})
+    )
+    service = profile(resolved, "default")["services"]["pypi"]
+    assert service["hosts"] == ["pypi.org", "files.pythonhosted.org"]
+    assert "secret" not in service
+
+
+@pytest.mark.todo
+def test_a_string_for_an_unknown_service_is_an_error(project):
+    result = project.config(spec(egress={"default": {"services": {"nonesuch": "main/ANTHROPIC_API_KEY"}}}))
+    assert result.returncode != 0
+    assert "nonesuch" in result.stderr
+
+
+@pytest.mark.todo
+def test_a_misspelled_service_suggests_the_close_name(project):
+    result = project.config(spec(egress={"default": {"services": {"antropic": "main/ANTHROPIC_API_KEY"}}}))
+    assert result.returncode != 0
+    assert "anthropic" in result.stderr
+
+
+@pytest.mark.todo
+def test_a_null_service_value_is_rejected(project):
+    result = project.config(spec(egress={"default": {"services": {"anthropic": None}}}))
+    assert result.returncode != 0
+
+
+@pytest.mark.todo
+@pytest.mark.parametrize("reference", ["main/MISSING", "nope/ANTHROPIC_API_KEY", "not-a-reference"])
+def test_a_secret_reference_must_exist_in_a_vault(project, reference):
+    result = project.config(spec(egress={"default": {"services": {"anthropic": reference}}}))
+    assert result.returncode != 0
+    assert reference.split("/")[-1] in result.stderr
+
+
+@pytest.mark.todo
+def test_two_services_sharing_a_host_with_different_injection_are_ambiguous(project):
+    shared = {
+        "hosts": DEPLOY_HOSTS,
+        "secret": "main/DEPLOY_TOKEN",
+    }
+    result = project.config(
+        spec(
+            egress={
+                "default": {
+                    "services": {
+                        "one": {**shared, "inject": {"header": "Authorization"}},
+                        "two": {**shared, "inject": {"header": "X-Api-Key"}},
+                    }
+                }
+            }
+        )
+    )
+    assert result.returncode != 0
+    assert DEPLOY_HOSTS[0] in result.stderr
+
+
+# --- extend ------------------------------------------------------------------------------------
+
+
+@pytest.mark.todo
+def test_extend_unions_allow_and_merges_services(project):
+    resolved = project.resolved(
+        spec(
+            egress={
+                "default": {"allow": ["a.example.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}},
+                "coder": {"extend": "default", "allow": ["b.example.com"], "services": {"github": "main/GITHUB_TOKEN"}},
+            }
+        )
+    )
+    coder = profile(resolved, "coder")
+    assert set(coder["allow"]) == {"a.example.com", "b.example.com"}
+    assert set(coder["services"]) == {"anthropic", "github"}
+    assert set(profile(resolved, "default")["services"]) == {"anthropic"}
+
+
+@pytest.mark.todo
+def test_a_child_string_overrides_only_the_secret(project):
+    resolved = project.resolved(
+        spec(
+            egress={
+                "default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}},
+                "staging": {"extend": "default", "services": {"deploy-api": "main/GITHUB_TOKEN"}},
+            }
+        )
+    )
+    service = profile(resolved, "staging")["services"]["deploy-api"]
+    assert service["secret"] == "main/GITHUB_TOKEN"
+    assert service["hosts"] == DEPLOY_HOSTS
+    assert service["inject"]["header"] == "Authorization"
+
+
+@pytest.mark.todo
+def test_a_child_object_replaces_the_inherited_definition(project):
+    resolved = project.resolved(
+        spec(
+            egress={
+                "default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}},
+                "staging": {
+                    "extend": "default",
+                    "services": {
+                        "deploy-api": {
+                            "hosts": ["staging.deploy.example.com"],
+                            "inject": {"header": "X-Key"},
+                            "secret": "main/DEPLOY_TOKEN",
+                        }
+                    },
+                },
+            }
+        )
+    )
+    service = profile(resolved, "staging")["services"]["deploy-api"]
+    assert service["hosts"] == ["staging.deploy.example.com"]
+    assert service["inject"]["header"] == "X-Key"
+
+
+@pytest.mark.todo
+def test_a_string_can_bind_a_secret_to_an_inherited_custom_service(project):
+    resolved = project.resolved(
+        spec(
+            egress={
+                "base": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}},
+                "operator": {"extend": "base", "services": {"deploy-api": "main/GITHUB_TOKEN"}},
+            }
+        )
+    )
+    assert profile(resolved, "operator")["services"]["deploy-api"]["secret"] == "main/GITHUB_TOKEN"
+
+
+@pytest.mark.todo
+def test_a_child_cannot_remove_what_it_inherits(project):
+    resolved = project.resolved(
+        spec(
+            egress={
+                "default": {"allow": ["a.example.com"]},
+                "child": {"extend": "default", "allow": []},
+            }
+        )
+    )
+    assert profile(resolved, "child")["allow"] == ["a.example.com"]
+
+
+@pytest.mark.todo
+def test_extend_cycles_are_rejected(project):
+    result = project.config(spec(egress={"a": {"extend": "b"}, "b": {"extend": "a"}}))
+    assert result.returncode != 0
+    assert "cycle" in result.stderr.lower()
+
+
+@pytest.mark.todo
+def test_an_unknown_parent_is_rejected(project):
+    result = project.config(spec(egress={"child": {"extend": "ghost"}}))
+    assert result.returncode != 0
+    assert "ghost" in result.stderr
+
+
+@pytest.mark.todo
+def test_extend_takes_a_single_parent(project):
+    result = project.config(spec(egress={"a": {}, "b": {}, "child": {"extend": ["a", "b"]}}))
+    assert result.returncode != 0
+
+
+# --- reachability warnings ---------------------------------------------------------------------
+
+
+@pytest.mark.todo
+def test_a_profile_that_cannot_reach_the_harness_provider_warns(project):
+    result = project.config(spec(agents={"coder": agent()}))
+    assert result.returncode == 0, result.stderr
+    assert "warning" in result.stderr.lower()
+    assert "api.anthropic.com" in result.stderr
+
+
+@pytest.mark.todo
+def test_a_profile_that_reaches_the_provider_does_not_warn(project):
+    result = project.config(spec(egress={"default": anthropic_profile()}, agents={"coder": agent()}))
+    assert result.returncode == 0, result.stderr
+    assert "warning" not in result.stderr.lower()

@@ -1,0 +1,11 @@
+# build output
+/bin/
+/dist/
+
+# editor and OS
+.idea/
+.vscode/
+.DS_Store
+
+# per-project workspace data created by egzo itself
+.egzo/
