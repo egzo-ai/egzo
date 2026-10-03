@@ -12,9 +12,15 @@ A todo spec runs as a *strict* xfail, so it can never rot: when the feature land
 passing, the run fails, and the author is forced to promote it to a regular spec.
 """
 
+import json
+
 import pytest
 
 COLUMNS = ["done", "todo", "broken", "promote", "skipped"]
+
+
+def pytest_addoption(parser):
+    parser.addoption("--spec-json", metavar="PATH", help="write the outcome of every spec as JSON (nodeid -> status)")
 
 
 def pytest_configure(config):
@@ -26,7 +32,7 @@ def pytest_configure(config):
         "markers",
         "engine: needs a container engine; runs once per available engine (docker, podman)",
     )
-    config.pluginmanager.register(SpecStatus(), "spec-status")
+    config.pluginmanager.register(SpecStatus(config), "spec-status")
 
 
 def _classify(report):
@@ -47,7 +53,8 @@ def _area(nodeid):
 class SpecStatus:
     """Collects one outcome per spec and prints the status table."""
 
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self.status = {}
 
     @pytest.hookimpl(trylast=True)
@@ -68,6 +75,12 @@ class SpecStatus:
         if report.when == "setup" and report.outcome == "passed":
             return
         self.status[report.nodeid] = _classify(report)
+
+    def pytest_sessionfinish(self):
+        path = self.config.getoption("--spec-json")
+        if path:
+            with open(path, "w") as out:
+                json.dump(self.status, out, indent=1, sort_keys=True)
 
     def pytest_terminal_summary(self, terminalreporter):
         if not self.status:

@@ -5,42 +5,35 @@ import pytest
 from support import spec
 
 
-@pytest.mark.todo
 def test_the_name_defaults_to_the_directory_name(project):
     assert project.resolved(spec())["name"] == project.name
 
 
-@pytest.mark.todo
 def test_name_in_the_file_overrides_the_directory(project):
     assert project.resolved(spec(name="from-file"))["name"] == "from-file"
 
 
-@pytest.mark.todo
 def test_the_environment_overrides_the_file(project):
     result = project.config(spec(name="from-file"), env={"EGZO_PROJECT_NAME": "from-env"})
     assert result.yaml()["name"] == "from-env"
 
 
-@pytest.mark.todo
 def test_the_flag_overrides_the_environment(project):
     project.write(spec(name="from-file"))
     result = project.run("-p", "from-flag", "config", env={"EGZO_PROJECT_NAME": "from-env"})
     assert result.yaml()["name"] == "from-flag"
 
 
-@pytest.mark.todo
 def test_the_long_flag_is_equivalent(project):
     project.write(spec())
     result = project.run("--project-name", "from-flag", "config")
     assert result.yaml()["name"] == "from-flag"
 
 
-@pytest.mark.todo
 def test_names_are_normalized_to_lowercase(project):
     assert project.resolved(spec(name="MyProj"))["name"] == "myproj"
 
 
-@pytest.mark.todo
 @pytest.mark.parametrize("bad", ["-leading-dash", "_leading-underscore", "has space", "dots.not.allowed", ""])
 def test_invalid_names_are_rejected(project, bad):
     result = project.config(spec(name=bad))

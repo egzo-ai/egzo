@@ -1,5 +1,7 @@
 """Small builders so specs read as the YAML they describe."""
 
+import copy
+
 VAULT = {
     "main": {
         "backend": "env",
@@ -16,7 +18,7 @@ GIT_WORKSPACE = {"repo": {"git": {"url": "https://github.com/acme/shop.git"}}}
 
 def spec(**sections):
     """An egzo.yaml as a dict, with the shared vault unless overridden."""
-    document = {"vaults": VAULT}
+    document = {"vaults": copy.deepcopy(VAULT)}
     document.update(sections)
     return document
 

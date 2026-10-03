@@ -5,7 +5,6 @@ import pytest
 from support import spec
 
 
-@pytest.mark.todo
 def test_up_has_no_detach_flag(project):
     project.write(spec())
     result = project.run("up", "-d")
@@ -13,7 +12,6 @@ def test_up_has_no_detach_flag(project):
     assert "-d" in result.stderr
 
 
-@pytest.mark.todo
 def test_up_documents_dry_run_with_a_long_flag_only(project):
     result = project.run("up", "--help")
     assert result.returncode == 0
@@ -69,7 +67,6 @@ def test_down_volumes_removes_the_volumes_too(live_project, engine):
     assert engine.resources(live_project.name) == []
 
 
-@pytest.mark.todo
 def test_down_never_deletes_workspace_directories(live_project, engine):
     live_project.write(
         spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": "./clones/repo"}})
