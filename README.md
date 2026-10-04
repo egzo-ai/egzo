@@ -3,11 +3,14 @@
 **Docker Compose for AI coding agents.** Describe a team of agents in one YAML file, start them in
 sandboxes, and attach to any of them with the real TUI you already know, Claude Code included.
 
-> Status: early. Config validation, `up` / `down`, isolated agents, the egress proxy with credential
-> injection, `exec` and `logs` work on Docker and rootless Podman. Git workspaces, the Claude Code
-> integration, `attach` and messaging are not built yet, so the example below does not run end to end.
-> The executable spec in `specs/` is the status report: a passing test is done, an expected failure
-> is todo, a failing test is broken. Run it with `make specs`.
+> Status: working on Docker, early everywhere else. Config validation, `up` / `down`, isolated agents
+> running as you, the egress proxy with credential injection, git workspaces (clone, shared, worktree),
+> Claude Code and OpenCode in their native TUI (`egzo attach`), message delivery into the terminal, and the
+> operator commands (`secrets`, `doctor`, `diff`, `ca rotate`, `proxy rules`) are built. Not yet: pi, the
+> Podman and gVisor spec runs, and one decision about Claude Code's first-run dialog
+> (`known-issues/claude-code-auto-mode-offer.md`). The executable spec in `specs/` is the status report:
+> a passing test is done, an expected failure is todo, a failing test is broken. Run it with
+> `make specs ENGINE=docker`.
 
 ## Why
 
@@ -76,10 +79,12 @@ Start it, look around, talk to your agents:
 $ export ANTHROPIC_API_KEY=... GITHUB_TOKEN=...
 $ egzo up                  # prepares a worktree per agent, starts the proxy and the agents
 $ egzo ps
-AGENT      HARNESS      STATE   WORKSPACE
-coder      claude-code  idle    repo
-reviewer   claude-code  idle    repo
-architect  claude-code  idle    repo
+NAME            SERVICE    STATE    HEALTH   ACTIVITY  STATUS
+shop-architect-1  architect  running           idle
+shop-coder-1      coder      running           idle
+shop-control-1    control    running  healthy
+shop-proxy-1      proxy      running  healthy
+shop-reviewer-1   reviewer   running           idle
 
 $ egzo send architect "How should we add rate limiting to the checkout API?"
 $ egzo send coder "Add rate limiting to the checkout API, then open a PR"
@@ -106,7 +111,8 @@ GitHub token: the proxy injects them into outgoing requests, and everything else
 
 ## Requirements
 
-Linux with Docker or Podman. egzo uses the engine `DOCKER_HOST` points at, like the docker CLI
+Linux with Docker or Podman. Harness images come from `ghcr.io/egzo-ai/egzo-harness-<name>`, or are built
+with `make images` (`EGZO_HARNESS_PREFIX` points egzo at another registry). egzo uses the engine `DOCKER_HOST` points at, like the docker CLI
 (default `/var/run/docker.sock`). For rootless Podman:
 
     systemctl --user enable --now podman.socket
