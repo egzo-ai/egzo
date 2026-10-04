@@ -47,7 +47,23 @@ def reachable(host):
         return False
 
 
-needs_internet = pytest.mark.skipif(not reachable("example.com"), reason="needs internet access")
+def require_reachable(host):
+    """The specs that go through the proxy need the real internet: without it they fail, never skip."""
+    if not reachable(host):
+        pytest.fail(f"these specs need to reach {host}:443 from this host, and cannot", pytrace=False)
+
+
+@pytest.fixture
+def internet():
+    require_reachable("example.com")
+
+
+@pytest.fixture
+def httpbin():
+    require_reachable("httpbin.org")
+
+
+needs_internet = pytest.mark.usefixtures("internet")
 
 
 def with_allow(*hosts, **agents):
@@ -143,7 +159,7 @@ def injecting(image):
     )
 
 
-needs_httpbin = pytest.mark.skipif(not reachable("httpbin.org"), reason="needs access to httpbin.org")
+needs_httpbin = pytest.mark.usefixtures("httpbin")
 
 
 @needs_httpbin
@@ -212,6 +228,7 @@ def test_a_second_up_with_agents_changes_nothing(live_project, engine, agent_ima
     assert "nothing to do" in again.stdout
 
 
+@needs_internet
 def test_the_ca_survives_recreating_the_proxy_and_the_policy_comes_back(live_project, engine, agent_image):
     up(live_project, with_allow("example.com", coder=custom(agent_image)))
     name = container(engine, live_project, "proxy").name
@@ -224,8 +241,7 @@ def test_the_ca_survives_recreating_the_proxy_and_the_policy_comes_back(live_pro
     live_project.run("up", "--recreate")
     assert container(engine, live_project, "proxy").name == name
     assert ca_fingerprint() == before
-    if reachable("example.com"):
-        assert status(engine, live_project, "example.com").stdout == "200"
+    assert status(engine, live_project, "example.com").stdout == "200"
 
 
 def test_the_ca_private_key_is_only_in_the_proxy_volume(live_project, engine, agent_image):
