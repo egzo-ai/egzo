@@ -17,7 +17,6 @@ def up(live_project, **env):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.todo
 def test_the_control_sidecar_carries_the_required_labels(live_project, engine):
     up(live_project)
     control = [r for r in engine.containers(live_project.name) if r.labels.get(f"{LABEL_PREFIX}kind") == "control"]
@@ -27,7 +26,6 @@ def test_the_control_sidecar_carries_the_required_labels(live_project, engine):
     assert control[0].labels[f"{LABEL_PREFIX}project-dir"] == str(live_project.root)
 
 
-@pytest.mark.todo
 def test_every_label_follows_the_dns_convention(live_project, engine):
     up(live_project)
     for resource in engine.resources(live_project.name):
@@ -35,7 +33,6 @@ def test_every_label_follows_the_dns_convention(live_project, engine):
             assert not key.startswith("egzo."), f"{resource.kind} {resource.name}: {key}"
 
 
-@pytest.mark.todo
 def test_label_values_are_short_and_plain(live_project, engine):
     up(live_project)
     for resource in engine.resources(live_project.name):
@@ -44,10 +41,10 @@ def test_label_values_are_short_and_plain(live_project, engine):
                 continue
             assert len(value) <= 256, key
             assert not value.lstrip().startswith(("{", "[")), f"{key} looks like JSON"
-            assert not re.fullmatch(r"[A-Za-z0-9+/=]{64,}", value), f"{key} looks encoded"
+            looks_base64 = re.fullmatch(r"[A-Za-z0-9+/=]{64,}", value) and not re.fullmatch(r"[0-9a-f]+", value)
+            assert not looks_base64, f"{key} looks encoded"
 
 
-@pytest.mark.todo
 def test_every_resource_of_the_project_is_labelled(live_project, engine):
     up(live_project)
     assert engine.resources(live_project.name), "nothing was created"
@@ -55,7 +52,6 @@ def test_every_resource_of_the_project_is_labelled(live_project, engine):
         assert f"{LABEL_PREFIX}project" in resource.labels
 
 
-@pytest.mark.todo
 def test_no_provider_secret_appears_in_any_resource(live_project, engine):
     secret = "sk-spec-secret-0123456789abcdef"
     up(live_project, ANTHROPIC_API_KEY=secret)

@@ -3,8 +3,11 @@
 **Docker Compose for AI coding agents.** Describe a team of agents in one YAML file, start them in
 sandboxes, and attach to any of them with the real TUI you already know, Claude Code included.
 
-> Status: design phase. Nothing here runs yet. The executable spec in `specs/` is the status
-> report: a passing test is done, an expected failure is todo, a failing test is broken.
+> Status: early. Config validation, `up` / `down`, isolated agents, the egress proxy with credential
+> injection, `exec` and `logs` work on Docker and rootless Podman. Git workspaces, the Claude Code
+> integration, `attach` and messaging are not built yet, so the example below does not run end to end.
+> The executable spec in `specs/` is the status report: a passing test is done, an expected failure
+> is todo, a failing test is broken. Run it with `make specs`.
 
 ## Why
 

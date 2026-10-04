@@ -427,33 +427,95 @@ Attach, Resize, Inject(text), Clients() (rw/ro), LastHumanInputAt(), SubscribeOu
 
 ## specs/ (pytest)
 
-Written and running (all `todo` until the CLI exists), see `specs/README.md`:
+The suite is the status report: `specs/README.md` explains the done / todo / broken / promote model.
+It runs against Docker and rootless Podman (`EGZO_SPEC_ENGINES`), builds its own sidecar and agent
+images, and needs internet access for the specs that talk to real hosts (they skip when offline).
 
     specs/
-      spec_status.py       # plugin: todo = strict xfail, per-area done/todo/broken/promote table
-      conftest.py          # egzo binary, project dirs, engine matrix (docker, podman), cleanup
+      spec_status.py       # plugin: todo = strict xfail, per-area table, --spec-json
+      promote.py           # removes @todo from specs that now pass
+      conftest.py          # egzo binary, project dirs, engine matrix, images, cleanup
       support.py           # builders so specs read as the YAML they describe
       test_meta.py         # the status model itself
       test_schema.py       # egzo.yaml validation, no users in files, no secrets in output
       test_project_name.py # name resolution, same-name-other-directory refusal
       test_workspaces.py   # mounts, workdir rule, https git, modes, paths, cross-agent refs
       test_egress.py       # profiles, services, built-ins, extend, reachability warnings
+      test_init.py         # egzo init
       test_labels.py       # ai.egzo.* contract, label size/format, no secrets in resources
       test_up_down.py      # up/down, --dry-run, no -d, idempotency, workspace dirs survive down
+      test_agents.py       # one container per agent, own internal network, isolation, workspaces
+      test_proxy.py        # injection, deny unless allowed, auth, per-agent policy, CA, audit
+      test_snapshot.py     # spec snapshot on the control volume
+      test_daily.py        # logs, exec (with a terminal), start/stop/restart, proxy log
 
-Planned (need agents, an integration or the sidecars first):
+Planned (need a harness integration, the session backend or the control agent API first):
 
-    test_proxy.py        # injection, deny unless allowed, allow *, CONNECT passthrough, SNI mismatch
-    test_tls.py          # CA persistence/rotation, bundle trust, key only in proxy, v1 HTTP/1.1 lessons
-    test_security.py     # no default route, no real secret in inspect/env/fs, rootless uid
     test_fidelity.py     # backend-independent Session matrix (P0 rows block release)
     test_injection.py    # idle/busy/blocked, human-quiet rule, header ack, no blind retry, queue combine
     test_control_mcp.py  # status signalling round-trip
     test_messaging.py    # fake client: send/queue, typed event stream, ask_user, actor attribution
     test_attach.py       # pty attach/detach via pexpect
+    test_prep.py         # git clone/worktree/shared, idempotency, down --workspaces safety
 
 Security specs are the differentiator: assert secrets never appear in `engine inspect`,
 agent env, agent filesystem, or logs; assert direct egress fails.
+
+## Implementation notes (what exists, and where it differs from the drafts above)
+
+Built and covered by specs on Docker and rootless Podman: `init`, `config`, `up` (`--dry-run`,
+`--recreate`), `down` (`--volumes`), `ps`, `logs`, `exec` (with a terminal: raw mode, window
+resizes), `start|stop|restart`, `proxy log`, plus the in-container roles `egzo control` and
+`egzo proxy serve`. Agents run any image through the `custom` harness (it requires `image:`).
+
+Decisions taken while building (reversible; each is covered by specs):
+- **Two-phase `up`.** The control sidecar comes up first because it hands out per-agent tokens
+  (HMAC of the agent name under a random project key kept on the control volume, so tokens are stable
+  across `up` runs and change only when the control volume is deleted). Secrets are read before
+  anything is created, so a missing secret never leaves half a project behind.
+- **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy
+  hash covers the secret values, so rotating a secret re-pushes the policy without recreating any
+  container; a restarted proxy denies everything until the next `egzo up` reloads its policy. The
+  proxy container's `inspect` never holds a secret.
+- **Operator APIs** are unix sockets inside the sidecar, called through `egzo <role> request METHOD
+  PATH` run by exec (scratch images have no curl). Control: tokens and spec snapshots. Proxy: policy.
+- **CA distribution is a read-only directory mount** (`/etc/egzo/ca` holding `ca.crt` and
+  `ca-bundle.crt`) plus `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`
+  and `NODE_EXTRA_CA_CERTS`, not an overlay of `/etc/ssl/certs/ca-certificates.crt`: a directory
+  mount works the same on Docker and Podman. The CA key stays in a volume only the proxy mounts.
+- **Proxy behaviour.** CONNECT only, port 443 only, agent identified by `Proxy-Authorization`
+  (agent name and token). Hosts of services that inject a credential (or set `inspect`) are
+  intercepted: TLS is terminated with a project-CA certificate whose name must match the CONNECT
+  target, requests for any other host inside the tunnel get 421, the credential replaces whatever
+  the agent sent, the agent is always spoken to in HTTP/1.1, responses stream unbuffered. Every
+  other allowed host is a tunnel, but the proxy reads the TLS ClientHello first and refuses the
+  tunnel when the server name is missing or differs from the approved host (domain fronting). Plain HTTP is refused (405); agents get `HTTP_PROXY`
+  too so `http://` fails loudly. Audit lines (JSON, no bodies or query strings) go to the proxy's
+  stdout.
+- **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
+  `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
+  init process, writable root filesystem. gVisor isolation maps to the `runsc` runtime.
+- **Sidecar image** must carry CA roots (a scratch image needs `ca-certificates.crt`) and, once the
+  prep role exists, git >= 2.47.
+- **Label kinds** in use: `control`, `proxy`, `agent`, and `workspace` (volumes of declared
+  workspaces without a source).
+- **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,
+  with the resolved config, the label contract version and the config hash of every container.
+
+Known gaps, in the order they block real use:
+1. **Which user agents run as.** On rootful Docker, root without capabilities cannot write a host
+   directory owned by the invoking user (rootless Podman works because container root is the host
+   user). Git clones and host-path workspaces need this answered.
+2. **Git workspaces.** Refused with a clear error until the prep role exists: a short-lived container
+   running as the agent (so the agent's egress profile and injected token apply) that clones into the
+   configured host path.
+3. **Harness images and integrations** (Claude Code, OpenCode, pi): bypass-mode config, first-run
+   seeding, hooks. They need real credentials to validate, so none is written yet.
+4. **Attach and the session backend.** The terminal plumbing exists (`exec`); the choice between a
+   tmux and a pty-holder backend is still the fidelity spike, which needs a real harness.
+5. **Control agent API**: MCP tools, hook ingest, status, queue and injection.
+6. Not yet implemented: `egzo ca rotate`, `down --workspaces`, `up SERVICE`, per-agent
+   `--agent` filtering of `proxy log`.
 
 ## Future: egzo-hub + web UI (planning; shapes the foundation, not built yet)
 

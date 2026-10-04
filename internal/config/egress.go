@@ -245,7 +245,7 @@ func validAllow(entry string) bool {
 // reaches reports whether a profile lets an agent reach host.
 func (p *ResolvedProfile) reaches(host string) bool {
 	for _, pattern := range p.Allow {
-		if matchHost(pattern, host) {
+		if MatchHost(pattern, host) {
 			return true
 		}
 	}
@@ -257,7 +257,8 @@ func (p *ResolvedProfile) reaches(host string) bool {
 	return false
 }
 
-func matchHost(pattern, host string) bool {
+// MatchHost reports whether an allow pattern (a host, *.domain or *) covers host.
+func MatchHost(pattern, host string) bool {
 	switch {
 	case pattern == "*":
 		return true

@@ -5,11 +5,13 @@ need a container engine use the `engine` fixture and run once per available engi
 EGZO_SPEC_ENGINES (default "docker,podman") to restrict the matrix.
 """
 
+import hashlib
 import json
 import os
 import secrets
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -123,6 +125,46 @@ class Engine:
     def usable(self):
         return self.run("version").returncode == 0
 
+    def image_for(self, binary):
+        """A local image holding the egzo binary, which stands in for the published sidecar image."""
+        digest = hashlib.sha256(Path(binary).read_bytes() + Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()).hexdigest()[:12]
+        tag = f"egzo-spec:{digest}"
+        if self.run("image", "inspect", tag).returncode == 0:
+            return tag
+        with tempfile.TemporaryDirectory() as context:
+            shutil.copy(binary, Path(context) / "egzo")
+            # a scratch image has no roots: the proxy needs them to verify upstream servers
+            shutil.copy("/etc/ssl/certs/ca-certificates.crt", Path(context) / "ca-certificates.crt")
+            (Path(context) / "Dockerfile").write_text(
+                "FROM scratch\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\nCOPY egzo /egzo\n"
+            )
+            built = self.run("build", "-t", tag, context)
+        assert built.returncode == 0, f"could not build the sidecar image with {self.cli}:\n{built.stderr}"
+        return tag
+
+    def agent_image(self):
+        """A small image that stays up, standing in for a harness (the custom harness takes any image)."""
+        tag = "egzo-spec-agent:2"
+        if self.run("image", "inspect", tag).returncode == 0:
+            return tag
+        with tempfile.TemporaryDirectory() as context:
+            (Path(context) / "Dockerfile").write_text('FROM docker.io/library/alpine:3\nRUN apk add --no-cache curl\nCMD ["sleep", "infinity"]\n')
+            built = self.run("build", "-t", tag, context)
+        assert built.returncode == 0, f"could not build the agent image with {self.cli}:\n{built.stderr}"
+        return tag
+
+    def has_runtime(self, name):
+        """Whether the engine has an OCI runtime registered (for example runsc for gVisor)."""
+        if self.cli == "docker":
+            info = self.run("info", "--format", "{{json .Runtimes}}")
+            return info.returncode == 0 and f'"{name}"' in info.stdout
+        info = self.run("info", "--format", "{{json .Host.OCIRuntime}}")
+        return info.returncode == 0 and name in info.stdout
+
+    def exec(self, container, *command, detach=False):
+        flags = ["-d"] if detach else []
+        return self.run("exec", *flags, container, *command)
+
     def _list(self, kind, project):
         listing = {
             "container": ["ps", "-aq"],
@@ -135,8 +177,13 @@ class Engine:
         for name in names:
             inspect = {"container": ["inspect"], "volume": ["volume", "inspect"], "network": ["network", "inspect"]}[kind]
             raw = json.loads(self.run(*inspect, name).stdout)[0]
-            labels = (raw.get("Config", {}).get("Labels") if kind == "container" else raw.get("Labels")) or {}
-            resources.append(Resource(kind, name, labels, raw))
+            if kind == "container":
+                labels = raw.get("Config", {}).get("Labels")
+            else:  # podman reports network labels in lowercase
+                labels = raw.get("Labels") or raw.get("labels")
+            labels = labels or {}
+            real_name = (raw.get("Name") or raw.get("name") or name).lstrip("/")  # ps -q and ls -q print ids
+            resources.append(Resource(kind, real_name, labels, raw))
         return resources
 
     def resources(self, project):
@@ -174,6 +221,11 @@ def engine(request):
     return candidate
 
 
+@pytest.fixture
+def agent_image(engine):
+    return engine.agent_image()
+
+
 @pytest.fixture(scope="session")
 def egzo():
     binary = os.environ.get("EGZO_BIN") or shutil.which("egzo")
@@ -198,9 +250,9 @@ def project(make_project):
 
 
 @pytest.fixture
-def live_project(make_project, engine):
+def live_project(make_project, engine, egzo):
     """A project bound to an engine; everything it created is removed afterwards."""
-    created = make_project(env=engine.env)
+    created = make_project(env={**engine.env, "EGZO_IMAGE": engine.image_for(egzo.binary)})
     yield created
     created.run("down", "--volumes")
     engine.cleanup(created.name)

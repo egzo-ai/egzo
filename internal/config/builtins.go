@@ -46,7 +46,8 @@ var harnesses = map[string][]string{
 	"custom":      nil,
 }
 
-func harnessNames() []string {
+// HarnessNames lists the supported harnesses, sorted.
+func HarnessNames() []string {
 	names := make([]string, 0, len(harnesses))
 	for name := range harnesses {
 		names = append(names, name)

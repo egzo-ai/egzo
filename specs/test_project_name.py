@@ -41,10 +41,9 @@ def test_invalid_names_are_rejected(project, bad):
     assert "name" in result.stderr
 
 
-@pytest.mark.todo
 def test_a_name_in_use_from_another_directory_refuses_every_command(live_project, make_project):
-    assert live_project.run("up").returncode == 0
     live_project.write(spec())
+    assert live_project.run("up").returncode == 0
 
     other = make_project(env=live_project.env)
     other.write(spec())

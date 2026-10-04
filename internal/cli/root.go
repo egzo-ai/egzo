@@ -22,10 +22,18 @@ func New() *cobra.Command {
 	root.PersistentFlags().StringVarP(&opts.projectName, "project-name", "p", "", "project name (default: name in egzo.yaml, else the directory name)")
 
 	root.AddCommand(
+		newInitCommand(),
 		newConfigCommand(opts),
 		newUpCommand(opts),
 		newDownCommand(opts),
 		newPsCommand(opts),
+		newLogsCommand(opts),
+		newExecCommand(opts),
+		newLifecycleCommand(opts, "start", "Start a service's container"),
+		newLifecycleCommand(opts, "stop", "Stop a service's container"),
+		newLifecycleCommand(opts, "restart", "Restart a service's container"),
+		newControlCommand(),
+		newProxyCommand(opts),
 	)
 	return root
 }

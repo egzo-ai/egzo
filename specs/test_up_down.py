@@ -19,7 +19,6 @@ def test_up_documents_dry_run_with_a_long_flag_only(project):
     assert "-n," not in result.stdout
 
 
-@pytest.mark.todo
 def test_dry_run_creates_nothing(live_project, engine):
     live_project.write(spec())
     result = live_project.run("up", "--dry-run")
@@ -27,14 +26,12 @@ def test_dry_run_creates_nothing(live_project, engine):
     assert engine.resources(live_project.name) == []
 
 
-@pytest.mark.todo
 def test_up_creates_the_control_sidecar(live_project, engine):
     live_project.write(spec())
     assert live_project.run("up").returncode == 0
     assert engine.containers(live_project.name)
 
 
-@pytest.mark.todo
 def test_a_second_up_changes_nothing(live_project, engine):
     live_project.write(spec())
     assert live_project.run("up").returncode == 0
@@ -43,14 +40,12 @@ def test_a_second_up_changes_nothing(live_project, engine):
     assert {c.name for c in engine.containers(live_project.name)} == before
 
 
-@pytest.mark.todo
 def test_up_returns_once_converged(live_project):
     live_project.write(spec())
     result = live_project.run("up", timeout=300)
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.todo
 def test_down_removes_the_containers_and_networks(live_project, engine):
     live_project.write(spec())
     assert live_project.run("up").returncode == 0
@@ -59,7 +54,6 @@ def test_down_removes_the_containers_and_networks(live_project, engine):
     assert not [r for r in remaining if r.kind in ("container", "network")]
 
 
-@pytest.mark.todo
 def test_down_volumes_removes_the_volumes_too(live_project, engine):
     live_project.write(spec())
     assert live_project.run("up").returncode == 0

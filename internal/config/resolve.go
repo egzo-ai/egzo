@@ -9,11 +9,14 @@ import (
 
 // Resolved is the fully resolved project: what `egzo config` prints.
 type Resolved struct {
-	Name       string                       `yaml:"name"`
-	Vaults     map[string][]string          `yaml:"vaults,omitempty"`
-	Workspaces map[string]ResolvedWorkspace `yaml:"workspaces"`
-	Agents     map[string]ResolvedAgent     `yaml:"agents"`
-	Egress     map[string]*ResolvedProfile  `yaml:"egress"`
+	// SecretSources maps "vault/SECRET" to its from: source. It is never printed.
+	SecretSources map[string]string            `yaml:"-"`
+	Runtime       Runtime                      `yaml:"runtime,omitempty"`
+	Name          string                       `yaml:"name"`
+	Vaults        map[string][]string          `yaml:"vaults,omitempty"`
+	Workspaces    map[string]ResolvedWorkspace `yaml:"workspaces"`
+	Agents        map[string]ResolvedAgent     `yaml:"agents"`
+	Egress        map[string]*ResolvedProfile  `yaml:"egress"`
 }
 
 type ResolvedAgent struct {
@@ -45,15 +48,18 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 
 	resolved := &Resolved{
 		Name:       name,
+		Runtime:    file.Runtime,
 		Vaults:     map[string][]string{},
 		Workspaces: resolveWorkspaces(file, dir, p),
 		Agents:     map[string]ResolvedAgent{},
 		Egress:     resolveEgress(file, p),
 	}
+	resolved.SecretSources = map[string]string{}
 	for vault, definition := range file.Vaults {
 		names := make([]string, 0, len(definition.Secrets))
-		for secret := range definition.Secrets {
+		for secret, source := range definition.Secrets {
 			names = append(names, secret)
+			resolved.SecretSources[vault+"/"+secret] = source.From
 		}
 		sort.Strings(names)
 		resolved.Vaults[vault] = names
@@ -90,11 +96,14 @@ func resolveAgent(
 	}
 	switch {
 	case agent.Harness == "":
-		p.addf("agent %q: harness is required (one of: %s)", name, strings.Join(harnessNames(), ", "))
+		p.addf("agent %q: harness is required (one of: %s)", name, strings.Join(HarnessNames(), ", "))
 	default:
 		if _, ok := harnesses[agent.Harness]; !ok {
-			p.addf("agent %q: unknown harness %q (one of: %s)", name, agent.Harness, strings.Join(harnessNames(), ", "))
+			p.addf("agent %q: unknown harness %q (one of: %s)", name, agent.Harness, strings.Join(HarnessNames(), ", "))
 		}
+	}
+	if agent.Harness == "custom" && agent.Image == "" {
+		p.addf("agent %q: the custom harness needs an image", name)
 	}
 	if agent.Permissions != "" && agent.Permissions != "bypass" && agent.Permissions != "default" {
 		p.addf("agent %q: unknown permissions %q (use bypass or default)", name, agent.Permissions)
