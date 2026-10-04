@@ -3,8 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"strings"
 
 	"github.com/docker/docker/client"
 )
@@ -13,51 +12,32 @@ import (
 type Client struct {
 	API  *client.Client
 	Host string
+	// Podman is true when the engine behind the Docker-compatible API is Podman.
+	Podman bool
 }
 
-// Connect opens the engine. DOCKER_HOST wins when set. Otherwise hint (docker, podman or auto,
-// from runtime.engine) selects which well-known sockets are tried, in order.
-func Connect(ctx context.Context, hint string) (*Client, error) {
-	if host := os.Getenv("DOCKER_HOST"); host != "" {
-		return open(ctx, host)
-	}
-	var tried []string
-	for _, host := range candidateSockets(hint) {
-		c, err := open(ctx, host)
-		if err == nil {
-			return c, nil
-		}
-		tried = append(tried, host)
-	}
-	return nil, fmt.Errorf("no container engine reachable (tried %v); start Docker or Podman, or set DOCKER_HOST", tried)
-}
-
-func open(ctx context.Context, host string) (*Client, error) {
-	api, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation())
+// Connect opens the engine the environment points at, the way the docker CLI does: DOCKER_HOST,
+// with /var/run/docker.sock as the default. Podman users point DOCKER_HOST at their Podman socket.
+func Connect(ctx context.Context) (*Client, error) {
+	api, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
+	host := api.DaemonHost()
 	if _, err := api.Ping(ctx); err != nil {
 		api.Close()
-		return nil, fmt.Errorf("engine at %s: %w", host, err)
+		return nil, fmt.Errorf("no container engine reachable at %s: %w\n"+
+			"egzo uses the engine DOCKER_HOST points at, like the docker CLI. For rootless Podman: "+
+			"systemctl --user enable --now podman.socket; export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock", host, err)
 	}
-	return &Client{API: api, Host: host}, nil
-}
-
-func candidateSockets(hint string) []string {
-	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-	if runtimeDir == "" {
-		runtimeDir = fmt.Sprintf("/run/user/%d", os.Getuid())
+	c := &Client{API: api, Host: host}
+	if version, err := api.ServerVersion(ctx); err == nil {
+		c.Podman = strings.Contains(strings.ToLower(version.Platform.Name), "podman")
+		for _, component := range version.Components {
+			c.Podman = c.Podman || strings.Contains(strings.ToLower(component.Name), "podman")
+		}
 	}
-	docker := []string{"unix:///var/run/docker.sock", "unix://" + filepath.Join(runtimeDir, "docker.sock")}
-	podman := []string{"unix://" + filepath.Join(runtimeDir, "podman", "podman.sock"), "unix:///run/podman/podman.sock"}
-	switch hint {
-	case "docker":
-		return docker
-	case "podman":
-		return podman
-	}
-	return append(docker, podman...)
+	return c, nil
 }
 
 func (c *Client) Close() error { return c.API.Close() }

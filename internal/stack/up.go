@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/egzo-ai/egzo/internal/config"
@@ -51,6 +52,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err != nil {
 		return err
 	}
+	warnRuntimes(c, desired)
 	plan := BuildPlan(desired, observed, opts.Recreate)
 	if err := Apply(ctx, c, desired, plan, opts.DryRun, out); err != nil {
 		return err
@@ -170,4 +172,20 @@ func pushPolicy(
 		return false, fmt.Errorf("load proxy policy: %s", strings.TrimSpace(string(result.Stderr)))
 	}
 	return true, nil
+}
+
+// warnRuntimes says what Podman cannot do: its Docker-compatible API ignores the OCI runtime a
+// container asks for, so the runtime is neither applied nor verifiable from here. Compose has the
+// same limit; unlike Compose we say so, because the runtime is usually a security boundary.
+func warnRuntimes(c *engine.Client, desired Desired) {
+	if !c.Podman {
+		return
+	}
+	for _, spec := range desired.Containers {
+		if spec.Runtime != "" {
+			fmt.Fprintf(os.Stderr, "warning: %s asks for the %s runtime, but Podman's Docker-compatible API ignores "+
+				"the runtime, so egzo can neither apply nor verify it. Set it as the default in containers.conf "+
+				"(runtime = %q), or use Docker\n", spec.Name, spec.Runtime, spec.Runtime)
+		}
+	}
 }

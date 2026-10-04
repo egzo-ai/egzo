@@ -11,7 +11,6 @@ import (
 type Resolved struct {
 	// SecretSources maps "vault/SECRET" to its from: source. It is never printed.
 	SecretSources map[string]string            `yaml:"-"`
-	Runtime       Runtime                      `yaml:"runtime,omitempty"`
 	Name          string                       `yaml:"name"`
 	Vaults        map[string][]string          `yaml:"vaults,omitempty"`
 	Workspaces    map[string]ResolvedWorkspace `yaml:"workspaces"`
@@ -29,7 +28,7 @@ type ResolvedAgent struct {
 	Prompt      string            `yaml:"prompt,omitempty"`
 	Tools       []string          `yaml:"tools,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty"`
-	Isolation   string            `yaml:"isolation,omitempty"`
+	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	DependsOn   []string          `yaml:"depends_on,omitempty"`
@@ -43,12 +42,10 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	if file.Version != 0 && file.Version != 1 {
 		p.addf("unsupported version %d (this egzo understands version 1)", file.Version)
 	}
-	checkRuntime(file.Runtime, p)
 	checkVaults(file.Vaults, p)
 
 	resolved := &Resolved{
 		Name:       name,
-		Runtime:    file.Runtime,
 		Vaults:     map[string][]string{},
 		Workspaces: resolveWorkspaces(file, dir, p),
 		Agents:     map[string]ResolvedAgent{},
@@ -108,9 +105,6 @@ func resolveAgent(
 	if agent.Permissions != "" && agent.Permissions != "bypass" && agent.Permissions != "default" {
 		p.addf("agent %q: unknown permissions %q (use bypass or default)", name, agent.Permissions)
 	}
-	if !validIsolation(agent.Isolation) {
-		p.addf("agent %q: unknown isolation %q (use rootless, gvisor or default)", name, agent.Isolation)
-	}
 	for _, dependency := range agent.DependsOn {
 		if !hasAgent(file, dependency) {
 			p.addf("agent %q: depends_on names unknown agent %q", name, dependency)
@@ -151,27 +145,11 @@ func resolveAgent(
 		Prompt:      agent.Prompt,
 		Tools:       agent.Tools,
 		Resources:   agent.Resources,
-		Isolation:   agent.Isolation,
+		Runtime:     agent.Runtime,
 		Permissions: permissions,
 		Env:         agent.Env,
 		DependsOn:   agent.DependsOn,
 	}, warnings
-}
-
-func checkRuntime(runtime Runtime, p *problems) {
-	if runtime.Engine != "" && runtime.Engine != "auto" && runtime.Engine != "docker" && runtime.Engine != "podman" {
-		p.addf("runtime: unknown engine %q (use auto, docker or podman)", runtime.Engine)
-	}
-	if !validIsolation(runtime.Isolation) {
-		p.addf("runtime: unknown isolation %q (use rootless, gvisor or default)", runtime.Isolation)
-	}
-	if runtime.Network != "" && runtime.Network != "isolated" {
-		p.addf("runtime: unknown network %q (only isolated is supported)", runtime.Network)
-	}
-}
-
-func validIsolation(value string) bool {
-	return value == "" || value == "rootless" || value == "gvisor" || value == "default"
 }
 
 var vaultBackends = map[string]bool{"env": true, "file": true, "sops": true, "pass": true, "1password": true}

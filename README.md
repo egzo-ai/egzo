@@ -23,7 +23,7 @@ gives each agent a sandbox you can trust, without changing the tool you use.
 - **Secrets never reach the agent.** Credentials live in a proxy sidecar that injects them into
   outgoing requests. An agent that is fully compromised still has nothing to steal.
 - **No daemon, nothing new to trust.** Egzo is a stateless CLI. Everything else is containers on your
-  own Docker or Podman, rootless Podman and gVisor included. The engine is the source of truth.
+  own Docker or Podman (whatever `DOCKER_HOST` points at). The engine is the source of truth.
 
 ## Example: a coder, a reviewer and an architect
 
@@ -106,7 +106,14 @@ GitHub token: the proxy injects them into outgoing requests, and everything else
 
 ## Requirements
 
-Linux with Docker or Podman. Rootless Podman and gVisor (`runsc`) are supported and recommended.
+Linux with Docker or Podman. egzo uses the engine `DOCKER_HOST` points at, like the docker CLI
+(default `/var/run/docker.sock`). For rootless Podman:
+
+    systemctl --user enable --now podman.socket
+    export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+
+For gVisor, register `runsc` with Docker and set `runtime: runsc` on an agent, as in Compose.
+Podman's Docker-compatible API ignores the runtime, so egzo warns it cannot apply or verify it there.
 
 ## Later
 

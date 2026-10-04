@@ -137,11 +137,6 @@ Existence/config = engine; liveness/status = control sidecar. Engine health = co
 version: 1
 name: myproj
 
-runtime:                       # project-wide defaults, overridable per service
-  engine: auto                 # auto | podman | docker
-  isolation: rootless          # rootless | gvisor | default  (gvisor => --runtime=runsc)
-  network: isolated            # agents get internal-only net; egress only via proxy
-
 vaults:
   main:
     backend: env               # env | file | sops | pass | 1password (pluggable)
@@ -187,7 +182,7 @@ agents:
     prompt: ./prompts/coder.md
     tools: [control]           # MCP servers exposed to the agent
     resources: { cpus: 2, memory: 4g }
-    isolation: gvisor          # per-agent override
+    runtime: runsc             # OCI runtime, as in Compose (e.g. gVisor); engine default if omitted
     permissions: bypass        # bypass (default) | default
     env: { FOO: bar }          # non-secret only; validated, secret-looking values rejected
 
@@ -223,8 +218,11 @@ control:                       # orchestrator MCP + status sidecar (always prese
 
 ## Decisions
 - Language: Go.
-- Engine access: Docker Engine API (Go docker client). Podman via its Docker-compat socket
-  (`podman.socket`, rootless). Never mount the socket into agent containers. Engine matrix in specs.
+- Engine access: Docker Engine API (Go docker client). The engine is whatever `DOCKER_HOST` points at
+  (default `/var/run/docker.sock`), like the docker CLI: no probing, no engine setting in egzo.yaml.
+  Podman works through its Docker-compat socket (`podman.socket`); its API ignores a container's
+  `runtime:`, so egzo warns that it cannot apply or verify it. Never mount the socket into agent
+  containers. Engine matrix in specs.
 - No daemon. Everything runs in containers except the `egzo` CLI.
 - Harness control is TUI-first (Scion-style). The native TUI always runs in the agent container
   behind a pty layer (the `Session` backend, see Session backend below); there is never a mode
@@ -495,7 +493,7 @@ Decisions taken while building (reversible; each is covered by specs):
   stdout.
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
-  init process, writable root filesystem. gVisor isolation maps to the `runsc` runtime.
+  init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. An agent's `runtime:` (as in Compose, e.g. `runsc` for gVisor) is passed to the engine as is; there is no project-wide default (use the engine's `default-runtime`, or a YAML anchor).
 - **Sidecar image** must carry CA roots (a scratch image needs `ca-certificates.crt`) and, once the
   prep role exists, git >= 2.47.
 - **Label kinds** in use: `control`, `proxy`, `agent`, and `workspace` (volumes of declared

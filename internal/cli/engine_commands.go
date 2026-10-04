@@ -41,7 +41,7 @@ func openSession(ctx context.Context, opts *options) (*session, error) {
 		return nil, err
 	}
 	printWarnings(p.Warnings)
-	c, err := engine.Connect(ctx, p.Resolved.Runtime.Engine)
+	c, err := engine.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -147,6 +147,9 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) 
 
 	created, err := c.API.ContainerCreate(ctx, config, host, networking, nil, spec.Name)
 	if err != nil {
+		if spec.Runtime != "" && strings.Contains(strings.ToLower(err.Error()), "runtime") {
+			return fmt.Errorf("%w\nthe engine must have the %q runtime registered (Docker: \"runtimes\" in /etc/docker/daemon.json)", err, spec.Runtime)
+		}
 		return err
 	}
 	if err := c.API.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {

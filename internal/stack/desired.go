@@ -249,13 +249,7 @@ func agentContainer(
 		workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))
 	}
 
-	isolation := agent.Isolation
-	if isolation == "" {
-		isolation = project.Runtime.Isolation
-	}
-	if isolation == "gvisor" {
-		spec.Runtime = "runsc"
-	}
+	spec.Runtime = agent.Runtime
 	if agent.Resources.CPUs > 0 {
 		spec.NanoCPUs = int64(agent.Resources.CPUs * 1e9)
 	}

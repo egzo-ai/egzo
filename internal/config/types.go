@@ -14,19 +14,12 @@ import (
 type File struct {
 	Version    int                  `yaml:"version"`
 	Name       *string              `yaml:"name"`
-	Runtime    Runtime              `yaml:"runtime"`
 	Vaults     map[string]Vault     `yaml:"vaults"`
 	Proxy      Proxy                `yaml:"proxy"`
 	Egress     map[string]Profile   `yaml:"egress"`
 	Workspaces map[string]Workspace `yaml:"workspaces"`
 	Agents     map[string]Agent     `yaml:"agents"`
 	Control    Control              `yaml:"control"`
-}
-
-type Runtime struct {
-	Engine    string `yaml:"engine,omitempty"`
-	Isolation string `yaml:"isolation,omitempty"`
-	Network   string `yaml:"network,omitempty"`
 }
 
 type Vault struct {
@@ -127,7 +120,7 @@ type Agent struct {
 	Prompt      string            `yaml:"prompt,omitempty"`
 	Tools       []string          `yaml:"tools,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty"`
-	Isolation   string            `yaml:"isolation,omitempty"`
+	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	DependsOn   []string          `yaml:"depends_on,omitempty"`
