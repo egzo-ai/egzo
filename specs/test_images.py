@@ -12,7 +12,6 @@ def container(engine, project, service):
     return [r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}service") == service][0]
 
 
-@pytest.mark.todo("harness image names")
 def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_configured_registry(
     live_project, engine, session_image, registry
 ):
@@ -28,7 +27,6 @@ def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_confi
     assert container(engine, live_project, "coder").raw["Config"]["Image"] == remote
 
 
-@pytest.mark.todo("harness image names")
 def test_an_unpullable_harness_image_stops_up_naming_the_image_and_the_override(live_project, engine):
     live_project.env["EGZO_HARNESS_PREFIX"] = "localhost:5000/does-not-exist-"
     live_project.write(spec(agents={"coder": agent(harness="opencode")}))
@@ -37,7 +35,6 @@ def test_an_unpullable_harness_image_stops_up_naming_the_image_and_the_override(
     assert "localhost:5000/does-not-exist-opencode" in result.stderr and "EGZO_HARNESS_PREFIX" in result.stderr
 
 
-@pytest.mark.todo("version command")
 def test_version_prints_the_version(project):
     result = project.run("version")
     assert result.returncode == 0 and result.stdout.strip()

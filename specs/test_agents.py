@@ -217,7 +217,6 @@ def exec_as(engine, project, name, *command):
     return engine.exec(container(engine, project, name).name, *command)
 
 
-@pytest.mark.todo("agents run as the invoking user")
 def test_agents_run_as_the_invoking_user_not_as_root(live_project, engine, agent_image):
     import os
 
@@ -226,7 +225,6 @@ def test_agents_run_as_the_invoking_user_not_as_root(live_project, engine, agent
     assert result.stdout.strip() == f"{os.getuid()}:{os.getgid()}"
 
 
-@pytest.mark.todo("agents run as the invoking user")
 def test_an_agent_writes_a_host_directory_workspace_as_the_invoking_user(live_project, engine, agent_image):
     import os
 
@@ -238,14 +236,12 @@ def test_an_agent_writes_a_host_directory_workspace_as_the_invoking_user(live_pr
     assert (shared / "from-agent").stat().st_uid == os.getuid()
 
 
-@pytest.mark.todo("agents run as the invoking user")
 def test_an_agent_writes_a_declared_volume_workspace(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
     written = exec_as(engine, live_project, "coder", "sh", "-c", "echo hi > /workspace/scratch/note && cat /workspace/scratch/note")
     assert written.stdout.strip() == "hi", written.stderr
 
 
-@pytest.mark.todo("agents run as the invoking user")
 def test_two_agents_share_a_declared_volume_workspace_both_writable(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"scratch": {}}, agents={
         "coder": custom(agent_image, workspaces=["scratch"]),

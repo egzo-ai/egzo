@@ -368,11 +368,11 @@ func TestAgentsRunAsTheGivenUserAndNewWorkspaceVolumesAreHandedToIt(t *testing.T
 	if findContainer(t, d, "proj-control-1").User != "" || findContainer(t, d, "proj-proxy-1").User != "" {
 		t.Error("the sidecars must keep their own user")
 	}
-	for _, volume := range d.Volumes {
-		wantOwner := volume.Name == "proj_shared"
-		if (volume.Owner == "1234:5678") != wantOwner {
-			t.Errorf("volume %s owner = %q", volume.Name, volume.Owner)
-		}
+	if got := findContainer(t, d, "proj-coder-1").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home", "proj_shared"}) {
+		t.Errorf("volumes handed to the agent = %v", got)
+	}
+	if got := findContainer(t, d, "proj-review-1").OwnedVolumes; len(got) != 0 {
+		t.Errorf("a host-bound or custom agent was given volumes: %v", got)
 	}
 	if d.PrepImage != in.Image {
 		t.Errorf("prep image = %q", d.PrepImage)

@@ -20,20 +20,26 @@ func newPrepCommand() *cobra.Command {
 		Hidden: true,
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "chown UID:GID PATH",
-		Short: "Give a directory tree to a user",
-		Args:  cobra.ExactArgs(2),
+		Use:   "chown UID:GID PATH...",
+		Short: "Give directory trees to a user",
+		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			uid, gid, err := parseOwner(args[0])
 			if err != nil {
 				return err
 			}
-			return filepath.WalkDir(args[1], func(path string, entry fs.DirEntry, err error) error {
+			for _, root := range args[1:] {
+				err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+					return os.Lchown(path, uid, gid)
+				})
 				if err != nil {
 					return err
 				}
-				return os.Lchown(path, uid, gid)
-			})
+			}
+			return nil
 		},
 	})
 	cmd.AddCommand(newPrepGitCommand())

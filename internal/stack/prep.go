@@ -101,21 +101,33 @@ func prepLogs(ctx context.Context, c *engine.Client, id string) string {
 
 func boolPointer(b bool) *bool { return &b }
 
-// chownVolume hands a new volume to the user agents run as.
-func chownVolume(ctx context.Context, c *engine.Client, image string, spec VolumeSpec) error {
+// chownVolumes hands volumes to the user agents run as. It runs after an agent's container is
+// created and before it starts: the engine makes the container's working directory, and when that
+// directory is a volume's mount point it gives it to root, undoing any earlier chown.
+func chownVolumes(ctx context.Context, c *engine.Client, image, owner string, volumes []string, id engine.Identity) error {
+	if len(volumes) == 0 || owner == "" {
+		return nil
+	}
 	if err := ensureImage(ctx, c, image); err != nil {
 		return err
 	}
+	cmd := []string{"/egzo", "prep", "chown", owner}
+	var mounts []MountSpec
+	for i, name := range volumes {
+		target := fmt.Sprintf("/volume%d", i)
+		cmd = append(cmd, target)
+		mounts = append(mounts, MountSpec{Source: name, Target: target})
+	}
 	_, err := RunPrep(ctx, c, PrepSpec{
 		Image:    image,
-		Cmd:      []string{"/egzo", "prep", "chown", spec.Owner, "/volume"},
+		Cmd:      cmd,
 		CapAdd:   []string{"CHOWN", "DAC_OVERRIDE", "FOWNER"},
-		Mounts:   []MountSpec{{Source: spec.Name, Target: "/volume"}},
-		Identity: engine.Identity{Project: spec.Identity.Project, Service: "prep", Kind: "prep", ProjectDir: spec.Identity.ProjectDir},
+		Mounts:   mounts,
+		Identity: engine.Identity{Project: id.Project, Service: "prep", Kind: "prep", ProjectDir: id.ProjectDir},
 		Timeout:  time.Minute,
 	})
 	if err != nil {
-		return fmt.Errorf("give volume %s to %s: %w", spec.Name, spec.Owner, err)
+		return fmt.Errorf("give %s to %s: %w", strings.Join(volumes, ", "), owner, err)
 	}
 	return nil
 }

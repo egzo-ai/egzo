@@ -83,19 +83,14 @@ func run(ctx context.Context, c *engine.Client, desired Desired, action Action) 
 	case "create volume":
 		for _, spec := range desired.Volumes {
 			if spec.Name == action.Name {
-				if _, err := c.API.VolumeCreate(ctx, volume.CreateOptions{Name: spec.Name, Labels: spec.Identity.Labels()}); err != nil {
-					return err
-				}
-				if spec.Owner != "" {
-					return chownVolume(ctx, c, desired.PrepImage, spec)
-				}
-				return nil
+				_, err := c.API.VolumeCreate(ctx, volume.CreateOptions{Name: spec.Name, Labels: spec.Identity.Labels()})
+				return err
 			}
 		}
 	case "create container":
 		for _, spec := range desired.Containers {
 			if spec.Name == action.Name {
-				return createContainer(ctx, c, spec)
+				return createContainer(ctx, c, spec, desired.PrepImage)
 			}
 		}
 	case "connect network":
@@ -117,7 +112,7 @@ func removeContainer(ctx context.Context, c *engine.Client, id string) error {
 	return c.API.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
 }
 
-func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) error {
+func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, prepImage string) error {
 	config := &container.Config{
 		Image:      spec.Image,
 		Cmd:        strslice.StrSlice(spec.Cmd),
@@ -153,6 +148,10 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) 
 		if spec.Runtime != "" && strings.Contains(strings.ToLower(err.Error()), "runtime") {
 			return fmt.Errorf("%w\nthe engine must have the %q runtime registered (Docker: \"runtimes\" in /etc/docker/daemon.json)", err, spec.Runtime)
 		}
+		return err
+	}
+	if err := chownVolumes(ctx, c, prepImage, spec.User, spec.OwnedVolumes, spec.Identity); err != nil {
+		c.API.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true})
 		return err
 	}
 	if err := c.API.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {

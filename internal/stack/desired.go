@@ -46,10 +46,7 @@ type NetworkSpec struct {
 }
 
 type VolumeSpec struct {
-	Name string
-	// Owner is "uid:gid": a new volume is handed to that user before anything uses it, because the
-	// engine creates volumes owned by root and agents do not run as root.
-	Owner    string
+	Name     string
 	Identity engine.Identity `json:"-"`
 }
 
@@ -62,20 +59,23 @@ type MountSpec struct {
 }
 
 type ContainerSpec struct {
-	Name        string
-	Image       string
-	Cmd         []string
-	User        string
-	Env         []string
-	Mounts      []MountSpec
-	Tmpfs       map[string]string
-	Network     string
-	WorkingDir  string
-	Harness     string
-	Runtime     string
-	NanoCPUs    int64
-	Memory      int64
-	Healthcheck []string
+	Name  string
+	Image string
+	Cmd   []string
+	User  string
+	// OwnedVolumes are volumes the container writes as User: the engine creates volumes owned by
+	// root and agents do not run as root, so they are handed over once the container exists.
+	OwnedVolumes []string
+	Env          []string
+	Mounts       []MountSpec
+	Tmpfs        map[string]string
+	Network      string
+	WorkingDir   string
+	Harness      string
+	Runtime      string
+	NanoCPUs     int64
+	Memory       int64
+	Healthcheck  []string
 	// Agents run under an init process that reaps children and forwards signals.
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
@@ -148,7 +148,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 	volumes := []VolumeSpec{controlVolume}
 	for _, name := range workspaceNames {
 		if project.Workspaces[name].Git == nil {
-			volumes = append(volumes, VolumeSpec{Name: project.Name + "_" + name, Owner: in.User, Identity: identity(name, kindWorkspace)})
+			volumes = append(volumes, VolumeSpec{Name: project.Name + "_" + name, Identity: identity(name, kindWorkspace)})
 		}
 	}
 
@@ -284,6 +284,13 @@ func agentContainer(
 	}
 	if hasHome(agent) {
 		spec.Mounts = append(spec.Mounts, MountSpec{Source: homeVolume(project.Name, name), Target: homeDir})
+		if in.User != "" {
+			spec.OwnedVolumes = append(spec.OwnedVolumes, homeVolume(project.Name, name))
+		}
+		// An engine gives a user with no passwd entry the home "/", which nobody can write.
+		if _, set := agent.Env["HOME"]; !set {
+			env["HOME"] = homeDir
+		}
 	}
 	for _, key := range sortedKeys(env) {
 		spec.Env = append(spec.Env, key+"="+env[key])
@@ -301,6 +308,9 @@ func agentContainer(
 				return spec, fmt.Errorf("agent %q: workspace %q is a git workspace; cloning git workspaces is not implemented yet", name, mount.Name)
 			}
 			spec.Mounts = append(spec.Mounts, MountSpec{Source: project.Name + "_" + mount.Name, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
+			if mount.Mode != "ro" && in.User != "" {
+				spec.OwnedVolumes = append(spec.OwnedVolumes, project.Name+"_"+mount.Name)
+			}
 		}
 		workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))
 	}
