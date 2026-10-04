@@ -1,11 +1,20 @@
-// Package control is the control sidecar: it will hold agent status, the event log and the
-// message queue. For now it serves the operator API on a unix socket inside the container,
-// reachable only through `engine exec`.
+// Package control is the control sidecar: it holds the agents' tokens, the typed event stream, the
+// message queue, questions and spec snapshots. It has two listeners: the operator API on a unix
+// socket inside the container, reached only through `engine exec`, and the agent API on the
+// project's agent networks, authenticated by each agent's own token.
 package control
 
 import (
+	"context"
+	"errors"
 	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/egzo-ai/egzo/internal/operator"
 )
@@ -16,12 +25,36 @@ const StateDir = "/state"
 // SocketPath is the operator API socket.
 var SocketPath = filepath.Join(StateDir, "operator.sock")
 
-// Run serves the operator API until SIGTERM or SIGINT.
+// Run serves both APIs until SIGTERM or SIGINT.
 func Run() error {
 	if err := ensureState(StateDir); err != nil {
 		return err
 	}
-	return operator.Serve(SocketPath, newServer(StateDir).handler())
+	srv, err := newServer(StateDir)
+	if err != nil {
+		return err
+	}
+
+	listener, err := net.Listen("tcp", ":"+AgentPort)
+	if err != nil {
+		return err
+	}
+	agents := &http.Server{Handler: (&agentAPI{server: srv}).handler(), ReadHeaderTimeout: 5 * time.Second}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		agents.Shutdown(shutdown)
+	}()
+	go func() {
+		if err := agents.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			os.Stderr.WriteString("agent API: " + err.Error() + "\n")
+		}
+	}()
+
+	return operator.Serve(SocketPath, srv.handler())
 }
 
 // Healthcheck succeeds when the operator API answers.
@@ -30,4 +63,9 @@ func Healthcheck() error { return operator.Healthcheck(SocketPath) }
 // Request is the client the CLI runs inside the container (`egzo control request`).
 func Request(method, path string, body io.Reader) ([]byte, error) {
 	return operator.Request(SocketPath, method, path, body)
+}
+
+// Stream copies a long-lived response, such as the event stream, to out as it arrives.
+func Stream(method, path string, out io.Writer) error {
+	return operator.Stream(SocketPath, method, path, out)
 }

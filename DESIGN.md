@@ -448,13 +448,13 @@ images, and needs internet access for the specs that talk to real hosts (they sk
       test_proxy.py        # injection, deny unless allowed, auth, per-agent policy, CA, audit
       test_snapshot.py     # spec snapshot on the control volume
       test_daily.py        # logs, exec (with a terminal), start/stop/restart, proxy log
+      test_messaging.py    # status, say, questions, queue and inbox, hooks, typed event stream
 
 Planned (need a harness integration, the session backend or the control agent API first):
 
     test_fidelity.py     # backend-independent Session matrix (P0 rows block release)
     test_injection.py    # idle/busy/blocked, human-quiet rule, header ack, no blind retry, queue combine
-    test_control_mcp.py  # status signalling round-trip
-    test_messaging.py    # fake client: send/queue, typed event stream, ask_user, actor attribution
+    test_control_mcp.py  # the MCP adapter over the control verbs
     test_attach.py       # pty attach/detach via pexpect
     test_prep.py         # git clone/worktree/shared, idempotency, down --workspaces safety
 
@@ -465,7 +465,8 @@ agent env, agent filesystem, or logs; assert direct egress fails.
 
 Built and covered by specs on Docker and rootless Podman: `init`, `config`, `up` (`--dry-run`,
 `--recreate`), `down` (`--volumes`), `ps`, `logs`, `exec` (with a terminal: raw mode, window
-resizes), `start|stop|restart`, `proxy log`, plus the in-container roles `egzo control` and
+resizes), `start|stop|restart`, `proxy log`, `send`, `events`, `questions`, `answer`, plus the
+in-container roles `egzo control` and
 `egzo proxy serve`. Agents run any image through the `custom` harness (it requires `image:`).
 
 Decisions taken while building (reversible; each is covered by specs):
@@ -499,6 +500,19 @@ Decisions taken while building (reversible; each is covered by specs):
   prep role exists, git >= 2.47.
 - **Label kinds** in use: `control`, `proxy`, `agent`, and `workspace` (volumes of declared
   workspaces without a source).
+- **Messaging contract** (control sidecar, decided in the hub section, now built). Agent API on
+  `http://control:7777` (HTTP basic: agent name and its token, in `EGZO_CONTROL_URL`, `EGZO_AGENT` and
+  `EGZO_TOKEN`): `POST /v1/status`, `/v1/say`, `/v1/ask` (returns a stable question id),
+  `GET /v1/questions/{id}`, `GET /v1/inbox` (hands over queued messages and marks them delivered),
+  `POST /v1/hooks/{name}` (a harness hook payload becomes an event). An agent can only act as
+  itself, only sees its own questions, and the agent port serves no operator verb. Operator API (unix
+  socket, exec only): `GET /events?after=&agent=&follow=1` (typed JSON-line stream), `POST /queue`,
+  `GET /queue`, `GET /questions`, `POST /questions/{id}/answer`, `GET /agents`. Every event has a
+  sequence number, a time, a type (`status`, `say`, `question`, `answer`, `message`, `delivered`,
+  `hook`) and an actor (`agent:<name>`, `user:<id>` or `operator`); the log is an append-only file on
+  the control volume and survives a restart. The CLI always acts as `operator`; the hub will pass the
+  signed-in user. Until the session backend exists, an agent receives messages by polling its inbox.
+  The MCP tools (`say`, `status`, `ask_user`, ...) will be a thin adapter over these verbs.
 - **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,
   with the resolved config, the label contract version and the config hash of every container.
 
@@ -513,7 +527,9 @@ Known gaps, in the order they block real use:
    seeding, hooks. They need real credentials to validate, so none is written yet.
 4. **Attach and the session backend.** The terminal plumbing exists (`exec`); the choice between a
    tmux and a pty-holder backend is still the fidelity spike, which needs a real harness.
-5. **Control agent API**: MCP tools, hook ingest, status, queue and injection.
+5. **Delivery into a TUI and the MCP adapter.** Events, status, questions and the queue exist; what is
+   missing is injecting a queued message into the agent's terminal (needs the session backend, the
+   idle states and the human-quiet rule) and exposing the verbs as MCP tools.
 6. Not yet implemented: `egzo ca rotate`, `down --workspaces`, `up SERVICE`, per-agent
    `--agent` filtering of `proxy log`.
 

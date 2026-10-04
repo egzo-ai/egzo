@@ -223,6 +223,8 @@ func agentContainer(
 		"CURL_CA_BUNDLE":      bundle,
 		"GIT_SSL_CAINFO":      bundle,
 		"NODE_EXTRA_CA_CERTS": certificate,
+		"EGZO_CONTROL_URL":    "http://control:7777",
+		"EGZO_TOKEN":          token,
 	}
 	for key, value := range agent.Env {
 		env[key] = value

@@ -237,13 +237,13 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool
 	return nil
 }
 
-// WriteStatus prints a project's containers.
-func WriteStatus(observed Observed, out io.Writer) {
+// WriteStatus prints a project's containers. reported holds what each agent last said about itself.
+func WriteStatus(observed Observed, reported map[string]string, out io.Writer) {
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH")
+	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tSTATUS")
 	for _, r := range observed.Resources {
 		if r.Type == "container" {
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health)
+			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, reported[r.Service])
 		}
 	}
 	table.Flush()

@@ -34,5 +34,11 @@ func newControlCommand() *cobra.Command {
 			return err
 		},
 	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "stream METHOD PATH",
+		Short: "Send one request to the operator API and print the response as it arrives",
+		Args:  cobra.ExactArgs(2),
+		RunE:  func(cmd *cobra.Command, args []string) error { return control.Stream(args[0], args[1], os.Stdout) },
+	})
 	return cmd
 }

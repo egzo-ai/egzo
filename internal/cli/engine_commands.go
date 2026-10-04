@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/signal"
 	"syscall"
@@ -122,8 +123,25 @@ func newPsCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			stack.WriteStatus(s.observed, cmd.OutOrStdout())
+			stack.WriteStatus(s.observed, reportedStatuses(ctx, s), cmd.OutOrStdout())
 			return nil
 		},
 	}
+}
+
+// reportedStatuses asks the control sidecar what each agent last said about itself. It is best
+// effort: ps still works when the sidecar is not running.
+func reportedStatuses(ctx context.Context, s *session) map[string]string {
+	reported := map[string]string{}
+	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/agents", nil)
+	if err != nil {
+		return reported
+	}
+	var statuses []struct{ Agent, Status string }
+	if json.Unmarshal(reply, &statuses) == nil {
+		for _, status := range statuses {
+			reported[status.Agent] = status.Status
+		}
+	}
+	return reported
 }

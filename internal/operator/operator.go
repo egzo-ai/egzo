@@ -81,3 +81,39 @@ func Healthcheck(socket string) error {
 	_, err := Request(socket, http.MethodGet, "/healthz", nil)
 	return err
 }
+
+// Stream sends one request and copies the response body to out as it arrives, without a timeout:
+// it is how a long-lived event stream reaches the caller.
+func Stream(socket, method, path string, out io.Writer) error {
+	streaming := client(socket)
+	streaming.Timeout = 0
+	request, err := http.NewRequest(method, "http://sidecar"+path, nil)
+	if err != nil {
+		return err
+	}
+	response, err := streaming.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		data, _ := io.ReadAll(response.Body)
+		return fmt.Errorf("%s %s: %s: %s", method, path, response.Status, strings.TrimSpace(string(data)))
+	}
+	buffer := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buffer)
+		if n > 0 {
+			out.Write(buffer[:n])
+			if f, ok := out.(interface{ Sync() error }); ok {
+				f.Sync()
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
