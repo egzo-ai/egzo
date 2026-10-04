@@ -333,19 +333,18 @@ def wait_until(check, what, timeout, context=None):
     raise AssertionError(f"timed out waiting for {what}" + (f"\n{context()}" if context else ""))
 
 
-@pytest.mark.parametrize("harness", [
-    pytest.param("claude-code", marks=pytest.mark.todo("known-issues/claude-code-auto-mode-offer.md: an injected Enter answers Claude Code's auto-mode offer")),
-    "opencode",
-], indirect=True)
 def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(launched, harness):
     """No model is called: the harness reports the prompt through its hook as soon as it is submitted."""
+    if harness == "claude-code":
+        # Not run: an injected Enter would answer Claude Code's "make auto mode your default?" dialog.
+        pytest.xfail("blocked on a decision, see known-issues/claude-code-auto-mode-offer.md")
     project = launched(agent_fields={"inject": {"human_quiet": "1s"}})
 
     def activity():
         rows = [e for e in events_of(project) if e["type"] == "activity" and e["agent"] == "coder"]
         return rows[-1]["text"] if rows else None
 
-    wait_until(lambda: activity() == "idle", "the harness to report that its session started", 60)
+    wait_until(lambda: activity() == "idle", "the harness to report that its session started", 45)
     assert project.run("send", "coder", "hello from the operator").returncode == 0
     wait_until(
         lambda: [e for e in events_of(project) if e["type"] == "delivered"], "the harness to acknowledge the message", 40,
