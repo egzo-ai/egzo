@@ -1,5 +1,7 @@
 """Where images come from: the default name of a harness image, and pulling it from a registry."""
 
+import secrets
+
 import pytest
 
 from conftest import LABEL_PREFIX
@@ -17,10 +19,12 @@ def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_confi
 ):
     """EGZO_HARNESS_PREFIX replaces ghcr.io/egzo-ai/egzo-harness-: the name is <prefix><harness>:<egzo version>."""
     version = live_project.run("version").stdout.split()[-1]
-    remote = registry.push(session_image, "egzo-harness-opencode", version)
+    # a name of its own: the registry is shared, and this stand-in image must never replace a real harness image
+    unique = f"egzo-spec-{secrets.token_hex(4)}"
+    remote = registry.push(session_image, f"{unique}-opencode", version)
     registry.forget(remote)
     assert engine.run("image", "inspect", remote).returncode != 0
-    live_project.env["EGZO_HARNESS_PREFIX"] = f"{registry.host}/egzo-harness-"
+    live_project.env["EGZO_HARNESS_PREFIX"] = f"{registry.host}/{unique}-"
     live_project.write(spec(agents={"coder": agent(harness="opencode", env={"FAKE_TUI": "cat"})}))
     result = live_project.run("up", timeout=600)
     assert result.returncode == 0, result.stderr
