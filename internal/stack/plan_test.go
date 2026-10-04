@@ -163,3 +163,53 @@ func TestOwnershipRefusesAnotherDirectory(t *testing.T) {
 		t.Fatalf("empty project refused: %v", err)
 	}
 }
+
+func TestActionString(t *testing.T) {
+	cases := []struct {
+		action Action
+		want   string
+	}{
+		{Action{Verb: "create", Type: "container", Name: "p-a-1"}, "create container p-a-1"},
+		{Action{Verb: "remove", Type: "network", Name: "p_a", ID: "n1"}, "remove network p_a"},
+		{Action{Verb: "connect", Type: "network", Name: "p_a", Peer: "p-control-1"}, "connect network p_a to p-control-1"},
+		{Action{Verb: "disconnect", Type: "network", Name: "p_a", Peer: "p-control-1"}, "disconnect network p_a from p-control-1"},
+	}
+	for _, c := range cases {
+		if got := c.action.String(); got != c.want {
+			t.Errorf("String() = %q, want %q", got, c.want)
+		}
+	}
+}
+
+func TestObservedFind(t *testing.T) {
+	observed := Observed{Resources: []Resource{
+		{Type: "network", Name: "same", ID: "n"},
+		{Type: "container", Name: "same", ID: "c"},
+	}}
+	if r := observed.find("container", "same"); r == nil || r.ID != "c" {
+		t.Errorf("find(container) = %+v", r)
+	}
+	if r := observed.find("volume", "same"); r != nil {
+		t.Errorf("find(volume) = %+v, want nil", r)
+	}
+}
+
+func TestResourceFromReadsTheLabels(t *testing.T) {
+	r := resourceFrom("container", "id1", "p-a-1", map[string]string{
+		engine.LabelService: "a", engine.LabelConfigHash: "h", engine.LabelProjectDir: "/d",
+	})
+	want := Resource{Type: "container", ID: "id1", Name: "p-a-1", Service: "a", ConfigHash: "h", ProjectDir: "/d"}
+	if !reflect.DeepEqual(r, want) {
+		t.Errorf("resourceFrom = %+v, want %+v", r, want)
+	}
+}
+
+func TestOwnershipAllowsTheSameDirectoryAndUnlabelledResources(t *testing.T) {
+	observed := Observed{Resources: []Resource{{Name: "a", ProjectDir: "/here"}, {Name: "b"}}}
+	if err := CheckOwnership(observed, "p", "/here"); err != nil {
+		t.Errorf("err = %v", err)
+	}
+	if err := CheckOwnership(Observed{}, "p", "/here"); err != nil {
+		t.Errorf("err = %v", err)
+	}
+}
