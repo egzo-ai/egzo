@@ -50,7 +50,6 @@ def git(path, *args):
     return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-@pytest.mark.todo("prep container")
 def test_up_clones_a_git_workspace_for_each_agent_before_it_starts(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     clone = live_project.root / ".egzo" / "workspaces" / "repo" / "coder"
@@ -59,7 +58,6 @@ def test_up_clones_a_git_workspace_for_each_agent_before_it_starts(live_project,
     assert "README" in in_agent(engine, live_project, "coder", "ls /workspace/repo").stdout
 
 
-@pytest.mark.todo("prep container")
 def test_the_clone_belongs_to_the_invoking_user_and_the_agent_can_commit(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     clone = live_project.root / ".egzo" / "workspaces" / "repo" / "coder"
@@ -72,13 +70,11 @@ def test_the_clone_belongs_to_the_invoking_user_and_the_agent_can_commit(live_pr
     assert git(clone, "log", "--oneline", "-1").endswith(" x")
 
 
-@pytest.mark.todo("prep container")
 def test_the_branch_is_checked_out(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image, workspace={"git": {"url": REPO, "branch": "test"}}))
     assert in_agent(engine, live_project, "coder", "git -C /workspace/repo branch --show-current").stdout.strip() == "test"
 
 
-@pytest.mark.todo("prep container")
 def test_every_agent_gets_its_own_independent_clone(live_project, engine, agent_image):
     agents = {"coder": custom(agent_image, workspaces=["repo"]), "reviewer": custom(agent_image, workspaces=["repo"])}
     up_ok(live_project, project_spec(agent_image, agents=agents))
@@ -87,14 +83,12 @@ def test_every_agent_gets_its_own_independent_clone(live_project, engine, agent_
     assert in_agent(engine, live_project, "reviewer", "test -d /workspace/repo/.git").returncode == 0
 
 
-@pytest.mark.todo("prep container")
 def test_the_clone_location_follows_the_path_key(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image, workspace={"path": "./work/repo"}))
     assert (live_project.root / "work" / "repo" / "coder" / "README").exists()
     assert not (live_project.root / ".egzo" / "workspaces").exists()
 
 
-@pytest.mark.todo("prep container")
 def test_an_existing_clone_is_never_modified_and_a_second_up_changes_nothing(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     clone = live_project.root / ".egzo" / "workspaces" / "repo" / "coder"
@@ -104,14 +98,12 @@ def test_an_existing_clone_is_never_modified_and_a_second_up_changes_nothing(liv
     assert (clone / "wip.txt").read_text() == "unpushed work\n"
 
 
-@pytest.mark.todo("prep container")
 def test_the_prep_container_is_removed_and_leaves_no_trace(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     names = {r.labels.get(f"{LABEL_PREFIX}service") for r in engine.containers(live_project.name)}
     assert names == {"control", "proxy", "coder"}
 
 
-@pytest.mark.todo("prep container")
 def test_the_clone_goes_through_the_proxy_with_the_agents_identity(live_project, engine, agent_image):
     import json
 
@@ -121,7 +113,6 @@ def test_the_clone_goes_through_the_proxy_with_the_agents_identity(live_project,
     assert allowed and {e["agent"] for e in allowed} == {"coder"}
 
 
-@pytest.mark.todo("prep container")
 def test_a_profile_that_cannot_reach_the_git_host_stops_up_with_a_clear_error(live_project, engine, agent_image):
     result = up(live_project, project_spec(agent_image, allow=("example.com",)))
     assert result.returncode != 0
@@ -129,7 +120,6 @@ def test_a_profile_that_cannot_reach_the_git_host_stops_up_with_a_clear_error(li
     assert not [r for r in engine.containers(live_project.name) if r.labels[f"{LABEL_PREFIX}service"] == "coder"]
 
 
-@pytest.mark.todo("prep container")
 def test_shared_mode_gives_every_agent_the_same_checkout(live_project, engine, agent_image):
     agents = {"coder": custom(agent_image, workspaces=["repo"]), "reviewer": custom(agent_image, workspaces=["repo"])}
     up_ok(live_project, project_spec(agent_image, workspace={"mode": "shared"}, agents=agents))
@@ -138,7 +128,6 @@ def test_shared_mode_gives_every_agent_the_same_checkout(live_project, engine, a
     assert in_agent(engine, live_project, "reviewer", "cat /workspace/repo/note").stdout.strip() == "seen"
 
 
-@pytest.mark.todo("prep container")
 def test_worktree_mode_gives_each_agent_a_worktree_of_one_base_clone(live_project, engine, agent_image):
     agents = {"coder": custom(agent_image, workspaces=["repo"]), "reviewer": custom(agent_image, workspaces=["repo"])}
     up_ok(live_project, project_spec(agent_image, workspace={"mode": "worktree"}, agents=agents))
@@ -148,7 +137,6 @@ def test_worktree_mode_gives_each_agent_a_worktree_of_one_base_clone(live_projec
     assert in_agent(engine, live_project, "reviewer", "test -e /workspace/repo/private").returncode != 0
 
 
-@pytest.mark.todo("prep container")
 def test_worktree_mode_does_not_expose_other_agents_worktrees(live_project, engine, agent_image):
     agents = {"coder": custom(agent_image, workspaces=["repo"]), "reviewer": custom(agent_image, workspaces=["repo"])}
     up_ok(live_project, project_spec(agent_image, workspace={"mode": "worktree"}, agents=agents))
@@ -156,7 +144,6 @@ def test_worktree_mode_does_not_expose_other_agents_worktrees(live_project, engi
     assert not any("reviewer" in m for m in mounts)
 
 
-@pytest.mark.todo("prep container")
 def test_changing_the_mode_of_an_existing_clone_is_refused_not_converted(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     result = up(live_project, project_spec(agent_image, workspace={"mode": "shared"}))
@@ -164,7 +151,6 @@ def test_changing_the_mode_of_an_existing_clone_is_refused_not_converted(live_pr
     assert "mode" in result.stderr and str(live_project.root / ".egzo" / "workspaces" / "repo") in result.stderr
 
 
-@pytest.mark.todo("prep container")
 def test_a_reviewer_reads_the_coders_clone_through_a_read_only_reference(live_project, engine, agent_image):
     agents = {
         "coder": custom(agent_image, workspaces=["repo"]),
@@ -176,7 +162,6 @@ def test_a_reviewer_reads_the_coders_clone_through_a_read_only_reference(live_pr
     assert in_agent(engine, live_project, "reviewer", "echo x > /workspace/coder/repo/draft").returncode != 0
 
 
-@pytest.mark.todo("prep container")
 def test_no_git_credential_reaches_the_clone_or_the_agent(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     config = (live_project.root / ".egzo" / "workspaces" / "repo" / "coder" / ".git" / "config").read_text()
@@ -185,14 +170,12 @@ def test_no_git_credential_reaches_the_clone_or_the_agent(live_project, engine, 
     assert not [e for e in env if e.startswith(("GITHUB_TOKEN", "GIT_ASKPASS", "GH_TOKEN"))]
 
 
-@pytest.mark.todo("prep container")
 def test_down_never_deletes_workspace_directories(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     assert live_project.run("down", "--volumes").returncode == 0
     assert (live_project.root / ".egzo" / "workspaces" / "repo" / "coder" / "README").exists()
 
 
-@pytest.mark.todo("down --workspaces")
 def test_down_workspaces_removes_clean_clones_after_confirmation(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     refused = live_project.run("down", "--workspaces", input="n\n")
@@ -203,7 +186,6 @@ def test_down_workspaces_removes_clean_clones_after_confirmation(live_project, e
     assert not (live_project.root / ".egzo" / "workspaces" / "repo" / "coder").exists()
 
 
-@pytest.mark.todo("down --workspaces")
 def test_down_workspaces_refuses_a_clone_with_uncommitted_work(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     clone = live_project.root / ".egzo" / "workspaces" / "repo" / "coder"
@@ -214,7 +196,6 @@ def test_down_workspaces_refuses_a_clone_with_uncommitted_work(live_project, eng
     assert (clone / "wip.txt").exists()
 
 
-@pytest.mark.todo("down --workspaces")
 def test_down_workspaces_refuses_a_clone_with_unpushed_commits(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     clone = live_project.root / ".egzo" / "workspaces" / "repo" / "coder"
@@ -225,7 +206,6 @@ def test_down_workspaces_refuses_a_clone_with_unpushed_commits(live_project, eng
     assert clone.exists()
 
 
-@pytest.mark.todo("down --workspaces")
 def test_down_workspaces_force_removes_even_unsaved_work(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     clone = live_project.root / ".egzo" / "workspaces" / "repo" / "coder"

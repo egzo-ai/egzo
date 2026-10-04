@@ -23,9 +23,9 @@ type Options struct {
 	HarnessPrefix string
 }
 
-// agentUser is who agents run as: the invoking user, so files they write on the host are theirs.
+// AgentUser is who agents run as: the invoking user, so files they write on the host are theirs.
 // Podman maps users itself (rootless container root is the invoking user), so it keeps the image's.
-func agentUser(c *engine.Client) string {
+func AgentUser(c *engine.Client) string {
 	if c.Podman || os.Getuid() < 0 {
 		return ""
 	}
@@ -33,7 +33,7 @@ func agentUser(c *engine.Client) string {
 }
 
 func (o Options) inputs(c *engine.Client, tokens map[string]string) Inputs {
-	return Inputs{Image: o.Image, Tokens: tokens, User: agentUser(c), HarnessPrefix: o.HarnessPrefix}
+	return Inputs{Image: o.Image, Tokens: tokens, User: AgentUser(c), HarnessPrefix: o.HarnessPrefix}
 }
 
 // Up converges a project: control first, because it hands out the per-agent tokens everything
@@ -70,11 +70,44 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		return err
 	}
 	warnRuntimes(c, desired)
-	plan := BuildPlan(desired, observed, opts.Recreate)
-	if err := Apply(ctx, c, desired, plan, opts.DryRun, out); err != nil {
+	checkouts, err := PlanGit(project)
+	if err != nil {
 		return err
 	}
-	markFresh(fresh, plan)
+	plan := BuildPlan(desired, observed, opts.Recreate)
+	switch {
+	case opts.DryRun:
+		if err := Apply(ctx, c, desired, plan, true, out); err != nil {
+			return err
+		}
+		for _, checkout := range checkouts {
+			fmt.Fprintf(out, "would clone %s\n", checkout)
+		}
+	case len(checkouts) > 0:
+		// The clones go through the proxy as the agent, so the sidecars, the agent's network and the
+		// policy must be in place before the agent's container, which needs the clone, exists.
+		sidecars, agents := splitAgentContainers(plan, project)
+		if err := Apply(ctx, c, desired, sidecars, false, out); err != nil {
+			return err
+		}
+		markFresh(fresh, sidecars)
+		if _, err := pushPolicy(ctx, c, project, desired, tokens, secrets, opts, fresh[desired.Proxy], out); err != nil {
+			return err
+		}
+		fresh[desired.Proxy] = false // it has its policy now
+		if err := RunGitPreps(ctx, c, project, dir, opts.Image, AgentUser(c), tokens, checkouts, out); err != nil {
+			return err
+		}
+		if err := Apply(ctx, c, desired, agents, false, out); err != nil {
+			return err
+		}
+		markFresh(fresh, agents)
+	default:
+		if err := Apply(ctx, c, desired, plan, false, out); err != nil {
+			return err
+		}
+		markFresh(fresh, plan)
+	}
 
 	// The proxy and the control sidecar are independent: talk to them at the same time.
 	out = &lockedWriter{w: out}
@@ -99,7 +132,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if storeErr != nil {
 		return storeErr
 	}
-	if len(plan) == 0 && !pushed && !stored {
+	if len(plan) == 0 && len(checkouts) == 0 && !pushed && !stored {
 		fmt.Fprintln(out, "nothing to do")
 	}
 	return nil
@@ -255,4 +288,21 @@ func warnRuntimes(c *engine.Client, desired Desired) {
 				"(runtime = %q), or use Docker\n", spec.Name, spec.Runtime, spec.Runtime)
 		}
 	}
+}
+
+// splitAgentContainers separates what must exist before an agent's container (networks, volumes,
+// the sidecars) from the agent containers themselves.
+func splitAgentContainers(plan []Action, project *config.Resolved) (before, agents []Action) {
+	agentContainers := map[string]bool{}
+	for name := range project.Agents {
+		agentContainers[project.Name+"-"+name+"-1"] = true
+	}
+	for _, action := range plan {
+		if action.Type == "container" && agentContainers[action.Name] {
+			agents = append(agents, action)
+		} else {
+			before = append(before, action)
+		}
+	}
+	return before, agents
 }

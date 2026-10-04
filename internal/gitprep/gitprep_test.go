@@ -1,0 +1,133 @@
+package gitprep
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// origin makes a bare repository with one commit on main and one on a second branch.
+func origin(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	bare := filepath.Join(root, "origin.git")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", work},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	os.WriteFile(filepath.Join(work, "README"), []byte("hello\n"), 0o644)
+	for _, args := range [][]string{
+		{"add", "."}, {"commit", "-qm", "first"}, {"checkout", "-qb", "side"},
+		{"commit", "-q", "--allow-empty", "-m", "on side"}, {"checkout", "-q", "main"},
+	} {
+		if _, err := Git(work, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command("git", "clone", "-q", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	return bare
+}
+
+func TestCloneChecksOutTheBranch(t *testing.T) {
+	url := origin(t)
+	dir := filepath.Join(t.TempDir(), "clone")
+	if err := Clone(url, "side", dir); err != nil {
+		t.Fatal(err)
+	}
+	if branch, _ := Git(dir, "branch", "--show-current"); branch != "side" {
+		t.Errorf("branch = %q", branch)
+	}
+	if remote, _ := Git(dir, "remote", "get-url", "origin"); remote != url {
+		t.Errorf("origin = %q", remote)
+	}
+}
+
+func TestCloneRefusesANonEmptyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "mine"), []byte("x"), 0o644)
+	if err := Clone(origin(t), "", dir); err == nil || !strings.Contains(err.Error(), "not empty") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mine")); err != nil {
+		t.Error("an existing file was touched")
+	}
+}
+
+func TestCloneFailureSaysWhy(t *testing.T) {
+	err := Clone(filepath.Join(t.TempDir(), "nowhere.git"), "", filepath.Join(t.TempDir(), "x"))
+	if err == nil || !strings.Contains(err.Error(), "nowhere.git") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestWorktreesShareOneBaseAndEachHasItsOwnBranch(t *testing.T) {
+	url := origin(t)
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	one, two := filepath.Join(root, "one"), filepath.Join(root, "two")
+	if err := Worktree(url, "", base, one, "coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Worktree(url, "", base, two, "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	for dir, want := range map[string]string{one: "egzo/coder", two: "egzo/reviewer"} {
+		if branch, _ := Git(dir, "branch", "--show-current"); branch != want {
+			t.Errorf("%s is on %q, want %q", dir, branch, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(one, "README")); err != nil {
+		t.Error("the worktree has no files")
+	}
+	if list, _ := Git(base, "worktree", "list"); strings.Count(list, "\n") != 2 {
+		t.Errorf("worktrees = %s", list)
+	}
+}
+
+func TestInspectReportsUncommittedAndUnpushedWork(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "c")
+	if err := Clone(origin(t), "", dir); err != nil {
+		t.Fatal(err)
+	}
+	if findings, err := Inspect(dir); err != nil || !findings.Clean() {
+		t.Fatalf("a fresh clone is not clean: %+v, %v", findings, err)
+	}
+	os.WriteFile(filepath.Join(dir, "wip"), []byte("x"), 0o644)
+	if findings, _ := Inspect(dir); findings.Uncommitted != 1 || findings.Unpushed != 0 {
+		t.Errorf("findings = %+v", findings)
+	}
+	Git(dir, "add", ".")
+	Git(dir, "commit", "-qm", "local")
+	if findings, _ := Inspect(dir); findings.Uncommitted != 0 || findings.Unpushed != 1 {
+		t.Errorf("findings = %+v", findings)
+	}
+}
+
+func TestASecondWorktreeMayUseAPathAnotherAgentsWorktreeIsRegisteredAt(t *testing.T) {
+	// In the containers every agent sees its worktree at the same path, and in a prep container the
+	// other agents' directories are not mounted, so git finds that path registered and missing.
+	url := origin(t)
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	path := filepath.Join(root, "workspace")
+	if err := Worktree(url, "", base, path, "coder"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := Worktree(url, "", base, path, "reviewer"); err != nil {
+		t.Errorf("err = %v", err)
+	}
+	if branch, _ := Git(path, "branch", "--show-current"); branch != "egzo/reviewer" {
+		t.Errorf("branch = %q", branch)
+	}
+}

@@ -234,13 +234,12 @@ func TestDesireErrors(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
-	t.Run("git workspaces are not implemented", func(t *testing.T) {
+	t.Run("an undeclared workspace", func(t *testing.T) {
 		project := desireProject()
-		project.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}}
 		agent := project.Agents["coder"]
-		agent.Workspaces = []config.Mount{{Name: "repo", Mount: "/workspace/repo", Mode: "rw"}}
+		agent.Workspaces = []config.Mount{{Name: "ghost", Mount: "/workspace/ghost", Mode: "rw"}}
 		project.Agents["coder"] = agent
-		if _, err := Desire(project, "/dir", desireInputs); err == nil || !strings.Contains(err.Error(), "not implemented") {
+		if _, err := Desire(project, "/dir", desireInputs); err == nil || !strings.Contains(err.Error(), "not declared") {
 			t.Errorf("err = %v", err)
 		}
 	})

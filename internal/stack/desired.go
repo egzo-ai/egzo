@@ -24,6 +24,7 @@ import (
 const revision = 1
 
 const (
+	workspaceRoot  = "/workspace"
 	controlService = "control"
 	proxyService   = "proxy"
 	controlState   = "/state"
@@ -238,25 +239,11 @@ func agentContainer(
 
 	// Agents reach the world only through the proxy and trust only the project CA on top of the
 	// usual roots. The token identifies the agent to the proxy; it is not a provider secret.
-	proxyURL := fmt.Sprintf("http://%s:%s@proxy:%s", name, token, proxyPort)
-	bundle, certificate := caAgentDir+"/ca-bundle.crt", caAgentDir+"/ca.crt"
-	env := map[string]string{
-		"EGZO_PROJECT":        project.Name,
-		"EGZO_AGENT":          name,
-		"HTTPS_PROXY":         proxyURL,
-		"https_proxy":         proxyURL,
-		"HTTP_PROXY":          proxyURL,
-		"http_proxy":          proxyURL,
-		"NO_PROXY":            "control,localhost,127.0.0.1",
-		"no_proxy":            "control,localhost,127.0.0.1",
-		"SSL_CERT_FILE":       bundle,
-		"REQUESTS_CA_BUNDLE":  bundle,
-		"CURL_CA_BUNDLE":      bundle,
-		"GIT_SSL_CAINFO":      bundle,
-		"NODE_EXTRA_CA_CERTS": certificate,
-		"EGZO_CONTROL_URL":    "http://control:7777",
-		"EGZO_TOKEN":          token,
-	}
+	env := proxyEnv(project.Name, name, token)
+	env["EGZO_PROJECT"] = project.Name
+	env["EGZO_AGENT"] = name
+	env["EGZO_CONTROL_URL"] = "http://control:7777"
+	env["EGZO_TOKEN"] = token
 	env["EGZO_HARNESS"] = agent.Harness
 	env["EGZO_PERMISSIONS"] = agent.Permissions
 	env["EGZO_HUMAN_QUIET"] = agent.Inject.HumanQuiet
@@ -304,8 +291,20 @@ func agentContainer(
 			spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: mount.HostPath, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
 		default:
 			declared, ok := project.Workspaces[mount.Name]
-			if !ok || declared.Git != nil {
-				return spec, fmt.Errorf("agent %q: workspace %q is a git workspace; cloning git workspaces is not implemented yet", name, mount.Name)
+			if !ok {
+				return spec, fmt.Errorf("agent %q: workspace %q is not declared", name, mount.Name)
+			}
+			if declared.Git != nil {
+				owner := name
+				if mount.From != "" {
+					owner = mount.From
+				}
+				spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: CheckoutDir(declared, owner), Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
+				if declared.Mode == "worktree" && mount.From == "" {
+					spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: BaseDir(declared), Target: baseMountPath(mount.Name)})
+				}
+				workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))
+				continue
 			}
 			spec.Mounts = append(spec.Mounts, MountSpec{Source: project.Name + "_" + mount.Name, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
 			if mount.Mode != "ro" && in.User != "" {
