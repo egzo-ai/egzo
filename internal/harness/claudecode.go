@@ -61,15 +61,18 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	for _, name := range claudeHooks {
 		hooks[name] = []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "egzo hook " + name}}}}
 	}
-	permissions := map[string]any{"defaultMode": "default"}
+	// Bypass mode comes from the command line, not from `permissions.defaultMode` in the settings: with
+	// that setting Claude Code asks on its first start "Make auto mode your default permission mode?", a
+	// question nobody is there to answer in an unattended agent. The key is removed (null deletes it when
+	// merging) so a home an earlier run configured does not keep asking either.
+	permissions := map[string]any{"defaultMode": nil}
 	settings := map[string]any{
 		"hooks":                             hooks,
 		"permissions":                       permissions,
-		"skipDangerousModePermissionPrompt": false,
+		"skipDangerousModePermissionPrompt": o.Bypass,
 	}
-	if o.Bypass {
-		permissions["defaultMode"] = "bypassPermissions"
-		settings["skipDangerousModePermissionPrompt"] = true
+	if !o.Bypass {
+		permissions["defaultMode"] = "default"
 	}
 	if len(o.Workspaces) > 1 {
 		extra := make([]any, 0, len(o.Workspaces))
@@ -86,6 +89,9 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	command := append([]string{}, args...)
 	if len(command) == 0 {
 		command = []string{"claude"}
+	}
+	if o.Bypass {
+		command = append(command, "--permission-mode", "bypassPermissions")
 	}
 	if o.Model != "" {
 		command = append(command, "--model", o.Model)

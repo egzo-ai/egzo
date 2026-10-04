@@ -6,9 +6,8 @@ sandboxes, and attach to any of them with the real TUI you already know, Claude 
 > Status: working on Docker, early everywhere else. Config validation, `up` / `down`, isolated agents
 > running as you, the egress proxy with credential injection, git workspaces (clone, shared, worktree),
 > Claude Code and OpenCode in their native TUI (`egzo attach`), message delivery into the terminal, and the
-> operator commands (`secrets`, `doctor`, `diff`, `ca rotate`, `proxy rules`) are built. Not yet: pi, the
-> Podman and gVisor spec runs, and one decision about Claude Code's first-run dialog
-> (`known-issues/claude-code-auto-mode-offer.md`). The executable spec in `specs/` is the status report:
+> operator commands (`secrets`, `doctor`, `diff`, `ca rotate`, `proxy rules`) are built. Not yet: pi, and the
+> Podman and gVisor spec runs. The executable spec in `specs/` is the status report:
 > a passing test is done and a failing test is not done yet or broken (the failing specs are the todo list). Run it with
 > `make specs` (it picks the platform from your machine; `ENGINE=docker` names one).
 

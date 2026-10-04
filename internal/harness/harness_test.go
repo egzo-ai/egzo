@@ -66,8 +66,16 @@ func TestClaudeCodeBypassesPermissionsAndSkipsEveryFirstRunQuestion(t *testing.T
 		t.Fatal(err)
 	}
 	settings := decode(t, plan, filepath.Join(o.Home, ".claude", "settings.json"))
-	if get(t, settings, "permissions", "defaultMode") != "bypassPermissions" || settings["skipDangerousModePermissionPrompt"] != true {
+	if settings["skipDangerousModePermissionPrompt"] != true {
 		t.Errorf("settings = %v", settings)
+	}
+	// bypass comes from the flag: permissions.defaultMode in the settings makes Claude Code ask whether
+	// to make auto mode the default on its first start, and it must be gone (null deletes it on merge)
+	if value, present := get(t, settings, "permissions").(map[string]any)["defaultMode"]; !present || value != nil {
+		t.Errorf("permissions.defaultMode must be sent as null so the merge deletes it: %v", settings["permissions"])
+	}
+	if !strings.Contains(strings.Join(plan.Command, "\x00"), "--permission-mode\x00bypassPermissions") {
+		t.Errorf("command = %q", plan.Command)
 	}
 	state := decode(t, plan, filepath.Join(o.Home, ".claude.json"))
 	if state["hasCompletedOnboarding"] != true {
@@ -92,6 +100,9 @@ func TestClaudeCodeOptOutOfBypassIsExplicitSoItUndoesAnEarlierRun(t *testing.T) 
 	settings := decode(t, plan, filepath.Join(o.Home, ".claude", "settings.json"))
 	if get(t, settings, "permissions", "defaultMode") != "default" || settings["skipDangerousModePermissionPrompt"] != false {
 		t.Errorf("settings = %v", settings)
+	}
+	if strings.Contains(strings.Join(plan.Command, " "), "permission-mode") {
+		t.Errorf("an opt-out must not pass the bypass flag: %q", plan.Command)
 	}
 	if env := (claudeCode{}).ContainerEnv(false); env["IS_SANDBOX"] != "" {
 		t.Errorf("env = %v", env)

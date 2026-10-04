@@ -419,7 +419,6 @@ screen, so native scrollback is lost.
 
 ## Still open (design)
 - The prep container's uid mapping under rootless Podman (Docker runs it as the invoking user).
-- Whether egzo may answer Claude Code's auto-mode offer on the user's behalf (known-issues).
 
 ## Still open (spikes)
 Answered: the session backend is the pty holder (it passes the fidelity matrix; tmux was not built); `egzo-agent`
@@ -515,8 +514,8 @@ Decisions taken while building (reversible; each is covered by specs):
   `<project>_<agent>-home`, so `/resume` and settings survive recreating the agent) and
   `ENTRYPOINT egzo agent run --`. An integration (`internal/harness`) is pure: from the agent's definition it
   produces files (merged into what the harness already keeps in the volume), a command line and the interrupt
-  key. Claude Code: `~/.claude.json` (onboarding done, each workspace trusted, a placeholder API key
-  pre-approved, the `egzo` MCP server), `~/.claude/settings.json` (bypass mode and its prompt skipped, hooks
+  key. Claude Code starts with `--permission-mode bypassPermissions`, never with `permissions.defaultMode` in the settings (which makes it ask on its first start whether to make auto mode the default; nobody is there to answer in an unattended agent, and an injected Enter would). Claude Code: `~/.claude.json` (onboarding done, each workspace trusted, a placeholder API key
+  pre-approved, the `egzo` MCP server), `~/.claude/settings.json` (its bypass prompt skipped, any earlier `defaultMode` removed, hooks
   `egzo hook <Name>`), `--model`, `--append-system-prompt` with the platform instructions + the agent's prompt,
   `IS_SANDBOX=1`. OpenCode: `opencode.json` (`permission: {"*": "allow"}`, the MCP server, model,
   instructions) and a plugin that reports `SessionStart` when it loads (OpenCode only creates a session on the
@@ -556,14 +555,12 @@ Decisions taken while building (reversible; each is covered by specs):
   with the resolved config, the label contract version and the config hash of every container.
 
 Open, in the order they matter:
-1. **Claude Code on a fresh home asks "Make auto mode your default permission mode?"** and an injected Enter
-   would answer it. Needs a decision: `known-issues/claude-code-auto-mode-offer.md`.
-2. **pi** is accepted as a harness name but has no image or integration. `custom` covers it for now.
-3. The engine matrix beyond Docker (rootless and rootful Podman, gVisor) is not part of the current spec run;
+1. **pi** is accepted as a harness name but has no image or integration. `custom` covers it for now.
+2. The engine matrix beyond Docker (rootless and rootful Podman, gVisor) is not part of the current spec run;
    the specs were written for it and need a pass on those hosts. Rootful Podman loses outbound connectivity
    intermittently (`known-issues/rootful-podman-intermittent-egress.md`).
-4. `request_secret_access`, the optional mount of the user's own `~/.claude` settings, per-service path scoping.
-5. A real model call is never made by the specs; the end-to-end behaviour of a harness with a model (that a
+3. `request_secret_access`, the optional mount of the user's own `~/.claude` settings, per-service path scoping.
+4. A real model call is never made by the specs; the end-to-end behaviour of a harness with a model (that a
    reply comes back, that the Stop text reaches `say`) is unverified.
 
 ## Future: egzo-hub + web UI (planning; shapes the foundation, not built yet)

@@ -175,8 +175,12 @@ def opencode(environment_secrets, harness_image):
 def test_claude_code_bypasses_permissions_and_has_accepted_everything(claude, engine):
     project = claude()
     settings = json.loads(read_in_agent(engine, project, "$HOME/.claude/settings.json"))
-    assert settings["permissions"]["defaultMode"] == "bypassPermissions"
     assert settings["skipDangerousModePermissionPrompt"] is True
+    # bypass comes from the flag: permissions.defaultMode in the settings makes Claude Code ask on its
+    # first start whether to make auto mode the default
+    assert "defaultMode" not in settings.get("permissions", {})
+    cmdline = engine.exec(container(engine, project).name, "sh", "-c", "tr '\\0' ' ' < /proc/$(pgrep -n -x claude)/cmdline").stdout
+    assert "--permission-mode bypassPermissions" in cmdline
     state = json.loads(read_in_agent(engine, project, "$HOME/.claude.json"))
     assert state["hasCompletedOnboarding"] is True
     env = container(engine, project).raw["Config"]["Env"]
@@ -245,6 +249,8 @@ def test_permissions_default_keeps_the_harness_prompts(claude, engine):
     settings = json.loads(read_in_agent(engine, project, "$HOME/.claude/settings.json"))
     assert settings["permissions"].get("defaultMode", "default") == "default"
     assert not settings.get("skipDangerousModePermissionPrompt")
+    cmdline = engine.exec(container(engine, project).name, "sh", "-c", "tr '\\0' ' ' < /proc/$(pgrep -n -x claude)/cmdline").stdout
+    assert "--permission-mode" not in cmdline
     assert "IS_SANDBOX=1" not in container(engine, project).raw["Config"]["Env"]
 
 
@@ -335,9 +341,6 @@ def wait_until(check, what, timeout, context=None):
 
 def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(launched, harness):
     """No model is called: the harness reports the prompt through its hook as soon as it is submitted."""
-    if harness == "claude-code":
-        # Not run: an injected Enter would answer Claude Code's "make auto mode your default?" dialog.
-        pytest.fail("blocked on a decision, see known-issues/claude-code-auto-mode-offer.md", pytrace=False)
     project = launched(agent_fields={"inject": {"human_quiet": "1s"}})
 
     def activity():
