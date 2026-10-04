@@ -220,8 +220,8 @@ control:                       # orchestrator MCP + status sidecar (always prese
 - Language: Go.
 - Engine access: Docker Engine API (Go docker client). The engine is whatever `DOCKER_HOST` points at
   (default `/var/run/docker.sock`), like the docker CLI: no probing, no engine setting in egzo.yaml.
-  Podman works through its Docker-compat socket (`podman.socket`); its API ignores a container's
-  `runtime:`, so egzo warns that it cannot apply or verify it. Never mount the socket into agent
+  Podman works through its Docker-compat socket (`podman.socket`); its API cannot select a container's
+  `runtime:`, so egzo refuses to start an agent that asks for one there (known-issues/podman-gvisor-unsupported.md). Never mount the socket into agent
   containers. Engine matrix in specs.
 - No daemon. Everything runs in containers except the `egzo` CLI.
 - Harness control is TUI-first (Scion-style). The native TUI always runs in the agent container
@@ -433,8 +433,9 @@ Claude Code `SessionStart` arrives before its first-run dialogs are answered.
 ## specs/ (pytest)
 
 The suite is the status report: `specs/README.md` explains the done / todo / broken / promote model.
-A run tests one host scenario chosen with `--engine` (docker, docker-gvisor, podman, podman-rootless); CI runs
-one machine per scenario. It builds its own sidecar and agent images, and needs the internet for the specs that
+A run tests egzo on one reference platform (docker, docker-gvisor, podman, podman-rootless: what the host is like, not
+what egzo is asked), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
+per platform (known-issues/reference-platform-ci-matrix.md). It builds its own sidecar and agent images, and needs the internet for the specs that
 talk to real hosts (they fail when offline) and a registry for the image-name spec (`EGZO_SPEC_REGISTRY`).
 
     specs/

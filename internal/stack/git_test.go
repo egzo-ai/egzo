@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/egzo-ai/egzo/internal/config"
+	"github.com/egzo-ai/egzo/internal/engine"
 )
 
 func gitProject(t *testing.T, mode string) (*config.Resolved, string) {
@@ -257,5 +258,19 @@ func TestDependsOnDoesNotChangeWhatAContainerIs(t *testing.T) {
 	}
 	if !slices.Equal(spec.StartAfter, []string{"proj-coder-1"}) {
 		t.Errorf("StartAfter = %v", spec.StartAfter)
+	}
+}
+
+func TestPodmanRefusesAProjectThatAsksForARuntime(t *testing.T) {
+	desired := Desired{Containers: []ContainerSpec{{Name: "proj-control-1"}, {Name: "proj-coder-1", Runtime: "runsc"}}}
+	err := refuseRuntimes(&engine.Client{Podman: true}, desired)
+	if err == nil || !strings.Contains(err.Error(), "proj-coder-1") || !strings.Contains(err.Error(), "runsc") || !strings.Contains(err.Error(), "Podman") {
+		t.Errorf("err = %v", err)
+	}
+	if err := refuseRuntimes(&engine.Client{Podman: true}, Desired{Containers: []ContainerSpec{{Name: "a"}}}); err != nil {
+		t.Errorf("a project without a runtime was refused: %v", err)
+	}
+	if err := refuseRuntimes(&engine.Client{}, desired); err != nil {
+		t.Errorf("Docker applies the runtime itself: %v", err)
 	}
 }

@@ -10,7 +10,7 @@ sandboxes, and attach to any of them with the real TUI you already know, Claude 
 > Podman and gVisor spec runs, and one decision about Claude Code's first-run dialog
 > (`known-issues/claude-code-auto-mode-offer.md`). The executable spec in `specs/` is the status report:
 > a passing test is done, an expected failure is todo, a failing test is broken. Run it with
-> `make specs ENGINE=docker`.
+> `make specs` (it picks the platform from your machine; `ENGINE=docker` names one).
 
 ## Why
 
@@ -119,7 +119,7 @@ with `make images` (`EGZO_HARNESS_PREFIX` points egzo at another registry). egzo
     export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 
 For gVisor, register `runsc` with Docker and set `runtime: runsc` on an agent, as in Compose.
-Podman's Docker-compatible API ignores the runtime, so egzo warns it cannot apply or verify it there.
+Podman's Docker-compatible API cannot select a runtime, so egzo refuses to start an agent that asks for one on Podman rather than start it without.
 
 ## Later
 

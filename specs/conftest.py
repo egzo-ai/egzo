@@ -1,11 +1,13 @@
 """Fixtures for the egzo spec suite.
 
-The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it on PATH). A run tests
-ONE host scenario (ENGINES below), chosen with `--engine NAME` or EGZO_ENGINE: CI runs one machine per
-scenario. Specs that need a container engine use the `engine` fixture, which is that scenario. A host
-that lacks the chosen engine FAILS those specs, with what to set up, because a green run must mean the
-scenario works. The one exception is a platform that can never run the scenario (gVisor off Linux),
-which SKIPS. A supported platform that is merely missing something (no runsc on Linux) FAILS.
+The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it on PATH).
+
+A run tests egzo on ONE reference platform (ENGINES below), chosen with `--engine NAME` or EGZO_ENGINE,
+or, when neither is given, by select_platform.py from what this machine has (the report is printed in
+the header of the run). A platform says what the host is like: a rootful Docker host, a Docker host that
+has gVisor registered, rootful or rootless Podman. It does not ask egzo for anything: specs that use a
+feature the platform lacks (an agent with `runtime: runsc` on a host without gVisor) are expected to
+fail there, and are marked so. Nothing is probed or skipped for them: egzo is asked, and fails or not.
 """
 
 import copy
@@ -70,8 +72,6 @@ class Project:
         self.root = root
         self.egzo = egzo
         self.env = dict(env or {})
-        # When set, every agent a written document leaves without a runtime gets this one.
-        self.default_runtime = None
         self.root.mkdir(parents=True)
 
     @property
@@ -84,11 +84,6 @@ class Project:
         return path
 
     def write(self, document, filename="egzo.yaml"):
-        if self.default_runtime and isinstance(document, dict):
-            document = copy.deepcopy(document)
-            for agent in (document.get("agents") or {}).values():
-                if isinstance(agent, dict):
-                    agent.setdefault("runtime", self.default_runtime)
         text = document if isinstance(document, str) else yaml.safe_dump(document, sort_keys=False)
         path = self.root / filename
         path.write_text(text)
@@ -123,13 +118,14 @@ class Engine:
     The CLI (docker, or podman in remote mode) talks to the same socket egzo does, so the specs
     observe exactly what egzo sees, and the socket is all a host has to provide."""
 
-    def __init__(self, name, cli, host, rootless=False, runtime=None, setup=""):
+    def __init__(self, name, cli, host, rootless=False, gvisor=False, setup=""):
         self.name = name
         self.cli = cli
         self.host = host
         self.rootless = rootless
-        # An OCI runtime every agent of a spec project gets (the gVisor matrix entry).
-        self.runtime = runtime
+        # Whether this reference platform has gVisor (runsc) registered. It only describes the host:
+        # no agent runs under it unless a spec asks for `runtime: runsc`.
+        self.gvisor = gvisor
         self.setup = setup
         self.env = {"DOCKER_HOST": host}
 
@@ -161,15 +157,19 @@ class Engine:
             return f"the engine at {self.host} is Podman, not Docker"
         if self.cli == "podman" and (probe.stdout.strip() == "true") != self.rootless:
             return f"the Podman at {self.host} is {'rootless' if self.rootless else 'rootful'} in name only: it reports otherwise"
-        if self.runtime and sys.platform.startswith("linux") and not self.has_runtime(self.runtime):
-            return f"the engine at {self.host} has no {self.runtime} runtime registered"
         return None
 
-    def unsupported(self):
-        """Why this platform can never run this scenario (a skip, not a failure), or None."""
-        if self.runtime and not sys.platform.startswith("linux"):
-            return f"{self.runtime} (gVisor) only runs on Linux"
-        return None
+    def available(self):
+        """Whether this host is this reference platform: (True, "") or (False, why not). Used to choose
+        a platform automatically; a platform chosen by name is not second-guessed."""
+        problem = self.problem()
+        if problem:
+            return False, problem
+        if self.gvisor and not self.has_runtime("runsc"):
+            return False, f"the engine at {self.host} has no runsc (gVisor) runtime registered"
+        if not self.gvisor and self.has_runtime("runsc"):
+            return True, "has gVisor registered too (docker-gvisor is the better match)"
+        return True, ""
 
     def image_for(self, binary):
         """A local image holding the egzo binary and git, which stands in for the published sidecar image."""
@@ -294,10 +294,11 @@ def _rootless_podman_socket():
 DOCKER_SETUP = "install Docker Engine and make /var/run/docker.sock usable by this user (docker group)"
 GVISOR_SETUP = 'install gVisor and register it: {"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}} in /etc/docker/daemon.json'
 
-# The supported host scenarios. A run picks exactly one (--engine / EGZO_ENGINE).
+# The supported reference platforms. A run tests exactly one. There is no podman-gvisor: Podman's
+# Docker-compatible API cannot select a runtime (known-issues/podman-gvisor-unsupported.md).
 ENGINES = [
     Engine("docker", "docker", "unix:///var/run/docker.sock", setup=DOCKER_SETUP),
-    Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", runtime="runsc", setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
+    Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", gvisor=True, setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
     Engine(
         "podman",
         "podman",
@@ -320,31 +321,42 @@ def pytest_addoption(parser):
         "--engine",
         default=os.environ.get("EGZO_ENGINE"),
         choices=[e.name for e in ENGINES],
-        help="the host scenario this run tests (or set EGZO_ENGINE)",
+        help="the reference platform this run tests (or set EGZO_ENGINE); default: chosen from this machine",
     )
+
+
+def pytest_configure(config):
+    import select_platform
+
+    name = config.getoption("--engine")
+    config._egzo_platform = select_platform.select(ENGINES, name)
+
+
+def pytest_report_header(config):
+    return config._egzo_platform.report.splitlines()
 
 
 @pytest.fixture(scope="session")
 def engine(request):
-    """The one engine scenario this run tests."""
-    name = request.config.getoption("--engine")
-    if not name:
-        pytest.fail(
-            "no engine scenario chosen: pass --engine or set EGZO_ENGINE to one of "
-            + ", ".join(e.name for e in ENGINES),
-            pytrace=False,
-        )
-    candidate = next(e for e in ENGINES if e.name == name)
-    problem = candidate.problem()
+    """The one reference platform this run tests."""
+    chosen = request.config._egzo_platform
+    if chosen.engine is None:
+        pytest.fail(chosen.report, pytrace=False)
+    problem = chosen.engine.problem()
     if problem:
         pytest.fail(
-            f"required engine '{candidate.name}' is not available: {problem}\nto set it up: {candidate.setup}",
+            f"required platform '{chosen.engine.name}' is not available: {problem}\nto set it up: {chosen.engine.setup}",
             pytrace=False,
         )
-    unsupported = candidate.unsupported()
-    if unsupported:
-        pytest.skip(unsupported)
-    return candidate
+    return chosen.engine
+
+
+@pytest.fixture
+def gvisor_agents(request, engine):
+    """For specs that use the gVisor feature of egzo: they need a platform with gVisor, and are expected
+    to fail without it. Strict, so a pass on a platform said to lack it is reported as well."""
+    if not engine.gvisor:
+        request.applymarker(pytest.mark.xfail(strict=True, reason=f"{engine.name} is a platform without gVisor"))
 
 
 @pytest.fixture
@@ -411,7 +423,6 @@ def project(make_project):
 def live_project(make_project, engine, egzo):
     """A project bound to an engine; everything it created is removed afterwards."""
     created = make_project(env={**engine.env, "EGZO_IMAGE": engine.image_for(egzo.binary)})
-    created.default_runtime = engine.runtime
     yield created
     created.run("down", "--volumes")
     engine.cleanup(created.name)

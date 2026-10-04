@@ -12,21 +12,29 @@ $ specs/.venv/bin/pip install -r specs/requirements.txt
 $ EGZO_BIN=/path/to/egzo specs/.venv/bin/pytest specs --engine docker
 ```
 
-`EGZO_BIN` defaults to `egzo` on `PATH`. A run tests **one host scenario**, chosen with
-`--engine NAME` (or `EGZO_ENGINE`). CI runs one machine per scenario, so nothing is multiplied
-across engines inside a run. Specs that observe the container engine get that scenario from the
-`engine` fixture:
+`EGZO_BIN` defaults to `egzo` on `PATH`. A run tests egzo on **one reference platform**. A platform says what
+the host is like; it does not ask egzo for anything:
 
-| `--engine` | engine | socket |
+| platform | the host is | socket |
 |---|---|---|
-| `docker` | Docker (rootful) | `/var/run/docker.sock` |
-| `docker-gvisor` | the same Docker, every agent under `runsc` (gVisor) | `/var/run/docker.sock` |
-| `podman` | Podman, rootful | `/run/podman/podman.sock` (this user needs access to it) |
-| `podman-rootless` | Podman, rootless | `$XDG_RUNTIME_DIR/podman/podman.sock` |
+| `docker` | a rootful Docker host | `/var/run/docker.sock` |
+| `docker-gvisor` | the same, with `runsc` (gVisor) registered | `/var/run/docker.sock` |
+| `podman` | a rootful Podman host | `/run/podman/podman.sock` (this user needs access to it) |
+| `podman-rootless` | a rootless Podman host | `$XDG_RUNTIME_DIR/podman/podman.sock` |
 
-Without `--engine`, the engine specs **fail** and list the choices. If the chosen engine is missing
-on the host they fail too, with what to set up, so a green run means the scenario works. The one
-exception is a platform that can never run the scenario (gVisor off Linux), which **skips**. Linux without a registered `runsc` fails.
+There is no `podman-gvisor`: Podman's API cannot select a runtime (`known-issues/podman-gvisor-unsupported.md`).
+
+Name the platform with `--engine NAME` (or `EGZO_ENGINE`), as CI does, one machine per platform. With none
+named, `select_platform.py` picks the first one this machine can be, in the order `docker-gvisor`,
+`podman-rootless`, `docker`, `podman`, and the run prints what it found, what it chose and how to override
+(`python specs/select_platform.py` prints just that). A platform that is named but missing fails the engine
+specs with what to set up.
+
+Specs that use a feature the platform lacks, which today is only gVisor (`runtime: runsc`), are marked to
+fail there (strict xfail), so they are todo on `docker`, `podman` and `podman-rootless` and done on
+`docker-gvisor`; one spec requires that a project asking for gVisor cannot start without it. Nothing is
+probed or skipped: egzo is asked, and the outcome is the result. The specs have so far only run on one
+developer machine: see `known-issues/reference-platform-ci-matrix.md`.
 
 Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootstrap pip with
 `get-pip.py`.
@@ -39,7 +47,7 @@ Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootst
 | xfail (`@pytest.mark.todo`) | todo | specified, not implemented yet |
 | fail | broken | implemented (or expected to be) and wrong |
 | strict XPASS | promote | a todo spec passes now: remove its marker |
-| skip | skipped | cannot run here (gVisor on a non-Linux platform; anything missing on a supported platform fails instead) |
+| skip | skipped | does not apply to this platform (for example a spec about Podman on Docker) |
 
 A `todo` spec is a strict xfail, so it cannot rot: when the feature lands the spec starts passing,
 the run fails with `promote`, and the author turns it into a regular spec. The summary at the end of

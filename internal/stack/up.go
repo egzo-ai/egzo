@@ -72,7 +72,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err != nil {
 		return err
 	}
-	warnRuntimes(c, desired)
+	if err := refuseRuntimes(c, desired); err != nil {
+		return err
+	}
 	checkouts, err := PlanGit(project)
 	if err != nil {
 		return err
@@ -288,20 +290,21 @@ func markFresh(fresh map[string]bool, plan []Action) {
 	}
 }
 
-// warnRuntimes says what Podman cannot do: its Docker-compatible API ignores the OCI runtime a
-// container asks for, so the runtime is neither applied nor verifiable from here. Compose has the
-// same limit; unlike Compose we say so, because the runtime is usually a security boundary.
-func warnRuntimes(c *engine.Client, desired Desired) {
+// refuseRuntimes stops a project that asks for an OCI runtime on Podman. Podman's Docker-compatible
+// API cannot select a runtime, so egzo could neither apply nor verify it, and the runtime is
+// usually a security boundary (gVisor): starting the agent without it would be a silent downgrade.
+func refuseRuntimes(c *engine.Client, desired Desired) error {
 	if !c.Podman {
-		return
+		return nil
 	}
 	for _, spec := range desired.Containers {
 		if spec.Runtime != "" {
-			fmt.Fprintf(os.Stderr, "warning: %s asks for the %s runtime, but Podman's Docker-compatible API ignores "+
-				"the runtime, so egzo can neither apply nor verify it. Set it as the default in containers.conf "+
-				"(runtime = %q), or use Docker\n", spec.Name, spec.Runtime, spec.Runtime)
+			return fmt.Errorf("%s asks for the %s runtime, but Podman's Docker-compatible API cannot select a runtime, "+
+				"so egzo can neither apply nor verify it and will not start the agent without it: "+
+				"remove runtime: from the agent, or use Docker with the runtime registered", spec.Name, spec.Runtime)
 		}
 	}
+	return nil
 }
 
 // splitAgentContainers separates what must exist before an agent's container (networks, volumes,

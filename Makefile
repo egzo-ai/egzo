@@ -23,11 +23,11 @@ test:
 	$(GO) vet ./...
 	$(GO) test -race ./...
 
-# ENGINE is one of: docker, docker-gvisor, podman, podman-rootless
-ENGINE ?= docker
+# ENGINE is one of: docker, docker-gvisor, podman, podman-rootless; empty chooses from this machine
+ENGINE ?=
 
 specs: build
-	cd specs && EGZO_BIN=$(CURDIR)/$(BIN) .venv/bin/pytest --engine $(ENGINE)
+	cd specs && EGZO_BIN=$(CURDIR)/$(BIN) .venv/bin/pytest $(if $(ENGINE),--engine $(ENGINE))
 
 clean:
 	rm -rf bin

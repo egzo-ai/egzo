@@ -181,33 +181,55 @@ def test_resources_limit_the_agent_container(live_project, engine, agent_image):
     assert host.get("NanoCpus", host.get("NanoCPUs")) == 1_000_000_000
 
 
-def test_runtime_runs_the_agent_under_that_oci_runtime(live_project, engine, agent_image):
-    if engine.cli != "docker":
-        pytest.skip("Podman's Docker-compatible API cannot select the runtime: see the next spec")
-    assert engine.has_runtime("runsc"), "gVisor (runsc) must be registered with Docker"
+def no_agent_container(engine, project):
+    return not [r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}kind") == "agent"]
+
+
+def test_an_agent_with_runtime_runsc_really_runs_under_gvisor(live_project, engine, agent_image, gvisor_agents):
+    """Proved from inside the agent, not from what egzo asked for: an engine that drops the runtime
+    would still say `runsc` in `inspect`."""
     up(live_project, spec(agents={"coder": custom(agent_image, runtime="runsc")}))
-    resource = container(engine, live_project, "coder")
-    assert resource.raw["HostConfig"]["Runtime"] == "runsc"
-    assert "gvisor" in engine.exec(resource.name, "uname", "-r").stdout
+    name = container(engine, live_project, "coder").name
+    assert "gvisor" in engine.exec(name, "cat", "/proc/version").stdout.lower()
+    assert "Starting gVisor" in engine.exec(name, "dmesg").stdout
 
 
-def test_an_unregistered_runtime_fails_with_a_hint_on_docker(live_project, engine, agent_image):
-    if engine.cli != "docker":
-        pytest.skip("only Docker rejects an unknown runtime")
-    live_project.write(spec(agents={"coder": custom(agent_image, runtime="no-such-runtime")}))
-    result = live_project.run("up")
-    assert result.returncode != 0
-    assert "no-such-runtime" in result.stderr and "daemon.json" in result.stderr
+def test_an_agent_without_a_runtime_does_not_run_under_gvisor(live_project, engine, agent_image):
+    """The control for the spec above: on a platform that has gVisor, agents only get it when they ask."""
+    up(live_project, spec(agents={"coder": custom(agent_image)}))
+    name = container(engine, live_project, "coder").name
+    assert "gvisor" not in engine.exec(name, "cat", "/proc/version").stdout.lower()
 
 
-def test_podman_warns_that_the_runtime_cannot_be_applied_or_verified(live_project, engine, agent_image):
-    if engine.cli != "podman":
-        pytest.skip("only Podman ignores the requested runtime")
+def test_a_project_that_requires_gvisor_cannot_start_on_a_platform_without_it(live_project, engine, agent_image):
+    if engine.gvisor:
+        pytest.skip(f"{engine.name} has gVisor; this spec is about platforms without it")
     live_project.write(spec(agents={"coder": custom(agent_image, runtime="runsc")}))
     result = live_project.run("up", timeout=300)
-    assert result.returncode == 0, result.stderr
-    assert "warning" in result.stderr.lower()
-    assert "runsc" in result.stderr and "podman" in result.stderr.lower() and "containers.conf" in result.stderr
+    assert result.returncode != 0, "the agent started without the runtime it asked for: this host has gVisor or egzo dropped it"
+    assert "runsc" in result.stderr
+    assert no_agent_container(engine, live_project)
+
+
+def test_an_unknown_runtime_never_starts_the_agent(live_project, engine, agent_image):
+    live_project.write(spec(agents={"coder": custom(agent_image, runtime="no-such-runtime")}))
+    result = live_project.run("up", timeout=300)
+    assert result.returncode != 0
+    assert "no-such-runtime" in result.stderr
+    assert no_agent_container(engine, live_project)
+    if engine.cli == "docker":
+        assert "daemon.json" in result.stderr  # how to register a runtime
+
+
+def test_podman_refuses_a_runtime_because_it_cannot_apply_or_verify_it(live_project, engine, agent_image):
+    """Podman's Docker-compatible API cannot select a runtime: egzo must not start the agent without it."""
+    if engine.cli != "podman":
+        pytest.skip("this is about Podman")
+    live_project.write(spec(agents={"coder": custom(agent_image, runtime="runsc")}))
+    result = live_project.run("up", timeout=300)
+    assert result.returncode != 0
+    assert "Podman" in result.stderr and "runsc" in result.stderr
+    assert no_agent_container(engine, live_project)
 
 
 # --- who an agent runs as ---------------------------------------------------------------------
