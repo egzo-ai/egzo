@@ -9,6 +9,12 @@ var builtinServices = map[string]ResolvedService{
 		Hosts:  []string{"api.anthropic.com"},
 		Inject: &Inject{Header: "x-api-key"},
 	},
+	// A Claude subscription token (`claude setup-token`, sk-ant-oat...) is not an API key: the API takes it
+	// as a bearer token. Bind it to this service, and an API key to "anthropic".
+	"anthropic-oauth": {
+		Hosts:  []string{"api.anthropic.com"},
+		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
+	},
 	"github": {
 		Hosts:  []string{"github.com", "api.github.com"},
 		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},

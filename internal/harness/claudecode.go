@@ -22,8 +22,16 @@ func (claudeCode) IdleSignal() string { return "hook" }
 // The footer under Claude Code's prompt names the permission mode, or offers the shortcuts.
 func (claudeCode) ReadyMarkers() []string { return []string{"for shortcuts", "shift+tab to cycle"} }
 
-func (claudeCode) ContainerEnv(bypass bool) map[string]string {
+// claudeOAuthToken is the placeholder for a subscription token; like claudeKey it is replaced by the proxy.
+const claudeOAuthToken = "sk-ant-oat01-egzo-placeholder-0000000000000000000000000000000000000000"
+
+func (claudeCode) ContainerEnv(bypass, bearer bool) map[string]string {
+	// A subscription token comes in CLAUDE_CODE_OAUTH_TOKEN and makes Claude Code send it as a bearer
+	// token; an ANTHROPIC_API_KEY next to it would win and be sent as x-api-key.
 	env := map[string]string{"ANTHROPIC_API_KEY": claudeKey}
+	if bearer {
+		env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": claudeOAuthToken}
+	}
 	if bypass {
 		// Claude Code refuses bypass mode as root unless it is told it runs in a sandbox, which it does.
 		env["IS_SANDBOX"] = "1"

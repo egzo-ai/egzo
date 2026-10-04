@@ -7,7 +7,7 @@ import urllib.request
 import pytest
 
 from conftest import LABEL_PREFIX
-from support import agent, spec
+from support import agent, anthropic_profile, spec
 
 SECRET = "sk-spec-injected-0123456789abcdef"
 
@@ -252,3 +252,23 @@ def test_the_ca_private_key_is_only_in_the_proxy_volume(live_project, engine, ag
     for service in ("control", "coder"):
         others = {m.get("Name") for m in container(engine, live_project, service).raw["Mounts"]}
         assert private not in others, service
+
+
+def test_up_refuses_an_oauth_token_bound_to_the_api_key_service(live_project, engine, agent_image):
+    """api.anthropic.com answers 401 to a subscription token sent as x-api-key: say so before starting anything."""
+    live_project.env["ANTHROPIC_API_KEY"] = "sk-ant-oat01-" + "x" * 60
+    live_project.write(spec(egress={"default": anthropic_profile()}, agents={"coder": custom(agent_image)}))
+    result = live_project.run("up", timeout=300)
+    assert result.returncode != 0
+    assert "OAuth" in result.stderr and "anthropic-oauth" in result.stderr
+    assert "oat01" not in result.stderr and not engine.containers(live_project.name)
+
+
+def test_up_refuses_an_api_key_bound_to_the_oauth_service(live_project, engine, agent_image):
+    live_project.env["ANTHROPIC_API_KEY"] = "sk-ant-api03-" + "x" * 60
+    profile_ = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}
+    live_project.write(spec(egress={"default": profile_}, agents={"coder": custom(agent_image)}))
+    result = live_project.run("up", timeout=300)
+    assert result.returncode != 0
+    assert "API key" in result.stderr and "anthropic" in result.stderr
+    assert "api03" not in result.stderr and not engine.containers(live_project.name)

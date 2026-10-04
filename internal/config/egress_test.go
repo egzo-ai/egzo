@@ -55,7 +55,7 @@ func TestEgressUnknownService(t *testing.T) {
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      anthropc: main/KEY\n",
 		`unknown service "anthropc" (did you mean "anthropic"?)`)
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      kubernetes: main/KEY\n",
-		`unknown service "kubernetes" (built-in services: anthropic, github)`)
+		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, github)`)
 }
 
 func TestEgressEmptyServiceEntryIsRejected(t *testing.T) {
@@ -268,7 +268,7 @@ func TestValidHost(t *testing.T) {
 }
 
 func TestBuiltinsAreSortedAndComplete(t *testing.T) {
-	if got, want := builtinNames(), []string{"anthropic", "github"}; !reflect.DeepEqual(got, want) {
+	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "github"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("builtinNames = %v, want %v", got, want)
 	}
 	if got, want := HarnessNames(), []string{"claude-code", "custom", "opencode", "pi"}; !reflect.DeepEqual(got, want) {
@@ -276,5 +276,12 @@ func TestBuiltinsAreSortedAndComplete(t *testing.T) {
 	}
 	if _, ok := builtinService("nope"); ok {
 		t.Error("builtinService found a service that does not exist")
+	}
+}
+
+func TestTheAnthropicOAuthServiceIsBuiltInAndSendsABearerToken(t *testing.T) {
+	service, ok := builtinService("anthropic-oauth")
+	if !ok || service.Hosts[0] != "api.anthropic.com" || service.Inject.Header != "Authorization" || service.Inject.Value != "Bearer {secret}" {
+		t.Errorf("service = %+v, ok = %v", service, ok)
 	}
 }

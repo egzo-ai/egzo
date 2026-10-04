@@ -75,6 +75,14 @@ def test_allow_accepts_hosts_and_globs(project):
 # --- services ----------------------------------------------------------------------------------
 
 
+def test_the_anthropic_oauth_service_is_built_in(project):
+    """A Claude subscription token (`claude setup-token`) is not an API key: api.anthropic.com takes it as a bearer token."""
+    profile_ = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}
+    service = profile(project.resolved(spec(egress={"default": profile_})), "default")["services"]["anthropic-oauth"]
+    assert service["hosts"] == ["api.anthropic.com"]
+    assert service["inject"] == {"header": "Authorization", "value": "Bearer {secret}"}
+
+
 def test_the_anthropic_service_is_built_in(project):
     service = profile(project.resolved(spec(egress={"default": anthropic_profile()})), "default")["services"]["anthropic"]
     assert service["hosts"] == ["api.anthropic.com"]

@@ -355,3 +355,27 @@ def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(la
     )
     prompts = [e for e in events_of(project) if e["type"] == "hook" and e["text"] == "UserPromptSubmit"]
     assert any("hello from the operator" in json.dumps(p["data"]) for p in prompts)
+
+
+# --- a Claude subscription token (claude setup-token) instead of an API key --------------------------------
+
+OAUTH_TOKEN = "sk-ant-oat01-egzo-spec-not-a-real-token-" + "0" * 40
+
+
+@pytest.fixture
+def subscription(environment_secrets, harness_image):
+    environment_secrets.env["CLAUDE_CODE_OAUTH_TOKEN"] = OAUTH_TOKEN
+    vaults = {"main": {"backend": "env", "secrets": {"CLAUDE_CODE_OAUTH_TOKEN": {"from": "env:CLAUDE_CODE_OAUTH_TOKEN"}}}}
+    egress = {"default": {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/CLAUDE_CODE_OAUTH_TOKEN"}}}
+    environment_secrets.write(spec(vaults=vaults, egress=egress, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"))}))
+    result = environment_secrets.run("up", timeout=900)
+    assert result.returncode == 0, result.stderr
+    return environment_secrets
+
+
+def test_claude_code_gets_an_oauth_placeholder_when_the_profile_injects_a_bearer_token(subscription, engine):
+    env = dict(e.split("=", 1) for e in container(engine, subscription).raw["Config"]["Env"])
+    assert env.get("CLAUDE_CODE_OAUTH_TOKEN"), "Claude Code reads a subscription token from CLAUDE_CODE_OAUTH_TOKEN"
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] != OAUTH_TOKEN
+    assert "ANTHROPIC_API_KEY" not in env, "an API key placeholder would make Claude Code send x-api-key"
+    assert OAUTH_TOKEN not in json.dumps(container(engine, subscription).raw["Config"])

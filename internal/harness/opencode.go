@@ -16,7 +16,7 @@ func (openCode) IdleSignal() string { return "hook" }
 // OpenCode's prompt box says "Ask anything…" until the first message.
 func (openCode) ReadyMarkers() []string { return []string{"Ask anything"} }
 
-func (openCode) ContainerEnv(bool) map[string]string {
+func (openCode) ContainerEnv(bool, bool) map[string]string {
 	// The proxy replaces the credential of every request to api.anthropic.com.
 	return map[string]string{"ANTHROPIC_API_KEY": claudeKey}
 }

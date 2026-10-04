@@ -260,7 +260,7 @@ func agentContainer(
 		env["EGZO_MODEL"] = agent.Model
 	}
 	if integration, ok := harness.For(agent.Harness); ok {
-		for key, value := range integration.ContainerEnv(agent.Permissions != "default") {
+		for key, value := range integration.ContainerEnv(agent.Permissions != "default", bearerProvider(project, agent)) {
 			env[key] = value
 		}
 	}
@@ -381,4 +381,24 @@ func hash(spec any) string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// bearerProvider reports whether an agent's profile injects the Anthropic credential as a bearer
+// token, which is how a Claude subscription token is sent.
+func bearerProvider(project *config.Resolved, agent config.ResolvedAgent) bool {
+	profile := project.Egress[agent.Egress]
+	if profile == nil {
+		return false
+	}
+	for _, service := range profile.Services {
+		if service.Inject == nil || !strings.EqualFold(service.Inject.Header, "Authorization") {
+			continue
+		}
+		for _, host := range service.Hosts {
+			if host == "api.anthropic.com" {
+				return true
+			}
+		}
+	}
+	return false
 }

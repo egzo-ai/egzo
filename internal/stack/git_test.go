@@ -274,3 +274,55 @@ func TestPodmanRefusesAProjectThatAsksForARuntime(t *testing.T) {
 		t.Errorf("Docker applies the runtime itself: %v", err)
 	}
 }
+
+func credProject(service string, def config.ResolvedService) *config.Resolved {
+	copied := def
+	return &config.Resolved{
+		Agents: map[string]config.ResolvedAgent{"coder": {Egress: "default"}},
+		Egress: map[string]*config.ResolvedProfile{"default": {Services: map[string]*config.ResolvedService{service: &copied}}},
+	}
+}
+
+var (
+	apiKeyService = config.ResolvedService{Hosts: []string{"api.anthropic.com"}, Secret: "main/K", Inject: &config.Inject{Header: "x-api-key"}}
+	bearerService = config.ResolvedService{Hosts: []string{"api.anthropic.com"}, Secret: "main/K", Inject: &config.Inject{Header: "Authorization", Value: "Bearer {secret}"}}
+)
+
+func TestAnOAuthTokenSentAsAnAPIKeyIsRefusedWithoutShowingIt(t *testing.T) {
+	problems := checkCredentialKinds(credProject("anthropic", apiKeyService), map[string]string{"main/K": "sk-ant-oat01-secretsecret"})
+	if len(problems) != 1 || !strings.Contains(problems[0], "anthropic-oauth") || !strings.Contains(problems[0], "main/K") || strings.Contains(problems[0], "secretsecret") {
+		t.Errorf("problems = %v", problems)
+	}
+}
+
+func TestAnAPIKeySentAsABearerTokenIsRefused(t *testing.T) {
+	problems := checkCredentialKinds(credProject("anthropic-oauth", bearerService), map[string]string{"main/K": "sk-ant-api03-secretsecret"})
+	if len(problems) != 1 || !strings.Contains(problems[0], "API key") || strings.Contains(problems[0], "secretsecret") {
+		t.Errorf("problems = %v", problems)
+	}
+}
+
+func TestMatchingCredentialsAndOtherHostsAreLeftAlone(t *testing.T) {
+	if p := checkCredentialKinds(credProject("anthropic", apiKeyService), map[string]string{"main/K": "sk-ant-api03-x"}); len(p) != 0 {
+		t.Errorf("a key as a key: %v", p)
+	}
+	if p := checkCredentialKinds(credProject("anthropic-oauth", bearerService), map[string]string{"main/K": "sk-ant-oat01-x"}); len(p) != 0 {
+		t.Errorf("a token as a token: %v", p)
+	}
+	other := config.ResolvedService{Hosts: []string{"api.deploy.test"}, Secret: "main/K", Inject: &config.Inject{Header: "x-api-key"}}
+	if p := checkCredentialKinds(credProject("deploy", other), map[string]string{"main/K": "sk-ant-oat01-x"}); len(p) != 0 {
+		t.Errorf("another host: %v", p)
+	}
+}
+
+func TestBearerProviderSaysWhetherTheAnthropicCredentialIsABearerToken(t *testing.T) {
+	if !bearerProvider(credProject("anthropic-oauth", bearerService), config.ResolvedAgent{Egress: "default"}) {
+		t.Error("a bearer service on api.anthropic.com was not noticed")
+	}
+	if bearerProvider(credProject("anthropic", apiKeyService), config.ResolvedAgent{Egress: "default"}) {
+		t.Error("an API key service counted as bearer")
+	}
+	if bearerProvider(credProject("anthropic", apiKeyService), config.ResolvedAgent{Egress: "missing"}) {
+		t.Error("an unknown profile counted as bearer")
+	}
+}

@@ -104,10 +104,10 @@ func TestClaudeCodeOptOutOfBypassIsExplicitSoItUndoesAnEarlierRun(t *testing.T) 
 	if strings.Contains(strings.Join(plan.Command, " "), "permission-mode") {
 		t.Errorf("an opt-out must not pass the bypass flag: %q", plan.Command)
 	}
-	if env := (claudeCode{}).ContainerEnv(false); env["IS_SANDBOX"] != "" {
+	if env := (claudeCode{}).ContainerEnv(false, false); env["IS_SANDBOX"] != "" {
 		t.Errorf("env = %v", env)
 	}
-	if env := (claudeCode{}).ContainerEnv(true); env["IS_SANDBOX"] != "1" || !strings.HasPrefix(env["ANTHROPIC_API_KEY"], "sk-ant-") {
+	if env := (claudeCode{}).ContainerEnv(true, false); env["IS_SANDBOX"] != "1" || !strings.HasPrefix(env["ANTHROPIC_API_KEY"], "sk-ant-") {
 		t.Errorf("env = %v", env)
 	}
 }
@@ -283,5 +283,22 @@ func TestEveryIntegrationNamesWhatItsPromptLooksLike(t *testing.T) {
 		if len(integration.ReadyMarkers()) == 0 {
 			t.Errorf("%s has no ready marker: messages could be typed before the TUI reads", name)
 		}
+	}
+}
+
+func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) {
+	env := claudeCode{}.ContainerEnv(true, true)
+	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], "sk-ant-oat01-") {
+		t.Errorf("env = %v", env)
+	}
+	if _, present := env["ANTHROPIC_API_KEY"]; present {
+		t.Error("an API key placeholder next to the token wins, and is sent as x-api-key")
+	}
+	if env["IS_SANDBOX"] != "1" {
+		t.Error("bypass mode still needs IS_SANDBOX")
+	}
+	plain := claudeCode{}.ContainerEnv(true, false)
+	if _, present := plain["CLAUDE_CODE_OAUTH_TOKEN"]; present || plain["ANTHROPIC_API_KEY"] == "" {
+		t.Errorf("an API key setup got %v", plain)
 	}
 }

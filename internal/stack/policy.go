@@ -64,10 +64,49 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 		}
 		values[ref] = value
 	}
+	problems = append(problems, checkCredentialKinds(project, values)...)
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
 	return values, nil
+}
+
+// checkCredentialKinds catches the one mix-up that is certain to fail and is easy to make: a Claude
+// subscription token (`claude setup-token`, sk-ant-oat...) is not an API key. api.anthropic.com takes the
+// token only as `Authorization: Bearer` and a key only as x-api-key; sent the other way it answers 401
+// "API key is invalid". The message never contains the value.
+func checkCredentialKinds(project *config.Resolved, values map[string]string) []string {
+	var problems []string
+	seen := map[string]bool{}
+	for _, agent := range project.Agents {
+		for name, service := range project.Egress[agent.Egress].Services {
+			if service.Inject == nil || service.Secret == "" || !contains(service.Hosts, "api.anthropic.com") || seen[name+service.Secret] {
+				continue
+			}
+			seen[name+service.Secret] = true
+			value := values[service.Secret]
+			bearer := strings.EqualFold(service.Inject.Header, "Authorization")
+			switch {
+			case !bearer && strings.HasPrefix(value, "sk-ant-oat"):
+				problems = append(problems, fmt.Sprintf("secret %s is a Claude subscription (OAuth) token, but service %q sends it as %s, "+
+					"which api.anthropic.com only accepts for API keys: bind the secret to the anthropic-oauth service instead", service.Secret, name, service.Inject.Header))
+			case bearer && strings.HasPrefix(value, "sk-ant-api"):
+				problems = append(problems, fmt.Sprintf("secret %s is an Anthropic API key, but service %q sends it as a bearer token, "+
+					"which api.anthropic.com only accepts for subscription tokens: bind the secret to the anthropic service instead", service.Secret, name))
+			}
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+func contains(list []string, value string) bool {
+	for _, item := range list {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 // SecretFilePath is where a file: secret lives: ~ is the home directory and a relative path is
