@@ -19,6 +19,9 @@ func init() { register(claudeCode{}) }
 func (claudeCode) Name() string       { return "claude-code" }
 func (claudeCode) IdleSignal() string { return "hook" }
 
+// The footer under Claude Code's prompt names the permission mode, or offers the shortcuts.
+func (claudeCode) ReadyMarkers() []string { return []string{"for shortcuts", "shift+tab to cycle"} }
+
 func (claudeCode) ContainerEnv(bypass bool) map[string]string {
 	env := map[string]string{"ANTHROPIC_API_KEY": claudeKey}
 	if bypass {

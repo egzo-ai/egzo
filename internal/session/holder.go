@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 // SocketPath is where the holder listens inside the agent container.
@@ -35,6 +36,7 @@ type Holder struct {
 	lastHuman  time.Time // the last time a read-write client typed
 	lastOutput time.Time
 	tail       []byte // the program's most recent output, for acknowledging injected text
+	wrote      bool
 	rows, cols int
 
 	done chan struct{}
@@ -110,6 +112,7 @@ func (h *Holder) pump() {
 			chunk := append([]byte(nil), buffer[:n]...)
 			h.mu.Lock()
 			h.lastOutput = time.Now()
+			h.wrote = true
 			h.tail = append(h.tail, chunk...)
 			if len(h.tail) > tailSize {
 				h.tail = h.tail[len(h.tail)-tailSize:]
@@ -252,6 +255,29 @@ func (h *Holder) LastHumanInput() time.Time {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.lastHuman
+}
+
+// Raw reports whether the program has taken the terminal over (turned off line editing), which is
+// what a TUI does when it starts. Input sent before that is discarded when the mode changes.
+func (h *Holder) Raw() bool {
+	conn, err := h.master.SyscallConn()
+	if err != nil {
+		return false
+	}
+	raw := false
+	conn.Control(func(fd uintptr) {
+		if termios, err := unix.IoctlGetTermios(int(fd), unix.TCGETS); err == nil {
+			raw = termios.Lflag&unix.ICANON == 0
+		}
+	})
+	return raw
+}
+
+// Wrote reports whether the program has written anything yet.
+func (h *Holder) Wrote() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.tail) > 0 || h.wrote
 }
 
 // LastOutput is when the program last wrote anything.

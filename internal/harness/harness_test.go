@@ -265,3 +265,12 @@ func TestWriteMergesIntoExistingFilesAndCreatesDirectories(t *testing.T) {
 		t.Errorf("file = %q", text)
 	}
 }
+
+func TestEveryIntegrationNamesWhatItsPromptLooksLike(t *testing.T) {
+	for _, name := range Names() {
+		integration, _ := For(name)
+		if len(integration.ReadyMarkers()) == 0 {
+			t.Errorf("%s has no ready marker: messages could be typed before the TUI reads", name)
+		}
+	}
+}

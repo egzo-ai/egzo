@@ -137,8 +137,10 @@ func runAgent(args []string) error {
 	holder.ForwardSignals()
 
 	idle := "quiescence"
+	var readyMarkers []string
 	if hasIntegration {
 		idle = integration.IdleSignal()
+		readyMarkers = integration.ReadyMarkers()
 	}
 	if value := os.Getenv("EGZO_IDLE_SIGNAL"); value == "hook" || value == "quiescence" {
 		idle = value
@@ -150,6 +152,8 @@ func runAgent(args []string) error {
 			IdleSignal:   idle,
 			Quiescence:   durationEnv("EGZO_QUIESCENCE", 5*time.Second),
 			InterruptKey: interrupt,
+			RequireRaw:   hasIntegration, // a known TUI: it is ready when it has taken the terminal over
+			ReadyMarkers: readyMarkers,
 		})
 	}
 

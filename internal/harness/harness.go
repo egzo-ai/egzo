@@ -65,6 +65,8 @@ type Integration interface {
 	Name() string
 	// IdleSignal is "hook" when the harness reports its state through hooks.
 	IdleSignal() string
+	// ReadyMarkers are texts the TUI draws once it takes input: nothing is typed before one shows.
+	ReadyMarkers() []string
 	// ContainerEnv is what the agent container carries in its definition (so it shows in
 	// `inspect`): placeholders for credentials the proxy replaces, never a real secret.
 	ContainerEnv(bypass bool) map[string]string

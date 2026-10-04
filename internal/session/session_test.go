@@ -284,6 +284,9 @@ func deliveryRig(t *testing.T, cfg Delivery) (*Holder, string, *fakeControl) {
 	t.Cleanup(server.Close)
 	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
 	cfg.Interval = 20 * time.Millisecond
+	if cfg.Settle == 0 {
+		cfg.Settle = 50 * time.Millisecond
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go holder.RunDelivery(ctx, api, cfg)
@@ -407,5 +410,126 @@ func TestFramesRoundTripAndRejectOversizedOnes(t *testing.T) {
 	huge := []byte{frameInput, 0xff, 0xff, 0xff, 0xff}
 	if _, _, err := readFrame(bytes.NewReader(huge)); err == nil {
 		t.Error("an oversized frame was accepted")
+	}
+}
+
+func TestNothingIsTypedBeforeTheProgramHasSpokenAndGoneQuiet(t *testing.T) {
+	holder, err := Start([]string{"sh", "-c", "sleep 0.6; printf first; sleep 0.3; printf second; sleep 5"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	fake := &fakeControl{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	started := time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go holder.RunDelivery(ctx, api, Delivery{HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "hook", Interval: 20 * time.Millisecond, Settle: 400 * time.Millisecond})
+	time.Sleep(100 * time.Millisecond)
+	if fake.claimCount() != 0 {
+		t.Fatalf("claimed %s after the start, before the program said anything", time.Since(started))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for fake.claimCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if waited := time.Since(started); waited < 1300*time.Millisecond {
+		t.Errorf("claimed after %s: the program was still drawing until about 1.3s", waited)
+	}
+}
+
+func (f *fakeControl) claimCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.claims
+}
+
+func TestRawReportsWhetherTheProgramHasTakenTheTerminalOver(t *testing.T) {
+	holder, _ := startHolder(t, "sleep 0.5; stty raw -echo; printf READY; sleep 5")
+	if holder.Raw() {
+		t.Error("a program that has not touched the terminal is already raw")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !holder.Raw() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !holder.Raw() {
+		t.Error("the program went raw but Raw() never said so")
+	}
+}
+
+func TestADeliveryThatRequiresRawWaitsForTheTerminalTakeoverNotForQuiet(t *testing.T) {
+	holder, err := Start([]string{"sh", "-c", "printf boot; sleep 1.2; stty raw -echo; printf ready; sleep 5"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	fake := &fakeControl{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := time.Now()
+	go holder.RunDelivery(ctx, api, Delivery{HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "hook", Interval: 20 * time.Millisecond, Settle: 100 * time.Millisecond, RequireRaw: true})
+	deadline := time.Now().Add(5 * time.Second)
+	for fake.claimCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if waited := time.Since(started); waited < 1400*time.Millisecond {
+		t.Errorf("claimed after %s: the quiet gap while booting must not count as ready (raw at 1.2s, plus a moment)", waited)
+	}
+}
+
+func TestADeliveryWithReadyMarkersWaitsForThePromptToBeDrawn(t *testing.T) {
+	holder, err := Start([]string{"sh", "-c", "stty raw -echo; printf boot; sleep 1.3; printf 'Ask anything'; sleep 5"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	fake := &fakeControl{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := time.Now()
+	go holder.RunDelivery(ctx, api, Delivery{
+		HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "hook", Interval: 20 * time.Millisecond,
+		RequireRaw: true, ReadyMarkers: []string{"Ask anything"},
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for fake.claimCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if waited := time.Since(started); waited < 1290*time.Millisecond {
+		t.Errorf("claimed after %s, before the prompt was drawn at 1.3s", waited)
+	}
+}
+
+func TestADeliveryGoesAheadWhenTheMarkerNeverShowsUp(t *testing.T) {
+	holder, err := Start([]string{"sh", "-c", "stty raw -echo; printf 'a different screen'; sleep 5"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	fake := &fakeControl{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go holder.RunDelivery(ctx, api, Delivery{
+		HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "hook", Interval: 20 * time.Millisecond,
+		RequireRaw: true, ReadyMarkers: []string{"Ask anything"}, ReadyTimeout: 500 * time.Millisecond,
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for fake.claimCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if fake.claimCount() == 0 {
+		t.Error("a harness whose screen changed stranded its messages")
 	}
 }

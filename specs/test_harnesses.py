@@ -323,14 +323,14 @@ def events_of(project):
     return [json.loads(line) for line in out.splitlines() if line.startswith("{")]
 
 
-def wait_until(check, what, timeout):
+def wait_until(check, what, timeout, context=None):
     deadline = time.time() + timeout
     while time.time() < deadline:
         found = check()
         if found:
             return found
         time.sleep(1)
-    raise AssertionError(f"timed out waiting for {what}")
+    raise AssertionError(f"timed out waiting for {what}" + (f"\n{context()}" if context else ""))
 
 
 @pytest.mark.parametrize("harness", [
@@ -345,8 +345,11 @@ def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(la
         rows = [e for e in events_of(project) if e["type"] == "activity" and e["agent"] == "coder"]
         return rows[-1]["text"] if rows else None
 
-    wait_until(lambda: activity() == "idle", "the harness to report that its session started", 90)
+    wait_until(lambda: activity() == "idle", "the harness to report that its session started", 60)
     assert project.run("send", "coder", "hello from the operator").returncode == 0
-    wait_until(lambda: [e for e in events_of(project) if e["type"] == "delivered"], "the harness to acknowledge the message", 120)
+    wait_until(
+        lambda: [e for e in events_of(project) if e["type"] == "delivered"], "the harness to acknowledge the message", 40,
+        context=lambda: "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events_of(project)),
+    )
     prompts = [e for e in events_of(project) if e["type"] == "hook" and e["text"] == "UserPromptSubmit"]
     assert any("hello from the operator" in json.dumps(p["data"]) for p in prompts)
