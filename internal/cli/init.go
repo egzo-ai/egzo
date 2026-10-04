@@ -61,11 +61,18 @@ func initProject(dir, harness string, cmd *cobra.Command) error {
 	return nil
 }
 
+// scaffoldHosts are the hosts without a credential that each integrated harness needs, as the
+// scaffold's allow list.
+var scaffoldHosts = map[string]string{
+	"claude-code": "platform.claude.com",
+	"opencode":    "models.opencode.ai",
+}
+
 func scaffold(harness, repoURL string) string {
 	var b strings.Builder
 	b.WriteString("# egzo.yaml: see DESIGN.md for the full schema\n")
-	if harness == "claude-code" {
-		b.WriteString(`vaults:
+	if hosts, known := scaffoldHosts[harness]; known {
+		fmt.Fprintf(&b, `vaults:
   main:
     backend: env
     secrets:
@@ -73,11 +80,11 @@ func scaffold(harness, repoURL string) string {
 
 egress:
   default:                      # everything not allowed here is denied
-    allow: [platform.claude.com]
+    allow: [%s]
     services:
       anthropic: main/ANTHROPIC_API_KEY
 
-`)
+`, hosts)
 	} else {
 		b.WriteString("# TODO: add vaults and an egress profile that lets the agent reach its provider\n\n")
 	}

@@ -99,8 +99,8 @@ to work. There is no override flag; rename the project (`-p`, env or `name:`) or
   image tagged with its own version, so CLI and sidecars cannot drift. It includes git >= 2.47 for
   the prep role. `proxy.image` stays overridable. Harness images are separate:
   `ghcr.io/egzo-ai/egzo-harness-<name>`.
-- `egzo-agent` is the in-container role (hooks, MCP stdio fallback, pty holder candidate), built from
-  the same code; how it gets into harness images stays an open spike.
+- `egzo agent` and `egzo hook` are the in-container roles (pty holder, hooks), the same binary, copied into
+  every harness image.
 - Config file `egzo.yaml`, env vars `EGZO_*`, per-project directory `.egzo/`.
 - Labels follow the DNS convention under our domain: `ai.egzo.*` (e.g. `ai.egzo.project`).
 
@@ -365,18 +365,24 @@ control:                       # orchestrator MCP + status sidecar (always prese
   pre-warmed connections log as `aborted`, not `denied`; `platform.claude.com` allowed w/o injection.
 - Pinned-cert hosts cannot be injected (out of scope).
 
-## Session backend (decided: explore two, ship exactly one)
-tmux vs an `egzo-agent` pty holder, behind a `Session` interface, both run against one
-backend-independent fidelity spec (pytest/pexpect); the product ships ONE, chosen by the matrix,
-never two. P0 rows: keys (Shift+Enter, Ctrl-C/D), large bracketed paste, resize, truecolor, native
-terminal scrollback/selection, injection. Other rows: OSC52, OSC8, wide chars, detach/reattach
-redraw, two clients of different sizes, read-only observer, title/bell.
-Leaning pty holder: tmux takes the outer alternate screen so native scrollback is lost (mitigations
-like `alternate-screen off` duplicate lines); a raw pass-through has exact keys/clipboard, injects by
-writing the pty master, supports read-only observers natively, and reuses `egzo-agent`. Its weak
-point is state restore on reattach (replay last N KB + SIGWINCH repaint); fallback is holder + a
-small terminal emulator, only if the raw replay proves inadequate. `Session` interface:
-Attach, Resize, Inject(text), Clients() (rw/ro), LastHumanInputAt(), SubscribeOutputActivity().
+## Session backend (decided: the pty holder, built)
+The holder is `egzo agent run`, the entrypoint of every egzo harness image (`internal/session`). It runs the
+harness on a pty inside the agent container, serves clients on a unix socket in the container, and is a raw
+pass-through: no tmux, no screen model, nothing drawn around the TUI, so the user's own terminal keeps its
+scrollback, clipboard (OSC 52), hyperlinks, truecolor, Shift+Enter and mouse. What it does add:
+- clients are `egzo agent attach` run through `engine exec` with a terminal (`egzo attach`): any number of
+  read-write clients, and read-only observers (`--read-only`) whose keys are ignored and never count as a
+  human typing; the detach key is the client's (default Ctrl-], `--detach-keys`), and the engine's own
+  Ctrl-P Ctrl-Q detach is switched off for terminals, because it would swallow keys of a TUI;
+- a client starts with the last 64 KB the program wrote, then the program is asked to repaint at the client's
+  size (a real size change, or a one-column wobble when the size is the same: the kernel only signals on a change);
+- it types injected messages (bracketed paste, then Enter) and the interrupt key, and watches the output for
+  quiescence-based harnesses.
+The fidelity matrix is `specs/test_session.py`, run against a stand-in TUI (`specs/fixtures/fake-tui.sh`) so
+every row is observable: all byte values both ways, a 36 KB bracketed paste, resize, truecolor, no alternate
+screen, Ctrl-C and Ctrl-D reaching the program, OSC 52 / OSC 8, detach and reattach, two clients, observers.
+Known limit: a detach-key byte inside pasted data detaches. tmux was not built: it takes the outer alternate
+screen, so native scrollback is lost.
 
 ## Injection and agent states (decided)
 - States: `starting`, `idle`, `busy`, `blocked` (waiting on a human), `stopped`. Signals: harness
@@ -412,22 +418,24 @@ Attach, Resize, Inject(text), Clients() (rw/ro), LastHumanInputAt(), SubscribeOu
 - Trade-off accepted: the hub's detailed spec view needs the control container running.
 
 ## Still open (design)
-- Exact mount layout for worktree mode (relative link validity without exposing other worktrees),
-  and the prep container's uid mapping under rootless podman.
+- The prep container's uid mapping under rootless Podman (Docker runs it as the invoking user).
+- Whether egzo may answer Claude Code's auto-mode offer on the user's behalf (known-issues).
 
 ## Still open (spikes)
-1. Session backend fidelity matrix results (tmux vs pty holder); Claude Code repaint on SIGWINCH.
-2. Per-agent `internal` networks and CA bundle bind-mount on rootless podman + gVisor.
-3. Claude Code hook behavior: Stop on user interrupt, Notification matchers.
-4. Per-harness hook/idle signal for OpenCode and pi.
-5. Whether `egzo-agent` is baked into harness images or mounted read-only.
-6. Practical label size limits on docker and podman, incl. remote engines.
+Answered: the session backend is the pty holder (it passes the fidelity matrix; tmux was not built); `egzo-agent`
+is the egzo binary baked into the harness images; OpenCode reports idle through a plugin (`session.idle`); a
+Claude Code `SessionStart` arrives before its first-run dialogs are answered.
+1. Per-agent `internal` networks and the CA bundle mount on rootless Podman + gVisor (the specs need a pass there).
+2. Claude Code hook behaviour on a user interrupt (does Stop fire?) and the exact Notification texts per release.
+3. How a harness behaves with a real model in the loop (reply capture, `say` from the Stop text).
+4. Practical label size limits on docker and podman, incl. remote engines.
 
 ## specs/ (pytest)
 
 The suite is the status report: `specs/README.md` explains the done / todo / broken / promote model.
-It runs against Docker and rootless Podman (`EGZO_SPEC_ENGINES`), builds its own sidecar and agent
-images, and needs internet access for the specs that talk to real hosts (they skip when offline).
+A run tests one host scenario chosen with `--engine` (docker, docker-gvisor, podman, podman-rootless); CI runs
+one machine per scenario. It builds its own sidecar and agent images, and needs the internet for the specs that
+talk to real hosts (they fail when offline) and a registry for the image-name spec (`EGZO_SPEC_REGISTRY`).
 
     specs/
       spec_status.py       # plugin: todo = strict xfail, per-area table, --spec-json
@@ -448,40 +456,43 @@ images, and needs internet access for the specs that talk to real hosts (they sk
       test_daily.py        # logs, exec (with a terminal), start/stop/restart, proxy log
       test_messaging.py    # status, say, questions, queue and inbox, hooks, typed event stream
 
-Planned (need a harness integration, the session backend or the control agent API first):
-
-    test_fidelity.py     # backend-independent Session matrix (P0 rows block release)
-    test_injection.py    # idle/busy/blocked, human-quiet rule, header ack, no blind retry, queue combine
-    test_control_mcp.py  # the MCP adapter over the control verbs
-    test_attach.py       # pty attach/detach via pexpect
-    test_prep.py         # git clone/worktree/shared, idempotency, down --workspaces safety
+    test_session.py      # attach and the session fidelity matrix (P0 rows block release)
+    test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
+    test_harnesses.py    # Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, real TUIs
+    test_git_workspaces.py # prep container: clone/shared/worktree, idempotency, down --workspaces safety
+    test_operations.py   # secrets, doctor, diff, ca rotate, up AGENT, depends_on, proxy rules, handoff
+    test_images.py       # harness image names and pulling them from a registry
 
 Security specs are the differentiator: assert secrets never appear in `engine inspect`,
 agent env, agent filesystem, or logs; assert direct egress fails.
 
 ## Implementation notes (what exists, and where it differs from the drafts above)
 
-Built and covered by specs on Docker and rootless Podman: `init`, `config`, `up` (`--dry-run`,
-`--recreate`), `down` (`--volumes`), `ps`, `logs`, `exec` (with a terminal: raw mode, window
-resizes), `start|stop|restart`, `proxy log`, `send`, `events`, `questions`, `answer`, plus the
-in-container roles `egzo control` and
-`egzo proxy serve`. Agents run any image through the `custom` harness (it requires `image:`).
+Built and covered by specs (Docker is the engine the specs run against now; Podman works through its
+compatible socket but is not exercised by the current suite): `init`, `config`, `up [AGENT...]` (`--dry-run`,
+`--recreate`), `diff`, `down` (`--volumes`, `--workspaces`), `ps`, `logs`, `exec`, `attach`, `start|stop|restart`,
+`send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls|set|rm`, `proxy log|rules`, `ca rotate`,
+`doctor`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
+`egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
+the egzo image with `make images`); `custom` runs any image.
 
 Decisions taken while building (reversible; each is covered by specs):
 - **Two-phase `up`.** The control sidecar comes up first because it hands out per-agent tokens
   (HMAC of the agent name under a random project key kept on the control volume, so tokens are stable
   across `up` runs and change only when the control volume is deleted). Secrets are read before
-  anything is created, so a missing secret never leaves half a project behind.
+  anything is created, so a missing secret never leaves half a project behind. When a git workspace has to
+  be cloned, the sidecars, the agent networks and the proxy policy come first, then the clones, then the agents.
 - **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy
   hash covers the secret values, so rotating a secret re-pushes the policy without recreating any
   container; a restarted proxy denies everything until the next `egzo up` reloads its policy. The
   proxy container's `inspect` never holds a secret.
 - **Operator APIs** are unix sockets inside the sidecar, called through `egzo <role> request METHOD
-  PATH` run by exec (scratch images have no curl). Control: tokens and spec snapshots. Proxy: policy.
+  PATH` run by exec (scratch images have no curl). Control: tokens, spec snapshots, the queue. Proxy: policy, CA rotation.
 - **CA distribution is a read-only directory mount** (`/etc/egzo/ca` holding `ca.crt` and
   `ca-bundle.crt`) plus `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`
   and `NODE_EXTRA_CA_CERTS`, not an overlay of `/etc/ssl/certs/ca-certificates.crt`: a directory
   mount works the same on Docker and Podman. The CA key stays in a volume only the proxy mounts.
+  `egzo ca rotate` makes a new CA in the proxy, publishes it and restarts the agents.
 - **Proxy behaviour.** CONNECT only, port 443 only, agent identified by `Proxy-Authorization`
   (agent name and token). Hosts of services that inject a credential (or set `inspect`) are
   intercepted: TLS is terminated with a project-CA certificate whose name must match the CONNECT
@@ -490,46 +501,69 @@ Decisions taken while building (reversible; each is covered by specs):
   other allowed host is a tunnel, but the proxy reads the TLS ClientHello first and refuses the
   tunnel when the server name is missing or differs from the approved host (domain fronting). Plain HTTP is refused (405); agents get `HTTP_PROXY`
   too so `http://` fails loudly. Audit lines (JSON, no bodies or query strings) go to the proxy's
-  stdout.
+  stdout (`egzo proxy log [--agent]`).
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
   init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. An agent's `runtime:` (as in Compose, e.g. `runsc` for gVisor) is passed to the engine as is; there is no project-wide default (use the engine's `default-runtime`, or a YAML anchor).
-- **Sidecar image** must carry CA roots (a scratch image needs `ca-certificates.crt`) and, once the
-  prep role exists, git >= 2.47.
-- **Label kinds** in use: `control`, `proxy`, `agent`, and `workspace` (volumes of declared
-  workspaces without a source).
-- **Messaging contract** (control sidecar, decided in the hub section, now built). Agent API on
-  `http://control:7777` (HTTP basic: agent name and its token, in `EGZO_CONTROL_URL`, `EGZO_AGENT` and
-  `EGZO_TOKEN`): `POST /v1/status`, `/v1/say`, `/v1/ask` (returns a stable question id),
-  `GET /v1/questions/{id}`, `GET /v1/inbox` (hands over queued messages and marks them delivered),
-  `POST /v1/hooks/{name}` (a harness hook payload becomes an event). An agent can only act as
-  itself, only sees its own questions, and the agent port serves no operator verb. Operator API (unix
-  socket, exec only): `GET /events?after=&agent=&follow=1` (typed JSON-line stream), `POST /queue`,
-  `GET /queue`, `GET /questions`, `POST /questions/{id}/answer`, `GET /agents`. Every event has a
-  sequence number, a time, a type (`status`, `say`, `question`, `answer`, `message`, `delivered`,
-  `hook`) and an actor (`agent:<name>`, `user:<id>` or `operator`); the log is an append-only file on
-  the control volume and survives a restart. The CLI always acts as `operator`; the hub will pass the
-  signed-in user. Until the session backend exists, an agent receives messages by polling its inbox.
-  The MCP tools (`say`, `status`, `ask_user`, ...) will be a thin adapter over these verbs.
+- **Agents run as the invoking user** (`uid:gid` of whoever runs egzo, on Docker; Podman maps users itself), so
+  what they write on the host belongs to that user. Volumes are created by the engine owned by root, so a prep
+  container hands each volume an agent writes to (workspaces, its home) to that user after the agent's container
+  is created and before it starts: the engine hands a volume to root when it is the container's working
+  directory, which would undo an earlier chown.
+- **Harness images** carry the egzo binary (`COPY --from=<egzo image>`), `HOME=/home/agent` (a volume
+  `<project>_<agent>-home`, so `/resume` and settings survive recreating the agent) and
+  `ENTRYPOINT egzo agent run --`. An integration (`internal/harness`) is pure: from the agent's definition it
+  produces files (merged into what the harness already keeps in the volume), a command line and the interrupt
+  key. Claude Code: `~/.claude.json` (onboarding done, each workspace trusted, a placeholder API key
+  pre-approved, the `egzo` MCP server), `~/.claude/settings.json` (bypass mode and its prompt skipped, hooks
+  `egzo hook <Name>`), `--model`, `--append-system-prompt` with the platform instructions + the agent's prompt,
+  `IS_SANDBOX=1`. OpenCode: `opencode.json` (`permission: {"*": "allow"}`, the MCP server, model,
+  instructions) and a plugin that reports `SessionStart` when it loads (OpenCode only creates a session on the
+  first prompt), `UserPromptSubmit` from `chat.message` and `Stop` from `session.idle`. `permissions: default`
+  undoes all of it explicitly, so an opt-out also fixes a home an earlier run configured.
+- **Agent activity and delivery.** The control sidecar derives `starting | idle | busy | blocked` from hooks
+  (`SessionStart`/`Stop` idle, `UserPromptSubmit`/tool hooks busy, `Notification` blocked unless it says the
+  agent waits for input) and records every change as an `activity` event. The holder asks `POST /v1/claim` when
+  nobody has typed (read-write clients only) for `inject.human_quiet`; control hands over an interrupt first,
+  then all queued messages at once, but only to an idle agent with nothing awaiting an acknowledgement. The
+  messages are typed as one paste, each behind `[egzo msg <id> from <actor>]`; the `UserPromptSubmit` hook that
+  contains the id acknowledges it (`delivered`); no acknowledgement by `inject.ack_timeout` makes it
+  `unconfirmed` and it is never retried. Harnesses without hooks (`inject.idle_signal: quiescence`, the
+  default for `custom`) are idle when their output has been quiet for `inject.quiescence`, and a message is
+  acknowledged by its header appearing in the output. `egzo ps` shows the activity next to the reported status.
+- **Git workspaces** (`internal/stack/git.go`, `internal/gitprep`): the CLI decides the layout (`clone`:
+  `<path>/<agent>`, `shared`: `<path>/shared`, `worktree`: `<path>/<agent>` plus the base `<path>/.base`) and a
+  prep container does the git, on the agent's own network so the clone goes through the proxy as that agent. In
+  every container a checkout is `/workspace/<name>` and a worktree's base `/.egzo/base/<name>`, so the absolute
+  links git writes between them are valid in prep and agent containers (from the host they do not resolve;
+  worktrees are registered with `--force` for that reason, each on its own branch `egzo/<agent>`). An existing
+  checkout is never touched; one made in another mode is refused. `down --workspaces` inspects every checkout
+  in a prep container first and refuses when any holds uncommitted files or unpushed commits (`--force`).
+- **Sidecar image** (`Dockerfile`) is the static binary on Alpine with CA roots and git >= 2.47.
+- **Label kinds** in use: `control`, `proxy`, `agent`, `workspace` (declared volumes without a source), and
+  `prep` (short-lived containers, which never outlive the command).
+- **Messaging contract** (control sidecar). Agent API on `http://control:7777` (HTTP basic: agent name and
+  its token, in `EGZO_CONTROL_URL`, `EGZO_AGENT` and `EGZO_TOKEN`): `POST /v1/status`, `/v1/say`, `/v1/ask`,
+  `GET /v1/questions/{id}`, `GET /v1/inbox`, `POST /v1/hooks/{name}`, `POST /v1/activity`, `/v1/claim`,
+  `/v1/ack`, and MCP at `/mcp` with the tools `status`, `say`, `ask_user`, `get_answer`, `check_inbox` and
+  `handoff`. An agent can only act as itself, only sees its own questions, and the agent port serves no
+  operator verb. Operator API (unix socket, exec only): `GET /events?after=&agent=&follow=1`, `POST /queue`
+  (`interrupt: true` asks for the current turn to be stopped), `GET /queue`, `GET /questions`,
+  `POST /questions/{id}/answer`, `GET /agents`, `PUT /project`. Event types: `status`, `say`, `question`,
+  `answer`, `message`, `delivering`, `delivered`, `unconfirmed`, `interrupt`, `interrupted`, `activity`, `hook`.
 - **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,
   with the resolved config, the label contract version and the config hash of every container.
 
-Known gaps, in the order they block real use:
-1. **Which user agents run as.** On rootful Docker, root without capabilities cannot write a host
-   directory owned by the invoking user (rootless Podman works because container root is the host
-   user). Git clones and host-path workspaces need this answered.
-2. **Git workspaces.** Refused with a clear error until the prep role exists: a short-lived container
-   running as the agent (so the agent's egress profile and injected token apply) that clones into the
-   configured host path.
-3. **Harness images and integrations** (Claude Code, OpenCode, pi): bypass-mode config, first-run
-   seeding, hooks. They need real credentials to validate, so none is written yet.
-4. **Attach and the session backend.** The terminal plumbing exists (`exec`); the choice between a
-   tmux and a pty-holder backend is still the fidelity spike, which needs a real harness.
-5. **Delivery into a TUI and the MCP adapter.** Events, status, questions and the queue exist; what is
-   missing is injecting a queued message into the agent's terminal (needs the session backend, the
-   idle states and the human-quiet rule) and exposing the verbs as MCP tools.
-6. Not yet implemented: `egzo ca rotate`, `down --workspaces`, `up SERVICE`, per-agent
-   `--agent` filtering of `proxy log`.
+Open, in the order they matter:
+1. **Claude Code on a fresh home asks "Make auto mode your default permission mode?"** and an injected Enter
+   would answer it. Needs a decision: `known-issues/claude-code-auto-mode-offer.md`.
+2. **pi** is accepted as a harness name but has no image or integration. `custom` covers it for now.
+3. The engine matrix beyond Docker (rootless and rootful Podman, gVisor) is not part of the current spec run;
+   the specs were written for it and need a pass on those hosts. Rootful Podman loses outbound connectivity
+   intermittently (`known-issues/rootful-podman-intermittent-egress.md`).
+4. `request_secret_access`, the optional mount of the user's own `~/.claude` settings, per-service path scoping.
+5. A real model call is never made by the specs; the end-to-end behaviour of a harness with a model (that a
+   reply comes back, that the Stop text reaches `say`) is unverified.
 
 ## Future: egzo-hub + web UI (planning; shapes the foundation, not built yet)
 

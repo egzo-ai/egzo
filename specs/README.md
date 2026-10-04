@@ -88,10 +88,18 @@ do not change the exit code. Changing this contract means changing these specs f
 | `test_egress.py` | profiles, services, built-ins, extend, reachability warnings |
 | `test_labels.py` | the `ai.egzo.*` label contract |
 | `test_up_down.py` | `up`, `down`, `--dry-run`, idempotency, workspace safety |
+| `test_agents.py` | one container per agent, networks, isolation, who agents run as |
+| `test_proxy.py` | injection, TLS, deny unless allowed, per-agent policy, CA, audit |
+| `test_session.py` | `egzo attach` and the session fidelity matrix, against a stand-in TUI |
+| `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
+| `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
+| `test_git_workspaces.py` | the prep container: clone, shared, worktree, `down --workspaces` safety (clones from github.com) |
+| `test_operations.py` | `secrets`, `doctor`, `diff`, `ca rotate`, `up AGENT`, `depends_on`, `proxy rules`, `handoff` |
+| `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
 
-## Not written yet
+## Not covered
 
-Needs agents, a harness integration or the sidecars first: proxy injection and TLS, per-agent
-network isolation and "no direct egress", attach and the session fidelity matrix, message
-injection and agent states, the control sidecar API, the prep container and clone modes, and the
-harness bypass-mode specs.
+A model is never called: the harness specs stop at what egzo configures, what the TUI shows and what the
+harness reports through hooks (prompt submitted, session idle), which needs no credential. The specs that need
+the outside world (github.com, httpbin.org, example.com, the registry) fail when it is unreachable.
+The harness specs build the real images from `harness/` (a few minutes the first time, cached by content).

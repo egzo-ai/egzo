@@ -41,7 +41,7 @@ func builtinNames() []string {
 // harnesses lists the supported harnesses and the provider hosts each one needs to reach.
 var harnesses = map[string][]string{
 	"claude-code": {"api.anthropic.com"},
-	"opencode":    nil,
+	"opencode":    {"models.opencode.ai"},
 	"pi":          nil,
 	"custom":      nil,
 }
