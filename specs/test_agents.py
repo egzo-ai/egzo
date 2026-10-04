@@ -208,3 +208,55 @@ def test_podman_warns_that_the_runtime_cannot_be_applied_or_verified(live_projec
     assert result.returncode == 0, result.stderr
     assert "warning" in result.stderr.lower()
     assert "runsc" in result.stderr and "podman" in result.stderr.lower() and "containers.conf" in result.stderr
+
+
+# --- who an agent runs as ---------------------------------------------------------------------
+
+
+def exec_as(engine, project, name, *command):
+    return engine.exec(container(engine, project, name).name, *command)
+
+
+@pytest.mark.todo("agents run as the invoking user")
+def test_agents_run_as_the_invoking_user_not_as_root(live_project, engine, agent_image):
+    import os
+
+    up(live_project, spec(agents={"coder": custom(agent_image)}))
+    result = exec_as(engine, live_project, "coder", "sh", "-c", "echo $(id -u):$(id -g)")
+    assert result.stdout.strip() == f"{os.getuid()}:{os.getgid()}"
+
+
+@pytest.mark.todo("agents run as the invoking user")
+def test_an_agent_writes_a_host_directory_workspace_as_the_invoking_user(live_project, engine, agent_image):
+    import os
+
+    shared = live_project.mkdir("data")
+    up(live_project, spec(agents={"coder": custom(agent_image, workspaces=["./data"])}))
+    written = exec_as(engine, live_project, "coder", "sh", "-c", "echo hi > /workspace/data/from-agent && ls -ln /workspace/data/from-agent")
+    assert written.returncode == 0, written.stderr
+    assert (shared / "from-agent").read_text() == "hi\n"
+    assert (shared / "from-agent").stat().st_uid == os.getuid()
+
+
+@pytest.mark.todo("agents run as the invoking user")
+def test_an_agent_writes_a_declared_volume_workspace(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
+    written = exec_as(engine, live_project, "coder", "sh", "-c", "echo hi > /workspace/scratch/note && cat /workspace/scratch/note")
+    assert written.stdout.strip() == "hi", written.stderr
+
+
+@pytest.mark.todo("agents run as the invoking user")
+def test_two_agents_share_a_declared_volume_workspace_both_writable(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"scratch": {}}, agents={
+        "coder": custom(agent_image, workspaces=["scratch"]),
+        "reviewer": custom(agent_image, workspaces=["scratch"]),
+    }))
+    assert exec_as(engine, live_project, "coder", "sh", "-c", "echo one > /workspace/scratch/a").returncode == 0
+    assert exec_as(engine, live_project, "reviewer", "sh", "-c", "echo two >> /workspace/scratch/a && cat /workspace/scratch/a").stdout.split() == ["one", "two"]
+
+
+def test_agents_have_no_capabilities_and_cannot_gain_privileges(live_project, engine, agent_image):
+    up(live_project, spec(agents={"coder": custom(agent_image)}))
+    status = exec_as(engine, live_project, "coder", "grep", "-E", "CapEff|NoNewPrivs", "/proc/self/status").stdout
+    assert "CapEff:\t0000000000000000" in status
+    assert "NoNewPrivs:\t1" in status

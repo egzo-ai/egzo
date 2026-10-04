@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -171,17 +172,18 @@ class Engine:
         return None
 
     def image_for(self, binary):
-        """A local image holding the egzo binary, which stands in for the published sidecar image."""
-        digest = hashlib.sha256(Path(binary).read_bytes() + Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()).hexdigest()[:12]
+        """A local image holding the egzo binary and git, which stands in for the published sidecar image."""
+        digest = hashlib.sha256(b"alpine-git:" + Path(binary).read_bytes()).hexdigest()[:12]
         tag = f"egzo-spec:{digest}"
         if self.run("image", "inspect", tag).returncode == 0:
             return tag
         with tempfile.TemporaryDirectory() as context:
             shutil.copy(binary, Path(context) / "egzo")
-            # a scratch image has no roots: the proxy needs them to verify upstream servers
-            shutil.copy("/etc/ssl/certs/ca-certificates.crt", Path(context) / "ca-certificates.crt")
+            # like the published image: CA roots for the proxy, and git (>= 2.47) for the prep role
             (Path(context) / "Dockerfile").write_text(
-                "FROM scratch\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\nCOPY egzo /egzo\n"
+                "FROM docker.io/library/alpine:3\n"
+                "RUN apk add --no-cache ca-certificates git\n"
+                "COPY egzo /egzo\n"
             )
             built = self.run("build", "-t", tag, context)
         assert built.returncode == 0, f"could not build the sidecar image with {self.cli}:\n{built.stderr}"
@@ -189,13 +191,52 @@ class Engine:
 
     def agent_image(self):
         """A small image that stays up, standing in for a harness (the custom harness takes any image)."""
-        tag = "egzo-spec-agent:2"
+        tag = "egzo-spec-agent:3"
         if self.run("image", "inspect", tag).returncode == 0:
             return tag
         with tempfile.TemporaryDirectory() as context:
-            (Path(context) / "Dockerfile").write_text('FROM docker.io/library/alpine:3\nRUN apk add --no-cache curl\nCMD ["sleep", "infinity"]\n')
+            (Path(context) / "Dockerfile").write_text(
+                'FROM docker.io/library/alpine:3\nRUN apk add --no-cache curl git\nCMD ["sleep", "infinity"]\n'
+            )
             built = self.run("build", "-t", tag, context)
         assert built.returncode == 0, f"could not build the agent image with {self.cli}:\n{built.stderr}"
+        return tag
+
+    def session_image(self, binary):
+        """An agent image whose entrypoint is the egzo session holder, running the fake TUI of the specs."""
+        script = Path(__file__).parent / "fixtures" / "fake-tui.sh"
+        digest = hashlib.sha256(Path(binary).read_bytes() + script.read_bytes()).hexdigest()[:12]
+        tag = f"egzo-spec-session:{digest}"
+        if self.run("image", "inspect", tag).returncode == 0:
+            return tag
+        with tempfile.TemporaryDirectory() as context:
+            shutil.copy(script, Path(context) / "fake-tui")
+            shutil.copy(binary, Path(context) / "egzo")
+            (Path(context) / "Dockerfile").write_text(
+                "FROM docker.io/library/alpine:3\n"
+                "RUN apk add --no-cache curl git\n"
+                "COPY fake-tui /usr/local/bin/fake-tui\n"
+                "COPY egzo /usr/local/bin/egzo\n"
+                'ENTRYPOINT ["/usr/local/bin/egzo", "agent", "run", "--"]\n'
+                'CMD ["/usr/local/bin/fake-tui"]\n'
+            )
+            built = self.run("build", "-t", tag, context)
+        assert built.returncode == 0, f"could not build the session image with {self.cli}:\n{built.stderr}"
+        return tag
+
+    def harness_image(self, name, binary):
+        """The real harness image of the repository (harness/<name>), with the egzo binary of this run in it."""
+        root = Path(__file__).parent.parent / "harness" / name
+        assert (root / "Dockerfile").exists(), f"there is no harness image for {name}: harness/{name}/Dockerfile"
+        sidecar = self.image_for(binary)
+        digest = hashlib.sha256(
+            Path(binary).read_bytes() + b"".join(p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file())
+        ).hexdigest()[:12]
+        tag = f"egzo-harness-{name}:spec-{digest}"
+        if self.run("image", "inspect", tag).returncode == 0:
+            return tag
+        built = self.run("build", "--build-arg", f"EGZO_IMAGE={sidecar}", "-t", tag, str(root))
+        assert built.returncode == 0, f"could not build the {name} harness image:\n{built.stderr[-3000:]}"
         return tag
 
     def has_runtime(self, name):
@@ -311,6 +352,32 @@ def agent_image(engine):
     return engine.agent_image()
 
 
+@pytest.fixture
+def session_image(engine, egzo):
+    return engine.session_image(egzo.binary)
+
+
+@pytest.fixture
+def harness_image(engine, egzo):
+    """Factory: the image of a real harness, built from the repository."""
+    return lambda name: engine.harness_image(name, egzo.binary)
+
+
+def _reachable(host):
+    try:
+        socket.create_connection((host, 443), timeout=5).close()
+        return True
+    except OSError:
+        return False
+
+
+@pytest.fixture
+def github():
+    """The git specs clone a public repository: without the internet they fail, never skip."""
+    if not _reachable("github.com"):
+        pytest.fail("these specs need to reach github.com:443 from this host, and cannot", pytrace=False)
+
+
 @pytest.fixture(scope="session")
 def egzo():
     configured = os.environ.get("EGZO_BIN")
@@ -348,3 +415,41 @@ def live_project(make_project, engine, egzo):
     yield created
     created.run("down", "--volumes")
     engine.cleanup(created.name)
+
+
+class Registry:
+    """A registry the specs can push to, to prove egzo pulls harness images by their default name."""
+
+    def __init__(self, engine, host):
+        self.engine = engine
+        self.host = host
+
+    def push(self, local, repository, tag):
+        remote = f"{self.host}/{repository}:{tag}"
+        assert self.engine.run("tag", local, remote).returncode == 0
+        pushed = self.engine.run("push", remote)
+        assert pushed.returncode == 0, f"could not push {remote}:\n{pushed.stderr}"
+        return remote
+
+    def forget(self, remote):
+        self.engine.run("image", "rm", "-f", remote)
+
+
+@pytest.fixture
+def registry(engine):
+    """The test registry (EGZO_SPEC_REGISTRY, default localhost:5000). Pushing needs EGZO_SPEC_REGISTRY_USER
+    and a password in the file named by EGZO_SPEC_REGISTRY_PASSWORD_FILE (defaults: cedric, ~/.registry-password)."""
+    host = os.environ.get("EGZO_SPEC_REGISTRY", "localhost:5000")
+    try:
+        socket.create_connection((host.split(":")[0], int(host.split(":")[1])), timeout=3).close()
+    except OSError:
+        pytest.fail(f"these specs need the test registry at {host}: set EGZO_SPEC_REGISTRY", pytrace=False)
+    user = os.environ.get("EGZO_SPEC_REGISTRY_USER", "cedric")
+    password_file = Path(os.environ.get("EGZO_SPEC_REGISTRY_PASSWORD_FILE", "~/.registry-password")).expanduser()
+    if password_file.exists():
+        login = subprocess.run(
+            [engine.cli, "login", "-u", user, "--password-stdin", host],
+            input=password_file.read_text().strip(), text=True, capture_output=True, env={**os.environ, **engine.env},
+        )
+        assert login.returncode == 0, f"could not log in to {host}:\n{login.stderr}"
+    return Registry(engine, host)
