@@ -1,10 +1,12 @@
 """Fixtures for the egzo spec suite.
 
 The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it on PATH). Specs that
-need a container engine use the `engine` fixture and run once per available engine; set
-EGZO_SPEC_ENGINES (default "docker,podman") to restrict the matrix.
+need a container engine use the `engine` fixture and run once per supported engine (ENGINES below).
+Every engine is required: a host that lacks one FAILS those specs, with what to set up. Nothing is
+skipped for a missing engine, because a green suite must mean every supported engine works.
 """
 
+import copy
 import hashlib
 import json
 import os
@@ -51,6 +53,7 @@ class Egzo:
             input=input,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
         )
         return Result(completed.returncode, completed.stdout, completed.stderr)
@@ -63,6 +66,8 @@ class Project:
         self.root = root
         self.egzo = egzo
         self.env = dict(env or {})
+        # When set, every agent a written document leaves without a runtime gets this one.
+        self.default_runtime = None
         self.root.mkdir(parents=True)
 
     @property
@@ -75,6 +80,11 @@ class Project:
         return path
 
     def write(self, document, filename="egzo.yaml"):
+        if self.default_runtime and isinstance(document, dict):
+            document = copy.deepcopy(document)
+            for agent in (document.get("agents") or {}).values():
+                if isinstance(agent, dict):
+                    agent.setdefault("runtime", self.default_runtime)
         text = document if isinstance(document, str) else yaml.safe_dump(document, sort_keys=False)
         path = self.root / filename
         path.write_text(text)
@@ -104,26 +114,52 @@ class Resource:
 
 
 class Engine:
-    """A container engine CLI (docker or podman) used to observe what egzo created."""
+    """A supported container engine, reached through its Docker-compatible socket.
 
-    def __init__(self, cli):
+    The CLI (docker, or podman in remote mode) talks to the same socket egzo does, so the specs
+    observe exactly what egzo sees, and the socket is all a host has to provide."""
+
+    def __init__(self, name, cli, host, rootless=False, runtime=None, setup=""):
+        self.name = name
         self.cli = cli
-        self.env = {}
-        if cli == "podman":
-            runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-            self.env["DOCKER_HOST"] = f"unix://{runtime_dir}/podman/podman.sock"
+        self.host = host
+        self.rootless = rootless
+        # An OCI runtime every agent of a spec project gets (the gVisor matrix entry).
+        self.runtime = runtime
+        self.setup = setup
+        self.env = {"DOCKER_HOST": host}
+
+    def __repr__(self):
+        return self.name
 
     def run(self, *args):
+        command = [self.cli, *args] if self.cli == "docker" else [self.cli, "--remote", "--url", self.host, *args]
+        # Build output from remote Podman is not always valid UTF-8.
         completed = subprocess.run(
-            [self.cli, *args],
-            env={**os.environ, **self.env},
-            capture_output=True,
-            text=True,
+            command, env={**os.environ, **self.env}, capture_output=True, text=True, errors="replace"
         )
         return Result(completed.returncode, completed.stdout, completed.stderr)
 
-    def usable(self):
-        return self.run("version").returncode == 0
+    def problem(self):
+        """Why this host cannot run the specs against this engine, or None when it can."""
+        if not shutil.which(self.cli):
+            return f"the {self.cli} CLI is not installed"
+        if self.cli == "docker":
+            # `docker version` fails when the engine is unreachable. A podman-docker symlink would
+            # make a Docker entry silently test Podman, so check what answers.
+            probe = self.run("version", "--format", "{{json .Server}}")
+        else:
+            # `podman version` exits 0 without a connection; `info` needs one.
+            probe = self.run("info", "--format", "{{.Host.Security.Rootless}}")
+        if probe.returncode != 0:
+            return f"no usable engine at {self.host}: {probe.stderr.strip()}"
+        if self.cli == "docker" and "podman" in probe.stdout.lower():
+            return f"the engine at {self.host} is Podman, not Docker"
+        if self.cli == "podman" and (probe.stdout.strip() == "true") != self.rootless:
+            return f"the Podman at {self.host} is {'rootless' if self.rootless else 'rootful'} in name only: it reports otherwise"
+        if self.runtime and not self.has_runtime(self.runtime):
+            return f"the engine at {self.host} has no {self.runtime} runtime registered"
+        return None
 
     def image_for(self, binary):
         """A local image holding the egzo binary, which stands in for the published sidecar image."""
@@ -201,23 +237,53 @@ class Engine:
                 self.run(command, "rm", "-f", resource.name)
 
 
-def _available_engines():
-    wanted = os.environ.get("EGZO_SPEC_ENGINES", "docker,podman").split(",")
-    return [name for name in wanted if shutil.which(name)]
+def _rootless_podman_socket():
+    return f"unix://{os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')}/podman/podman.sock"
+
+
+DOCKER_SETUP = "install Docker Engine and make /var/run/docker.sock usable by this user (docker group)"
+GVISOR_SETUP = 'install gVisor and register it: {"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}} in /etc/docker/daemon.json'
+
+# Every supported engine. All of them are required: the engine fixture fails when one is missing.
+ENGINES = [
+    Engine("docker", "docker", "unix:///var/run/docker.sock", setup=DOCKER_SETUP),
+    Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", runtime="runsc", setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
+    Engine(
+        "podman",
+        "podman",
+        "unix:///run/podman/podman.sock",
+        setup="install Podman, run `systemctl enable --now podman.socket` as root, and make "
+        "/run/podman/podman.sock usable by this user (SocketGroup= and SocketMode=0660 in a podman.socket drop-in, "
+        "and this user in that group)",
+    ),
+    Engine(
+        "podman-rootless",
+        "podman",
+        _rootless_podman_socket(),
+        rootless=True,
+        setup="install Podman and run `systemctl --user enable --now podman.socket`",
+    ),
+]
+
+_problems = {}
 
 
 def pytest_generate_tests(metafunc):
     if "engine" in metafunc.fixturenames:
-        metafunc.parametrize("engine", _available_engines() or ["unavailable"], indirect=True)
+        metafunc.parametrize("engine", ENGINES, ids=[e.name for e in ENGINES], indirect=True)
 
 
 @pytest.fixture
 def engine(request):
-    if request.param == "unavailable":
-        pytest.skip("no container engine CLI found")
-    candidate = Engine(request.param)
-    if not candidate.usable():
-        pytest.skip(f"{request.param} is installed but not usable by this user")
+    candidate = request.param
+    if candidate.name not in _problems:
+        _problems[candidate.name] = candidate.problem()
+    if _problems[candidate.name]:
+        pytest.fail(
+            f"required engine '{candidate.name}' is not available: {_problems[candidate.name]}\n"
+            f"to set it up: {candidate.setup}",
+            pytrace=False,
+        )
     return candidate
 
 
@@ -228,9 +294,15 @@ def agent_image(engine):
 
 @pytest.fixture(scope="session")
 def egzo():
-    binary = os.environ.get("EGZO_BIN") or shutil.which("egzo")
-    if not binary:
-        pytest.fail("egzo binary not found: build it and set EGZO_BIN (or put it on PATH)", pytrace=False)
+    configured = os.environ.get("EGZO_BIN")
+    # Specs run egzo from temporary project directories, so a relative EGZO_BIN would stop pointing at it.
+    binary = os.path.abspath(configured) if configured else shutil.which("egzo")
+    if not binary or not os.access(binary, os.X_OK):
+        pytest.fail(
+            f"egzo binary not found or not executable: {binary or configured or 'egzo'}; "
+            "build it (make build) and set EGZO_BIN, or put it on PATH",
+            pytrace=False,
+        )
     return Egzo(binary)
 
 
@@ -253,6 +325,7 @@ def project(make_project):
 def live_project(make_project, engine, egzo):
     """A project bound to an engine; everything it created is removed afterwards."""
     created = make_project(env={**engine.env, "EGZO_IMAGE": engine.image_for(egzo.binary)})
+    created.default_runtime = engine.runtime
     yield created
     created.run("down", "--volumes")
     engine.cleanup(created.name)

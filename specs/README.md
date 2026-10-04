@@ -12,9 +12,19 @@ $ specs/.venv/bin/pip install -r specs/requirements.txt
 $ EGZO_BIN=/path/to/egzo specs/.venv/bin/pytest specs
 ```
 
-`EGZO_BIN` defaults to `egzo` on `PATH`. Specs that observe the container engine use the `engine`
-fixture and run once per available engine; `EGZO_SPEC_ENGINES=docker` (default `docker,podman`)
-restricts the matrix, and engines that are missing or unusable are skipped.
+`EGZO_BIN` defaults to `egzo` on `PATH`. That is all the suite needs to be told. Specs that observe
+the container engine use the `engine` fixture and run once per supported engine:
+
+| id | engine | socket |
+|---|---|---|
+| `docker` | Docker (rootful) | `/var/run/docker.sock` |
+| `docker-gvisor` | the same Docker, every agent under `runsc` (gVisor) | `/var/run/docker.sock` |
+| `podman` | Podman, rootful | `/run/podman/podman.sock` (this user needs access to it) |
+| `podman-rootless` | Podman, rootless | `$XDG_RUNTIME_DIR/podman/podman.sock` |
+
+Every engine is required. A host that lacks one makes its specs **fail** with what to set up, so a
+green run means every supported engine works. Pick a subset with pytest itself, for example
+`-k "docker and not gvisor"`.
 
 Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootstrap pip with
 `get-pip.py`.
@@ -27,7 +37,7 @@ Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootst
 | xfail (`@pytest.mark.todo`) | todo | specified, not implemented yet |
 | fail | broken | implemented (or expected to be) and wrong |
 | strict XPASS | promote | a todo spec passes now: remove its marker |
-| skip | skipped | cannot run here (for example, no engine) |
+| skip | skipped | cannot run here (never because an engine is missing: that fails) |
 
 A `todo` spec is a strict xfail, so it cannot rot: when the feature lands the spec starts passing,
 the run fails with `promote`, and the author turns it into a regular spec. The summary at the end of

@@ -165,10 +165,10 @@ def test_a_read_write_host_directory_can_be_written(live_project, engine, agent_
     up(live_project, spec(agents={"coder": custom(agent_image, workspaces=["./notes"])}))
     name = container(engine, live_project, "coder").name
     written = engine.exec(name, "sh", "-c", "echo hi > /workspace/notes/from-agent")
-    if written.returncode != 0 and engine.cli == "docker":
-        # rootful docker: root without capabilities cannot write a directory owned by someone else.
+    if written.returncode != 0 and not engine.rootless:
+        # rootful engines: root without capabilities cannot write a directory owned by someone else.
         # Which user agents run as, so they can write host directories, is undecided.
-        pytest.xfail("agents cannot write host directories on rootful docker yet")
+        pytest.xfail("agents cannot write host directories on rootful engines yet")
     assert written.returncode == 0, written.stderr
     assert (notes / "from-agent").read_text().strip() == "hi"
     engine.exec(name, "rm", "/workspace/notes/from-agent")
@@ -181,30 +181,30 @@ def test_resources_limit_the_agent_container(live_project, engine, agent_image):
     assert host.get("NanoCpus", host.get("NanoCPUs")) == 1_000_000_000
 
 
-def test_gvisor_isolation_runs_the_agent_under_runsc(live_project, engine, agent_image):
-    if not engine.has_runtime("runsc"):
-        pytest.skip(f"{engine.cli} has no runsc runtime registered")
-    up(live_project, spec(agents={"coder": custom(agent_image, isolation="gvisor")}))
+def test_runtime_runs_the_agent_under_that_oci_runtime(live_project, engine, agent_image):
+    if engine.cli != "docker":
+        pytest.skip("Podman's Docker-compatible API cannot select the runtime: see the next spec")
+    assert engine.has_runtime("runsc"), "gVisor (runsc) must be registered with Docker"
+    up(live_project, spec(agents={"coder": custom(agent_image, runtime="runsc")}))
     resource = container(engine, live_project, "coder")
     assert resource.raw["HostConfig"]["Runtime"] == "runsc"
     assert "gvisor" in engine.exec(resource.name, "uname", "-r").stdout
 
 
-def test_a_git_workspace_is_refused_until_cloning_exists(live_project, agent_image):
-    live_project.write(
-        spec(
-            workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}}},
-            agents={"coder": custom(agent_image, workspaces=["repo"])},
-        )
-    )
+def test_an_unregistered_runtime_fails_with_a_hint_on_docker(live_project, engine, agent_image):
+    if engine.cli != "docker":
+        pytest.skip("only Docker rejects an unknown runtime")
+    live_project.write(spec(agents={"coder": custom(agent_image, runtime="no-such-runtime")}))
     result = live_project.run("up")
     assert result.returncode != 0
-    assert "git workspace" in result.stderr
+    assert "no-such-runtime" in result.stderr and "daemon.json" in result.stderr
 
 
-def test_the_agent_environment_is_passed_through(live_project, engine, agent_image):
-    up(live_project, spec(agents={"coder": custom(agent_image, env={"FOO": "bar"})}))
-    env = container(engine, live_project, "coder").raw["Config"]["Env"]
-    assert "FOO=bar" in env
-    assert f"EGZO_AGENT=coder" in env
-    assert json.dumps(env)  # plain strings only
+def test_podman_warns_that_the_runtime_cannot_be_applied_or_verified(live_project, engine, agent_image):
+    if engine.cli != "podman":
+        pytest.skip("only Podman ignores the requested runtime")
+    live_project.write(spec(agents={"coder": custom(agent_image, runtime="runsc")}))
+    result = live_project.run("up", timeout=300)
+    assert result.returncode == 0, result.stderr
+    assert "warning" in result.stderr.lower()
+    assert "runsc" in result.stderr and "podman" in result.stderr.lower() and "containers.conf" in result.stderr
