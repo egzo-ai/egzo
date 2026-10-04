@@ -332,7 +332,7 @@ control:                       # orchestrator MCP + status sidecar (always prese
   a string overrides only the secret of the inherited definition (hosts and inject kept), an
   object replaces the definition entirely. A child cannot remove anything it inherits. One parent
   only; cycles and unknown parents are errors.
-- **Built-in services** ship with egzo as data (initially `anthropic`: `api.anthropic.com` +
+- **Built-in services** ship with egzo as data. `anthropic-oauth` is for a Claude subscription token (`claude setup-token`, `sk-ant-oat…`), sent as `Authorization: Bearer`; the agent then gets `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. A token bound to `anthropic`, or an API key to `anthropic-oauth`, is refused at `up`. Initially `anthropic`: `api.anthropic.com` +
   `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Bearer`), more later
   (openai, google-ai, package registries). An object with a built-in's name replaces it.
   `egzo config` prints each profile fully resolved.
