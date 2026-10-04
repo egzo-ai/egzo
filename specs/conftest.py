@@ -1,9 +1,11 @@
 """Fixtures for the egzo spec suite.
 
-The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it on PATH). Specs that
-need a container engine use the `engine` fixture and run once per supported engine (ENGINES below).
-Every engine is required: a host that lacks one FAILS those specs, with what to set up. Nothing is
-skipped for a missing engine, because a green suite must mean every supported engine works.
+The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it on PATH). A run tests
+ONE host scenario (ENGINES below), chosen with `--engine NAME` or EGZO_ENGINE: CI runs one machine per
+scenario. Specs that need a container engine use the `engine` fixture, which is that scenario. A host
+that lacks the chosen engine FAILS those specs, with what to set up, because a green run must mean the
+scenario works. The one exception is a platform that can never run the scenario (gVisor off Linux),
+which SKIPS. A supported platform that is merely missing something (no runsc on Linux) FAILS.
 """
 
 import copy
@@ -13,6 +15,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -157,8 +160,14 @@ class Engine:
             return f"the engine at {self.host} is Podman, not Docker"
         if self.cli == "podman" and (probe.stdout.strip() == "true") != self.rootless:
             return f"the Podman at {self.host} is {'rootless' if self.rootless else 'rootful'} in name only: it reports otherwise"
-        if self.runtime and not self.has_runtime(self.runtime):
+        if self.runtime and sys.platform.startswith("linux") and not self.has_runtime(self.runtime):
             return f"the engine at {self.host} has no {self.runtime} runtime registered"
+        return None
+
+    def unsupported(self):
+        """Why this platform can never run this scenario (a skip, not a failure), or None."""
+        if self.runtime and not sys.platform.startswith("linux"):
+            return f"{self.runtime} (gVisor) only runs on Linux"
         return None
 
     def image_for(self, binary):
@@ -244,7 +253,7 @@ def _rootless_podman_socket():
 DOCKER_SETUP = "install Docker Engine and make /var/run/docker.sock usable by this user (docker group)"
 GVISOR_SETUP = 'install gVisor and register it: {"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}} in /etc/docker/daemon.json'
 
-# Every supported engine. All of them are required: the engine fixture fails when one is missing.
+# The supported host scenarios. A run picks exactly one (--engine / EGZO_ENGINE).
 ENGINES = [
     Engine("docker", "docker", "unix:///var/run/docker.sock", setup=DOCKER_SETUP),
     Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", runtime="runsc", setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
@@ -265,25 +274,35 @@ ENGINES = [
     ),
 ]
 
-_problems = {}
+def pytest_addoption(parser):
+    parser.addoption(
+        "--engine",
+        default=os.environ.get("EGZO_ENGINE"),
+        choices=[e.name for e in ENGINES],
+        help="the host scenario this run tests (or set EGZO_ENGINE)",
+    )
 
 
-def pytest_generate_tests(metafunc):
-    if "engine" in metafunc.fixturenames:
-        metafunc.parametrize("engine", ENGINES, ids=[e.name for e in ENGINES], indirect=True)
-
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def engine(request):
-    candidate = request.param
-    if candidate.name not in _problems:
-        _problems[candidate.name] = candidate.problem()
-    if _problems[candidate.name]:
+    """The one engine scenario this run tests."""
+    name = request.config.getoption("--engine")
+    if not name:
         pytest.fail(
-            f"required engine '{candidate.name}' is not available: {_problems[candidate.name]}\n"
-            f"to set it up: {candidate.setup}",
+            "no engine scenario chosen: pass --engine or set EGZO_ENGINE to one of "
+            + ", ".join(e.name for e in ENGINES),
             pytrace=False,
         )
+    candidate = next(e for e in ENGINES if e.name == name)
+    problem = candidate.problem()
+    if problem:
+        pytest.fail(
+            f"required engine '{candidate.name}' is not available: {problem}\nto set it up: {candidate.setup}",
+            pytrace=False,
+        )
+    unsupported = candidate.unsupported()
+    if unsupported:
+        pytest.skip(unsupported)
     return candidate
 
 

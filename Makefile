@@ -11,8 +11,11 @@ test:
 	$(GO) vet ./...
 	$(GO) test -race ./...
 
+# ENGINE is one of: docker, docker-gvisor, podman, podman-rootless
+ENGINE ?= docker
+
 specs: build
-	cd specs && EGZO_BIN=$(CURDIR)/$(BIN) .venv/bin/pytest
+	cd specs && EGZO_BIN=$(CURDIR)/$(BIN) .venv/bin/pytest --engine $(ENGINE)
 
 clean:
 	rm -rf bin

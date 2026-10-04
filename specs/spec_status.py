@@ -30,7 +30,7 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
-        "engine: needs a container engine; runs once per available engine (docker, podman)",
+        "engine: needs a container engine; runs against the one scenario chosen with --engine",
     )
     config.pluginmanager.register(SpecStatus(config), "spec-status")
 
