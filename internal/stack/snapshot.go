@@ -46,17 +46,20 @@ func newSnapshot(project *config.Resolved, desired Desired) ([]byte, string, err
 }
 
 // pushSnapshot stores the snapshot on the control volume unless it is already there.
-func pushSnapshot(ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired, out io.Writer) (bool, error) {
+func pushSnapshot(ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired, fresh bool, out io.Writer) (bool, error) {
 	data, hash, err := newSnapshot(project, desired)
 	if err != nil {
 		return false, err
 	}
-	probe, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "GET", "/specs/" + hash}, nil)
-	if err != nil {
-		return false, fmt.Errorf("check spec snapshot: %w", err)
-	}
-	if probe.ExitCode == 0 {
-		return false, nil
+	// A control volume this run just created holds no snapshot yet.
+	if !fresh {
+		probe, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "GET", "/specs/" + hash}, nil)
+		if err != nil {
+			return false, fmt.Errorf("check spec snapshot: %w", err)
+		}
+		if probe.ExitCode == 0 {
+			return false, nil
+		}
 	}
 	result, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/specs/" + hash}, bytes.NewReader(data))
 	if err != nil {

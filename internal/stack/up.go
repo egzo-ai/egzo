@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -40,9 +41,10 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		}
 	}
 
+	fresh := map[string]bool{} // resources created by this run: nothing can be stored in them yet
 	tokens := map[string]string{}
 	if len(project.Agents) > 0 {
-		tokens, observed, err = agentTokens(ctx, c, project, dir, opts, observed, out)
+		tokens, observed, err = agentTokens(ctx, c, project, dir, opts, observed, fresh, out)
 		if err != nil {
 			return err
 		}
@@ -57,16 +59,30 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err := Apply(ctx, c, desired, plan, opts.DryRun, out); err != nil {
 		return err
 	}
+	markFresh(fresh, plan)
 
-	pushed, err := pushPolicy(ctx, c, project, desired, tokens, secrets, opts, out)
-	if err != nil {
-		return err
-	}
-	stored := false
-	if !opts.DryRun {
-		if stored, err = pushSnapshot(ctx, c, project, desired, out); err != nil {
-			return err
+	// The proxy and the control sidecar are independent: talk to them at the same time.
+	out = &lockedWriter{w: out}
+	var pushed, stored bool
+	var pushErr, storeErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		pushed, pushErr = pushPolicy(ctx, c, project, desired, tokens, secrets, opts, fresh[desired.Proxy], out)
+	}()
+	go func() {
+		defer wg.Done()
+		if !opts.DryRun {
+			stored, storeErr = pushSnapshot(ctx, c, project, desired, fresh[project.Name+"_control"], out)
 		}
+	}()
+	wg.Wait()
+	if pushErr != nil {
+		return pushErr
+	}
+	if storeErr != nil {
+		return storeErr
 	}
 	if len(plan) == 0 && !pushed && !stored {
 		fmt.Fprintln(out, "nothing to do")
@@ -77,7 +93,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 // agentTokens makes sure the control sidecar runs, then asks it for each agent's token. In a dry
 // run nothing is created, so agents get a placeholder when control is not there yet.
 func agentTokens(
-	ctx context.Context, c *engine.Client, project *config.Resolved, dir string, opts Options, observed Observed, out io.Writer,
+	ctx context.Context, c *engine.Client, project *config.Resolved, dir string, opts Options, observed Observed, fresh map[string]bool, out io.Writer,
 ) (map[string]string, Observed, error) {
 	controlName := project.Name + "-control-1"
 	control := observed.find("container", controlName)
@@ -93,30 +109,54 @@ func agentTokens(
 		if err != nil {
 			return nil, observed, err
 		}
-		var control []Action
+		// Everything but the agents can come up now: only the agents need the tokens, and the
+		// proxy starts while control does.
+		agentOwned := map[string]bool{}
+		for name := range project.Agents {
+			agentOwned[project.Name+"_"+name] = true
+			agentOwned[project.Name+"-"+name+"-1"] = true
+		}
+		var sidecars []Action
 		for _, action := range BuildPlan(bootstrap, observed, false) {
-			if strings.Contains(action.Name, "_control") || action.Name == controlName {
-				control = append(control, action)
+			if !agentOwned[action.Name] && action.Verb != "connect" {
+				sidecars = append(sidecars, action)
 			}
 		}
-		if err := Apply(ctx, c, bootstrap, control, false, out); err != nil {
+		if err := Apply(ctx, c, bootstrap, sidecars, false, out); err != nil {
 			return nil, observed, err
 		}
+		markFresh(fresh, sidecars)
 		if observed, err = Observe(ctx, c, project.Name); err != nil {
 			return nil, observed, err
 		}
 	}
 
+	names := sortedKeys(project.Agents)
+	values := make([]string, len(names))
+	errs := make([]error, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/tokens/" + name}, nil)
+			switch {
+			case err != nil:
+				errs[i] = fmt.Errorf("token for agent %q: %w", name, err)
+			case result.ExitCode != 0:
+				errs[i] = fmt.Errorf("token for agent %q: %s", name, strings.TrimSpace(string(result.Stderr)))
+			default:
+				values[i] = strings.TrimSpace(string(result.Stdout))
+			}
+		}()
+	}
+	wg.Wait()
 	tokens := map[string]string{}
-	for name := range project.Agents {
-		result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/tokens/" + name}, nil)
-		if err != nil {
-			return nil, observed, fmt.Errorf("token for agent %q: %w", name, err)
+	for i, name := range names {
+		if errs[i] != nil {
+			return nil, observed, errs[i]
 		}
-		if result.ExitCode != 0 {
-			return nil, observed, fmt.Errorf("token for agent %q: %s", name, strings.TrimSpace(string(result.Stderr)))
-		}
-		tokens[name] = strings.TrimSpace(string(result.Stdout))
+		tokens[name] = values[i]
 	}
 	return tokens, observed, nil
 }
@@ -125,7 +165,7 @@ func agentTokens(
 // policy carries secret values, so it goes through exec stdin and lives only in the proxy's memory.
 func pushPolicy(
 	ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired,
-	tokens, secrets map[string]string, opts Options, out io.Writer,
+	tokens, secrets map[string]string, opts Options, fresh bool, out io.Writer,
 ) (bool, error) {
 	if desired.Proxy == "" {
 		return false, nil
@@ -145,18 +185,21 @@ func pushPolicy(
 
 	policy := BuildPolicy(project, tokens, secrets)
 
-	loaded, err := c.Exec(ctx, desired.Proxy, []string{"/egzo", "proxy", "request", "GET", "/policy"}, nil)
-	if err != nil {
-		return false, fmt.Errorf("query proxy policy: %w", err)
-	}
-	var current struct {
-		Hash string `json:"hash"`
-	}
-	if loaded.ExitCode == 0 {
-		_ = json.Unmarshal(loaded.Stdout, &current)
-	}
-	if current.Hash == policy.Hash {
-		return false, nil
+	// The policy lives in the proxy's memory only: a proxy this run just created has none.
+	if !fresh {
+		loaded, err := c.Exec(ctx, desired.Proxy, []string{"/egzo", "proxy", "request", "GET", "/policy"}, nil)
+		if err != nil {
+			return false, fmt.Errorf("query proxy policy: %w", err)
+		}
+		var current struct {
+			Hash string `json:"hash"`
+		}
+		if loaded.ExitCode == 0 {
+			_ = json.Unmarshal(loaded.Stdout, &current)
+		}
+		if current.Hash == policy.Hash {
+			return false, nil
+		}
 	}
 
 	body, err := json.Marshal(policy)
@@ -172,6 +215,15 @@ func pushPolicy(
 		return false, fmt.Errorf("load proxy policy: %s", strings.TrimSpace(string(result.Stderr)))
 	}
 	return true, nil
+}
+
+// markFresh records the containers and volumes a plan creates.
+func markFresh(fresh map[string]bool, plan []Action) {
+	for _, action := range plan {
+		if action.Verb == "create" && (action.Type == "container" || action.Type == "volume") {
+			fresh[action.Name] = true
+		}
+	}
 }
 
 // warnRuntimes says what Podman cannot do: its Docker-compatible API ignores the OCI runtime a

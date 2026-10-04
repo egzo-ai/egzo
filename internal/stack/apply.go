@@ -52,13 +52,14 @@ func Apply(ctx context.Context, c *engine.Client, desired Desired, plan []Action
 		}
 	}
 
-	for _, action := range plan {
+	out = &lockedWriter{w: out}
+	return runConcurrently(ctx, plan, dependencies(desired, plan), func(ctx context.Context, action Action) error {
 		fmt.Fprintln(out, action)
 		if err := run(ctx, c, desired, action); err != nil {
 			return fmt.Errorf("%s: %w", action, err)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func run(ctx context.Context, c *engine.Client, desired Desired, action Action) error {
@@ -119,12 +120,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) 
 		WorkingDir: spec.WorkingDir,
 	}
 	if len(spec.Healthcheck) > 0 {
-		config.Healthcheck = &container.HealthConfig{
-			Test:     append([]string{"CMD"}, spec.Healthcheck...),
-			Interval: time.Second,
-			Timeout:  3 * time.Second,
-			Retries:  60,
-		}
+		config.Healthcheck = healthConfig(spec.Healthcheck, c.Podman)
 	}
 	host := &container.HostConfig{
 		NetworkMode:    container.NetworkMode(spec.Network),
@@ -158,6 +154,26 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) 
 	return waitHealthy(ctx, c, created.ID)
 }
 
+// healthConfig probes fast until the first success so startup is not paced by the interval, then
+// slowly: every probe result is written to the engine's disk. Podman's Docker-compatible API
+// predates the start interval (API 1.44), so it keeps a short fixed interval.
+func healthConfig(command []string, podman bool) *container.HealthConfig {
+	health := &container.HealthConfig{
+		Test:    append([]string{"CMD"}, command...),
+		Timeout: 3 * time.Second,
+	}
+	if podman {
+		health.Interval = time.Second
+		health.Retries = 60
+		return health
+	}
+	health.StartPeriod = healthyTimeout
+	health.StartInterval = 100 * time.Millisecond
+	health.Interval = 10 * time.Second
+	health.Retries = 3
+	return health
+}
+
 // waitHealthy blocks until the container is healthy: converged means ready, not just started.
 func waitHealthy(ctx context.Context, c *engine.Client, id string) error {
 	deadline := time.Now().Add(healthyTimeout)
@@ -179,7 +195,7 @@ func waitHealthy(ctx context.Context, c *engine.Client, id string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
 	return fmt.Errorf("container not healthy after %s\n%s", healthyTimeout, tail(ctx, c, id))
@@ -214,27 +230,29 @@ func ensureImage(ctx context.Context, c *engine.Client, ref string) error {
 // Down removes a project's containers and networks, and its volumes when volumes is true.
 // Workspace directories on the host are never touched.
 func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool, out io.Writer) error {
+	out = &lockedWriter{w: out}
+	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
+	// depends on anything, and stopping containers is where the time goes, so do it together.
 	for _, kind := range []string{"container", "network", "volume"} {
 		if kind == "volume" && !volumes {
 			continue
 		}
+		var actions []Action
 		for _, r := range observed.Resources {
-			if r.Type != kind {
-				continue
+			if r.Type == kind {
+				actions = append(actions, Action{Verb: "remove", Type: kind, Name: r.Name, ID: r.ID})
 			}
-			fmt.Fprintf(out, "remove %s %s\n", r.Type, r.Name)
-			var err error
-			switch kind {
-			case "container":
-				err = removeContainer(ctx, c, r.ID)
-			case "network":
-				err = c.API.NetworkRemove(ctx, r.ID)
-			case "volume":
-				err = c.API.VolumeRemove(ctx, r.ID, true)
+		}
+		deps := make([][]int, len(actions))
+		err := runConcurrently(ctx, actions, deps, func(ctx context.Context, a Action) error {
+			fmt.Fprintf(out, "remove %s %s\n", a.Type, a.Name)
+			if err := run(ctx, c, Desired{}, a); err != nil {
+				return fmt.Errorf("remove %s %s: %w", a.Type, a.Name, err)
 			}
-			if err != nil {
-				return fmt.Errorf("remove %s %s: %w", r.Type, r.Name, err)
-			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return nil
