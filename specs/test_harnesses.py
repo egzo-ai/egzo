@@ -22,7 +22,8 @@ pytestmark = pytest.mark.usefixtures("engine")
 HARNESSES = ["claude-code", "opencode"]
 ANTHROPIC = {"allow": ["platform.claude.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}
 # what each harness prints when its prompt is ready, and what must never appear before that
-PROMPT_READY = {"claude-code": rb"\? for shortcuts|Try \"", "opencode": rb"Ask anything|opencode"}
+PROMPT_READY = {"claude-code": rb"bypass permissions on|\? for shortcuts", "opencode": rb"Ask anything"}
+BINARY = {"claude-code": "claude", "opencode": "opencode"}
 FIRST_RUN = [
     rb"Choose the text style", rb"Let's get started", rb"Do you trust", rb"trust the files", rb"Yes, I trust",
     rb"Bypass Permissions mode", rb"WARNING: Claude Code running in Bypass", rb"Detected a custom API key",
@@ -79,16 +80,14 @@ def spawn_attach(project, egzo, *args, dimensions=(40, 120)):
 # --- the images --------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("harness images")
 def test_the_harness_runs_as_the_invoking_user_and_its_cli_works(launched, engine, harness):
     project = launched()
     who = engine.exec(container(engine, project).name, "id", "-u")
     assert who.stdout.strip() == str(os.getuid())
-    version = engine.exec(container(engine, project).name, harness, "--version")
+    version = engine.exec(container(engine, project).name, BINARY[harness], "--version")
     assert version.returncode == 0 and re.search(r"\d+\.\d+", version.stdout), version.stderr
 
 
-@pytest.mark.todo("harness images")
 def test_the_harness_image_has_the_session_holder_and_the_tools_an_agent_needs(launched, engine):
     project = launched()
     for tool in ("egzo", "git", "curl", "rg", "node"):
@@ -96,15 +95,17 @@ def test_the_harness_image_has_the_session_holder_and_the_tools_an_agent_needs(l
         assert found.returncode == 0, f"{tool} is missing from the harness image"
 
 
-@pytest.mark.todo("harness images")
 def test_the_harness_starts_in_its_workspace_and_stays_up(launched, engine):
     project = launched(workspaces={"scratch": {}}, agent_fields={"workspaces": ["scratch"]})
-    cwd = engine.exec(container(engine, project).name, "sh", "-c", "readlink /proc/$(pgrep -n -f 'claude|opencode' | head -1)/cwd")
-    assert cwd.stdout.strip() == "/workspace/scratch"
+    find = (
+        "for p in /proc/[0-9]*; do c=$(tr '\\0' ' ' < $p/cmdline 2>/dev/null); "
+        "case \"$c\" in sh*|/usr/local/bin/egzo*) ;; *claude*|*opencode*) readlink $p/cwd; break;; esac; done"
+    )
+    cwd = engine.exec(container(engine, project).name, "sh", "-c", find)
+    assert cwd.stdout.strip() == "/workspace/scratch", cwd.stderr
     assert container(engine, project).raw["State"]["Running"]
 
 
-@pytest.mark.todo("harness images")
 def test_no_real_credential_is_inside_the_agent(launched, engine, harness):
     project = launched()
     inspect = json.dumps(container(engine, project).raw["Config"]["Env"])
@@ -116,7 +117,6 @@ def test_no_real_credential_is_inside_the_agent(launched, engine, harness):
 # --- first run: nothing to answer -----------------------------------------------------------------
 
 
-@pytest.mark.todo("harness images")
 def test_the_tui_reaches_its_prompt_with_no_first_run_question(launched, engine, egzo, harness):
     project = launched()
     client = spawn_attach(project, egzo)
@@ -134,7 +134,6 @@ def test_the_tui_reaches_its_prompt_with_no_first_run_question(launched, engine,
     client.expect(pexpect.EOF)
 
 
-@pytest.mark.todo("harness images")
 def test_the_tui_survives_a_recreate_with_its_conversation_home(launched, engine):
     project = launched()
     engine.exec(container(engine, project).name, "sh", "-c", "echo kept > $HOME/marker")
@@ -173,7 +172,6 @@ def opencode(environment_secrets, harness_image):
     return start
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_bypasses_permissions_and_has_accepted_everything(claude, engine):
     project = claude()
     settings = json.loads(read_in_agent(engine, project, "$HOME/.claude/settings.json"))
@@ -185,7 +183,6 @@ def test_claude_code_bypasses_permissions_and_has_accepted_everything(claude, en
     assert "IS_SANDBOX=1" in env
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_has_the_workspace_trusted_and_a_placeholder_key_approved(claude, engine):
     project = claude(workspaces={"scratch": {}}, agent_fields={"workspaces": ["scratch"]})
     state = json.loads(read_in_agent(engine, project, "$HOME/.claude.json"))
@@ -195,7 +192,6 @@ def test_claude_code_has_the_workspace_trusted_and_a_placeholder_key_approved(cl
     assert env["ANTHROPIC_API_KEY"] and env["ANTHROPIC_API_KEY"] != project.env["ANTHROPIC_API_KEY"]
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_trusts_every_workspace_of_an_agent_with_several(claude, engine):
     project = claude(workspaces={"one": {}, "two": {}}, agent_fields={"workspaces": ["one", "two"]})
     state = json.loads(read_in_agent(engine, project, "$HOME/.claude.json"))
@@ -205,7 +201,6 @@ def test_claude_code_trusts_every_workspace_of_an_agent_with_several(claude, eng
         assert f"/workspace/{name}" in settings["permissions"]["additionalDirectories"]
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_reports_its_life_cycle_to_the_control_sidecar(claude, engine):
     project = claude()
     settings = json.loads(read_in_agent(engine, project, "$HOME/.claude/settings.json"))
@@ -214,7 +209,6 @@ def test_claude_code_reports_its_life_cycle_to_the_control_sidecar(claude, engin
         assert f"egzo hook {hook}" in commands, hook
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_gets_the_control_tools_over_mcp(claude, engine):
     project = claude()
     state = json.loads(read_in_agent(engine, project, "$HOME/.claude.json"))
@@ -223,7 +217,6 @@ def test_claude_code_gets_the_control_tools_over_mcp(claude, engine):
     assert server["headers"]["Authorization"].startswith("Basic ")
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_is_told_how_to_read_an_egzo_message_header(claude, engine):
     project = claude()
     process = engine.exec(container(engine, project).name, "sh", "-c", "tr '\\0' ' ' < /proc/$(pgrep -n -x claude)/cmdline")
@@ -232,14 +225,12 @@ def test_claude_code_is_told_how_to_read_an_egzo_message_header(claude, engine):
     assert "[egzo msg" in instructions
 
 
-@pytest.mark.todo("harness images")
 def test_claude_code_model_and_prompt_come_from_the_agent_definition(claude, engine):
     project = claude(agent_fields={"model": "claude-sonnet-5-5"})
     cmdline = engine.exec(container(engine, project).name, "sh", "-c", "tr '\\0' ' ' < /proc/$(pgrep -n -x claude)/cmdline").stdout
     assert "--model claude-sonnet-5-5" in cmdline
 
 
-@pytest.mark.todo("harness images")
 def test_the_prompt_file_is_added_to_the_instructions(environment_secrets, harness_image, engine):
     (environment_secrets.root / "coder.md").write_text("Always answer in rhyme.\n")
     document = spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"), prompt="./coder.md")})
@@ -249,7 +240,6 @@ def test_the_prompt_file_is_added_to_the_instructions(environment_secrets, harne
     assert "Always answer in rhyme." in text and "[egzo msg" in text
 
 
-@pytest.mark.todo("harness images")
 def test_permissions_default_keeps_the_harness_prompts(claude, engine):
     project = claude(agent_fields={"permissions": "default"})
     settings = json.loads(read_in_agent(engine, project, "$HOME/.claude/settings.json"))
@@ -258,21 +248,18 @@ def test_permissions_default_keeps_the_harness_prompts(claude, engine):
     assert "IS_SANDBOX=1" not in container(engine, project).raw["Config"]["Env"]
 
 
-@pytest.mark.todo("harness images")
 def test_opencode_allows_every_tool_without_asking(opencode, engine):
     project = opencode()
     config = json.loads(read_in_agent(engine, project, "$HOME/.config/opencode/opencode.json"))
     assert config["permission"] in ("allow", {"*": "allow"}) or all(v == "allow" for v in config["permission"].values())
 
 
-@pytest.mark.todo("harness images")
 def test_opencode_permissions_default_keeps_the_prompts(opencode, engine):
     project = opencode(agent_fields={"permissions": "default"})
     config = json.loads(read_in_agent(engine, project, "$HOME/.config/opencode/opencode.json"))
     assert config.get("permission") not in ("allow", {"*": "allow"})
 
 
-@pytest.mark.todo("harness images")
 def test_opencode_gets_the_control_tools_over_mcp(opencode, engine):
     project = opencode()
     config = json.loads(read_in_agent(engine, project, "$HOME/.config/opencode/opencode.json"))
@@ -281,16 +268,13 @@ def test_opencode_gets_the_control_tools_over_mcp(opencode, engine):
     assert server["headers"]["Authorization"].startswith("Basic ")
 
 
-@pytest.mark.todo("harness images")
 def test_opencode_reports_its_life_cycle_through_a_plugin(opencode, engine):
     project = opencode()
     plugin = engine.exec(container(engine, project).name, "sh", "-c", "cat $HOME/.config/opencode/plugin/egzo.js $HOME/.config/opencode/plugins/egzo.js 2>/dev/null").stdout
-    for event in ("session.idle", "session.created"):
-        assert event in plugin
+    assert "session.idle" in plugin
     assert "UserPromptSubmit" in plugin and "Stop" in plugin and "SessionStart" in plugin
 
 
-@pytest.mark.todo("harness images")
 def test_opencode_model_and_instructions_come_from_the_agent_definition(environment_secrets, harness_image, engine):
     (environment_secrets.root / "coder.md").write_text("Always answer in rhyme.\n")
     fields = {"model": "anthropic/claude-sonnet-5-5", "prompt": "./coder.md"}
@@ -305,7 +289,6 @@ def test_opencode_model_and_instructions_come_from_the_agent_definition(environm
 # --- hooks in both directions ---------------------------------------------------------------------------
 
 
-@pytest.mark.todo("hook command")
 def test_the_hook_command_posts_its_payload_as_a_hook_event(live_project, engine, session_image):
     live_project.write(spec(agents={"coder": agent(harness="custom", image=session_image, env={"FAKE_TUI": "emit"})}))
     assert live_project.run("up", timeout=300).returncode == 0
@@ -322,7 +305,6 @@ def test_the_hook_command_posts_its_payload_as_a_hook_event(live_project, engine
     assert found and found[0]["agent"] == "coder"
 
 
-@pytest.mark.todo("hook command")
 def test_the_hook_command_never_blocks_or_fails_the_harness(live_project, engine, session_image):
     live_project.write(spec(agents={"coder": agent(harness="custom", image=session_image, env={"FAKE_TUI": "emit"})}))
     assert live_project.run("up", timeout=300).returncode == 0
@@ -331,3 +313,40 @@ def test_the_hook_command_never_blocks_or_fails_the_harness(live_project, engine
     broken = engine.exec(name, "sh", "-c", "EGZO_CONTROL_URL=http://127.0.0.1:9 egzo hook Stop </dev/null; echo exit=$?")
     assert "exit=0" in broken.stdout
     assert time.time() - start < 6
+
+
+# --- the real TUIs take what egzo types -----------------------------------------------------------------
+
+
+def events_of(project):
+    out = project.run("events").stdout
+    return [json.loads(line) for line in out.splitlines() if line.startswith("{")]
+
+
+def wait_until(check, what, timeout):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        found = check()
+        if found:
+            return found
+        time.sleep(1)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+@pytest.mark.parametrize("harness", [
+    pytest.param("claude-code", marks=pytest.mark.todo("known-issues/claude-code-auto-mode-offer.md: an injected Enter answers Claude Code's auto-mode offer")),
+    "opencode",
+], indirect=True)
+def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(launched, harness):
+    """No model is called: the harness reports the prompt through its hook as soon as it is submitted."""
+    project = launched(agent_fields={"inject": {"human_quiet": "1s"}})
+
+    def activity():
+        rows = [e for e in events_of(project) if e["type"] == "activity" and e["agent"] == "coder"]
+        return rows[-1]["text"] if rows else None
+
+    wait_until(lambda: activity() == "idle", "the harness to report that its session started", 90)
+    assert project.run("send", "coder", "hello from the operator").returncode == 0
+    wait_until(lambda: [e for e in events_of(project) if e["type"] == "delivered"], "the harness to acknowledge the message", 120)
+    prompts = [e for e in events_of(project) if e["type"] == "hook" and e["text"] == "UserPromptSubmit"]
+    assert any("hello from the operator" in json.dumps(p["data"]) for p in prompts)

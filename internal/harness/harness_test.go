@@ -200,7 +200,7 @@ func TestOpenCodePluginReportsTheLifeCycleUnderClaudeCodesHookNames(t *testing.T
 	o := options(t)
 	plan, _ := openCode{}.Plan(o, nil)
 	plugin := string(plan.Files[filepath.Join(o.Home, ".config", "opencode", "plugin", "egzo.js")].Content)
-	for _, want := range []string{`"session.created"`, `hook("SessionStart"`, `"session.idle"`, `hook("Stop"`, `hook("UserPromptSubmit"`, `"chat.message"`, `hook("Notification"`, "/v1/hooks/"} {
+	for _, want := range []string{`hook("SessionStart"`, `"session.idle"`, `hook("Stop"`, `hook("UserPromptSubmit"`, `"chat.message"`, `hook("Notification"`, "/v1/hooks/"} {
 		if !strings.Contains(plugin, want) {
 			t.Errorf("the plugin lacks %s", want)
 		}
@@ -251,7 +251,7 @@ func TestWriteMergesIntoExistingFilesAndCreatesDirectories(t *testing.T) {
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	os.WriteFile(path, []byte(`{"kept": true}`), 0o600)
 	plan := Plan{Files: map[string]File{
-		path:                              {Content: []byte(`{"added": 1}`), Merge: true, Mode: 0o600},
+		path:                             {Content: []byte(`{"added": 1}`), Merge: true, Mode: 0o600},
 		filepath.Join(dir, "x", "y.txt"): {Content: []byte("hello")},
 	}}
 	if err := plan.Write(); err != nil {

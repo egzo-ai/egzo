@@ -40,11 +40,18 @@ async function hook(name, payload) {
   } catch {}
 }
 
-export const EgzoPlugin = async () => ({
+let started = false
+
+export const EgzoPlugin = async () => {
+  // OpenCode only creates a session when the first prompt is sent, so the plugin loading is the
+  // moment the TUI is up and waiting.
+  if (!started) {
+    started = true
+    hook("SessionStart", {})
+  }
+  return {
   event: async ({ event }) => {
     switch (event.type) {
-      case "session.created":
-        return hook("SessionStart", {})
       case "session.idle":
         return hook("Stop", {})
       case "permission.asked":
@@ -57,7 +64,8 @@ export const EgzoPlugin = async () => ({
     const prompt = (output.parts || []).filter((part) => part.type === "text").map((part) => part.text).join("\n")
     await hook("UserPromptSubmit", { prompt })
   },
-})
+  }
+}
 `
 
 func (o openCode) Plan(opts Options, args []string) (Plan, error) {

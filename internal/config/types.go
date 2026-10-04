@@ -124,7 +124,7 @@ type Agent struct {
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	DependsOn   []string          `yaml:"depends_on,omitempty"`
-	Inject      *AgentInject          `yaml:"inject,omitempty"`
+	Inject      *AgentInject      `yaml:"inject,omitempty"`
 }
 
 // AgentInject tunes how queued messages are typed into the agent's terminal.
