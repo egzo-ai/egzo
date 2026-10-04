@@ -54,6 +54,16 @@ func Run() error {
 		}
 	}()
 
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-time.After(500 * time.Millisecond):
+				srv.expire(now)
+			}
+		}
+	}()
 	return operator.Serve(SocketPath, srv.handler())
 }
 

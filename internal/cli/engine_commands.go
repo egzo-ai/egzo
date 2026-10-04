@@ -17,6 +17,10 @@ import (
 // EnvImage overrides the all-in-one egzo image that runs the sidecars.
 const EnvImage = "EGZO_IMAGE"
 
+// EnvHarnessPrefix overrides where harness images come from: the image of a harness is
+// <prefix><harness>:<version>, by default ghcr.io/egzo-ai/egzo-harness-<harness>:<version>.
+const EnvHarnessPrefix = "EGZO_HARNESS_PREFIX"
+
 func imageRef() string {
 	if image := os.Getenv(EnvImage); image != "" {
 		return image
@@ -79,7 +83,7 @@ func newUpCommand(opts *options) *cobra.Command {
 			defer s.close()
 
 			return stack.Up(ctx, s.engine, s.Resolved, s.Dir,
-				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef()}, cmd.OutOrStdout())
+				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix)}, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without changing anything")
@@ -131,16 +135,16 @@ func newPsCommand(opts *options) *cobra.Command {
 
 // reportedStatuses asks the control sidecar what each agent last said about itself. It is best
 // effort: ps still works when the sidecar is not running.
-func reportedStatuses(ctx context.Context, s *session) map[string]string {
-	reported := map[string]string{}
+func reportedStatuses(ctx context.Context, s *session) map[string]stack.Report {
+	reported := map[string]stack.Report{}
 	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/agents", nil)
 	if err != nil {
 		return reported
 	}
-	var statuses []struct{ Agent, Status string }
+	var statuses []struct{ Agent, Status, Activity string }
 	if json.Unmarshal(reply, &statuses) == nil {
 		for _, status := range statuses {
-			reported[status.Agent] = status.Status
+			reported[status.Agent] = stack.Report{Status: status.Status, Activity: status.Activity}
 		}
 	}
 	return reported

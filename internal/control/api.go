@@ -26,6 +26,9 @@ type server struct {
 	dir    string
 	mu     sync.Mutex
 	events *store
+	// deliveryMu makes activity changes, claims and acknowledgements one at a time, so two of them
+	// never decide from the same state.
+	deliveryMu sync.Mutex
 }
 
 func newServer(dir string) (*server, error) {
@@ -185,9 +188,10 @@ func (s *server) streamEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		To   string `json:"to"`
-		From string `json:"from"`
-		Text string `json:"text"`
+		To        string `json:"to"`
+		From      string `json:"from"`
+		Text      string `json:"text"`
+		Interrupt bool   `json:"interrupt"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil || !safeName.MatchString(body.To) {
 		http.Error(w, "expected {\"to\": agent, \"text\": message}", http.StatusBadRequest)
@@ -205,11 +209,17 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if body.Interrupt {
+		if _, err := s.events.append(Event{Type: "interrupt", Agent: body.To, Actor: body.From}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	json.NewEncoder(w).Encode(map[string]string{"id": id})
 }
 
 func (s *server) queue(w http.ResponseWriter, r *http.Request) {
-	messages := s.events.pending(r.URL.Query().Get("agent"))
+	messages := s.events.unfinished(r.URL.Query().Get("agent"))
 	if messages == nil {
 		messages = []Message{}
 	}

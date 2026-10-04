@@ -32,6 +32,9 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("GET /v1/questions/{id}", a.authenticated(a.question))
 	mux.HandleFunc("GET /v1/inbox", a.authenticated(a.inbox))
 	mux.HandleFunc("POST /v1/hooks/{name}", a.authenticated(a.hook))
+	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
+	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
+	mux.HandleFunc("POST /v1/ack", a.authenticated(a.ack))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
 	return mux
 }
@@ -171,6 +174,10 @@ func (a *agentAPI) hook(w http.ResponseWriter, r *http.Request, agent string) {
 		event.Data = payload
 	}
 	if _, err := a.server.events.append(event); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := a.server.onHook(agent, name, payload); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

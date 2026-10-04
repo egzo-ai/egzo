@@ -92,7 +92,7 @@ func TestDesireLayout(t *testing.T) {
 	for _, v := range d.Volumes {
 		volumes = append(volumes, v.Name)
 	}
-	if want := []string{"proj_control", "proj_shared", "proj_ca-private", "proj_ca"}; !slices.Equal(volumes, want) {
+	if want := []string{"proj_control", "proj_shared", "proj_ca-private", "proj_ca", "proj_coder-home"}; !slices.Equal(volumes, want) {
 		t.Errorf("volumes = %v, want %v", volumes, want)
 	}
 }
@@ -178,6 +178,7 @@ func TestDesireAgentContainer(t *testing.T) {
 	}
 
 	wantMounts := []MountSpec{
+		{Source: "proj_coder-home", Target: "/home/agent"},
 		{Source: "proj_ca", Target: "/etc/egzo/ca", ReadOnly: true},
 		{Source: "proj_shared", Target: "/workspace/shared"},
 	}
@@ -333,11 +334,14 @@ func TestConfigHashTracksWhatRunsNotWhereItIsDeclared(t *testing.T) {
 }
 
 func TestAgentImage(t *testing.T) {
-	if got := agentImage(config.ResolvedAgent{Image: "mine:1", Harness: "pi"}); got != "mine:1" {
+	if got := agentImage(config.ResolvedAgent{Image: "mine:1", Harness: "pi"}, ""); got != "mine:1" {
 		t.Errorf("explicit image = %q", got)
 	}
-	if got := agentImage(config.ResolvedAgent{Harness: "pi"}); !strings.HasPrefix(got, "ghcr.io/egzo-ai/egzo-harness-pi:") {
+	if got := agentImage(config.ResolvedAgent{Harness: "pi"}, ""); !strings.HasPrefix(got, "ghcr.io/egzo-ai/egzo-harness-pi:") {
 		t.Errorf("default image = %q", got)
+	}
+	if got := agentImage(config.ResolvedAgent{Harness: "pi"}, "localhost:5000/h-"); !strings.HasPrefix(got, "localhost:5000/h-pi:") {
+		t.Errorf("image with a registry prefix = %q", got)
 	}
 }
 
@@ -348,5 +352,81 @@ func TestSortedKeys(t *testing.T) {
 	}
 	if got := sortedKeys[int](nil); len(got) != 0 {
 		t.Errorf("sortedKeys(nil) = %v", got)
+	}
+}
+
+func TestAgentsRunAsTheGivenUserAndNewWorkspaceVolumesAreHandedToIt(t *testing.T) {
+	in := desireInputs
+	in.User = "1234:5678"
+	d, err := Desire(desireProject(), "/dir", in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findContainer(t, d, "proj-coder-1").User != "1234:5678" {
+		t.Error("the agent does not run as the given user")
+	}
+	if findContainer(t, d, "proj-control-1").User != "" || findContainer(t, d, "proj-proxy-1").User != "" {
+		t.Error("the sidecars must keep their own user")
+	}
+	for _, volume := range d.Volumes {
+		wantOwner := volume.Name == "proj_shared"
+		if (volume.Owner == "1234:5678") != wantOwner {
+			t.Errorf("volume %s owner = %q", volume.Name, volume.Owner)
+		}
+	}
+	if d.PrepImage != in.Image {
+		t.Errorf("prep image = %q", d.PrepImage)
+	}
+}
+
+func TestHarnessAgentsCarryTheirIntegrationInTheirDefinition(t *testing.T) {
+	project := desireProject()
+	coder := project.Agents["coder"]
+	coder.Harness = "claude-code"
+	coder.Image = ""
+	coder.Model = "claude-sonnet-5-5"
+	coder.Permissions = "bypass"
+	coder.Inject = config.ResolvedInject{HumanQuiet: "30s", AckTimeout: "60s", IdleSignal: "hook", Quiescence: "5s"}
+	project.Agents["coder"] = coder
+	d := desire(t, project)
+	spec := findContainer(t, d, "proj-coder-1")
+	for _, want := range []string{
+		"EGZO_HARNESS=claude-code", "EGZO_MODEL=claude-sonnet-5-5", "EGZO_PERMISSIONS=bypass", "IS_SANDBOX=1",
+		"EGZO_HUMAN_QUIET=30s", "EGZO_ACK_TIMEOUT=60s", "EGZO_IDLE_SIGNAL=hook", "EGZO_WORKSPACES=/workspace/shared",
+	} {
+		if !slices.Contains(spec.Env, want) {
+			t.Errorf("env lacks %s\n%v", want, spec.Env)
+		}
+	}
+	for _, entry := range spec.Env {
+		if strings.HasPrefix(entry, "ANTHROPIC_API_KEY=") && !strings.Contains(entry, "placeholder") {
+			t.Errorf("a real-looking credential in the definition: %s", entry)
+		}
+	}
+	coder.Permissions = "default"
+	project.Agents["coder"] = coder
+	if slices.Contains(findContainer(t, desire(t, project), "proj-coder-1").Env, "IS_SANDBOX=1") {
+		t.Error("IS_SANDBOX is set although permissions are not bypassed")
+	}
+}
+
+func TestAnAgentPromptIsMountedReadOnlyFromTheProjectDirectory(t *testing.T) {
+	project := desireProject()
+	coder := project.Agents["coder"]
+	coder.Prompt = "./prompts/coder.md"
+	project.Agents["coder"] = coder
+	spec := findContainer(t, desire(t, project), "proj-coder-1")
+	want := MountSpec{Bind: true, Source: "/dir/prompts/coder.md", Target: "/etc/egzo/prompt.md", ReadOnly: true}
+	if !slices.Contains(spec.Mounts, want) || !slices.Contains(spec.Env, "EGZO_PROMPT_FILE=/etc/egzo/prompt.md") {
+		t.Errorf("mounts = %+v env = %v", spec.Mounts, spec.Env)
+	}
+}
+
+func TestCustomAgentsGetNoHomeVolume(t *testing.T) {
+	d := desire(t, desireProject())
+	for _, volume := range d.Volumes {
+		if volume.Name == "proj_review-home" {
+			t.Error("a custom harness image has no egzo home")
+		}
 	}
 }

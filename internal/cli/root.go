@@ -37,6 +37,11 @@ func New() *cobra.Command {
 		newLifecycleCommand(opts, "stop", "Stop a service's container"),
 		newLifecycleCommand(opts, "restart", "Restart a service's container"),
 		newControlCommand(),
+		newAgentCommand(),
+		newPrepCommand(),
+		newHookCommand(),
+		newAttachCommand(opts),
+		newVersionCommand(),
 		newProxyCommand(opts),
 	)
 	return root

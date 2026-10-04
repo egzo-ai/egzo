@@ -23,6 +23,7 @@ type Resource struct {
 	Health     string   // containers only
 	Networks   []string // containers only: names of the networks it is attached to
 	Service    string
+	Kind       string
 	ConfigHash string
 	ProjectDir string
 }
@@ -51,6 +52,7 @@ func resourceFrom(kind, id, name string, labels map[string]string) Resource {
 		ID:         id,
 		Name:       name,
 		Service:    labels[engine.LabelService],
+		Kind:       labels[engine.LabelKind],
 		ConfigHash: labels[engine.LabelConfigHash],
 		ProjectDir: labels[engine.LabelProjectDir],
 	}

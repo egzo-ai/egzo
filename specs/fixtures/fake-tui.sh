@@ -3,7 +3,7 @@
 # observe exactly what the session layer does to a terminal program.
 mode="${FAKE_TUI:-cat}"
 esc=$(printf '\033')
-clean() { printf '%s' "$1" | tr -cd '[:print:]' | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+clean() { printf '%s' "$1" | sed -e "s/${esc}\[20[01]~//g" -e 's/[^[:print:]]//g' -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
 case "$mode" in
 cat) # raw terminal, every byte comes straight back
@@ -56,10 +56,13 @@ hooks) # a harness with hooks: reports its life cycle to the control sidecar the
 	printf 'READY\r\n'
 	[ "${FAKE_HOOKS:-1}" = 1 ] && egzo hook SessionStart </dev/null
 	buf=""
+	pasting=0
 	while IFS= read -r line; do
-		case "$buf$line" in *"${esc}[200~"*) ;; *) [ -z "$line" ] && continue ;; esac
+		case "$line" in *"${esc}[200~"*) pasting=1 ;; esac
+		if [ "$pasting" = 0 ] && [ -z "$line" ]; then continue; fi
 		buf="$buf$line "
-		case "$line" in *"${esc}[200~"*) case "$line" in *"${esc}[201~"*) ;; *) continue ;; esac ;; esac
+		case "$line" in *"${esc}[201~"*) pasting=0 ;; esac
+		[ "$pasting" = 1 ] && continue
 		text=$(clean "$buf")
 		buf=""
 		[ -z "$text" ] && continue
@@ -68,10 +71,10 @@ hooks) # a harness with hooks: reports its life cycle to the control sidecar the
 		fi
 		printf 'got:%s\r\n' "$text"
 		case "$text" in
-		*ask-permission*) printf '{"message":"Claude needs your permission to use Bash"}' | egzo hook Notification ;;
-		*idle-prompt*) printf '{"message":"Claude is waiting for your input"}' | egzo hook Notification ;;
-		*) sleep "${FAKE_WORK:-1}" ;;
+		*ask-permission*) printf '{"message":"Claude needs your permission to use Bash"}' | egzo hook Notification; continue ;;
+		*idle-prompt*) printf '{"message":"Claude is waiting for your input"}' | egzo hook Notification; continue ;;
 		esac
+		sleep "${FAKE_WORK:-1}"
 		[ "${FAKE_HOOKS:-1}" = 1 ] && printf '{}' | egzo hook Stop
 	done
 	;;

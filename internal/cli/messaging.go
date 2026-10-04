@@ -16,11 +16,13 @@ import (
 const operatorActor = "operator"
 
 func newSendCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var interrupt bool
+	cmd := &cobra.Command{
 		Use:   "send AGENT MESSAGE...",
 		Short: "Queue a message for an agent",
 		Long: "Queue a message for an agent. The queue lives in the control sidecar, so every client, the CLI,\n" +
-			"the hub and chat integrations, sends through the same path.",
+			"the hub and chat integrations, sends through the same path. The session holder types it into the\n" +
+			"agent's terminal once the agent is idle and nobody has typed for a while (see `inject` in egzo.yaml).",
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -33,7 +35,7 @@ func newSendCommand(opts *options) *cobra.Command {
 			if _, ok := s.Resolved.Agents[args[0]]; !ok {
 				return fmt.Errorf("no agent %q in egzo.yaml", args[0])
 			}
-			body, _ := json.Marshal(map[string]string{"to": args[0], "from": operatorActor, "text": strings.Join(args[1:], " ")})
+			body, _ := json.Marshal(map[string]any{"to": args[0], "from": operatorActor, "text": strings.Join(args[1:], " "), "interrupt": interrupt})
 			reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/queue", body)
 			if err != nil {
 				return err
@@ -44,6 +46,8 @@ func newSendCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "stop what the agent is doing first, so the message is typed in right away")
+	return cmd
 }
 
 func newEventsCommand(opts *options) *cobra.Command {

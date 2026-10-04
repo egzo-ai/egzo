@@ -26,7 +26,7 @@ HEADER = re.compile(r"\[egzo msg (m[0-9a-f]+) from ([^\]]+)\]")
 
 def harness(image, *, inject=None, **env):
     fields = {"harness": "custom", "image": image, "env": {"FAKE_TUI": "hooks", **env}}
-    fields["inject"] = {"human_quiet": "1s", "ack_timeout": "20s", **(inject or {})}
+    fields["inject"] = {"human_quiet": "1s", "ack_timeout": "20s", "idle_signal": "hook", **(inject or {})}
     return agent(**fields)
 
 
@@ -109,7 +109,6 @@ def as_agent(engine, project, verb, path, body=None, name="coder"):
 # --- the inject section of the schema -------------------------------------------------------------
 
 
-@pytest.mark.todo("inject schema")
 def test_inject_settings_are_validated(project):
     base = {"harness": "custom", "image": "alpine"}
     for inject, complaint in (
@@ -124,7 +123,6 @@ def test_inject_settings_are_validated(project):
         assert complaint in result.stderr
 
 
-@pytest.mark.todo("inject schema")
 def test_inject_defaults_are_resolved(project):
     resolved = project.resolved(spec(agents={"coder": {"harness": "claude-code"}}, egress={"default": {"allow": ["x.test"]}}))
     assert resolved["agents"]["coder"]["inject"] == {"human_quiet": "30s", "ack_timeout": "60s", "idle_signal": "hook", "quiescence": "5s"}
@@ -135,20 +133,17 @@ def test_inject_defaults_are_resolved(project):
 # --- states ----------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("agent states")
 def test_ps_shows_an_activity_column(run):
     project = run()
     assert "ACTIVITY" in project.run("ps").stdout.splitlines()[0]
 
 
-@pytest.mark.todo("agent states")
 def test_an_agent_is_idle_once_its_harness_says_the_session_started(run):
     project = run()
     wait_activity(project, "idle")
     assert [e["text"] for e in events(project) if e["type"] == "activity" and e["agent"] == "coder"][-1] == "idle"
 
 
-@pytest.mark.todo("agent states")
 def test_hooks_drive_the_state_of_an_agent(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": agent(harness="custom", image=agent_image)}))
     assert live_project.run("up", timeout=300).returncode == 0
@@ -165,7 +160,6 @@ def test_hooks_drive_the_state_of_an_agent(live_project, engine, agent_image):
         assert activity(live_project) == expected, f"after {hook}"
 
 
-@pytest.mark.todo("agent states")
 def test_a_stopped_agent_shows_as_stopped(run):
     project = run()
     wait_activity(project, "idle")
@@ -173,7 +167,6 @@ def test_a_stopped_agent_shows_as_stopped(run):
     assert activity(project) == "stopped"
 
 
-@pytest.mark.todo("agent states")
 def test_a_started_agent_goes_through_starting_to_idle_again(run):
     project = run()
     wait_activity(project, "idle")
@@ -185,7 +178,6 @@ def test_a_started_agent_goes_through_starting_to_idle_again(run):
 # --- delivery --------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("message injection")
 def test_a_queued_message_is_typed_into_the_idle_agent_and_acknowledged(run):
     project = run()
     wait_activity(project, "idle")
@@ -197,7 +189,6 @@ def test_a_queued_message_is_typed_into_the_idle_agent_and_acknowledged(run):
     assert "please review the parser" in prompt
 
 
-@pytest.mark.todo("message injection")
 def test_the_message_carries_a_header_naming_its_id_and_sender(run):
     project = run()
     wait_activity(project, "idle")
@@ -210,7 +201,6 @@ def test_the_message_carries_a_header_naming_its_id_and_sender(run):
     assert found.group(1) == queued["id"] and found.group(2) == "operator"
 
 
-@pytest.mark.todo("message injection")
 def test_the_sender_in_the_header_is_the_actor_of_the_message(run, engine):
     project = run()
     wait_activity(project, "idle")
@@ -227,7 +217,6 @@ def test_the_sender_in_the_header_is_the_actor_of_the_message(run, engine):
     assert "from user:cedric]" in prompts(project)[0]
 
 
-@pytest.mark.todo("message injection")
 def test_text_with_unicode_and_quotes_arrives_whole(run):
     project = run()
     wait_activity(project, "idle")
@@ -236,7 +225,6 @@ def test_text_with_unicode_and_quotes_arrives_whole(run):
     assert "use 'quotes' and caf" in prompts(project)[0]  # printable text; the fake keeps ASCII only
 
 
-@pytest.mark.todo("message injection")
 def test_nothing_is_typed_while_the_agent_is_busy(run):
     project = run(FAKE_WORK="6")
     wait_activity(project, "idle")
@@ -251,7 +239,6 @@ def test_nothing_is_typed_while_the_agent_is_busy(run):
     assert when(second) - when(first_stop) < 15
 
 
-@pytest.mark.todo("message injection")
 def test_messages_queued_while_busy_are_combined_into_one_prompt_and_acked_one_by_one(run):
     project = run(FAKE_WORK="5")
     wait_activity(project, "idle")
@@ -267,7 +254,6 @@ def test_messages_queued_while_busy_are_combined_into_one_prompt_and_acked_one_b
     assert len({e["id"] for e in message_events(project, "delivered")}) == 4
 
 
-@pytest.mark.todo("message injection")
 def test_a_blocked_agent_gets_nothing_until_a_human_unblocks_it(run, engine):
     project = run()
     wait_activity(project, "idle")
@@ -280,7 +266,6 @@ def test_a_blocked_agent_gets_nothing_until_a_human_unblocks_it(run, engine):
     wait_for(lambda: len(message_events(project, "delivered")) == 2, "delivery after unblocking")
 
 
-@pytest.mark.todo("message injection")
 def test_a_message_is_never_typed_while_a_human_is_typing(live_project, session_image, egzo):
     live_project.write(spec(agents={"coder": harness(session_image, inject={"human_quiet": "6s"})}))
     assert live_project.run("up", timeout=300).returncode == 0
@@ -299,7 +284,6 @@ def test_a_message_is_never_typed_while_a_human_is_typing(live_project, session_
     client.expect(pexpect.EOF)
 
 
-@pytest.mark.todo("message injection")
 def test_a_read_only_observer_never_holds_a_message_back(live_project, session_image, egzo):
     live_project.write(spec(agents={"coder": harness(session_image, inject={"human_quiet": "30s"})}))
     assert live_project.run("up", timeout=300).returncode == 0
@@ -315,7 +299,6 @@ def test_a_read_only_observer_never_holds_a_message_back(live_project, session_i
     observer.expect(pexpect.EOF)
 
 
-@pytest.mark.todo("message injection")
 def test_a_message_the_harness_never_acknowledges_is_unconfirmed_and_never_retried(run):
     project = run(inject={"ack_timeout": "4s"}, FAKE_ACK="0")
     wait_activity(project, "idle")
@@ -328,7 +311,6 @@ def test_a_message_the_harness_never_acknowledges_is_unconfirmed_and_never_retri
     assert "unconfirmed" in queue
 
 
-@pytest.mark.todo("message injection")
 def test_a_message_for_a_stopped_agent_waits_and_is_delivered_after_it_starts(run):
     project = run()
     wait_activity(project, "idle")
@@ -340,7 +322,6 @@ def test_a_message_for_a_stopped_agent_waits_and_is_delivered_after_it_starts(ru
     wait_for(lambda: message_events(project, "delivered"), "delivery after the restart", timeout=60)
 
 
-@pytest.mark.todo("message injection")
 def test_send_interrupt_stops_the_current_turn_and_then_delivers(run):
     project = run(FAKE_WORK="40")
     wait_activity(project, "idle")
@@ -352,7 +333,6 @@ def test_send_interrupt_stops_the_current_turn_and_then_delivers(run):
     assert [e for e in events(project) if e["type"] == "interrupt" and e["agent"] == "coder"]
 
 
-@pytest.mark.todo("message injection")
 def test_without_hooks_quiet_output_means_idle_and_the_echoed_header_is_the_ack(live_project, session_image):
     document = spec(agents={"coder": agent(
         harness="custom", image=session_image, env={"FAKE_TUI": "cat"},

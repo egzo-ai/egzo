@@ -89,10 +89,50 @@ func (s *store) since(seq int, agent string) ([]Event, <-chan struct{}) {
 	return out, s.wake
 }
 
+// all returns the whole log without copying it: the log only ever grows, so what was returned
+// stays valid.
 func (s *store) all() []Event {
-	events, _ := s.since(0, "")
-	return events
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.events[:len(s.events):len(s.events)]
 }
+
+// activity is what an agent is doing: starting, idle, busy or blocked. It is the last activity event.
+func (s *store) activity(agent string) string {
+	events := s.all()
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type == "activity" && events[i].Agent == agent {
+			return events[i].Text
+		}
+	}
+	return ""
+}
+
+// interruptPending reports whether an interrupt was requested for an agent and not yet handed over.
+func (s *store) interruptPending(agent string) bool {
+	events := s.all()
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Agent != agent {
+			continue
+		}
+		switch events[i].Type {
+		case "interrupted":
+			return false
+		case "interrupt":
+			return true
+		}
+	}
+	return false
+}
+
+// Message states: queued until the session holder claims it, delivering while it waits for the
+// harness to acknowledge it, then delivered, or unconfirmed when no acknowledgement came in time.
+const (
+	messageQueued      = "queued"
+	messageDelivering  = "delivering"
+	messageDelivered   = "delivered"
+	messageUnconfirmed = "unconfirmed"
+)
 
 // Message is a queued message and its fate, derived from the log.
 type Message struct {
@@ -101,26 +141,65 @@ type Message struct {
 	From      string    `json:"from"`
 	Text      string    `json:"text"`
 	Time      time.Time `json:"time"`
+	State     string    `json:"state"`
 	Delivered bool      `json:"delivered"`
+	Deadline  time.Time `json:"-"`
 }
 
-// pending lists the undelivered messages for an agent, oldest first.
-func (s *store) pending(agent string) []Message {
-	delivered := map[string]bool{}
-	var queued []Message
+// messages lists every message addressed to an agent with its state, oldest first.
+func (s *store) messages(agent string) []Message {
+	byID := map[string]*Message{}
+	var order []string
 	for _, event := range s.all() {
 		switch event.Type {
 		case "message":
 			if event.Agent == agent {
-				queued = append(queued, Message{ID: event.ID, To: event.Agent, From: event.Actor, Text: event.Text, Time: event.Time})
+				byID[event.ID] = &Message{ID: event.ID, To: event.Agent, From: event.Actor, Text: event.Text, Time: event.Time, State: messageQueued}
+				order = append(order, event.ID)
 			}
-		case "delivered":
-			delivered[event.ID] = true
+		case messageDelivering, messageDelivered, messageUnconfirmed:
+			if message := byID[event.ID]; message != nil {
+				message.State = event.Type
+				message.Delivered = event.Type == messageDelivered
+				if event.Type == messageDelivering {
+					var data struct {
+						DeadlineMs int64 `json:"deadline_ms"`
+					}
+					if json.Unmarshal(event.Data, &data) == nil && data.DeadlineMs > 0 {
+						message.Deadline = time.UnixMilli(data.DeadlineMs)
+					}
+				}
+			}
 		}
 	}
+	out := make([]Message, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out
+}
+
+func (s *store) withState(agent, state string) []Message {
 	var out []Message
-	for _, message := range queued {
-		if !delivered[message.ID] {
+	for _, message := range s.messages(agent) {
+		if message.State == state {
+			out = append(out, message)
+		}
+	}
+	return out
+}
+
+// pending lists the messages still waiting to be handed over, oldest first.
+func (s *store) pending(agent string) []Message { return s.withState(agent, messageQueued) }
+
+// outstanding lists the messages handed over and waiting for the harness to acknowledge them.
+func (s *store) outstanding(agent string) []Message { return s.withState(agent, messageDelivering) }
+
+// unfinished lists the messages that have not reached a final state.
+func (s *store) unfinished(agent string) []Message {
+	var out []Message
+	for _, message := range s.messages(agent) {
+		if message.State == messageQueued || message.State == messageDelivering {
 			out = append(out, message)
 		}
 	}
@@ -159,18 +238,29 @@ func (s *store) questions() []Question {
 	return out
 }
 
-// AgentStatus is the latest status an agent reported.
+// AgentStatus is the latest status an agent reported and what it is doing.
 type AgentStatus struct {
-	Agent   string    `json:"agent"`
-	Status  string    `json:"status"`
-	Updated time.Time `json:"updated"`
+	Agent    string    `json:"agent"`
+	Status   string    `json:"status"`
+	Activity string    `json:"activity,omitempty"`
+	Updated  time.Time `json:"updated"`
 }
 
 func (s *store) statuses() []AgentStatus {
 	latest := map[string]AgentStatus{}
 	for _, event := range s.all() {
-		if event.Type == "status" {
-			latest[event.Agent] = AgentStatus{Agent: event.Agent, Status: event.Text, Updated: event.Time}
+		switch event.Type {
+		case "status":
+			entry := latest[event.Agent]
+			entry.Agent, entry.Status, entry.Updated = event.Agent, event.Text, event.Time
+			latest[event.Agent] = entry
+		case "activity":
+			entry := latest[event.Agent]
+			entry.Agent, entry.Activity = event.Agent, event.Text
+			if entry.Updated.Before(event.Time) {
+				entry.Updated = event.Time
+			}
+			latest[event.Agent] = entry
 		}
 	}
 	out := make([]AgentStatus, 0, len(latest))

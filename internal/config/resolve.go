@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Resolved is the fully resolved project: what `egzo config` prints.
@@ -32,6 +33,49 @@ type ResolvedAgent struct {
 	Permissions string            `yaml:"permissions"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	DependsOn   []string          `yaml:"depends_on,omitempty"`
+	Inject      ResolvedInject    `yaml:"inject"`
+}
+
+// ResolvedInject is how messages reach the agent's terminal, with defaults applied.
+type ResolvedInject struct {
+	HumanQuiet string `yaml:"human_quiet"`
+	AckTimeout string `yaml:"ack_timeout"`
+	IdleSignal string `yaml:"idle_signal"`
+	Quiescence string `yaml:"quiescence"`
+}
+
+// harnessesWithHooks report their own state through hooks; the others are watched by their output.
+var harnessesWithHooks = map[string]bool{"claude-code": true, "opencode": true}
+
+func resolveInject(name string, agent Agent, p *problems) ResolvedInject {
+	inject := ResolvedInject{HumanQuiet: "30s", AckTimeout: "60s", IdleSignal: "quiescence", Quiescence: "5s"}
+	if harnessesWithHooks[agent.Harness] {
+		inject.IdleSignal = "hook"
+	}
+	if agent.Inject == nil {
+		return inject
+	}
+	duration := func(key, value string, target *string) {
+		if value == "" {
+			return
+		}
+		if parsed, err := time.ParseDuration(value); err != nil || parsed <= 0 {
+			p.addf("agent %q: inject.%s %q is not a positive duration like 30s or 2m", name, key, value)
+			return
+		}
+		*target = value
+	}
+	duration("human_quiet", agent.Inject.HumanQuiet, &inject.HumanQuiet)
+	duration("ack_timeout", agent.Inject.AckTimeout, &inject.AckTimeout)
+	duration("quiescence", agent.Inject.Quiescence, &inject.Quiescence)
+	switch agent.Inject.IdleSignal {
+	case "":
+	case "hook", "quiescence":
+		inject.IdleSignal = agent.Inject.IdleSignal
+	default:
+		p.addf("agent %q: inject.idle_signal %q is not hook or quiescence", name, agent.Inject.IdleSignal)
+	}
+	return inject
 }
 
 // Resolve validates the file and returns the resolved project plus non-fatal warnings. dir is the
@@ -149,6 +193,7 @@ func resolveAgent(
 		Permissions: permissions,
 		Env:         agent.Env,
 		DependsOn:   agent.DependsOn,
+		Inject:      resolveInject(name, agent, p),
 	}, warnings
 }
 

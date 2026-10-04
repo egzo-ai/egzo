@@ -258,7 +258,7 @@ func TestHooksBecomeEventsWithTheirPayload(t *testing.T) {
 		t.Fatalf("status %d", response.StatusCode)
 	}
 	events := r.srv.events.all()
-	if len(events) != 1 || events[0].Type != "hook" || events[0].Text != "Stop" || !strings.Contains(string(events[0].Data), "done") {
+	if len(events) < 1 || events[0].Type != "hook" || events[0].Text != "Stop" || !strings.Contains(string(events[0].Data), "done") {
 		t.Errorf("events = %+v", events)
 	}
 	bad := r.asAgent("coder", "POST", "/v1/hooks/..%2Fx", `{}`)

@@ -8,6 +8,12 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
+// noDetach replaces the engine's own detach sequence (Ctrl-P Ctrl-Q) on terminals, which would
+// otherwise swallow those keys and end the session of a TUI that uses them. It is a sequence of
+// three NUL bytes: nobody types it, and a lone NUL still passes through. Detaching is the job of the
+// session client, with its own configurable key.
+const noDetach = "ctrl-@,ctrl-@,ctrl-@"
+
 // Stream describes how a command's input and output are wired to the caller.
 type Stream struct {
 	In  io.Reader
@@ -28,6 +34,7 @@ func (c *Client) ExecStream(ctx context.Context, containerID string, command []s
 		AttachStdout: true,
 		AttachStderr: !s.TTY,
 		Tty:          s.TTY,
+		DetachKeys:   noDetach,
 	})
 	if err != nil {
 		return 1, err

@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -82,8 +83,13 @@ func run(ctx context.Context, c *engine.Client, desired Desired, action Action) 
 	case "create volume":
 		for _, spec := range desired.Volumes {
 			if spec.Name == action.Name {
-				_, err := c.API.VolumeCreate(ctx, volume.CreateOptions{Name: spec.Name, Labels: spec.Identity.Labels()})
-				return err
+				if _, err := c.API.VolumeCreate(ctx, volume.CreateOptions{Name: spec.Name, Labels: spec.Identity.Labels()}); err != nil {
+					return err
+				}
+				if spec.Owner != "" {
+					return chownVolume(ctx, c, desired.PrepImage, spec)
+				}
+				return nil
 			}
 		}
 	case "create container":
@@ -115,6 +121,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) 
 	config := &container.Config{
 		Image:      spec.Image,
 		Cmd:        strslice.StrSlice(spec.Cmd),
+		User:       spec.User,
 		Env:        spec.Env,
 		Labels:     spec.Identity.Labels(),
 		WorkingDir: spec.WorkingDir,
@@ -151,7 +158,37 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec) 
 	if err := c.API.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return err
 	}
-	return waitHealthy(ctx, c, created.ID)
+	if err := waitHealthy(ctx, c, created.ID); err != nil {
+		return err
+	}
+	if spec.Identity.Kind == kindAgent {
+		return settle(ctx, c, created.ID)
+	}
+	return nil
+}
+
+// settleTime is how long an agent must stay up before `up` calls it converged: a harness that
+// cannot start (a bad image, a crash on its first read of the configuration) dies within moments,
+// and `up` should say so instead of reporting a project whose agent is already gone.
+const settleTime = 600 * time.Millisecond
+
+func settle(ctx context.Context, c *engine.Client, id string) error {
+	deadline := time.Now().Add(settleTime)
+	for time.Now().Before(deadline) {
+		inspected, err := c.API.ContainerInspect(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !inspected.State.Running && !inspected.State.Restarting {
+			return fmt.Errorf("container exited with code %d\n%s", inspected.State.ExitCode, tail(ctx, c, id))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return nil
 }
 
 // healthConfig probes fast until the first success so startup is not paced by the interval, then
@@ -220,7 +257,9 @@ func ensureImage(ctx context.Context, c *engine.Client, ref string) error {
 	}
 	reader, err := c.API.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
-		return fmt.Errorf("image %s is not available locally and could not be pulled (set EGZO_IMAGE to use another image): %w", ref, err)
+		return fmt.Errorf("image %s is not available locally and could not be pulled: %w\n"+
+			"(sidecar images come from EGZO_IMAGE; a harness image comes from EGZO_HARNESS_PREFIX, which replaces "+
+			"%q, or from the agent's image: key)", ref, err, DefaultHarnessPrefix)
 	}
 	defer reader.Close()
 	_, err = io.Copy(io.Discard, reader)
@@ -258,14 +297,39 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool
 	return nil
 }
 
-// WriteStatus prints a project's containers. reported holds what each agent last said about itself.
-func WriteStatus(observed Observed, reported map[string]string, out io.Writer) {
+// Report is what an agent last said about itself and what it is doing, as the control sidecar knows it.
+type Report struct {
+	Status   string
+	Activity string
+}
+
+// WriteStatus prints a project's containers. reported holds what the control sidecar knows of each agent.
+func WriteStatus(observed Observed, reported map[string]Report, out io.Writer) {
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tSTATUS")
+	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tSTATUS")
 	for _, r := range observed.Resources {
-		if r.Type == "container" {
-			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, reported[r.Service])
+		if r.Type != "container" {
+			continue
 		}
+		report := reported[r.Service]
+		activity := ""
+		if r.Kind == kindAgent {
+			activity = report.Activity
+			switch {
+			case r.State != "running":
+				activity = "stopped"
+			case activity == "":
+				activity = "starting"
+			}
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, activity, report.Status)
 	}
 	table.Flush()
+}
+
+// demux splits an engine log stream into its text, stdout and stderr together.
+func demux(reader io.Reader) string {
+	var out strings.Builder
+	_, _ = stdcopy.StdCopy(&out, &out, reader)
+	return out.String()
 }

@@ -68,7 +68,6 @@ def state_of(project, service):
 # --- P0 rows ------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("attach")
 def test_attach_shows_the_programs_output_and_passes_typed_input(session):
     session("cat")
     client = attach(session)
@@ -78,7 +77,6 @@ def test_attach_shows_the_programs_output_and_passes_typed_input(session):
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_every_key_byte_passes_through_unchanged(session):
     """Shift+Enter (ESC CR), arrows, Ctrl keys, Alt keys, Tab, Backspace: raw bytes both ways."""
     session("cat")
@@ -95,7 +93,6 @@ def test_every_key_byte_passes_through_unchanged(session):
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_a_large_bracketed_paste_arrives_intact(session):
     session("cat")
     client = attach(session)
@@ -114,17 +111,16 @@ def test_a_large_bracketed_paste_arrives_intact(session):
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_the_window_size_reaches_the_program_and_follows_resizes(session):
     session("resize")
     client = attach(session, dimensions=(30, 100))
-    client.expect(rb"READY size:30 100")
+    client.expect(rb"READY size:24 80")  # what it printed before anyone attached
+    client.expect(rb"size:30 100")  # then the size of this terminal
     client.setwinsize(45, 160)
     client.expect(rb"size:45 160")
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_the_program_gets_a_truecolor_terminal(session):
     session("env")
     client = attach(session)
@@ -132,7 +128,6 @@ def test_the_program_gets_a_truecolor_terminal(session):
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_the_session_adds_nothing_to_the_screen(session):
     """No alternate screen, no status bar, no clear: the user's own scrollback stays theirs."""
     session("cat")
@@ -147,7 +142,6 @@ def test_the_session_adds_nothing_to_the_screen(session):
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_control_c_and_control_d_reach_the_program(session):
     session("sigint")
     client = attach(session)
@@ -166,7 +160,6 @@ def test_control_c_and_control_d_reach_the_program(session):
     detach(client)
 
 
-@pytest.mark.todo("attach")
 def test_escape_sequences_the_terminal_understands_pass_through_untouched(session):
     session("emit")
     client = attach(session)
@@ -181,7 +174,6 @@ def test_escape_sequences_the_terminal_understands_pass_through_untouched(sessio
 # --- detach, reattach, several clients ------------------------------------------------------------
 
 
-@pytest.mark.todo("attach")
 def test_the_detach_key_leaves_the_program_running_and_exits_zero(session):
     session("cat")
     client = attach(session)
@@ -190,7 +182,6 @@ def test_the_detach_key_leaves_the_program_running_and_exits_zero(session):
     assert state_of(session.project, "coder") == "running"
 
 
-@pytest.mark.todo("attach")
 def test_a_custom_detach_key_is_honoured(session):
     session("cat")
     client = attach(session, "--detach-keys", "ctrl-q")
@@ -203,7 +194,6 @@ def test_a_custom_detach_key_is_honoured(session):
     assert client.exitstatus == 0
 
 
-@pytest.mark.todo("attach")
 def test_reattaching_repaints_the_screen(session):
     session("draw")
     first = attach(session, dimensions=(24, 80))
@@ -214,7 +204,6 @@ def test_reattaching_repaints_the_screen(session):
     detach(second)
 
 
-@pytest.mark.todo("attach")
 def test_two_clients_see_the_same_session_and_both_can_type(session):
     session("cat")
     one, two = attach(session), attach(session)
@@ -229,7 +218,6 @@ def test_two_clients_see_the_same_session_and_both_can_type(session):
     detach(two)
 
 
-@pytest.mark.todo("attach")
 def test_a_read_only_observer_sees_everything_and_types_nothing(session):
     session("cat")
     writer, observer = attach(session), attach(session, "--read-only")
@@ -244,7 +232,6 @@ def test_a_read_only_observer_sees_everything_and_types_nothing(session):
     detach(writer)
 
 
-@pytest.mark.todo("attach")
 def test_an_agent_whose_program_exits_at_once_fails_up_with_its_exit_code(live_project, session_image):
     live_project.write(spec(agents={"coder": tui(session_image, "exit")}))
     result = live_project.run("up", timeout=300)
@@ -252,12 +239,11 @@ def test_an_agent_whose_program_exits_at_once_fails_up_with_its_exit_code(live_p
     assert "code 3" in result.stderr and "bye" in result.stderr
 
 
-@pytest.mark.todo("attach")
 def test_when_the_program_exits_attach_exits_with_its_code(session):
     session("lines")
     client = attach(session)
     client.expect(b"READY")
-    session.project.run("exec", "coder", "--", "sh", "-c", "kill -9 $(pgrep -f fake-tui | head -1)")
+    session.project.run("exec", "coder", "--", "sh", "-c", "pkill -9 -f '^/bin/sh /usr/local/bin/fake-tui'")
     client.expect(pexpect.EOF, timeout=30)
     client.close()
     assert state_of(session.project, "coder") == "exited"
@@ -266,7 +252,6 @@ def test_when_the_program_exits_attach_exits_with_its_code(session):
 # --- refusals --------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("attach")
 def test_attach_needs_a_terminal(session):
     session("cat")
     result = session.project.run("attach", "coder", input="")
@@ -274,7 +259,6 @@ def test_attach_needs_a_terminal(session):
     assert "terminal" in result.stderr
 
 
-@pytest.mark.todo("attach")
 def test_attach_to_an_unknown_agent_names_the_known_ones(session):
     session("cat")
     client = attach(session, agent_name="nobody")
@@ -284,7 +268,6 @@ def test_attach_to_an_unknown_agent_names_the_known_ones(session):
     assert b"nobody" in client.before and b"coder" in client.before
 
 
-@pytest.mark.todo("attach")
 def test_attach_to_an_agent_without_a_session_explains_what_is_missing(live_project, engine, agent_image, egzo):
     live_project.write(spec(agents={"coder": agent(harness="custom", image=agent_image)}))
     assert live_project.run("up", timeout=300).returncode == 0

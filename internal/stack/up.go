@@ -19,6 +19,21 @@ type Options struct {
 	DryRun   bool
 	Recreate bool
 	Image    string
+	// HarnessPrefix overrides where harness images are pulled from (EGZO_HARNESS_PREFIX).
+	HarnessPrefix string
+}
+
+// agentUser is who agents run as: the invoking user, so files they write on the host are theirs.
+// Podman maps users itself (rootless container root is the invoking user), so it keeps the image's.
+func agentUser(c *engine.Client) string {
+	if c.Podman || os.Getuid() < 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+}
+
+func (o Options) inputs(c *engine.Client, tokens map[string]string) Inputs {
+	return Inputs{Image: o.Image, Tokens: tokens, User: agentUser(c), HarnessPrefix: o.HarnessPrefix}
 }
 
 // Up converges a project: control first, because it hands out the per-agent tokens everything
@@ -50,7 +65,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		}
 	}
 
-	desired, err := Desire(project, dir, Inputs{Image: opts.Image, Tokens: tokens})
+	desired, err := Desire(project, dir, opts.inputs(c, tokens))
 	if err != nil {
 		return err
 	}
@@ -105,7 +120,7 @@ func agentTokens(
 			}
 			return tokens, observed, nil
 		}
-		bootstrap, err := Desire(project, dir, Inputs{Image: opts.Image})
+		bootstrap, err := Desire(project, dir, opts.inputs(c, nil))
 		if err != nil {
 			return nil, observed, err
 		}

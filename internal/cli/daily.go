@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/docker/docker/api/types/container"
@@ -13,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
@@ -211,4 +214,71 @@ func newProxyLogCommand(opts *options) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow the audit trail")
 	return cmd
+}
+
+func newAttachCommand(opts *options) *cobra.Command {
+	var readOnly bool
+	var detachKeys string
+	cmd := &cobra.Command{
+		Use:   "attach AGENT",
+		Short: "Attach to an agent's harness TUI",
+		Long: "Attach to the native TUI of an agent's harness. Nothing is drawn around it: your terminal shows\n" +
+			"exactly what the harness draws, and keeps its own scrollback. Detach with Ctrl-] (--detach-keys).\n" +
+			"Several people can attach at once; --read-only watches without typing.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+				return fmt.Errorf("attach needs a terminal on both stdin and stdout")
+			}
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			s, err := openSession(ctx, opts)
+			if err != nil {
+				return err
+			}
+			defer s.close()
+			if _, ok := s.Resolved.Agents[args[0]]; !ok {
+				return fmt.Errorf("no agent %q in egzo.yaml (agents: %s)", args[0], strings.Join(agentNames(s.Resolved.Agents), ", "))
+			}
+			target, err := s.service(args[0])
+			if err != nil {
+				return err
+			}
+			if target.State != "running" {
+				return fmt.Errorf("agent %q is %s: start it with `egzo start %s` or `egzo up`", args[0], target.State, args[0])
+			}
+			command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys}
+			if readOnly {
+				command = append(command, "--read-only")
+			}
+			err = runIn(ctx, s.engine, target.ID, command)
+			if code, isExit := IsExitError(err); isExit && (code == 126 || code == 127) {
+				return fmt.Errorf("agent %q has no session to attach to: its image does not contain the egzo session holder "+
+					"(egzo harness images do; for a custom image run your program with `egzo agent run -- PROGRAM`)", args[0])
+			}
+			if err != nil && strings.Contains(err.Error(), "executable file not found") {
+				return fmt.Errorf("agent %q has no session to attach to: its image does not contain egzo (the session holder)", args[0])
+			}
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&readOnly, "read-only", false, "watch the session without typing into it")
+	cmd.Flags().StringVar(&detachKeys, "detach-keys", envOr("EGZO_DETACH_KEYS", "ctrl-]"), "the key that detaches (ctrl-<letter>, ctrl-], ctrl-\\, ctrl-^, ctrl-_)")
+	return cmd
+}
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func agentNames(agents map[string]config.ResolvedAgent) []string {
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

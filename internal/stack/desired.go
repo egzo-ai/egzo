@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/harness"
 	"github.com/egzo-ai/egzo/internal/version"
 )
 
@@ -28,6 +30,7 @@ const (
 	caPrivateDir   = "/ca-private"
 	caPublicDir    = "/ca-pub"
 	caAgentDir     = "/etc/egzo/ca"
+	promptPath     = "/etc/egzo/prompt.md"
 	proxyPort      = "3128"
 
 	kindControl   = "control"
@@ -43,7 +46,10 @@ type NetworkSpec struct {
 }
 
 type VolumeSpec struct {
-	Name     string
+	Name string
+	// Owner is "uid:gid": a new volume is handed to that user before anything uses it, because the
+	// engine creates volumes owned by root and agents do not run as root.
+	Owner    string
 	Identity engine.Identity `json:"-"`
 }
 
@@ -59,6 +65,7 @@ type ContainerSpec struct {
 	Name        string
 	Image       string
 	Cmd         []string
+	User        string
 	Env         []string
 	Mounts      []MountSpec
 	Tmpfs       map[string]string
@@ -92,6 +99,8 @@ type Desired struct {
 	Attachments []Attachment
 	Control     string
 	Proxy       string // empty when the project has no agents
+	// PrepImage runs the short-lived prep containers (git, volume ownership).
+	PrepImage string
 }
 
 // Inputs are what Desire needs besides the resolved project.
@@ -100,7 +109,15 @@ type Inputs struct {
 	Image string
 	// Tokens maps each agent to the token that identifies it to the proxy.
 	Tokens map[string]string
+	// User is the "uid:gid" agents run as, so what they write on the host is the invoking user's.
+	// Empty leaves it to the image (Podman maps users itself).
+	User string
+	// HarnessPrefix is the start of a harness image's name, ending in "egzo-harness-".
+	HarnessPrefix string
 }
+
+// DefaultHarnessPrefix is where harness images are published.
+const DefaultHarnessPrefix = "ghcr.io/egzo-ai/egzo-harness-"
 
 // Desire computes the desired resources of a project.
 func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
@@ -108,6 +125,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		return engine.Identity{Project: project.Name, Service: service, Kind: kind, ProjectDir: dir}
 	}
 	var desired Desired
+	desired.PrepImage = in.Image
 
 	controlNetwork := NetworkSpec{Name: project.Name + "_control", Internal: true, Identity: identity(controlService, kindControl)}
 	controlVolume := VolumeSpec{Name: project.Name + "_control", Identity: identity(controlService, kindControl)}
@@ -130,7 +148,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 	volumes := []VolumeSpec{controlVolume}
 	for _, name := range workspaceNames {
 		if project.Workspaces[name].Git == nil {
-			volumes = append(volumes, VolumeSpec{Name: project.Name + "_" + name, Identity: identity(name, kindWorkspace)})
+			volumes = append(volumes, VolumeSpec{Name: project.Name + "_" + name, Owner: in.User, Identity: identity(name, kindWorkspace)})
 		}
 	}
 
@@ -171,12 +189,15 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 
 	for _, name := range agentNames {
 		network := NetworkSpec{Name: project.Name + "_" + name, Internal: true, Identity: identity(name, kindAgent)}
-		spec, err := agentContainer(project, name, project.Agents[name], network.Name, in.Tokens[name], identity(name, kindAgent))
+		spec, err := agentContainer(project, dir, name, project.Agents[name], network.Name, in, identity(name, kindAgent))
 		if err != nil {
 			return desired, err
 		}
 		networks = append(networks, network)
 		containers = append(containers, spec)
+		if hasHome(project.Agents[name]) {
+			volumes = append(volumes, VolumeSpec{Name: homeVolume(project.Name, name), Identity: identity(name, kindAgent)})
+		}
 	}
 
 	for i := range networks {
@@ -192,12 +213,22 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 	return desired, nil
 }
 
+// homeDir is where a harness image keeps its home. It is a volume, so the harness's own state, such
+// as conversations to resume, outlives recreating the agent.
+const homeDir = "/home/agent"
+
+func hasHome(agent config.ResolvedAgent) bool { return agent.Harness != "custom" }
+
+func homeVolume(project, agent string) string { return project + "_" + agent + "-home" }
+
 func agentContainer(
-	project *config.Resolved, name string, agent config.ResolvedAgent, network, token string, identity engine.Identity,
+	project *config.Resolved, dir, name string, agent config.ResolvedAgent, network string, in Inputs, identity engine.Identity,
 ) (ContainerSpec, error) {
+	token := in.Tokens[name]
 	spec := ContainerSpec{
 		Name:       project.Name + "-" + name + "-1",
-		Image:      agentImage(agent),
+		Image:      agentImage(agent, in.HarnessPrefix),
+		User:       in.User,
 		Network:    network,
 		WorkingDir: agent.Workdir,
 		Harness:    agent.Harness,
@@ -226,8 +257,33 @@ func agentContainer(
 		"EGZO_CONTROL_URL":    "http://control:7777",
 		"EGZO_TOKEN":          token,
 	}
+	env["EGZO_HARNESS"] = agent.Harness
+	env["EGZO_PERMISSIONS"] = agent.Permissions
+	env["EGZO_HUMAN_QUIET"] = agent.Inject.HumanQuiet
+	env["EGZO_ACK_TIMEOUT"] = agent.Inject.AckTimeout
+	env["EGZO_IDLE_SIGNAL"] = agent.Inject.IdleSignal
+	env["EGZO_QUIESCENCE"] = agent.Inject.Quiescence
+	if agent.Model != "" {
+		env["EGZO_MODEL"] = agent.Model
+	}
+	if integration, ok := harness.For(agent.Harness); ok {
+		for key, value := range integration.ContainerEnv(agent.Permissions != "default") {
+			env[key] = value
+		}
+	}
 	for key, value := range agent.Env {
 		env[key] = value
+	}
+	if agent.Prompt != "" {
+		prompt := agent.Prompt
+		if !filepath.IsAbs(prompt) {
+			prompt = filepath.Join(dir, prompt)
+		}
+		spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: filepath.Clean(prompt), Target: promptPath, ReadOnly: true})
+		env["EGZO_PROMPT_FILE"] = promptPath
+	}
+	if hasHome(agent) {
+		spec.Mounts = append(spec.Mounts, MountSpec{Source: homeVolume(project.Name, name), Target: homeDir})
 	}
 	for _, key := range sortedKeys(env) {
 		spec.Env = append(spec.Env, key+"="+env[key])
@@ -261,6 +317,16 @@ func agentContainer(
 		spec.Memory = memory
 	}
 
+	if len(workspaceNames) > 0 {
+		var paths []string
+		for _, mount := range agent.Workspaces {
+			paths = append(paths, mount.Mount)
+		}
+		env2 := "EGZO_WORKSPACES=" + strings.Join(paths, ":")
+		spec.Env = append(spec.Env, env2)
+		sort.Strings(spec.Env)
+	}
+
 	spec.Identity.Extra = map[string]string{
 		engine.LabelAgentHarness:    agent.Harness,
 		engine.LabelAgentWorkspaces: strings.Join(workspaceNames, ","),
@@ -268,11 +334,14 @@ func agentContainer(
 	return spec, nil
 }
 
-func agentImage(agent config.ResolvedAgent) string {
+func agentImage(agent config.ResolvedAgent, prefix string) string {
 	if agent.Image != "" {
 		return agent.Image
 	}
-	return "ghcr.io/egzo-ai/egzo-harness-" + agent.Harness + ":" + version.Version
+	if prefix == "" {
+		prefix = DefaultHarnessPrefix
+	}
+	return prefix + agent.Harness + ":" + version.Version
 }
 
 func sortedKeys[V any](m map[string]V) []string {

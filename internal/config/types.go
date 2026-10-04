@@ -124,6 +124,15 @@ type Agent struct {
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	DependsOn   []string          `yaml:"depends_on,omitempty"`
+	Inject      *AgentInject          `yaml:"inject,omitempty"`
+}
+
+// AgentInject tunes how queued messages are typed into the agent's terminal.
+type AgentInject struct {
+	HumanQuiet string `yaml:"human_quiet,omitempty"`
+	AckTimeout string `yaml:"ack_timeout,omitempty"`
+	IdleSignal string `yaml:"idle_signal,omitempty"`
+	Quiescence string `yaml:"quiescence,omitempty"`
 }
 
 type Resources struct {
