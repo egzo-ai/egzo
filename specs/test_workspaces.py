@@ -63,6 +63,35 @@ def test_an_inline_host_path_is_mounted_by_its_basename(project):
     assert mount["mode"] == "rw"
 
 
+def test_a_relative_host_path_is_relative_to_the_project_directory_when_run_from_a_subdirectory(project):
+    docs = project.mkdir("docs")
+    project.mkdir("src/deep/docs")  # a ./docs next to the shell must not be mistaken for the project's
+    project.write(spec(agents={"coder": agent(workspaces=["./docs"])}))
+    result = project.egzo.run("config", cwd=project.root / "src" / "deep")
+    assert result.returncode == 0, result.stderr
+    assert mounts(result.yaml(), "coder")["/workspace/docs"]["host_path"] == str(docs)
+    assert result.yaml()["name"] == project.name
+
+
+def test_a_relative_host_path_is_relative_to_the_project_directory_when_run_from_outside_it(project, tmp_path):
+    docs = project.mkdir("docs")
+    outside = tmp_path / "elsewhere"
+    (outside / "docs").mkdir(parents=True)  # again, not the project's ./docs
+    project.write(spec(agents={"coder": agent(workspaces=["./docs"])}))
+    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=outside)
+    assert result.returncode == 0, result.stderr
+    assert mounts(result.yaml(), "coder")["/workspace/docs"]["host_path"] == str(docs)
+    assert result.yaml()["name"] == project.name
+
+
+def test_a_git_workspace_path_is_relative_to_the_project_directory_when_run_from_outside_it(project, tmp_path):
+    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": "./clones/repo"}})
+    project.write(document)
+    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert Path(result.yaml()["workspaces"]["repo"]["path"]) == project.root / "clones" / "repo"
+
+
 def test_ro_makes_a_host_path_read_only(project):
     project.mkdir("docs")
     resolved = project.resolved(spec(agents={"coder": agent(workspaces=["./docs:ro"])}))

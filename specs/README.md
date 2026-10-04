@@ -1,7 +1,7 @@
 # egzo specs
 
 The executable specification of egzo. These are black-box tests that drive the real `egzo`
-binary. Running the suite tells you what is done, what is still todo and what is broken, so no
+binary. Running the suite tells you what is done and what is not, so no
 other document has to be trusted for that.
 
 ## Running
@@ -31,7 +31,7 @@ named, `select_platform.py` picks the first one this machine can be, in the orde
 specs with what to set up.
 
 Specs that use a feature the platform lacks, which today is only gVisor (`runtime: runsc`), are marked to
-fail there (strict xfail), so they are todo on `docker`, `podman` and `podman-rootless` and done on
+fail there (strict xfail), so they show as unsupported on `docker`, `podman` and `podman-rootless` and done on
 `docker-gvisor`; one spec requires that a project asking for gVisor cannot start without it. Nothing is
 probed or skipped: egzo is asked, and the outcome is the result. The specs have so far only run on one
 developer machine: see `known-issues/reference-platform-ci-matrix.md`.
@@ -44,19 +44,20 @@ Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootst
 | Outcome | Column | Meaning |
 |---|---|---|
 | pass | done | the behaviour exists and works |
-| xfail (`@pytest.mark.todo`) | todo | specified, not implemented yet |
-| fail | broken | implemented (or expected to be) and wrong |
-| strict XPASS | promote | a todo spec passes now: remove its marker |
+| fail | broken | the spec fails: the feature is not built yet, or it is wrong |
+| xfail (strict) | unsupported | this reference platform cannot do it (gVisor on a platform without gVisor) |
 | skip | skipped | does not apply to this platform (for example a spec about Podman on Docker) |
 
-A `todo` spec is a strict xfail, so it cannot rot: when the feature lands the spec starts passing,
-the run fails with `promote`, and the author turns it into a regular spec. The summary at the end of
-every run counts each outcome per area (one area per `test_<area>.py`).
+**The failing specs are the todo list.** A spec for a feature that is not built fails; there is no marker
+that turns it green, and no `xfail` or `skip` for "not implemented", "not decided" or "blocked" (a blocked
+spec fails and says what it waits for). `xfail` is only for platforms, and is strict, so a pass on a
+platform said to lack the feature is reported as broken too. The summary at the end of every run counts each
+outcome per area (one area per `test_<area>.py`).
 
 ## Writing specs
 
-- Write a spec before the feature, mark it `@pytest.mark.todo`, and make its assertions the exact
-  behaviour you want. A todo spec must fail for the right reason, not because it is half written.
+- Write a spec before the feature and make its assertions the exact behaviour you want. It must fail for
+  the right reason, not because it is half written. Leave it failing until the feature lands.
 - A "valid input is accepted" spec only means something next to the rejection specs that pin the
   rules down. A binary that validates nothing passes it.
 - Use `support.py` builders (`spec`, `agent`, `anthropic_profile`, ...) so a spec reads as the YAML

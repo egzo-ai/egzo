@@ -233,8 +233,8 @@ control:                       # orchestrator MCP + status sidecar (always prese
   - Agent -> human: MCP `egzo` tools (`say`, `status`, `ask_user`, `handoff`) plus the Stop hook's
     final assistant text.
   - Attach (CLI and web UI) = `engine exec -it` into the Session backend.
-- Specs: pytest in `specs/`; `@pytest.mark.todo` = xfail(strict=True), so one run shows done
-  (pass) / todo (xfail) / broken (fail); an unexpectedly passing todo fails the run.
+- Specs: pytest in `specs/`. A spec for an unbuilt feature fails (the failing specs are the todo list); strict
+  xfail is only for platforms that lack a feature.
 - Reuse from v1 (/home/cedric/egzo): harness adapter Render logic (pure, golden-tested), proxy/gate
   lessons (todos/0002), Claude onboarding/trust seeding in ~/.claude.json.
 
@@ -432,15 +432,15 @@ Claude Code `SessionStart` arrives before its first-run dialogs are answered.
 
 ## specs/ (pytest)
 
-The suite is the status report: `specs/README.md` explains the done / todo / broken / promote model.
+The suite is the status report: `specs/README.md` explains the done / broken / unsupported model.
 A run tests egzo on one reference platform (docker, docker-gvisor, podman, podman-rootless: what the host is like, not
 what egzo is asked), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
 per platform (known-issues/reference-platform-ci-matrix.md). It builds its own sidecar and agent images, and needs the internet for the specs that
 talk to real hosts (they fail when offline) and a registry for the image-name spec (`EGZO_SPEC_REGISTRY`).
 
     specs/
-      spec_status.py       # plugin: todo = strict xfail, per-area table, --spec-json
-      promote.py           # removes @todo from specs that now pass
+      spec_status.py       # plugin: per-area table, --spec-json
+      select_platform.py   # picks the reference platform on a developer machine
       conftest.py          # egzo binary, project dirs, engine matrix, images, cleanup
       support.py           # builders so specs read as the YAML they describe
       test_meta.py         # the status model itself

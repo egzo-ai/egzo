@@ -9,7 +9,7 @@ sandboxes, and attach to any of them with the real TUI you already know, Claude 
 > operator commands (`secrets`, `doctor`, `diff`, `ca rotate`, `proxy rules`) are built. Not yet: pi, the
 > Podman and gVisor spec runs, and one decision about Claude Code's first-run dialog
 > (`known-issues/claude-code-auto-mode-offer.md`). The executable spec in `specs/` is the status report:
-> a passing test is done, an expected failure is todo, a failing test is broken. Run it with
+> a passing test is done and a failing test is not done yet or broken (the failing specs are the todo list). Run it with
 > `make specs` (it picks the platform from your machine; `ENGINE=docker` names one).
 
 ## Why

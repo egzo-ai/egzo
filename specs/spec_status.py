@@ -1,22 +1,22 @@
 """pytest plugin implementing the spec status model.
 
-The suite is the specification, so running it must answer "what is done, what is todo, what is
-broken" without reading anything else.
+The suite is the specification, so running it must answer "what is done, what is not, what does not
+apply" without reading anything else.
 
-    pass                       done     the behaviour exists and works
-    xfail  (@pytest.mark.todo) todo     specified, not implemented yet
-    fail                       broken   implemented (or expected to be) and wrong
-    strict XPASS               promote  a todo spec passes now: remove its @todo marker
+    pass                       done         the behaviour exists and works
+    fail                       broken       the spec fails: the feature is not built, or it is wrong
+    xfail                      unsupported  the reference platform cannot do it (gVisor without gVisor)
+    skip                       skipped      the spec does not apply to this platform
 
-A todo spec runs as a *strict* xfail, so it can never rot: when the feature lands, the spec starts
-passing, the run fails, and the author is forced to promote it to a regular spec.
+There is no marker for "not implemented yet": that spec fails, and the failing specs are the todo list.
+xfail is only for platforms, and strict, so a pass on a platform said to lack the feature is reported.
 """
 
 import json
 
 import pytest
 
-COLUMNS = ["done", "todo", "broken", "promote", "skipped"]
+COLUMNS = ["done", "broken", "unsupported", "skipped"]
 
 
 def pytest_addoption(parser):
@@ -26,10 +26,6 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "todo(reason=None): specified but not implemented yet; runs as a strict xfail",
-    )
-    config.addinivalue_line(
-        "markers",
         "engine: needs a container engine; runs against the one scenario chosen with --engine",
     )
     config.pluginmanager.register(SpecStatus(config), "spec-status")
@@ -37,11 +33,11 @@ def pytest_configure(config):
 
 def _classify(report):
     if report.skipped:
-        return "todo" if hasattr(report, "wasxfail") else "skipped"
+        return "unsupported" if hasattr(report, "wasxfail") else "skipped"
     if report.failed:
-        return "promote" if "XPASS(strict)" in str(report.longrepr) else "broken"
+        return "broken"
     if hasattr(report, "wasxfail"):
-        return "promote"
+        return "broken"  # passed although this platform is said to lack the feature
     return "done"
 
 
@@ -60,10 +56,6 @@ class SpecStatus:
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(self, items):
         for item in items:
-            marker = item.get_closest_marker("todo")
-            if marker is not None:
-                reason = marker.args[0] if marker.args else marker.kwargs.get("reason", "not implemented")
-                item.add_marker(pytest.mark.xfail(reason=f"todo: {reason}", strict=True))
             if "engine" in getattr(item, "fixturenames", ()):
                 item.add_marker(pytest.mark.engine)
 
@@ -91,13 +83,11 @@ class SpecStatus:
 
         terminalreporter.write_sep("=", "spec status")
         width = max(len(area) for area in areas) + 2
-        terminalreporter.write_line("area".ljust(width) + "".join(c.rjust(9) for c in COLUMNS))
+        terminalreporter.write_line("area".ljust(width) + "".join(c.rjust(13) for c in COLUMNS))
         totals = dict.fromkeys(COLUMNS, 0)
         for area in sorted(areas):
-            terminalreporter.write_line(area.ljust(width) + "".join(str(areas[area][c]).rjust(9) for c in COLUMNS))
+            terminalreporter.write_line(area.ljust(width) + "".join(str(areas[area][c]).rjust(13) for c in COLUMNS))
             for c in COLUMNS:
                 totals[c] += areas[area][c]
-        terminalreporter.write_line("total".ljust(width) + "".join(str(totals[c]).rjust(9) for c in COLUMNS))
+        terminalreporter.write_line("total".ljust(width) + "".join(str(totals[c]).rjust(13) for c in COLUMNS))
         terminalreporter.write_line(f"{totals['done']}/{sum(totals.values())} specs done")
-        if totals["promote"]:
-            terminalreporter.write_line("promote: a todo spec passes now, remove its @pytest.mark.todo marker")

@@ -8,6 +8,7 @@ import (
 // options are the global flags shared by every command.
 type options struct {
 	projectName string
+	file        string
 }
 
 // New builds the root command.
@@ -19,6 +20,9 @@ func New() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// Like Docker Compose, -f comes before the command (`egzo -f x.yaml up`): after it, -f means --follow.
+	root.TraverseChildren = true
+	root.Flags().StringVarP(&opts.file, "file", "f", "", "the project file (default: egzo.yaml in this directory or the nearest parent; or EGZO_FILE)")
 	root.PersistentFlags().StringVarP(&opts.projectName, "project-name", "p", "", "project name (default: name in egzo.yaml, else the directory name)")
 
 	root.AddCommand(

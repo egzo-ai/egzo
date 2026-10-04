@@ -158,3 +158,40 @@ func TestDoctorChecksTheProjectFileWithoutAnEngine(t *testing.T) {
 		t.Errorf("an invalid file: %v", report)
 	}
 }
+
+func TestTheProjectFileIsFoundFromASubdirectoryAndNamedWithFlagOrEnv(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "a", "b")
+	os.MkdirAll(deep, 0o755)
+	file := filepath.Join(root, "egzo.yaml")
+	os.WriteFile(file, []byte("agents: {}\n"), 0o644)
+	other := filepath.Join(t.TempDir(), "other.yaml")
+	os.WriteFile(other, []byte("agents: {}\n"), 0o644)
+
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	os.Chdir(deep)
+	got, err := projectFile(&options{})
+	if resolved, _ := filepath.EvalSymlinks(got); err != nil || resolved != mustEval(t, file) {
+		t.Errorf("from a subdirectory: %q, %v", got, err)
+	}
+	if got, _ := projectFile(&options{file: other}); got != other {
+		t.Errorf("with -f: %q", got)
+	}
+	t.Setenv("EGZO_FILE", other)
+	if got, _ := projectFile(&options{}); got != other {
+		t.Errorf("with EGZO_FILE: %q", got)
+	}
+	if got, _ := projectFile(&options{file: file}); got != file {
+		t.Errorf("-f must win over EGZO_FILE: %q", got)
+	}
+}
+
+func mustEval(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}

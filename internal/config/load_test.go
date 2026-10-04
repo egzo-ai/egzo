@@ -92,3 +92,56 @@ egress:
 		t.Errorf("custom definition = %+v", got.Def)
 	}
 }
+
+func TestFindFileSearchesTheDirectoryThenItsParents(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "src", "deep")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(root, FileName), []byte("agents: {}\n"), 0o644)
+	for _, from := range []string{root, filepath.Join(root, "src"), deep} {
+		got, err := FindFile(from)
+		if err != nil || got != filepath.Join(root, FileName) {
+			t.Errorf("FindFile(%s) = %q, %v", from, got, err)
+		}
+	}
+}
+
+func TestFindFilePrefersTheNearestFile(t *testing.T) {
+	root := t.TempDir()
+	inner := filepath.Join(root, "inner")
+	os.MkdirAll(inner, 0o755)
+	os.WriteFile(filepath.Join(root, FileName), []byte("agents: {}\n"), 0o644)
+	os.WriteFile(filepath.Join(inner, FileName), []byte("agents: {}\n"), 0o644)
+	if got, _ := FindFile(inner); got != filepath.Join(inner, FileName) {
+		t.Errorf("FindFile = %q", got)
+	}
+}
+
+func TestFindFileSaysWhereItLookedAndHowToNameTheFile(t *testing.T) {
+	_, err := FindFile(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "parent") || !strings.Contains(err.Error(), "-f") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestFindFileIgnoresADirectoryNamedLikeTheFile(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, FileName), 0o755)
+	if _, err := FindFile(root); err == nil {
+		t.Error("a directory was taken for the project file")
+	}
+}
+
+func TestLoadFileReadsAFileUnderAnyName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "team.yaml")
+	os.WriteFile(path, []byte("agents:\n  a: {harness: custom, image: x}\n"), 0o644)
+	file, err := LoadFile(path)
+	if err != nil || len(file.Agents) != 1 {
+		t.Errorf("file = %+v, err = %v", file, err)
+	}
+	if _, err := LoadFile(path + ".missing"); err == nil || !strings.Contains(err.Error(), "team.yaml.missing") {
+		t.Errorf("a missing file: %v", err)
+	}
+}

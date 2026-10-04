@@ -165,10 +165,6 @@ def test_a_read_write_host_directory_can_be_written(live_project, engine, agent_
     up(live_project, spec(agents={"coder": custom(agent_image, workspaces=["./notes"])}))
     name = container(engine, live_project, "coder").name
     written = engine.exec(name, "sh", "-c", "echo hi > /workspace/notes/from-agent")
-    if written.returncode != 0 and not engine.rootless:
-        # rootful engines: root without capabilities cannot write a directory owned by someone else.
-        # Which user agents run as, so they can write host directories, is undecided.
-        pytest.xfail("agents cannot write host directories on rootful engines yet")
     assert written.returncode == 0, written.stderr
     assert (notes / "from-agent").read_text().strip() == "hi"
     engine.exec(name, "rm", "/workspace/notes/from-agent")

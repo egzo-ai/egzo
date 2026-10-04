@@ -99,14 +99,12 @@ func checkEngine(ctx context.Context, c *engine.Client, report func(level, forma
 }
 
 func checkProject(opts *options, report func(level, format string, a ...any)) {
-	dir, err := os.Getwd()
+	path, err := projectFile(opts)
 	if err != nil {
+		report("ok", "no %s here or in a parent directory: project checks skipped", config.FileName)
 		return
 	}
-	if _, err := os.Stat(filepath.Join(dir, config.FileName)); err != nil {
-		report("ok", "no %s here: project checks skipped", config.FileName)
-		return
-	}
+	dir := filepath.Dir(path)
 	p, err := loadProject(opts)
 	if err != nil {
 		report("fail", "%s: %s", config.FileName, firstLine(err.Error()))

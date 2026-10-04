@@ -14,17 +14,43 @@ import (
 // FileName is the project file egzo looks for in the project directory.
 const FileName = "egzo.yaml"
 
+// EnvFile names the project file, like -f.
+const EnvFile = "EGZO_FILE"
+
 // Load reads and strictly decodes egzo.yaml from dir.
-func Load(dir string) (*File, error) {
-	path := filepath.Join(dir, FileName)
+func Load(dir string) (*File, error) { return LoadFile(filepath.Join(dir, FileName)) }
+
+// LoadFile reads and strictly decodes the project file at path.
+func LoadFile(path string) (*File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("no %s in %s", FileName, dir)
+			return nil, fmt.Errorf("no such project file: %s", path)
 		}
 		return nil, err
 	}
 	return Parse(data)
+}
+
+// FindFile locates the project file the way Docker Compose does: the directory you are in, then each
+// parent, up to the root. It returns the file's absolute path; the project directory is the directory
+// that holds it, wherever you ran egzo from.
+func FindFile(from string) (string, error) {
+	dir, err := filepath.Abs(from)
+	if err != nil {
+		return "", err
+	}
+	for {
+		path := filepath.Join(dir, FileName)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no %s in %s or any parent directory (use -f to name the file)", FileName, from)
+		}
+		dir = parent
+	}
 }
 
 // Parse strictly decodes a project file: unknown keys are errors.

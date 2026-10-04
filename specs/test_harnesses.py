@@ -337,7 +337,7 @@ def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(la
     """No model is called: the harness reports the prompt through its hook as soon as it is submitted."""
     if harness == "claude-code":
         # Not run: an injected Enter would answer Claude Code's "make auto mode your default?" dialog.
-        pytest.xfail("blocked on a decision, see known-issues/claude-code-auto-mode-offer.md")
+        pytest.fail("blocked on a decision, see known-issues/claude-code-auto-mode-offer.md", pytrace=False)
     project = launched(agent_fields={"inject": {"human_quiet": "1s"}})
 
     def activity():
