@@ -344,3 +344,14 @@ def test_without_hooks_quiet_output_means_idle_and_the_echoed_header_is_the_ack(
     live_project.run("send", "coder", "no hooks here")
     wait_for(lambda: message_events(live_project, "delivered"), "delivery by quiescence", timeout=40)
     wait_activity(live_project, "idle")
+
+
+def test_an_escape_sequence_in_a_message_cannot_end_the_paste_and_type_keystrokes(run):
+    """A message can come from another agent (handoff): it must stay one paste, never become keys."""
+    project = run()
+    wait_activity(project, "idle")
+    assert project.run("send", "coder", "before\x1b[201~after and then more").returncode == 0
+    wait_for(lambda: message_events(project, "delivered"), "delivery")
+    time.sleep(2)
+    (prompt,) = prompts(project)  # exactly one prompt: nothing was typed outside the paste
+    assert "before" in prompt and "after and then more" in prompt

@@ -61,6 +61,23 @@ func drawn(output []byte, markers []string) bool {
 	return false
 }
 
+// Sanitize removes what could leave a bracketed paste: the escape character and the other control
+// characters a terminal acts on (newline and tab stay). A message can come from another agent, and
+// text that ends the paste early would be typed into the TUI as keystrokes, answering its dialogs.
+func Sanitize(text string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case r == '\r':
+			return '\n'
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return -1
+		}
+		return r
+	}, text)
+}
+
 // Header is the line that tells the harness (and the control sidecar) which message follows.
 func Header(id, from string) string { return fmt.Sprintf("[egzo msg %s from %s]", id, from) }
 
@@ -166,7 +183,7 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		}
 		parts := make([]string, 0, len(work.Messages))
 		for _, message := range work.Messages {
-			parts = append(parts, Header(message.ID, message.From)+" "+message.Text)
+			parts = append(parts, Header(message.ID, Sanitize(message.From))+" "+Sanitize(message.Text))
 			outstanding[message.ID] = true
 		}
 		h.Inject(strings.Join(parts, "\n\n"))
