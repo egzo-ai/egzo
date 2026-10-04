@@ -89,3 +89,12 @@ def test_config_never_prints_secret_values(project):
     assert result.returncode == 0, result.stderr
     assert secret not in result.stdout
     assert secret not in result.stderr
+
+
+def test_a_prompt_that_is_not_an_existing_file_is_rejected(project):
+    result = project.config(spec(agents={"coder": agent(harness="custom", image="alpine", prompt="./prompts/missing.md")}))
+    assert result.returncode != 0
+    assert "prompts/missing.md" in result.stderr
+    (project.root / "prompts").mkdir()
+    (project.root / "prompts" / "missing.md").write_text("be brief\n")
+    assert project.config(spec(agents={"coder": agent(harness="custom", image="alpine", prompt="./prompts/missing.md")})).returncode == 0

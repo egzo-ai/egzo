@@ -34,6 +34,7 @@ func TestRootCommandTree(t *testing.T) {
 	want := []string{
 		"init", "config", "up", "down", "ps", "send", "events", "questions", "answer",
 		"logs", "exec", "start", "stop", "restart", "control", "proxy",
+		"attach", "agent", "hook", "prep", "version", "secrets", "doctor", "diff", "ca",
 	}
 	have := map[string]bool{}
 	for _, c := range root.Commands() {

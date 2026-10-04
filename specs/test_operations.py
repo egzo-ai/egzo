@@ -36,7 +36,6 @@ def file_vault(path, **names):
 # --- secrets ----------------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("secrets command")
 def test_secrets_ls_shows_which_secrets_are_set_and_never_their_values(project, tmp_path):
     (tmp_path / "TOKEN_A").write_text("super-secret-value\n")
     vaults = {"main": {"backend": "env", "secrets": {
@@ -53,7 +52,6 @@ def test_secrets_ls_shows_which_secrets_are_set_and_never_their_values(project, 
     assert "another-secret-value" not in result.stdout + result.stderr
 
 
-@pytest.mark.todo("secrets command")
 def test_secrets_set_writes_a_file_source_from_stdin_with_private_permissions(project, tmp_path):
     target = tmp_path / "vault" / "API_KEY"
     project.write({"vaults": file_vault(tmp_path / "vault", API_KEY=None)})
@@ -64,7 +62,6 @@ def test_secrets_set_writes_a_file_source_from_stdin_with_private_permissions(pr
     assert "s3cr3t-value" not in result.stdout + result.stderr
 
 
-@pytest.mark.todo("secrets command")
 def test_secrets_set_refuses_an_env_source_and_says_why(project):
     project.write({"vaults": {"main": {"backend": "env", "secrets": {"TOKEN": {"from": "env:SOME_VAR"}}}}})
     result = project.run("secrets", "set", "main/TOKEN", input="value\n")
@@ -72,7 +69,6 @@ def test_secrets_set_refuses_an_env_source_and_says_why(project):
     assert "env" in result.stderr and "SOME_VAR" in result.stderr
 
 
-@pytest.mark.todo("secrets command")
 def test_secrets_set_of_an_unknown_secret_names_the_known_ones(project, tmp_path):
     project.write({"vaults": file_vault(tmp_path, API_KEY=None)})
     result = project.run("secrets", "set", "main/NOPE", input="x\n")
@@ -80,7 +76,6 @@ def test_secrets_set_of_an_unknown_secret_names_the_known_ones(project, tmp_path
     assert "main/API_KEY" in result.stderr
 
 
-@pytest.mark.todo("secrets command")
 def test_secrets_rm_deletes_a_file_source(project, tmp_path):
     (tmp_path / "API_KEY").write_text("value\n")
     project.write({"vaults": file_vault(tmp_path, API_KEY=None)})
@@ -89,7 +84,6 @@ def test_secrets_rm_deletes_a_file_source(project, tmp_path):
     assert "missing" in project.run("secrets", "ls").stdout
 
 
-@pytest.mark.todo("secrets command")
 def test_a_secret_set_by_the_command_reaches_the_proxy_on_the_next_up(live_project, engine, agent_image, tmp_path):
     document = spec(
         vaults=file_vault(tmp_path, API_KEY=None),
@@ -107,7 +101,6 @@ def test_a_secret_set_by_the_command_reaches_the_proxy_on_the_next_up(live_proje
 # --- doctor -----------------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("doctor")
 def test_doctor_checks_the_engine_and_exits_zero_when_nothing_fails(project, engine):
     result = project.run("doctor", env=engine.env)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -116,21 +109,18 @@ def test_doctor_checks_the_engine_and_exits_zero_when_nothing_fails(project, eng
     assert any(l.startswith("ok") and "engine" in l for l in lines)
 
 
-@pytest.mark.todo("doctor")
 def test_doctor_fails_loudly_when_no_engine_answers(project):
     result = project.run("doctor", env={"DOCKER_HOST": "unix:///nonexistent.sock"})
     assert result.returncode != 0
     assert "fail" in result.stdout and "engine" in result.stdout
 
 
-@pytest.mark.todo("doctor")
 def test_doctor_reports_the_isolation_runtimes(project, engine):
     out = project.run("doctor", env=engine.env).stdout
     assert re.search(r"(ok|warn)\s+.*gVisor|runsc", out), out
     assert re.search(r"(ok|warn)\s+.*(rootless|rootful)", out), out
 
 
-@pytest.mark.todo("doctor")
 def test_doctor_warns_when_the_egzo_directory_is_not_git_ignored(project, engine):
     subprocess.run(["git", "init", "-q"], cwd=project.root, check=True)
     project.write(spec())
@@ -143,7 +133,6 @@ def test_doctor_warns_when_the_egzo_directory_is_not_git_ignored(project, engine
 # --- diff -------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("diff command")
 def test_diff_lists_what_up_would_do_and_exits_one_when_there_is_a_difference(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image)}))
     result = live_project.run("diff")
@@ -151,7 +140,6 @@ def test_diff_lists_what_up_would_do_and_exits_one_when_there_is_a_difference(li
     assert "coder" in result.stdout and "create" in result.stdout
 
 
-@pytest.mark.todo("diff command")
 def test_diff_is_silent_and_exits_zero_when_converged(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
     result = live_project.run("diff")
@@ -159,7 +147,6 @@ def test_diff_is_silent_and_exits_zero_when_converged(live_project, engine, agen
     assert result.stdout.strip() == ""
 
 
-@pytest.mark.todo("diff command")
 def test_diff_names_the_service_whose_definition_changed(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     live_project.write(spec(agents={"coder": custom(agent_image, env={"CHANGED": "yes"}), "reviewer": custom(agent_image)}))
@@ -176,7 +163,6 @@ def read_ca(engine, project, service="coder"):
     return engine.exec(container(engine, project, service).name, "cat", "/etc/egzo/ca/ca.crt").stdout
 
 
-@pytest.mark.todo("ca rotate")
 def test_ca_rotate_issues_a_new_ca_and_restarts_the_agents_that_trust_it(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
     old_ca = read_ca(engine, live_project)
@@ -189,7 +175,6 @@ def test_ca_rotate_issues_a_new_ca_and_restarts_the_agents_that_trust_it(live_pr
     assert "nothing to do" in live_project.run("up").stdout
 
 
-@pytest.mark.todo("ca rotate")
 def test_after_rotating_the_proxy_still_serves_the_policy(live_project, engine, agent_image):
     up(live_project, spec(egress={"default": {"allow": ["example.com"]}}, agents={"coder": custom(agent_image)}))
     assert live_project.run("ca", "rotate", timeout=300).returncode == 0
@@ -200,7 +185,6 @@ def test_after_rotating_the_proxy_still_serves_the_policy(live_project, engine, 
 # --- up SERVICE and depends_on ---------------------------------------------------------------------------------
 
 
-@pytest.mark.todo("up service")
 def test_up_with_a_service_only_brings_up_that_agent_and_what_it_needs(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     assert live_project.run("up", "coder", timeout=300).returncode == 0
@@ -210,7 +194,6 @@ def test_up_with_a_service_only_brings_up_that_agent_and_what_it_needs(live_proj
     assert container(engine, live_project, "reviewer")
 
 
-@pytest.mark.todo("up service")
 def test_up_with_an_unknown_service_names_the_known_ones(live_project, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image)}))
     result = live_project.run("up", "nobody")
@@ -218,7 +201,6 @@ def test_up_with_an_unknown_service_names_the_known_ones(live_project, agent_ima
     assert "nobody" in result.stderr and "coder" in result.stderr
 
 
-@pytest.mark.todo("up service")
 def test_depends_on_brings_dependencies_up_first(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image, depends_on=["coder"])}))
     assert live_project.run("up", "reviewer", timeout=300).returncode == 0
@@ -231,7 +213,6 @@ def test_depends_on_brings_dependencies_up_first(live_project, engine, agent_ima
 # --- the proxy's audit trail and rules ---------------------------------------------------------------------------
 
 
-@pytest.mark.todo("proxy rules")
 def test_proxy_log_can_be_filtered_by_agent(live_project, engine, agent_image):
     up(live_project, spec(egress={"default": {"allow": []}}, agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     for name in ("coder", "reviewer"):
@@ -242,7 +223,6 @@ def test_proxy_log_can_be_filtered_by_agent(live_project, engine, agent_image):
     assert only and {e["agent"] for e in only} == {"coder"}
 
 
-@pytest.mark.todo("proxy rules")
 def test_proxy_rules_show_what_each_agent_may_reach_without_any_secret(live_project, engine, agent_image):
     live_project.env["API_SECRET"] = "very-secret-value-1234567890"
     document = spec(
@@ -276,7 +256,6 @@ def mcp_call(engine, project, name, tool, arguments):
     return json.loads(reply.stdout)["result"]
 
 
-@pytest.mark.todo("handoff tool")
 def test_handoff_queues_a_message_for_another_agent_from_the_calling_agent(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     result = mcp_call(engine, live_project, "coder", "handoff", {"to": "reviewer", "text": "please review branch x"})
@@ -286,7 +265,6 @@ def test_handoff_queues_a_message_for_another_agent_from_the_calling_agent(live_
     assert message["agent"] == "reviewer" and message["actor"] == "agent:coder" and message["text"] == "please review branch x"
 
 
-@pytest.mark.todo("handoff tool")
 def test_handoff_to_an_unknown_agent_or_to_oneself_is_an_error(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     assert mcp_call(engine, live_project, "coder", "handoff", {"to": "ghost", "text": "x"}).get("isError")

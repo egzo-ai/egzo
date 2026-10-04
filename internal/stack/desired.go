@@ -67,16 +67,19 @@ type ContainerSpec struct {
 	// OwnedVolumes are volumes the container writes as User: the engine creates volumes owned by
 	// root and agents do not run as root, so they are handed over once the container exists.
 	OwnedVolumes []string
-	Env          []string
-	Mounts       []MountSpec
-	Tmpfs        map[string]string
-	Network      string
-	WorkingDir   string
-	Harness      string
-	Runtime      string
-	NanoCPUs     int64
-	Memory       int64
-	Healthcheck  []string
+	// StartAfter names the containers this one is created after (depends_on). It does not change
+	// what the container is, so it is left out of the hash.
+	StartAfter  []string `json:"-"`
+	Env         []string
+	Mounts      []MountSpec
+	Tmpfs       map[string]string
+	Network     string
+	WorkingDir  string
+	Harness     string
+	Runtime     string
+	NanoCPUs    int64
+	Memory      int64
+	Healthcheck []string
 	// Agents run under an init process that reaps children and forwards signals.
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
@@ -193,6 +196,9 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		spec, err := agentContainer(project, dir, name, project.Agents[name], network.Name, in, identity(name, kindAgent))
 		if err != nil {
 			return desired, err
+		}
+		for _, dependency := range project.Agents[name].DependsOn {
+			spec.StartAfter = append(spec.StartAfter, project.Name+"-"+dependency+"-1")
 		}
 		networks = append(networks, network)
 		containers = append(containers, spec)

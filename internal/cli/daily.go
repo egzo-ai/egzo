@@ -197,6 +197,7 @@ func newLifecycleCommand(opts *options, verb, short string) *cobra.Command {
 
 func newProxyLogCommand(opts *options) *cobra.Command {
 	var follow bool
+	var only string
 	cmd := &cobra.Command{
 		Use:   "log",
 		Short: "Show the proxy's audit trail, one JSON event per line",
@@ -209,10 +210,17 @@ func newProxyLogCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
+			if only != "" {
+				if _, ok := s.Resolved.Agents[only]; !ok {
+					return fmt.Errorf("no agent %q in egzo.yaml (agents: %s)", only, strings.Join(agentNames(s.Resolved.Agents), ", "))
+				}
+				cmd.SetOut(&agentLines{out: cmd.OutOrStdout(), agent: only})
+			}
 			return streamLogs(ctx, s, "proxy", follow, "all", cmd)
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow the audit trail")
+	cmd.Flags().StringVar(&only, "agent", "", "only the connections of this agent")
 	return cmd
 }
 

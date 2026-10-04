@@ -70,6 +70,24 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 	return values, nil
 }
 
+// SecretFilePath is where a file: secret lives: ~ is the home directory and a relative path is
+// relative to the project directory.
+func SecretFilePath(location, dir string) string {
+	path := location
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	return path
+}
+
+// ReadSecret reads the value a secret source points to.
+func ReadSecret(source, dir string) (string, error) { return readSecret(source, dir) }
+
 func readSecret(source, dir string) (string, error) {
 	scheme, location, _ := strings.Cut(source, ":")
 	switch scheme {
@@ -80,15 +98,7 @@ func readSecret(source, dir string) (string, error) {
 		}
 		return value, nil
 	case "file":
-		path := location
-		if strings.HasPrefix(path, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				path = filepath.Join(home, path[2:])
-			}
-		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
-		}
+		path := SecretFilePath(location, dir)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("cannot read %s: %v", path, err)

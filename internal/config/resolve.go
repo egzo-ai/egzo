@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -155,6 +157,15 @@ func resolveAgent(
 		}
 	}
 	checkEnv(name, agent.Env, p)
+	if agent.Prompt != "" {
+		path := agent.Prompt
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		if info, err := os.Stat(path); err != nil || info.IsDir() {
+			p.addf("agent %q: prompt %q is not an existing file (%s)", name, agent.Prompt, path)
+		}
+	}
 
 	profileName := agent.Egress
 	if profileName == "" {

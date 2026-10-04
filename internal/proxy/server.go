@@ -51,6 +51,9 @@ func NewServer(ca *CA, audit *Audit) *Server {
 	}
 }
 
+// SetCA switches the CA that signs the certificates of intercepted hosts.
+func (s *Server) SetCA(ca *CA) { s.minter.SetCA(ca) }
+
 // SetPolicy atomically replaces the policy. Until one is set, everything is denied.
 func (s *Server) SetPolicy(policy *Policy) { s.policy.Store(policy) }
 

@@ -71,11 +71,13 @@ func commandContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 func newUpCommand(opts *options) *cobra.Command {
 	var dryRun, recreate bool
 	cmd := &cobra.Command{
-		Use:   "up",
+		Use:   "up [AGENT...]",
 		Short: "Converge the running project to egzo.yaml",
 		Long: "Converge the running project to egzo.yaml. up always returns once the project is converged:\n" +
-			"there is no foreground mode, agents are reached with `egzo attach`.",
-		Args: cobra.NoArgs,
+			"there is no foreground mode, agents are reached with `egzo attach`.\n" +
+			"With agent names, only those agents and what they need (the sidecars, the agents they depend on) are\n" +
+			"converged; the others are left as they are.",
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
 			defer stop()
@@ -86,7 +88,7 @@ func newUpCommand(opts *options) *cobra.Command {
 			defer s.close()
 
 			return stack.Up(ctx, s.engine, s.Resolved, s.Dir,
-				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix)}, cmd.OutOrStdout())
+				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix), Services: args}, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without changing anything")

@@ -17,6 +17,7 @@ func newProxyCommand(opts *options) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newProxyLogCommand(opts),
+		newProxyRulesCommand(opts),
 		&cobra.Command{
 			Use:    "serve",
 			Short:  "Run the egress proxy (runs inside a container)",

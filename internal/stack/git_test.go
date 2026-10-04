@@ -170,3 +170,92 @@ func TestSplitAgentContainersKeepsTheSidecarsAndNetworksFirst(t *testing.T) {
 		t.Errorf("before = %+v agents = %+v", before, agents)
 	}
 }
+
+func scopeProject() *config.Resolved {
+	return &config.Resolved{Name: "proj", Agents: map[string]config.ResolvedAgent{
+		"coder":    {},
+		"reviewer": {DependsOn: []string{"coder"}},
+		"deployer": {DependsOn: []string{"reviewer"}},
+		"loner":    {},
+	}}
+}
+
+func TestScopeAgentsFollowsDependsOnTransitively(t *testing.T) {
+	got, err := ScopeAgents(scopeProject(), []string{"deployer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["deployer"] || !got["reviewer"] || !got["coder"] || got["loner"] {
+		t.Errorf("scope = %v", got)
+	}
+}
+
+func TestScopeAgentsAcceptsTheSidecarsAndNamesTheKnownServicesOtherwise(t *testing.T) {
+	got, err := ScopeAgents(scopeProject(), []string{"proxy", "control"})
+	if err != nil || len(got) != 0 {
+		t.Errorf("scope = %v, err = %v", got, err)
+	}
+	_, err = ScopeAgents(scopeProject(), []string{"nobody"})
+	if err == nil || !strings.Contains(err.Error(), `"nobody"`) || !strings.Contains(err.Error(), "loner") || !strings.Contains(err.Error(), "control") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestRestrictPlanDropsEverythingOfAgentsOutsideTheScope(t *testing.T) {
+	project := scopeProject()
+	plan := []Action{
+		{Verb: "create", Type: "container", Name: "proj-control-1"},
+		{Verb: "create", Type: "network", Name: "proj_coder"},
+		{Verb: "create", Type: "container", Name: "proj-coder-1"},
+		{Verb: "create", Type: "network", Name: "proj_loner"},
+		{Verb: "create", Type: "container", Name: "proj-loner-1"},
+		{Verb: "remove", Type: "container", Name: "proj-loner-1"},
+		{Verb: "connect", Type: "network", Name: "proj_loner", Peer: "proj-proxy-1"},
+		{Verb: "connect", Type: "network", Name: "proj_coder", Peer: "proj-proxy-1"},
+		{Verb: "create", Type: "volume", Name: "proj_loner-home"},
+		{Verb: "create", Type: "volume", Name: "proj_shared"},
+	}
+	kept := restrictPlan(plan, project, map[string]bool{"coder": true})
+	var names []string
+	for _, action := range kept {
+		names = append(names, action.Verb+" "+action.Name)
+	}
+	want := []string{"create proj-control-1", "create proj_coder", "create proj-coder-1", "connect proj_coder", "create proj_shared"}
+	if !slices.Equal(names, want) {
+		t.Errorf("kept = %v, want %v", names, want)
+	}
+}
+
+func TestDependsOnOrdersTheCreationOfAgentContainers(t *testing.T) {
+	desired := Desired{Containers: []ContainerSpec{
+		{Name: "proj-coder-1"},
+		{Name: "proj-reviewer-1", StartAfter: []string{"proj-coder-1"}},
+	}}
+	plan := []Action{
+		{Verb: "create", Type: "container", Name: "proj-reviewer-1"},
+		{Verb: "create", Type: "container", Name: "proj-coder-1"},
+		{Verb: "start", Type: "container", Name: "proj-reviewer-1"},
+	}
+	deps := dependencies(desired, plan)
+	if !slices.Contains(deps[0], 1) {
+		t.Errorf("the reviewer is not created after the coder: %v", deps)
+	}
+	if len(deps[1]) != 0 {
+		t.Errorf("the coder waits for something: %v", deps[1])
+	}
+}
+
+func TestDependsOnDoesNotChangeWhatAContainerIs(t *testing.T) {
+	project := desireProject()
+	before := findContainer(t, desire(t, project), "proj-review-1").Identity.ConfigHash
+	review := project.Agents["review"]
+	review.DependsOn = []string{"coder"}
+	project.Agents["review"] = review
+	spec := findContainer(t, desire(t, project), "proj-review-1")
+	if spec.Identity.ConfigHash != before {
+		t.Error("an ordering hint recreated the container")
+	}
+	if !slices.Equal(spec.StartAfter, []string{"proj-coder-1"}) {
+		t.Errorf("StartAfter = %v", spec.StartAfter)
+	}
+}

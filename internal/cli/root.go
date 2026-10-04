@@ -42,6 +42,10 @@ func New() *cobra.Command {
 		newHookCommand(),
 		newAttachCommand(opts),
 		newVersionCommand(),
+		newSecretsCommand(opts),
+		newDoctorCommand(opts),
+		newDiffCommand(opts),
+		newCACommand(opts),
 		newProxyCommand(opts),
 	)
 	return root

@@ -46,6 +46,15 @@ func dependencies(desired Desired, plan []Action) [][]int {
 						after(i, "create", "volume", m.Source)
 					}
 				}
+				for _, dependency := range spec.StartAfter {
+					after(i, "create", "container", dependency)
+					after(i, "start", "container", dependency)
+				}
+			}
+		case a.Verb == "start" && a.Type == "container":
+			for _, dependency := range specs[a.Name].StartAfter {
+				after(i, "create", "container", dependency)
+				after(i, "start", "container", dependency)
 			}
 		case a.Verb == "remove" && a.Type == "network":
 			deps[i] = append(deps[i], removals...)

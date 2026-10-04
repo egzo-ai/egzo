@@ -145,3 +145,45 @@ func TestAuthenticateNeedsTheRightTokenForTheRightAgent(t *testing.T) {
 		t.Error("an agent without a token accepted an empty one")
 	}
 }
+
+func TestRotateCAIssuesANewCAAndOverwritesTheFiles(t *testing.T) {
+	dir := t.TempDir()
+	first, err := LoadOrCreateCA(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := RotateCA(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.Fingerprint() == first.Fingerprint() {
+		t.Fatal("the CA did not change")
+	}
+	again, err := LoadOrCreateCA(dir)
+	if err != nil || again.Fingerprint() != rotated.Fingerprint() {
+		t.Errorf("the rotated CA was not what got stored: %v", err)
+	}
+}
+
+func TestTheMinterSignsWithTheNewCAAfterARotationAndForgetsTheOldLeaves(t *testing.T) {
+	old, _ := LoadOrCreateCA(t.TempDir())
+	minter := NewMinter(old)
+	before, err := minter.Certificate("example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, _ := RotateCA(t.TempDir())
+	minter.SetCA(rotated)
+	after, err := minter.Certificate("example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
+		t.Fatal("the cached certificate of the old CA was reused")
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(rotated.Cert)
+	if _, err := after.Leaf.Verify(x509.VerifyOptions{Roots: pool, DNSName: "example.test"}); err != nil {
+		t.Errorf("the new leaf does not verify against the new CA: %v", err)
+	}
+}

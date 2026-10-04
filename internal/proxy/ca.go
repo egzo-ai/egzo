@@ -41,7 +41,15 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	if !errors.Is(keyErr, os.ErrNotExist) && keyErr != nil {
 		return nil, keyErr
 	}
+	return generateCA(dir)
+}
 
+// RotateCA replaces the CA in dir with a new one. Everything signed by the old one stops being
+// trusted by agents once they have the new certificate, which is why agents are restarted after.
+func RotateCA(dir string) (*CA, error) { return generateCA(dir) }
+
+func generateCA(dir string) (*CA, error) {
+	keyPath, certPath := filepath.Join(dir, "ca.key"), filepath.Join(dir, "ca.crt")
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -72,8 +80,8 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
 		return nil, err
 	}

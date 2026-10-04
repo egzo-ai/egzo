@@ -27,6 +27,11 @@ type idArgs struct {
 	ID string `json:"id" jsonschema:"the question id returned by ask_user"`
 }
 
+type handoffArgs struct {
+	To   string `json:"to" jsonschema:"the name of the agent to hand the work to"`
+	Text string `json:"text" jsonschema:"what you want it to do, with everything it needs to know"`
+}
+
 type noArgs struct{}
 
 type okResult struct {
@@ -95,6 +100,16 @@ func (a *agentAPI) mcpServer(agent string) *mcp.Server {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, inboxResult, error) {
 		messages, err := a.server.takeInbox(agent)
 		return nil, inboxResult{Messages: messages}, err
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "handoff",
+		Description: "Hand work to another agent of this project: it is queued for that agent and typed into its terminal when it is idle. Say what you need and where to find it.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in handoffArgs) (*mcp.CallToolResult, okResult, error) {
+		if err := a.server.handoff(agent, in.To, in.Text); err != nil {
+			return nil, okResult{}, err
+		}
+		return nil, okResult{OK: true}, nil
 	})
 	return server
 }

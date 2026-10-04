@@ -395,3 +395,61 @@ agents:
 		t.Run(c.name, func(t *testing.T) { wantProblems(t, dir, c.yaml, c.want) })
 	}
 }
+
+func TestInjectDefaultsDependOnHowTheHarnessReportsItsState(t *testing.T) {
+	resolved, _ := mustResolve(t, t.TempDir(), `
+agents:
+  hooked: {harness: claude-code}
+  plain: {harness: custom, image: x}
+egress:
+  default: {allow: [platform.claude.com]}
+`)
+	hooked, plain := resolved.Agents["hooked"].Inject, resolved.Agents["plain"].Inject
+	if hooked.IdleSignal != "hook" || plain.IdleSignal != "quiescence" {
+		t.Errorf("hooked = %+v plain = %+v", hooked, plain)
+	}
+	if hooked.HumanQuiet != "30s" || hooked.AckTimeout != "60s" || hooked.Quiescence != "5s" {
+		t.Errorf("defaults = %+v", hooked)
+	}
+}
+
+func TestInjectSettingsOverrideTheDefaultsAndAreValidated(t *testing.T) {
+	resolved, _ := mustResolve(t, t.TempDir(), `
+agents:
+  coder: {harness: custom, image: x, inject: {human_quiet: 2m, idle_signal: hook}}
+`)
+	inject := resolved.Agents["coder"].Inject
+	if inject.HumanQuiet != "2m" || inject.IdleSignal != "hook" || inject.AckTimeout != "60s" {
+		t.Errorf("inject = %+v", inject)
+	}
+	for _, bad := range []string{"human_quiet: soon", "ack_timeout: -3s", "idle_signal: vibes", "quiescence: 0s"} {
+		file, err := Parse([]byte("agents:\n  coder: {harness: custom, image: x, inject: {" + bad + "}}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Resolve(file, "p", t.TempDir()); err == nil {
+			t.Errorf("%s was accepted", bad)
+		}
+	}
+	if _, err := Parse([]byte("agents:\n  coder: {harness: custom, image: x, inject: {nonsense: 1}}\n")); err == nil {
+		t.Error("an unknown inject key was accepted")
+	}
+}
+
+func TestAPromptThatIsNotAFileIsRejectedAndOneThatIsIsAccepted(t *testing.T) {
+	dir := t.TempDir()
+	yaml := "agents:\n  coder: {harness: custom, image: x, prompt: ./prompts/coder.md}\n"
+	if _, _, err := resolve(t, dir, yaml); err == nil || !strings.Contains(err.Error(), "prompts/coder.md") {
+		t.Fatalf("a missing prompt: err = %v", err)
+	}
+	os.MkdirAll(filepath.Join(dir, "prompts"), 0o755)
+	os.WriteFile(filepath.Join(dir, "prompts", "coder.md"), []byte("be brief\n"), 0o644)
+	if _, _, err := resolve(t, dir, yaml); err != nil {
+		t.Errorf("an existing prompt: err = %v", err)
+	}
+	os.Remove(filepath.Join(dir, "prompts", "coder.md"))
+	os.MkdirAll(filepath.Join(dir, "prompts", "coder.md"), 0o755)
+	if _, _, err := resolve(t, dir, yaml); err == nil {
+		t.Error("a directory was accepted as a prompt")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -54,6 +55,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /questions", s.listQuestions)
 	mux.HandleFunc("POST /questions/{id}/answer", s.answer)
 	mux.HandleFunc("GET /agents", s.agents)
+	mux.HandleFunc("PUT /project", s.putProject)
 	return mux
 }
 
@@ -271,4 +273,56 @@ func (s *server) agents(w http.ResponseWriter, r *http.Request) {
 		statuses = []AgentStatus{}
 	}
 	json.NewEncoder(w).Encode(statuses)
+}
+
+// putProject records which agents the project has, so an agent cannot hand work to one that does not exist.
+func (s *server) putProject(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Agents []string `json:"agents"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil {
+		http.Error(w, "expected {\"agents\": [...]}", http.StatusBadRequest)
+		return
+	}
+	data, _ := json.Marshal(body)
+	if err := os.WriteFile(filepath.Join(s.dir, "project.json"), data, 0o644); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// knownAgent reports whether name is an agent of the project. Before the project has said which
+// agents it has, any well-formed name is accepted.
+func (s *server) knownAgent(name string) bool {
+	data, err := os.ReadFile(filepath.Join(s.dir, "project.json"))
+	if err != nil {
+		return safeName.MatchString(name)
+	}
+	var project struct {
+		Agents []string `json:"agents"`
+	}
+	if json.Unmarshal(data, &project) != nil {
+		return safeName.MatchString(name)
+	}
+	for _, agent := range project.Agents {
+		if agent == name {
+			return true
+		}
+	}
+	return false
+}
+
+// handoff queues a message for another agent, as the calling agent.
+func (s *server) handoff(from, to, text string) error {
+	switch {
+	case to == from:
+		return errors.New("an agent cannot hand work to itself")
+	case !s.knownAgent(to):
+		return fmt.Errorf("no agent %q in this project", to)
+	case !validText(text):
+		return errors.New("text must not be empty or longer than 16 KB")
+	}
+	_, err := s.events.append(Event{Type: "message", Agent: to, Actor: "agent:" + from, ID: newID("m"), Text: text})
+	return err
 }

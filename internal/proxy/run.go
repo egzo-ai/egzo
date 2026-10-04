@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -58,7 +59,7 @@ func Run(cfg Config, audit io.Writer) error {
 	}()
 
 	operatorDone := make(chan error, 1)
-	go func() { operatorDone <- operator.Serve(cfg.Socket, operatorHandler(server, ca)) }()
+	go func() { operatorDone <- operator.Serve(cfg.Socket, operatorHandler(server, ca, cfg)) }()
 
 	select {
 	case err := <-failed:
@@ -72,11 +73,31 @@ func Run(cfg Config, audit io.Writer) error {
 }
 
 // operatorHandler is the proxy's operator API: load a policy, report which one is loaded.
-func operatorHandler(server *Server, ca *CA) http.Handler {
+func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
 	mux := http.NewServeMux()
+	var mu sync.Mutex // the CA in use, and rotating it
+	current := ca
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 	mux.HandleFunc("GET /policy", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"hash": server.PolicyHash(), "ca": ca.Fingerprint()})
+		mu.Lock()
+		fingerprint := current.Fingerprint()
+		mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]string{"hash": server.PolicyHash(), "ca": fingerprint})
+	})
+	mux.HandleFunc("POST /ca/rotate", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		rotated, err := RotateCA(cfg.CADir)
+		if err == nil {
+			err = rotated.Publish(cfg.PubDir, cfg.SystemBundle)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		server.SetCA(rotated)
+		current = rotated
+		json.NewEncoder(w).Encode(map[string]string{"ca": rotated.Fingerprint()})
 	})
 	mux.HandleFunc("PUT /policy", func(w http.ResponseWriter, r *http.Request) {
 		var policy Policy

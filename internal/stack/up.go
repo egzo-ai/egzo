@@ -21,6 +21,9 @@ type Options struct {
 	Image    string
 	// HarnessPrefix overrides where harness images are pulled from (EGZO_HARNESS_PREFIX).
 	HarnessPrefix string
+	// Services limits `up` to these agents and what they need: the sidecars, their networks and the
+	// agents they depend on. Everything else is left exactly as it is.
+	Services []string
 }
 
 // AgentUser is who agents run as: the invoking user, so files they write on the host are theirs.
@@ -75,6 +78,14 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		return err
 	}
 	plan := BuildPlan(desired, observed, opts.Recreate)
+	if len(opts.Services) > 0 {
+		included, err := ScopeAgents(project, opts.Services)
+		if err != nil {
+			return err
+		}
+		plan = restrictPlan(plan, project, included)
+		checkouts = restrictCheckouts(checkouts, included)
+	}
 	switch {
 	case opts.DryRun:
 		if err := Apply(ctx, c, desired, plan, true, out); err != nil {
@@ -115,6 +126,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	var pushErr, storeErr error
 	var wg sync.WaitGroup
 	wg.Add(2)
+	if !opts.DryRun {
+		putProject(ctx, c, project, desired)
+	}
 	go func() {
 		defer wg.Done()
 		pushed, pushErr = pushPolicy(ctx, c, project, desired, tokens, secrets, opts, fresh[desired.Proxy], out)
@@ -305,4 +319,68 @@ func splitAgentContainers(plan []Action, project *config.Resolved) (before, agen
 		}
 	}
 	return before, agents
+}
+
+// ScopeAgents returns the agents `up SERVICE...` acts on: the named ones and, transitively, the
+// agents they depend on. control and proxy may be named; they are always part of it.
+func ScopeAgents(project *config.Resolved, services []string) (map[string]bool, error) {
+	included := map[string]bool{}
+	var visit func(string)
+	visit = func(name string) {
+		if included[name] {
+			return
+		}
+		included[name] = true
+		for _, dependency := range project.Agents[name].DependsOn {
+			visit(dependency)
+		}
+	}
+	for _, name := range services {
+		if name == controlService || name == proxyService {
+			continue
+		}
+		if _, ok := project.Agents[name]; !ok {
+			known := append([]string{controlService, proxyService}, sortedKeys(project.Agents)...)
+			return nil, fmt.Errorf("no service %q in egzo.yaml (services: %s)", name, strings.Join(known, ", "))
+		}
+		visit(name)
+	}
+	return included, nil
+}
+
+// restrictPlan drops the actions that concern agents outside the scope, so their containers are
+// neither created nor changed nor removed.
+func restrictPlan(plan []Action, project *config.Resolved, included map[string]bool) []Action {
+	excluded := map[string]bool{}
+	for name := range project.Agents {
+		if !included[name] {
+			excluded[project.Name+"-"+name+"-1"] = true
+			excluded[project.Name+"_"+name] = true
+			excluded[homeVolume(project.Name, name)] = true
+		}
+	}
+	var kept []Action
+	for _, action := range plan {
+		if excluded[action.Name] || excluded[action.Peer] {
+			continue
+		}
+		kept = append(kept, action)
+	}
+	return kept
+}
+
+func restrictCheckouts(plan []Checkout, included map[string]bool) []Checkout {
+	var kept []Checkout
+	for _, checkout := range plan {
+		if included[checkout.Agent] {
+			kept = append(kept, checkout)
+		}
+	}
+	return kept
+}
+
+// putProject tells the control sidecar which agents exist. It is best effort: control works without it.
+func putProject(ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired) {
+	body, _ := json.Marshal(map[string][]string{"agents": sortedKeys(project.Agents)})
+	c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/project"}, bytes.NewReader(body))
 }

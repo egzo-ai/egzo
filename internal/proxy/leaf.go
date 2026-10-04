@@ -26,6 +26,14 @@ func NewMinter(ca *CA) *Minter {
 	return &Minter{ca: ca, cache: map[string]*tls.Certificate{}, now: time.Now}
 }
 
+// SetCA switches to a new CA: the certificates minted by the old one are forgotten.
+func (m *Minter) SetCA(ca *CA) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ca = ca
+	m.cache = map[string]*tls.Certificate{}
+}
+
 // Certificate returns a certificate for host, valid for at least another hour.
 func (m *Minter) Certificate(host string) (*tls.Certificate, error) {
 	m.mu.Lock()

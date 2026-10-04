@@ -232,3 +232,43 @@ func TestAgentsListsTheActivityNextToTheStatus(t *testing.T) {
 		t.Errorf("agents = %+v", agents)
 	}
 }
+
+func TestHandoffQueuesAMessageFromTheCallingAgentForAnotherOne(t *testing.T) {
+	r := newRig(t)
+	project := r.asOperator("PUT", "/project", `{"agents":["coder","reviewer"]}`)
+	project.Body.Close()
+	if err := r.srv.handoff("coder", "reviewer", "please review branch x"); err != nil {
+		t.Fatal(err)
+	}
+	messages := r.srv.events.pending("reviewer")
+	if len(messages) != 1 || messages[0].From != "agent:coder" || messages[0].Text != "please review branch x" {
+		t.Errorf("messages = %+v", messages)
+	}
+}
+
+func TestHandoffRefusesUnknownAgentsOneselfAndEmptyText(t *testing.T) {
+	r := newRig(t)
+	r.asOperator("PUT", "/project", `{"agents":["coder","reviewer"]}`).Body.Close()
+	for name, call := range map[string]func() error{
+		"unknown": func() error { return r.srv.handoff("coder", "ghost", "x") },
+		"self":    func() error { return r.srv.handoff("coder", "coder", "x") },
+		"empty":   func() error { return r.srv.handoff("coder", "reviewer", "  ") },
+	} {
+		if call() == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if len(r.srv.events.all()) != 0 {
+		t.Error("a refused handoff left an event behind")
+	}
+}
+
+func TestBeforeTheProjectSaysWhichAgentsExistAnyWellFormedNameIsAccepted(t *testing.T) {
+	r := newRig(t)
+	if err := r.srv.handoff("coder", "reviewer", "hi"); err != nil {
+		t.Errorf("err = %v", err)
+	}
+	if err := r.srv.handoff("coder", "../etc", "hi"); err == nil {
+		t.Error("a malformed name was accepted")
+	}
+}
