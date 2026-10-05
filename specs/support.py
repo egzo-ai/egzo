@@ -47,3 +47,19 @@ def mounts(resolved, agent_name):
 
 def profile(resolved, name):
     return resolved["egress"][name]
+
+
+def table(output):
+    """Rows of a column-aligned table (as `egzo ps` and `egzo messages` print them) as dicts."""
+    import re
+
+    lines = output.splitlines()
+    if not lines:
+        return []
+    starts = [m.start() for m in re.finditer(r"\S+", lines[0]) if m.start() == 0 or lines[0][m.start() - 1] == " "]
+    names = lines[0].split()
+    rows = []
+    for line in lines[1:]:
+        cells = [line[a:b].strip() for a, b in zip(starts, starts[1:] + [None])]
+        rows.append(dict(zip(names, cells)))
+    return rows

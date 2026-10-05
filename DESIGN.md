@@ -209,7 +209,8 @@ control:                       # orchestrator MCP + status sidecar (always prese
     egzo ps                                # engine state + status from control sidecar
     egzo attach <agent>                    # native TUI; detach key configurable (default Ctrl-])
     egzo logs [-f] <svc>
-    egzo send <agent> "message"            # same queue path any messaging client (hub) uses
+    egzo send <agent> "message" [--wait]   # a request from the operator; --wait prints the resolution
+    egzo messages | answer <id> <text>     # open messages; answer or close one addressed to a person
     egzo exec <svc> -- cmd
     egzo secrets ls|set|rm                 # vault management, never prints values
     egzo proxy log|rules                   # audit trail
@@ -384,25 +385,97 @@ screen, Ctrl-C and Ctrl-D reaching the program, OSC 52 / OSC 8, detach and reatt
 Known limit: a detach-key byte inside pasted data detaches. tmux was not built: it takes the outer alternate
 screen, so native scrollback is lost.
 
-## Injection and agent states (decided)
-- States: `starting`, `idle`, `busy`, `blocked` (waiting on a human), `stopped`. Signals: harness
-  hooks (Claude: SessionStart, UserPromptSubmit->busy, Stop->idle, Notification->blocked), the pty
-  holder's view of the stream, and engine container state. Verify hook matchers per release.
-- Never inject while a human types: inject only when `idle` and no read-write client has typed for
-  `inject.human_quiet` (default 30s). Read-only observers never block. Known residual risk: a half-
-  typed draft merges with the paste (no screen model to see the input box); accepted.
-- Mechanics: one atomic write of `ESC[200~ text ESC[201~`, short delay (~100-300 ms), then Enter.
-  Every message carries a header like `[egzo msg 7f3a from user:cedric]` (platform instructions
-  explain it; v1: Claude flagged an unexplained header as injection). The UserPromptSubmit hook
-  payload contains the prompt, so matching the id is an exact ack. No ack within timeout ->
-  `unconfirmed`, surfaced to the operator; never blind-retry (could duplicate).
-- Queue: FIFO per agent in control. Message states: queued, delivering, delivered (acked),
-  unconfirmed/failed. Queued messages are combined into one prompt when idle, each still acked
-  individually. `--interrupt` sends the harness's interrupt key (declared per harness).
-- Each harness integration declares `idle_signal: hook | quiescence` (no pty output for N s; weaker).
-  OpenCode likely has `session.idle` plugin events (verify); pi unknown.
-- Lost signals: if we interrupted, control marks idle itself; a human Esc may not fire Stop (verify),
-  so tool-end hooks + output quiescence yield `stalled`, which returns to idle when output stays quiet.
+## Messages (decided, replaces pasting message text into the terminal)
+
+Everything people and agents say to each other is a **message**. The terminal only ever gets a short fixed
+line announcing a message; the message itself is fetched through the agent's tools (MCP). This keeps the
+sender out of anything typed (nothing a message contains can forge an origin or leave the paste), gives
+the typed line a user's authority, and makes a retry safe because the announcement carries no content.
+
+### The model
+- **Addresses:** `operator` (the CLI), `user:<id>` (a person, via the hub), `agent:<name>`.
+- **A message** has an id (`m` + 32 random hex characters, unguessable: it is a capability), `from`, `to`, a
+  `kind`, `text` (at most 16 KB), `re` (the id it answers or belongs to), `hops`, and for a question
+  `choices` (a list of strings, for quick answers; unused for now).
+- **Kinds:** `request` (`message`, or `egzo send`), `question` (`ask`), `resolution` (what `resolve`
+  sends back to the sender: the result of a request, or the answer to a question; it carries an `outcome`),
+  `update` (`update`: progress on a request).
+- **States** of a request or question: `queued` (written), `announced` (the line was typed into the
+  recipient's terminal), `fetched` (the recipient fetched it), `resolved` (with an outcome: `done`,
+  `declined` or `failed`; terminal: a requester who is unhappy sends a new message). A resolution is closed
+  once fetched. An update is passive: it is never announced, only visible (`list_messages`, `egzo messages`,
+  `egzo send --wait`). A message to a person is not announced either: it waits in `egzo messages` until
+  answered (`egzo answer`).
+- **Ids are checked, not trusted:** `get_message`, `resolve`, `update` and `ask` work only on messages
+  addressed to the calling agent, and `resolve`, `update` and `ask` only after it fetched the message. An
+  unknown id and someone else's id answer the same: "no such message".
+
+### The agent's tools (MCP server `egzo`, `http://control:7777/mcp`)
+
+| Tool | What it does |
+|---|---|
+| `list_messages()` | The agent's own open items: requests and questions it has been announced or has fetched and not resolved, and unread resolutions and updates. After a restart, or when context was compacted and ids were lost, this is how it finds what it owes. Never shows what was not announced yet. |
+| `get_message(id)` | Fetch one message addressed to the agent: sender, kind, text, `re`, time. Marks it `fetched`. |
+| `resolve(id, text, outcome)` | Close a request or question with a result. Sends a `resolution` to the sender. Terminal. |
+| `update(id, text)` | A progress note for the sender of request `id`. Agents are told to send one when they need time. |
+| `ask(id, text, [choices])` | Ask the sender of message `id` something. Leaves `id` open; the answer comes back as a `resolution` linked to it. |
+| `message(to, text, [re])` | A new request to `operator`, `user:<id>` or `agent:<name>`. It does not resolve anything. This replaces `handoff`: an agent that needs something done sends a message, waits for the resolution, then resolves its own request. |
+| `status(text)` | One line on what the agent is doing, shown by `egzo ps`. |
+| `agents` | The other agents with their activity and open counts. |
+
+Retired: `say` (use `message` to `operator` or `update`), `ask_user` (`ask`), `get_answer` (the answer is a
+message), `check_inbox` (`list_messages`), `handoff` (`message`).
+
+### Announcing
+The holder asks the control sidecar when the terminal is ready; control answers with the line to type.
+- **Gates:** the agent is `idle`, nothing it was announced is awaiting a fetch, the TUI has taken the terminal and
+  drawn its prompt, and no read-write client has typed for `inject.human_quiet` (default 30 s). Read-only
+  observers never block. A half-typed draft merges with the line (no screen model); accepted.
+- **Mechanics:** one atomic write of `ESC[200~ line ESC[201~`, a pause, then Enter, as before. Only the
+  id varies in the line, and it is hex, so there is nothing to sanitize but nothing to trust either.
+- **The lines** (control composes them, in one place; one line per kind, joined, when several are pending):
+
+| Kind (and sender) | Typed line |
+|---|---|
+| request from `operator` or a `user` | `check egzo message <id> and handle the request for me.` |
+| request or question from an `agent` | `egzo message <id> from another agent is waiting: fetch it and decide whether it fits your work.` |
+| resolution (a result or an answer) | `egzo message <id> is the reply to your earlier request: fetch it.` |
+| several of one kind | `check egzo messages <id1>, <id2> and handle each one.` (wording of the kind, ids listed) |
+
+  A message pending when the harness starts is announced the same way once its TUI is ready.
+- **Fetching is the acknowledgement.** No fetch within `inject.ack_timeout` (60 s by default) announces
+  again, safely, up to three times in all; then the message is `unconfirmed`, shown by `egzo messages`, and
+  still found by `list_messages`. The `UserPromptSubmit` hook no longer acknowledges anything.
+- **Interrupt:** `egzo send --interrupt` makes the holder send the harness's interrupt key first, as before.
+- **Limits** (a loop between agents is easy to start): at most 20 open requests per recipient, a thread is
+  at most 8 messages deep (`re` adds one hop), and a sender may send at most 30 messages a minute.
+  Past a limit the tool answers with an error that says which.
+
+### Agent status: what the harness does, and what the agent owes
+- **Activity** (from hooks, the holder and the engine): `starting`, `idle`, `working`, `blocked` (the
+  harness is stuck on its own UI: a permission dialog, a login: something only a person at the terminal can
+  answer), `stopped` (the container is not running). `working`, `blocked`, `starting` and `stopped` hold back
+  announcements; messages for a stopped agent wait and are announced when it is ready again.
+- **Overlay**, derived from messages and never a gate: `open: N` (requests and questions fetched and not
+  resolved) and `waiting` (it has asked a question that is not answered). An agent that asked something
+  usually ends its turn and goes `idle`, so `waiting` must not hold announcements back, or the answer
+  could never arrive.
+- `egzo ps` shows ACTIVITY, OPEN and WAITING next to the status line.
+- Signals: harness hooks (Claude Code: SessionStart/Stop idle, UserPromptSubmit and the tool hooks working,
+  Notification blocked unless it says the agent waits for input; OpenCode through its plugin), the holder
+  (for harnesses without hooks, quiet output means idle: `inject.idle_signal: quiescence`), the engine.
+- If we interrupted, control marks idle itself; a human Esc may not fire Stop.
+
+### The human side (CLI)
+- `egzo send AGENT TEXT [--interrupt] [--wait [--timeout D]]`: a request from the operator. `--wait` prints
+  updates to stderr and the resolution's text to stdout, and exits 0 for `done`, 3 for `declined`, 4 for
+  `failed`, 5 when the timeout passes (the message stays open).
+- `egzo messages [--agent A] [--all]`: open messages (`--all` includes resolved ones) with id, from, to, kind,
+  state and the start of the text. `egzo questions` is `egzo messages` limited to open questions.
+- `egzo answer ID TEXT [--outcome done|declined|failed]`: resolve a message addressed to a person: it
+  answers a question, and closes a request an agent made of the operator.
+- `egzo events`: the raw typed stream (`message`, `announced`, `fetched`, `resolved`, `unconfirmed`,
+  `interrupt`, `interrupted`, `activity`, `hook`, `status`).
 
 ## Spec visibility (decided)
 - Labels stay small, flat, readable (see Reconciliation model); observed state (image, env, mounts,

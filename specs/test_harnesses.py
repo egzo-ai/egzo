@@ -226,7 +226,9 @@ def test_claude_code_is_told_how_to_read_an_egzo_message_header(claude, engine):
     process = engine.exec(container(engine, project).name, "sh", "-c", "tr '\\0' ' ' < /proc/$(pgrep -n -x claude)/cmdline")
     assert "--append-system-prompt" in process.stdout
     instructions = read_in_agent(engine, project, "$HOME/.egzo/instructions.md")
-    assert "[egzo msg" in instructions
+    for needed in ("get_message", "list_messages", "resolve", "outcome", "update", "ask", "message(", "agents"):
+        assert needed in instructions, f"the platform instructions do not mention {needed}"
+    assert "reply" not in instructions.lower() or "tool" in instructions.lower()
 
 
 def test_claude_code_model_and_prompt_come_from_the_agent_definition(claude, engine):
@@ -241,7 +243,7 @@ def test_the_prompt_file_is_added_to_the_instructions(environment_secrets, harne
     environment_secrets.write(document)
     assert environment_secrets.run("up", timeout=900).returncode == 0
     text = read_in_agent(engine, environment_secrets, "$HOME/.egzo/instructions.md")
-    assert "Always answer in rhyme." in text and "[egzo msg" in text
+    assert "Always answer in rhyme." in text and "get_message" in text
 
 
 def test_permissions_default_keeps_the_harness_prompts(claude, engine):
@@ -339,8 +341,9 @@ def wait_until(check, what, timeout, context=None):
     raise AssertionError(f"timed out waiting for {what}" + (f"\n{context()}" if context else ""))
 
 
-def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(launched, harness):
-    """No model is called: the harness reports the prompt through its hook as soon as it is submitted."""
+def test_the_real_tui_reports_idle_and_is_told_a_message_is_waiting(launched, harness):
+    """No model is called: the harness reports the typed line through its hook as soon as it is submitted.
+    The line must reach the real TUI, be submitted, and name the message by its id and nothing else of it."""
     project = launched(agent_fields={"inject": {"human_quiet": "1s"}})
 
     def activity():
@@ -348,13 +351,15 @@ def test_the_real_tui_reports_idle_takes_a_queued_message_and_acknowledges_it(la
         return rows[-1]["text"] if rows else None
 
     wait_until(lambda: activity() == "idle", "the harness to report that its session started", 45)
-    assert project.run("send", "coder", "hello from the operator").returncode == 0
-    wait_until(
-        lambda: [e for e in events_of(project) if e["type"] == "delivered"], "the harness to acknowledge the message", 40,
-        context=lambda: "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events_of(project)),
+    sent = project.run("send", "coder", "hello from the operator, TOP-SECRET-PAYLOAD").stdout.split()[1]
+    context = lambda: "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events_of(project))
+    wait_until(lambda: [e for e in events_of(project) if e["type"] == "announced"], "the message to be announced", 40, context=context)
+    typed = wait_until(
+        lambda: [e["data"]["prompt"] for e in events_of(project) if e["type"] == "hook" and e["text"] == "UserPromptSubmit"],
+        "the TUI to submit the typed line", 40, context=context,
     )
-    prompts = [e for e in events_of(project) if e["type"] == "hook" and e["text"] == "UserPromptSubmit"]
-    assert any("hello from the operator" in json.dumps(p["data"]) for p in prompts)
+    assert typed[0] == f"check egzo message {sent} and handle the request for me."
+    assert "TOP-SECRET-PAYLOAD" not in json.dumps(typed)
 
 
 # --- a Claude subscription token (claude setup-token) instead of an API key --------------------------------

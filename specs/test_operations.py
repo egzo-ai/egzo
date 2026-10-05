@@ -240,32 +240,3 @@ def test_proxy_rules_show_what_each_agent_may_reach_without_any_secret(live_proj
     assert "very-secret-value" not in rules.stdout + rules.stderr
     only = live_project.run("proxy", "rules", "--agent", "coder").stdout
     assert "docs.example.org" in only and "api.test" not in only
-
-
-# --- the handoff tool -------------------------------------------------------------------------------------------
-
-
-def mcp_call(engine, project, name, tool, arguments):
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments}})
-    command = (
-        'curl -sS -m 10 -u "$EGZO_AGENT:$EGZO_TOKEN" -X POST "$EGZO_CONTROL_URL/mcp" '
-        "-H 'content-type: application/json' -H 'accept: application/json, text/event-stream' "
-        f"-d '{body}'"
-    )
-    reply = engine.exec(container(engine, project, name).name, "sh", "-c", command)
-    return json.loads(reply.stdout)["result"]
-
-
-def test_handoff_queues_a_message_for_another_agent_from_the_calling_agent(live_project, engine, agent_image):
-    up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    result = mcp_call(engine, live_project, "coder", "handoff", {"to": "reviewer", "text": "please review branch x"})
-    assert not result.get("isError"), result
-    queued = [json.loads(l) for l in live_project.run("events").stdout.splitlines() if l.startswith("{")]
-    message = [e for e in queued if e["type"] == "message"][0]
-    assert message["agent"] == "reviewer" and message["actor"] == "agent:coder" and message["text"] == "please review branch x"
-
-
-def test_handoff_to_an_unknown_agent_or_to_oneself_is_an_error(live_project, engine, agent_image):
-    up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    assert mcp_call(engine, live_project, "coder", "handoff", {"to": "ghost", "text": "x"}).get("isError")
-    assert mcp_call(engine, live_project, "coder", "handoff", {"to": "coder", "text": "x"}).get("isError")
