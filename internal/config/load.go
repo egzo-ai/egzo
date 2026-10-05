@@ -72,24 +72,38 @@ func Parse(data []byte) (*File, error) {
 	return &file, nil
 }
 
-// rejectUsers enforces that users, roles and grants are never declared in project files:
-// they live in the hub.
-func rejectUsers(node *yaml.Node) error {
-	if node.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := node.Content[i]
-			if key.Value == "users" {
+// rejectUsers enforces that users, roles and grants are never declared in project files: they live
+// in the hub. Only the places a users section could be declared are checked (the top level and the
+// settings of an agent, profile, workspace or vault), not every key that happens to be named users:
+// a workspace, a variable or a secret may be called that.
+func rejectUsers(root *yaml.Node) error {
+	node := root
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	check := func(mapping *yaml.Node) error {
+		for i := 0; mapping.Kind == yaml.MappingNode && i+1 < len(mapping.Content); i += 2 {
+			if key := mapping.Content[i]; key.Value == "users" {
 				return fmt.Errorf("%s:%d: users are never declared in project files; user management lives in the hub", FileName, key.Line)
-			}
-			if err := rejectUsers(node.Content[i+1]); err != nil {
-				return err
 			}
 		}
 		return nil
 	}
-	for _, child := range node.Content {
-		if err := rejectUsers(child); err != nil {
-			return err
+	if err := check(node); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		switch node.Content[i].Value {
+		case "agents", "egress", "workspaces", "vaults":
+			section := node.Content[i+1]
+			for j := 0; section.Kind == yaml.MappingNode && j+1 < len(section.Content); j += 2 {
+				if err := check(section.Content[j+1]); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil

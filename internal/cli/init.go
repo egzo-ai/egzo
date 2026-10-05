@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,40 +89,45 @@ egress:
 	} else {
 		b.WriteString("# TODO: add vaults and an egress profile that lets the agent reach its provider\n\n")
 	}
+	image := ""
+	if harness == "custom" {
+		image = "\n    image: docker.io/library/alpine:3   # TODO: the image that runs your program"
+	}
 	fmt.Fprintf(&b, `workspaces:
   repo:
-    git: { url: %s }
+    git: { url: %q }
 
 agents:
   %s:
-    harness: %s
+    harness: %s%s
     workspaces: [repo]
-`, repoURL, strings.ReplaceAll(harness, "-code", ""), harness)
+`, repoURL, strings.ReplaceAll(harness, "-code", ""), harness, image)
 	return b.String()
 }
 
+const placeholderURL = "https://github.com/OWNER/REPO.git"
+
 var scpURL = regexp.MustCompile(`^(?:[^@/]+@)?([^:/]+):(.+?)(?:\.git)?$`)
 
-// originURL returns the https form of the directory's git origin, or a placeholder.
+// originURL returns the https form of the directory's git origin, or a placeholderURL.
 func originURL(dir string) string {
-	const placeholder = "https://github.com/OWNER/REPO.git"
 	cmd := exec.Command("git", "config", "--get", "remote.origin.url")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
-		return placeholder
+		return placeholderURL
 	}
 	url := strings.TrimSpace(string(out))
 	switch {
 	case strings.HasPrefix(url, "https://"):
-		return url
+		return withoutCredentials(url)
 	case strings.HasPrefix(url, "ssh://"):
-		return placeholder
+		return placeholderURL
 	}
 	if m := scpURL.FindStringSubmatch(url); m != nil && !strings.HasPrefix(url, "/") && !strings.HasPrefix(url, ".") {
 		return fmt.Sprintf("https://%s/%s.git", m[1], m[2])
 	}
-	return placeholder
+	return placeholderURL
 }
 
 // ignoreWorkspaceData keeps egzo's per-project data out of the user's repository when the
@@ -150,4 +156,15 @@ func ignoreWorkspaceData(dir string) (bool, error) {
 func contains(list []string, value string) bool {
 	i := sort.SearchStrings(list, value)
 	return i < len(list) && list[i] == value
+}
+
+// withoutCredentials drops the user name and password of a URL: a token in an origin URL must not be
+// copied into a file that is committed.
+func withoutCredentials(raw string) string {
+	parsed, err := neturl.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return placeholderURL
+	}
+	parsed.User = nil
+	return parsed.String()
 }

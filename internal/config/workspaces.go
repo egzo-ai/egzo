@@ -30,9 +30,8 @@ var gitModes = map[string]bool{"clone": true, "worktree": true, "shared": true}
 func resolveWorkspaces(file *File, dir string, p *problems) map[string]ResolvedWorkspace {
 	resolved := map[string]ResolvedWorkspace{}
 	for name, workspace := range file.Workspaces {
-		if strings.ContainsAny(name, "/:") {
-			p.addf("workspace %q: names cannot contain '/' or ':'", name)
-			continue
+		if !identifier.MatchString(name) {
+			continue // checkNames reports it
 		}
 		if workspace.Git == nil {
 			if workspace.Mode != "" {
@@ -45,9 +44,7 @@ func resolveWorkspaces(file *File, dir string, p *problems) map[string]ResolvedW
 			continue
 		}
 
-		if !strings.HasPrefix(strings.ToLower(workspace.Git.URL), "https://") {
-			p.addf("workspace %q: git url %q must be an https URL; ssh URLs and local paths are not supported", name, workspace.Git.URL)
-		}
+		checkGit(name, workspace.Git, p)
 		mode := workspace.Mode
 		if mode == "" {
 			mode = "clone"
@@ -180,6 +177,10 @@ func resolveMounts(
 				path = filepath.Join(dir, path)
 			}
 			path = filepath.Clean(path)
+			if path == "/" {
+				p.addf("agent %q: workspace %q would mount the whole filesystem root", name, r.raw)
+				continue
+			}
 			if info, err := os.Stat(path); err != nil || !info.IsDir() {
 				p.addf("agent %q: workspace %q is not an existing directory (%s)", name, r.raw, path)
 				continue
@@ -218,7 +219,7 @@ func workdir(name string, agent Agent, mounts []Mount, p *problems) string {
 		if strings.HasPrefix(agent.Workdir, "/") {
 			return filepath.Clean(agent.Workdir)
 		}
-		path := workspaceRoot + "/" + strings.Trim(agent.Workdir, "/")
+		path := filepath.Clean(workspaceRoot + "/" + strings.Trim(agent.Workdir, "/"))
 		for _, m := range mounts {
 			if m.Mount == path || strings.HasPrefix(path, m.Mount+"/") {
 				return path

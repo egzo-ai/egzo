@@ -153,3 +153,25 @@ func mustEvalSymlinks(t *testing.T, path string) string {
 	}
 	return resolved
 }
+
+func TestTheSameProjectThroughASymlinkIsTheSameProject(t *testing.T) {
+	real := t.TempDir()
+	if err := os.WriteFile(filepath.Join(real, "egzo.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	viaLink, err := loadProject(&options{file: filepath.Join(link, "egzo.yaml")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct, err := loadProject(&options{file: filepath.Join(real, "egzo.yaml")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viaLink.Dir != direct.Dir {
+		t.Errorf("Dir through the link = %q, direct = %q", viaLink.Dir, direct.Dir)
+	}
+}

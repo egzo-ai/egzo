@@ -34,12 +34,11 @@ type SecretSource struct {
 // Proxy is the infrastructure of the egress sidecar. Policy lives in Egress.
 type Proxy struct {
 	Image string `yaml:"image,omitempty"`
-	Audit *bool  `yaml:"audit,omitempty"`
 }
 
-type Control struct {
-	Tools []string `yaml:"tools,omitempty"`
-}
+// Control is the control sidecar's section. It has no settings yet; the key is accepted so a file can
+// carry the section the design shows, and a setting that does nothing is rejected rather than ignored.
+type Control struct{}
 
 // Profile is a named egress profile.
 type Profile struct {
@@ -118,7 +117,6 @@ type Agent struct {
 	Egress      string            `yaml:"egress,omitempty"`
 	Model       string            `yaml:"model,omitempty"`
 	Prompt      string            `yaml:"prompt,omitempty"`
-	Tools       []string          `yaml:"tools,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty"`
 	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions,omitempty"`

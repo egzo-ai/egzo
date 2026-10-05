@@ -67,3 +67,17 @@ def test_init_points_the_workspace_at_the_origin_over_https(project):
     assert project.run("init").returncode == 0
     document = yaml.safe_load((project.root / "egzo.yaml").read_text())
     assert document["workspaces"]["repo"]["git"]["url"] == "https://github.com/acme/shop.git"
+
+
+def test_init_never_copies_credentials_from_the_origin_url(project):
+    git(project, "init", "-q")
+    git(project, "remote", "add", "origin", "https://alice:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/acme/shop.git")
+    assert project.run("init").returncode == 0
+    text = (project.root / "egzo.yaml").read_text()
+    assert "ghp_" not in text and "alice" not in text
+    assert "github.com/acme/shop.git" in text
+
+
+def test_init_for_the_custom_harness_scaffolds_a_file_egzo_accepts(project):
+    assert project.run("init", "--harness", "custom").returncode == 0
+    assert project.run("config").returncode == 0

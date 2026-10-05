@@ -91,13 +91,7 @@ func TestScaffoldIsAValidProjectForEveryHarness(t *testing.T) {
 			if len(file.Agents) != 1 {
 				t.Errorf("agents = %v", file.Agents)
 			}
-			// The scaffold leaves the image of a custom harness to the user: that is the only
-			// problem it may have.
-			_, _, err = config.Resolve(file, "demo", t.TempDir())
-			switch {
-			case harness == "custom" && (err == nil || !strings.Contains(err.Error(), "needs an image")):
-				t.Errorf("custom scaffold: err = %v, want the missing image", err)
-			case harness != "custom" && err != nil:
+			if _, _, err = config.Resolve(file, "demo", t.TempDir()); err != nil {
 				t.Errorf("the scaffold does not resolve: %v\n%s", err, text)
 			}
 		})
@@ -246,5 +240,28 @@ func TestContains(t *testing.T) {
 	}
 	if contains(nil, "a") {
 		t.Error("contains(nil)")
+	}
+}
+
+func TestScaffoldQuotesAnUnusualURL(t *testing.T) {
+	for _, url := range []string{"https://h/o/r.git#frag", "https://h/o/r.git?a=b, c: d", "https://h/{x}.git"} {
+		file, err := config.Parse([]byte(scaffold("claude-code", url)))
+		if err != nil || file.Workspaces["repo"].Git.URL != url {
+			t.Errorf("%s: err = %v, url = %v", url, err, file.Workspaces["repo"].Git)
+		}
+	}
+}
+
+func TestWithoutCredentials(t *testing.T) {
+	cases := map[string]string{
+		"https://alice:ghp_secret@github.com/a/b.git": "https://github.com/a/b.git",
+		"https://ghp_secret@github.com/a/b.git":       "https://github.com/a/b.git",
+		"https://github.com/a/b.git":                  "https://github.com/a/b.git",
+		"https://":                                    placeholderURL,
+	}
+	for in, want := range cases {
+		if got := withoutCredentials(in); got != want {
+			t.Errorf("withoutCredentials(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

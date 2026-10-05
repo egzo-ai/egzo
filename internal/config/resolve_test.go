@@ -112,7 +112,7 @@ func TestResolveAgentValidation(t *testing.T) {
 		{"unknown harness", "agents:\n  a: { harness: gpt }\n", []string{`unknown harness "gpt"`}},
 		{"custom needs an image", "agents:\n  a: { harness: custom }\n", []string{"custom harness needs an image"}},
 		{"unknown permissions", "agents:\n  a: { harness: custom, image: x, permissions: yolo }\n", []string{`unknown permissions "yolo"`}},
-		{"agent names cannot contain a slash", "agents:\n  a/b: { harness: custom, image: x }\n", []string{"cannot contain '/' or ':'"}},
+		{"agent names cannot contain a slash", "agents:\n  a/b: { harness: custom, image: x }\n", []string{"a name is 1 to 63 lowercase"}},
 		{"unknown dependency", "agents:\n  a: { harness: custom, image: x, depends_on: [ghost] }\n", []string{`unknown agent "ghost"`}},
 		{"unknown egress profile", "agents:\n  a: { harness: custom, image: x, egress: nowhere }\n", []string{`egress profile "nowhere" is not defined`}},
 	}
@@ -274,7 +274,7 @@ workspaces:
 	cases := []struct {
 		name, yaml, want string
 	}{
-		{"bad name", "workspaces:\n  'a:b': {}\n", "names cannot contain"},
+		{"bad name", "workspaces:\n  'a:b': {}\n", "a name is 1 to 63 lowercase"},
 		{"mode without git", "workspaces:\n  w: { mode: clone }\n", "mode only applies to git"},
 		{"path without git", "workspaces:\n  w: { path: ./x }\n", "path only applies to git"},
 		{"ssh url", "workspaces:\n  w: { git: { url: 'git@github.com:o/r.git' } }\n", "must be an https URL"},

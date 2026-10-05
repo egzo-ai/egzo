@@ -83,6 +83,7 @@ func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
 	}
 
 	for _, entry := range definition.Allow {
+		entry = normalizeHost(entry)
 		if !validAllow(entry) {
 			r.problems.addf("egress profile %q: invalid allow entry %q (use a host, *.domain or *)", name, entry)
 			continue
@@ -123,13 +124,21 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 			current.Services[name] = builtin
 			existing = builtin
 		}
+		if existing.Inject == nil {
+			r.problems.addf("egress profile %q: service %q injects no credential (it has no inject), so a secret cannot be bound to it", profile, name)
+			return
+		}
 		if r.checkSecret(profile, name, entry.Ref) {
 			existing.Secret = entry.Ref
 		}
 		return
 	}
 
-	def := entry.Def
+	def := *entry.Def
+	def.Hosts = make([]string, len(entry.Def.Hosts))
+	for i, host := range entry.Def.Hosts {
+		def.Hosts[i] = normalizeHost(host)
+	}
 	valid := true
 	if len(def.Hosts) == 0 {
 		r.problems.addf("egress profile %q: service %q needs hosts", profile, name)

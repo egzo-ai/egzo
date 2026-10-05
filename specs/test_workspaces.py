@@ -210,3 +210,42 @@ def test_a_cross_agent_reference_to_an_unknown_agent_is_an_error(project):
     )
     assert result.returncode != 0
     assert "ghost" in result.stderr
+
+
+# --- git sources carry no credentials and no option-looking values ---------------------------------------
+
+
+def test_a_git_url_with_credentials_is_rejected_without_echoing_them(project):
+    url = "https://alice:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/acme/shop.git"
+    result = project.config(spec(workspaces={"repo": {"git": {"url": url}}}, agents={"coder": agent(workspaces=["repo"])}))
+    assert result.returncode != 0
+    assert "credentials" in result.stderr
+    assert "ghp_" not in result.stderr and "alice" not in result.stderr
+
+
+@pytest.mark.parametrize("branch", ["--detach", "-x", "a b", "a..b", "x~1", "x^", "x:y", "ends.lock", ""])
+def test_a_git_branch_that_is_not_a_branch_name_is_rejected(project, branch):
+    git = {"url": "https://github.com/acme/shop.git", "branch": branch}
+    result = project.config(spec(workspaces={"repo": {"git": git}}, agents={"coder": agent(workspaces=["repo"])}))
+    if branch == "":
+        assert result.returncode == 0  # no branch means the default branch
+    else:
+        assert result.returncode != 0
+        assert "branch" in result.stderr
+
+
+@pytest.mark.parametrize("branch", ["main", "release/1.2", "feature/x_y-z", "v1.0.0"])
+def test_ordinary_branch_names_are_accepted(project, branch):
+    git = {"url": "https://github.com/acme/shop.git", "branch": branch}
+    result = project.config(spec(workspaces={"repo": {"git": git}}, agents={"coder": agent(workspaces=["repo"])}))
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_project_reached_through_a_symlink_is_the_same_project(project, tmp_path):
+    """Project identity is the directory: through a symlink it must resolve to the same real paths."""
+    project.write(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
+    link = tmp_path / "link"
+    link.symlink_to(project.root)
+    direct = project.run("config").yaml()["workspaces"]["repo"]["path"]
+    through = project.egzo.run("-f", link / "egzo.yaml", "config", cwd=tmp_path).yaml()["workspaces"]["repo"]["path"]
+    assert through == direct

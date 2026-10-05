@@ -40,6 +40,12 @@ func loadProject(opts *options) (*project, error) {
 		return nil, err
 	}
 	dir := filepath.Dir(path)
+	// The project is identified by its directory: the same directory reached through a symlink
+	// (or a $PWD that is one) must be the same project.
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+		path = filepath.Join(dir, filepath.Base(path))
+	}
 	file, err := config.LoadFile(path)
 	if err != nil {
 		return nil, err

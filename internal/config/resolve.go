@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/docker/go-units"
 )
 
 // Resolved is the fully resolved project: what `egzo config` prints.
@@ -19,6 +21,12 @@ type Resolved struct {
 	Workspaces    map[string]ResolvedWorkspace `yaml:"workspaces"`
 	Agents        map[string]ResolvedAgent     `yaml:"agents"`
 	Egress        map[string]*ResolvedProfile  `yaml:"egress"`
+	Proxy         *ResolvedProxy               `yaml:"proxy,omitempty"`
+}
+
+// ResolvedProxy is what the file says about the proxy sidecar; nil when it says nothing.
+type ResolvedProxy struct {
+	Image string `yaml:"image"`
 }
 
 type ResolvedAgent struct {
@@ -29,7 +37,6 @@ type ResolvedAgent struct {
 	Workspaces  []Mount           `yaml:"workspaces"`
 	Model       string            `yaml:"model,omitempty"`
 	Prompt      string            `yaml:"prompt,omitempty"`
-	Tools       []string          `yaml:"tools,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty"`
 	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions"`
@@ -80,6 +87,17 @@ func resolveInject(name string, agent Agent, p *problems) ResolvedInject {
 	return inject
 }
 
+func checkResources(agent string, r Resources, p *problems) {
+	if r.CPUs < 0 {
+		p.addf("agent %q: resources.cpus must not be negative", agent)
+	}
+	if r.Memory != "" {
+		if bytes, err := units.RAMInBytes(r.Memory); err != nil || bytes <= 0 {
+			p.addf("agent %q: resources.memory %q is not a size like 512m or 4g", agent, r.Memory)
+		}
+	}
+}
+
 // Resolve validates the file and returns the resolved project plus non-fatal warnings. dir is the
 // project directory, name the already resolved project name.
 func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
@@ -89,6 +107,8 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 		p.addf("unsupported version %d (this egzo understands version 1)", file.Version)
 	}
 	checkVaults(file.Vaults, p)
+	checkNames(file, p)
+	checkDependencies(file, p)
 
 	resolved := &Resolved{
 		Name:       name,
@@ -96,6 +116,9 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 		Workspaces: resolveWorkspaces(file, dir, p),
 		Agents:     map[string]ResolvedAgent{},
 		Egress:     resolveEgress(file, p),
+	}
+	if file.Proxy.Image != "" {
+		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image}
 	}
 	resolved.SecretSources = map[string]string{}
 	for vault, definition := range file.Vaults {
@@ -134,9 +157,6 @@ func resolveAgent(
 ) (ResolvedAgent, []string) {
 	var warnings []string
 
-	if strings.ContainsAny(name, "/:") {
-		p.addf("agent %q: names cannot contain '/' or ':'", name)
-	}
 	switch {
 	case agent.Harness == "":
 		p.addf("agent %q: harness is required (one of: %s)", name, strings.Join(HarnessNames(), ", "))
@@ -185,6 +205,14 @@ func resolveAgent(
 	}
 
 	mounts, workdir := resolveMounts(file, name, agent, dir, resolved.Workspaces, refs, p)
+	for _, mount := range mounts {
+		if mount.HostPath != "" {
+			if reason := socketWarning(mount.HostPath); reason != "" {
+				warnings = append(warnings, fmt.Sprintf("warning: agent %q mounts %s", name, reason))
+			}
+		}
+	}
+	checkResources(name, agent.Resources, p)
 
 	permissions := agent.Permissions
 	if permissions == "" {
@@ -198,7 +226,6 @@ func resolveAgent(
 		Workspaces:  mounts,
 		Model:       agent.Model,
 		Prompt:      agent.Prompt,
-		Tools:       agent.Tools,
 		Resources:   agent.Resources,
 		Runtime:     agent.Runtime,
 		Permissions: permissions,
@@ -264,6 +291,10 @@ func checkEnv(agent string, env map[string]string, p *problems) {
 	sort.Strings(names)
 	for _, key := range names {
 		value := env[key]
+		if reservedEnvName(key) {
+			p.addf("agent %q: env %s is set by egzo to wire the agent to its sidecars and cannot be overridden", agent, key)
+			continue
+		}
 		looksSecret := sensitiveKey.MatchString(key) && opaqueValue.MatchString(value)
 		for _, pattern := range secretValuePatterns {
 			looksSecret = looksSecret || pattern.MatchString(value)

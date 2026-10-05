@@ -283,3 +283,35 @@ def test_a_profile_that_reaches_the_provider_does_not_warn(project):
     result = project.config(spec(egress={"default": anthropic_profile()}, agents={"coder": agent()}))
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr.lower()
+
+
+# --- host names are compared the way the proxy compares them -----------------------------------------------
+
+
+def test_host_names_are_case_insensitive_and_a_trailing_dot_is_ignored(project):
+    """The proxy lowercases; the file must not warn about a host that the proxy would allow."""
+    document = spec(
+        egress={"default": {"allow": ["Platform.Claude.COM.", "API.Anthropic.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}},
+        agents={"coder": agent()},
+    )
+    result = project.config(document)
+    assert result.returncode == 0, result.stderr
+    assert "cannot reach" not in result.stderr
+    allow = result.yaml()["egress"]["default"]["allow"]
+    assert "platform.claude.com" in allow and "api.anthropic.com" in allow
+
+
+def test_a_secret_bound_to_a_service_that_injects_nothing_is_an_error(project):
+    document = spec(
+        egress={
+            "default": {
+                "services": {
+                    "plain": {"hosts": ["example.com"]},
+                }
+            },
+            "other": {"extend": "default", "services": {"plain": "main/DEPLOY_TOKEN"}},
+        },
+    )
+    result = project.config(document)
+    assert result.returncode != 0
+    assert "plain" in result.stderr and "inject" in result.stderr

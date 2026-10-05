@@ -170,9 +170,13 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		egress := NetworkSpec{Name: project.Name + "_egress", Identity: identity(proxyService, kindProxy)}
 		caPrivate := VolumeSpec{Name: project.Name + "_ca-private", Identity: identity(proxyService, kindProxy)}
 		caPublic := VolumeSpec{Name: project.Name + "_ca", Identity: identity(proxyService, kindProxy)}
+		proxyImage := in.Image
+		if project.Proxy != nil && project.Proxy.Image != "" {
+			proxyImage = project.Proxy.Image
+		}
 		proxy := ContainerSpec{
 			Name:  project.Name + "-proxy-1",
-			Image: in.Image,
+			Image: proxyImage,
 			Cmd:   []string{"/egzo", "proxy", "serve"},
 			Mounts: []MountSpec{
 				{Source: caPrivate.Name, Target: caPrivateDir},
