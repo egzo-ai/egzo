@@ -44,6 +44,17 @@ func (c *Client) ExecStream(ctx context.Context, containerID string, command []s
 		return 1, err
 	}
 	defer attached.Close()
+	// The stream blocks until the command ends; a cancelled context must end it too, or a caller that
+	// stops following (`send --wait` once it has its answer) would wait for the command forever.
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			attached.Close()
+		case <-finished:
+		}
+	}()
 
 	resize := func() {
 		if s.TTY && s.Size != nil {

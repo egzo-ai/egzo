@@ -2,11 +2,11 @@ package control
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -27,14 +27,16 @@ type agentAPI struct {
 func (a *agentAPI) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/status", a.authenticated(a.status))
-	mux.HandleFunc("POST /v1/say", a.authenticated(a.say))
-	mux.HandleFunc("POST /v1/ask", a.authenticated(a.ask))
-	mux.HandleFunc("GET /v1/questions/{id}", a.authenticated(a.question))
-	mux.HandleFunc("GET /v1/inbox", a.authenticated(a.inbox))
+	mux.HandleFunc("GET /v1/messages", a.authenticated(a.list))
+	mux.HandleFunc("POST /v1/messages", a.authenticated(a.send))
+	mux.HandleFunc("GET /v1/messages/{id}", a.authenticated(a.get))
+	mux.HandleFunc("POST /v1/messages/{id}/resolve", a.authenticated(a.resolve))
+	mux.HandleFunc("POST /v1/messages/{id}/update", a.authenticated(a.update))
+	mux.HandleFunc("POST /v1/messages/{id}/ask", a.authenticated(a.ask))
+	mux.HandleFunc("GET /v1/agents", a.authenticated(a.agents))
 	mux.HandleFunc("POST /v1/hooks/{name}", a.authenticated(a.hook))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
-	mux.HandleFunc("POST /v1/ack", a.authenticated(a.ack))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
 	return mux
 }
@@ -82,79 +84,130 @@ func unauthorized(w http.ResponseWriter) {
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 
-func readText(w http.ResponseWriter, r *http.Request) (string, bool) {
-	var body struct {
-		Text string `json:"text"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "expected JSON like {\"text\": \"...\"}", http.StatusBadRequest)
-		return "", false
-	}
-	if !validText(body.Text) {
-		http.Error(w, "text must not be empty or longer than 16 KB", http.StatusBadRequest)
-		return "", false
-	}
-	return body.Text, true
-}
-
 func validText(text string) bool {
 	return strings.TrimSpace(text) != "" && len(text) <= maxTextSize
 }
 
-func (a *agentAPI) status(w http.ResponseWriter, r *http.Request, agent string) {
-	text, ok := readText(w, r)
-	if !ok {
+// fail writes an error with the status it maps to.
+func fail(w http.ResponseWriter, err error) {
+	var failure *apiError
+	if errors.As(err, &failure) {
+		http.Error(w, failure.Text, failure.Status)
 		return
 	}
-	if err := a.server.reportStatus(agent, text); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
+func reply(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(value)
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, into any) bool {
+	if err := json.NewDecoder(r.Body).Decode(into); err != nil {
+		http.Error(w, "expected a JSON body", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func (a *agentAPI) status(w http.ResponseWriter, r *http.Request, agent string) {
+	var body struct {
+		Text string `json:"text"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if !validText(body.Text) {
+		http.Error(w, "text must not be empty or longer than 16 KB", http.StatusBadRequest)
+		return
+	}
+	if err := a.server.reportStatus(agent, body.Text); err != nil {
+		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *agentAPI) say(w http.ResponseWriter, r *http.Request, agent string) {
-	text, ok := readText(w, r)
-	if !ok {
+func (a *agentAPI) list(w http.ResponseWriter, r *http.Request, agent string) {
+	reply(w, http.StatusOK, a.server.listFor(agent))
+}
+
+func (a *agentAPI) send(w http.ResponseWriter, r *http.Request, agent string) {
+	var body struct {
+		To   string `json:"to"`
+		Text string `json:"text"`
+		Re   string `json:"re"`
+	}
+	if !decodeBody(w, r, &body) {
 		return
 	}
-	if err := a.server.say(agent, text); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	id, err := a.server.sendFromAgent(agent, body.To, body.Text, body.Re)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+func (a *agentAPI) get(w http.ResponseWriter, r *http.Request, agent string) {
+	message, err := a.server.fetch(agent, r.PathValue("id"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, http.StatusOK, message)
+}
+
+func (a *agentAPI) resolve(w http.ResponseWriter, r *http.Request, agent string) {
+	var body struct {
+		Text    string `json:"text"`
+		Outcome string `json:"outcome"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if _, err := a.server.resolve(agent, r.PathValue("id"), body.Text, body.Outcome); err != nil {
+		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *agentAPI) update(w http.ResponseWriter, r *http.Request, agent string) {
+	var body struct {
+		Text string `json:"text"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	id, err := a.server.update(agent, r.PathValue("id"), body.Text)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, http.StatusCreated, map[string]string{"id": id})
 }
 
 func (a *agentAPI) ask(w http.ResponseWriter, r *http.Request, agent string) {
-	text, ok := readText(w, r)
-	if !ok {
+	var body struct {
+		Text    string   `json:"text"`
+		Choices []string `json:"choices"`
+	}
+	if !decodeBody(w, r, &body) {
 		return
 	}
-	id, err := a.server.ask(agent, text)
+	id, err := a.server.ask(agent, r.PathValue("id"), body.Text, body.Choices)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		fail(w, err)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]string{"id": id})
+	reply(w, http.StatusCreated, map[string]string{"id": id})
 }
 
-// question lets an agent see the answer to a question it asked, and only its own.
-func (a *agentAPI) question(w http.ResponseWriter, r *http.Request, agent string) {
-	if question, ok := a.server.questionFor(agent, r.PathValue("id")); ok {
-		json.NewEncoder(w).Encode(question)
-		return
-	}
-	http.NotFound(w, r)
-}
-
-// inbox hands an agent its queued messages and marks them delivered.
-func (a *agentAPI) inbox(w http.ResponseWriter, r *http.Request, agent string) {
-	messages, err := a.server.takeInbox(agent)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	json.NewEncoder(w).Encode(messages)
+func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) {
+	reply(w, http.StatusOK, a.server.othersOf(agent))
 }
 
 // hook ingests a harness hook payload as an event, so hooks and tool calls share one stream.
@@ -184,12 +237,6 @@ func (a *agentAPI) hook(w http.ResponseWriter, r *http.Request, agent string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func newID(prefix string) string {
-	raw := make([]byte, 4)
-	rand.Read(raw)
-	return prefix + hex.EncodeToString(raw)
-}
-
 // The verbs below are shared by the HTTP API and the MCP tools.
 
 func (s *server) reportStatus(agent, text string) error {
@@ -197,37 +244,31 @@ func (s *server) reportStatus(agent, text string) error {
 	return err
 }
 
-func (s *server) say(agent, text string) error {
-	_, err := s.events.append(Event{Type: "say", Agent: agent, Actor: "agent:" + agent, Text: text})
-	return err
-}
-
-func (s *server) ask(agent, text string) (string, error) {
-	id := newID("q")
-	_, err := s.events.append(Event{Type: "question", Agent: agent, Actor: "agent:" + agent, ID: id, Text: text})
-	return id, err
-}
-
-// questionFor returns a question only to the agent that asked it.
-func (s *server) questionFor(agent, id string) (Question, bool) {
-	for _, question := range s.events.questions() {
-		if question.ID == id && question.Agent == agent {
-			return question, true
+// othersOf lists the other agents of the project with what the control sidecar knows of each.
+func (s *server) othersOf(agent string) []AgentStatus {
+	out := []AgentStatus{}
+	for _, status := range s.agentStatuses() {
+		if status.Agent != agent {
+			out = append(out, status)
 		}
 	}
-	return Question{}, false
+	return out
 }
 
-// takeInbox returns an agent's undelivered messages and marks them delivered.
-func (s *server) takeInbox(agent string) ([]Message, error) {
-	messages := s.events.pending(agent)
-	for _, message := range messages {
-		if _, err := s.events.append(Event{Type: "delivered", Agent: agent, Actor: "agent:" + agent, ID: message.ID}); err != nil {
-			return nil, err
+// agentStatuses is every agent of the project, known from `up` and from what they reported.
+func (s *server) agentStatuses() []AgentStatus {
+	latest := s.events.statuses()
+	for _, name := range s.projectAgents() {
+		if _, ok := latest[name]; !ok {
+			latest[name] = AgentStatus{Agent: name}
 		}
 	}
-	if messages == nil {
-		messages = []Message{}
+	out := make([]AgentStatus, 0, len(latest))
+	for name, status := range latest {
+		status.Agent = name
+		status.Open, status.Waiting = s.overlay(name)
+		out = append(out, status)
 	}
-	return messages, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].Agent < out[j].Agent })
+	return out
 }

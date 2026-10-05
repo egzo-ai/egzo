@@ -15,24 +15,28 @@ import (
 type Event struct {
 	Seq   int             `json:"seq"`
 	Time  time.Time       `json:"time"`
-	Type  string          `json:"type"` // status, say, question, answer, message, delivered, hook
+	Type  string          `json:"type"` // status, message, announced, fetched, resolved, unconfirmed, interrupt, interrupted, activity, hook
 	Agent string          `json:"agent,omitempty"`
 	Actor string          `json:"actor,omitempty"` // agent:<name> or user:<id>; operator for the CLI
-	ID    string          `json:"id,omitempty"`    // message or question id
+	ID    string          `json:"id,omitempty"`    // message id
 	Text  string          `json:"text,omitempty"`
 	Data  json.RawMessage `json:"data,omitempty"`
 }
 
-// store is an append-only log on the control volume, with the live view derived from it.
+// store is an append-only log on the control volume, with the live view derived from it: the messages
+// and their states are kept in memory, rebuilt from the log when the sidecar starts.
 type store struct {
 	mu     sync.Mutex
 	path   string
 	events []Event
 	wake   chan struct{} // closed and replaced whenever an event is appended
+
+	messages map[string]*Message
+	order    []string
 }
 
 func openStore(dir string) (*store, error) {
-	s := &store{path: filepath.Join(dir, "events.jsonl"), wake: make(chan struct{})}
+	s := &store{path: filepath.Join(dir, "events.jsonl"), wake: make(chan struct{}), messages: map[string]*Message{}}
 	file, err := os.Open(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -47,6 +51,7 @@ func openStore(dir string) (*store, error) {
 		var event Event
 		if json.Unmarshal(scanner.Bytes(), &event) == nil {
 			s.events = append(s.events, event)
+			s.index(event)
 		}
 	}
 	return s, scanner.Err()
@@ -70,6 +75,7 @@ func (s *store) append(event Event) (Event, error) {
 		return event, err
 	}
 	s.events = append(s.events, event)
+	s.index(event)
 	close(s.wake)
 	s.wake = make(chan struct{})
 	return event, nil
@@ -97,7 +103,7 @@ func (s *store) all() []Event {
 	return s.events[:len(s.events):len(s.events)]
 }
 
-// activity is what an agent is doing: starting, idle, busy or blocked. It is the last activity event.
+// activity is what an agent is doing: starting, idle, working or blocked. It is the last activity event.
 func (s *store) activity(agent string) string {
 	events := s.all()
 	for i := len(events) - 1; i >= 0; i-- {
@@ -125,128 +131,18 @@ func (s *store) interruptPending(agent string) bool {
 	return false
 }
 
-// Message states: queued until the session holder claims it, delivering while it waits for the
-// harness to acknowledge it, then delivered, or unconfirmed when no acknowledgement came in time.
-const (
-	messageQueued      = "queued"
-	messageDelivering  = "delivering"
-	messageDelivered   = "delivered"
-	messageUnconfirmed = "unconfirmed"
-)
-
-// Message is a queued message and its fate, derived from the log.
-type Message struct {
-	ID        string    `json:"id"`
-	To        string    `json:"to"`
-	From      string    `json:"from"`
-	Text      string    `json:"text"`
-	Time      time.Time `json:"time"`
-	State     string    `json:"state"`
-	Delivered bool      `json:"delivered"`
-	Deadline  time.Time `json:"-"`
-}
-
-// messages lists every message addressed to an agent with its state, oldest first.
-func (s *store) messages(agent string) []Message {
-	byID := map[string]*Message{}
-	var order []string
-	for _, event := range s.all() {
-		switch event.Type {
-		case "message":
-			if event.Agent == agent {
-				byID[event.ID] = &Message{ID: event.ID, To: event.Agent, From: event.Actor, Text: event.Text, Time: event.Time, State: messageQueued}
-				order = append(order, event.ID)
-			}
-		case messageDelivering, messageDelivered, messageUnconfirmed:
-			if message := byID[event.ID]; message != nil {
-				message.State = event.Type
-				message.Delivered = event.Type == messageDelivered
-				if event.Type == messageDelivering {
-					var data struct {
-						DeadlineMs int64 `json:"deadline_ms"`
-					}
-					if json.Unmarshal(event.Data, &data) == nil && data.DeadlineMs > 0 {
-						message.Deadline = time.UnixMilli(data.DeadlineMs)
-					}
-				}
-			}
-		}
-	}
-	out := make([]Message, 0, len(order))
-	for _, id := range order {
-		out = append(out, *byID[id])
-	}
-	return out
-}
-
-func (s *store) withState(agent, state string) []Message {
-	var out []Message
-	for _, message := range s.messages(agent) {
-		if message.State == state {
-			out = append(out, message)
-		}
-	}
-	return out
-}
-
-// pending lists the messages still waiting to be handed over, oldest first.
-func (s *store) pending(agent string) []Message { return s.withState(agent, messageQueued) }
-
-// outstanding lists the messages handed over and waiting for the harness to acknowledge them.
-func (s *store) outstanding(agent string) []Message { return s.withState(agent, messageDelivering) }
-
-// unfinished lists the messages that have not reached a final state.
-func (s *store) unfinished(agent string) []Message {
-	var out []Message
-	for _, message := range s.messages(agent) {
-		if message.State == messageQueued || message.State == messageDelivering {
-			out = append(out, message)
-		}
-	}
-	return out
-}
-
-// Question is a question an agent asked a human, with its answer once there is one.
-type Question struct {
-	ID         string    `json:"id"`
-	Agent      string    `json:"agent"`
-	Text       string    `json:"text"`
-	Time       time.Time `json:"time"`
-	Answered   bool      `json:"answered"`
-	Answer     string    `json:"answer,omitempty"`
-	AnsweredBy string    `json:"answered_by,omitempty"`
-}
-
-func (s *store) questions() []Question {
-	byID := map[string]*Question{}
-	var order []string
-	for _, event := range s.all() {
-		switch event.Type {
-		case "question":
-			byID[event.ID] = &Question{ID: event.ID, Agent: event.Agent, Text: event.Text, Time: event.Time}
-			order = append(order, event.ID)
-		case "answer":
-			if question := byID[event.ID]; question != nil && !question.Answered {
-				question.Answered, question.Answer, question.AnsweredBy = true, event.Text, event.Actor
-			}
-		}
-	}
-	out := make([]Question, 0, len(order))
-	for _, id := range order {
-		out = append(out, *byID[id])
-	}
-	return out
-}
-
-// AgentStatus is the latest status an agent reported and what it is doing.
+// AgentStatus is what the control sidecar knows of an agent: the status line it set, its activity, and what
+// it owes (open requests, an unanswered question).
 type AgentStatus struct {
 	Agent    string    `json:"agent"`
 	Status   string    `json:"status"`
-	Activity string    `json:"activity,omitempty"`
+	Activity string    `json:"activity"`
+	Open     int       `json:"open"`
+	Waiting  bool      `json:"waiting"`
 	Updated  time.Time `json:"updated"`
 }
 
-func (s *store) statuses() []AgentStatus {
+func (s *store) statuses() map[string]AgentStatus {
 	latest := map[string]AgentStatus{}
 	for _, event := range s.all() {
 		switch event.Type {
@@ -263,9 +159,5 @@ func (s *store) statuses() []AgentStatus {
 			latest[event.Agent] = entry
 		}
 	}
-	out := make([]AgentStatus, 0, len(latest))
-	for _, status := range latest {
-		out = append(out, status)
-	}
-	return out
+	return latest
 }

@@ -35,6 +35,7 @@ func New() *cobra.Command {
 		newEventsCommand(opts),
 		newQuestionsCommand(opts),
 		newAnswerCommand(opts),
+		newMessagesCommand(opts),
 		newLogsCommand(opts),
 		newExecCommand(opts),
 		newLifecycleCommand(opts, "start", "Start a service's container"),

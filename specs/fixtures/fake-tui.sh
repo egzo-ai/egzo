@@ -3,7 +3,7 @@
 # observe exactly what the session layer does to a terminal program.
 mode="${FAKE_TUI:-cat}"
 esc=$(printf '\033')
-clean() { printf '%s' "$1" | sed -e "s/${esc}\[20[01]~//g" -e 's/[^[:print:]]//g' -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+clean() { printf '%s' "$1" | sed -e "s/${esc}\[20[01]~//g" -e 's/[^[:print:]]//g' -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^ *//' -e 's/ *$//'; }
 
 case "$mode" in
 cat) # raw terminal, every byte comes straight back

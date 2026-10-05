@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -30,6 +30,8 @@ type server struct {
 	// deliveryMu makes activity changes, claims and acknowledgements one at a time, so two of them
 	// never decide from the same state.
 	deliveryMu sync.Mutex
+	rateMu     sync.Mutex
+	sends      map[string][]time.Time
 }
 
 func newServer(dir string) (*server, error) {
@@ -50,10 +52,10 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /specs/{hash}", s.getSpec)
 	mux.HandleFunc("GET /specs", s.listSpecs)
 	mux.HandleFunc("GET /events", s.streamEvents)
-	mux.HandleFunc("POST /queue", s.enqueue)
-	mux.HandleFunc("GET /queue", s.queue)
-	mux.HandleFunc("GET /questions", s.listQuestions)
-	mux.HandleFunc("POST /questions/{id}/answer", s.answer)
+	mux.HandleFunc("POST /messages", s.enqueue)
+	mux.HandleFunc("GET /messages", s.listMessages)
+	mux.HandleFunc("GET /messages/{id}", s.getMessage)
+	mux.HandleFunc("POST /messages/{id}/resolve", s.resolveForOperator)
 	mux.HandleFunc("GET /agents", s.agents)
 	mux.HandleFunc("PUT /project", s.putProject)
 	return mux
@@ -188,6 +190,7 @@ func (s *server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// enqueue is a person sending a request to an agent: the CLI, and later the hub for its users.
 func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		To        string `json:"to"`
@@ -195,84 +198,84 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 		Text      string `json:"text"`
 		Interrupt bool   `json:"interrupt"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil || !safeName.MatchString(body.To) {
-		http.Error(w, "expected {\"to\": agent, \"text\": message}", http.StatusBadRequest)
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil {
+		http.Error(w, "expected {\"to\": \"agent:name\", \"text\": message}", http.StatusBadRequest)
 		return
 	}
 	if body.From == "" {
 		body.From = "operator"
 	}
-	if !actorName.MatchString(body.From) || strings.TrimSpace(body.Text) == "" || len(body.Text) > maxTextSize {
-		http.Error(w, "invalid sender or text", http.StatusBadRequest)
+	if !actorName.MatchString(body.From) || !isHuman(body.From) {
+		http.Error(w, "from must be operator or user:<id>", http.StatusBadRequest)
 		return
 	}
-	id := newID("m")
-	if _, err := s.events.append(Event{Type: "message", Agent: body.To, Actor: body.From, ID: id, Text: body.Text}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	message, event, err := s.send(sendRequest{From: body.From, To: body.To, Text: body.Text, Interrupt: body.Interrupt})
+	if err != nil {
+		fail(w, err)
 		return
 	}
-	if body.Interrupt {
-		if _, err := s.events.append(Event{Type: "interrupt", Agent: body.To, Actor: body.From}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-	json.NewEncoder(w).Encode(map[string]string{"id": id})
+	json.NewEncoder(w).Encode(map[string]any{"id": message.ID, "seq": event.Seq})
 }
 
-func (s *server) queue(w http.ResponseWriter, r *http.Request) {
-	messages := s.events.unfinished(r.URL.Query().Get("agent"))
-	if messages == nil {
-		messages = []Message{}
-	}
+// listMessages is `egzo messages`: the open requests and questions, or with all=1 everything. agent=
+// narrows it to the messages an agent sent or received, kind= to one kind.
+func (s *server) listMessages(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	agent, kind, all := query.Get("agent"), query.Get("kind"), query.Get("all") == "1"
+	messages := s.events.selectMessages(func(m Message) bool {
+		if agent != "" && m.To != "agent:"+agent && m.From != "agent:"+agent {
+			return false
+		}
+		if kind != "" && m.Kind != kind {
+			return false
+		}
+		if all {
+			return true
+		}
+		return (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
+	})
 	json.NewEncoder(w).Encode(messages)
 }
 
-func (s *server) listQuestions(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(s.events.questions())
+func (s *server) getMessage(w http.ResponseWriter, r *http.Request) {
+	message, ok := s.events.message(r.PathValue("id"))
+	if !ok {
+		http.Error(w, errNoSuchMessage.Text, http.StatusNotFound)
+		return
+	}
+	json.NewEncoder(w).Encode(message)
 }
 
-func (s *server) answer(w http.ResponseWriter, r *http.Request) {
+// resolveForOperator is a person answering a question or closing a request addressed to them.
+func (s *server) resolveForOperator(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Actor string `json:"actor"`
-		Text  string `json:"text"`
+		Actor   string `json:"actor"`
+		Text    string `json:"text"`
+		Outcome string `json:"outcome"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil || strings.TrimSpace(body.Text) == "" {
-		http.Error(w, "expected {\"text\": answer}", http.StatusBadRequest)
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil {
+		http.Error(w, "expected {\"text\": answer, \"outcome\": done|declined|failed}", http.StatusBadRequest)
 		return
 	}
 	if body.Actor == "" {
 		body.Actor = "operator"
 	}
-	if !actorName.MatchString(body.Actor) {
+	if body.Outcome == "" {
+		body.Outcome = "done"
+	}
+	if !actorName.MatchString(body.Actor) || !isHuman(body.Actor) {
 		http.Error(w, "invalid actor", http.StatusBadRequest)
 		return
 	}
-	id := r.PathValue("id")
-	for _, question := range s.events.questions() {
-		if question.ID != id {
-			continue
-		}
-		if question.Answered {
-			http.Error(w, "question already answered", http.StatusConflict)
-			return
-		}
-		if _, err := s.events.append(Event{Type: "answer", Agent: question.Agent, Actor: body.Actor, ID: id, Text: body.Text}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+	if _, err := s.resolveForPerson(body.Actor, r.PathValue("id"), body.Text, body.Outcome); err != nil {
+		fail(w, err)
 		return
 	}
-	http.NotFound(w, r)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) agents(w http.ResponseWriter, r *http.Request) {
-	statuses := s.events.statuses()
-	if statuses == nil {
-		statuses = []AgentStatus{}
-	}
-	json.NewEncoder(w).Encode(statuses)
+	json.NewEncoder(w).Encode(s.agentStatuses())
 }
 
 // putProject records which agents the project has, so an agent cannot hand work to one that does not exist.
@@ -290,6 +293,21 @@ func (s *server) putProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// projectAgents lists the agents the project said it has, or none before it has.
+func (s *server) projectAgents() []string {
+	data, err := os.ReadFile(filepath.Join(s.dir, "project.json"))
+	if err != nil {
+		return nil
+	}
+	var project struct {
+		Agents []string `json:"agents"`
+	}
+	if json.Unmarshal(data, &project) != nil {
+		return nil
+	}
+	return project.Agents
 }
 
 // knownAgent reports whether name is an agent of the project. Before the project has said which
@@ -311,18 +329,4 @@ func (s *server) knownAgent(name string) bool {
 		}
 	}
 	return false
-}
-
-// handoff queues a message for another agent, as the calling agent.
-func (s *server) handoff(from, to, text string) error {
-	switch {
-	case to == from:
-		return errors.New("an agent cannot hand work to itself")
-	case !s.knownAgent(to):
-		return fmt.Errorf("no agent %q in this project", to)
-	case !validText(text):
-		return errors.New("text must not be empty or longer than 16 KB")
-	}
-	_, err := s.events.append(Event{Type: "message", Agent: to, Actor: "agent:" + from, ID: newID("m"), Text: text})
-	return err
 }

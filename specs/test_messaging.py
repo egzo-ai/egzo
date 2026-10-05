@@ -297,7 +297,7 @@ def test_a_reply_chain_is_threaded_and_a_thread_has_a_depth_limit(live_project, 
     assert api(engine, live_project, "reviewer", "POST", "/v1/messages", {"to": "agent:coder", "text": "x", "re": parent})[0] in (400, 404)  # not its thread
 
     current, sender, receiver = child, "reviewer", "coder"
-    for hop in range(2, 9):  # the thread is 8 messages deep at most, counting the first
+    for hop in range(2, 8):  # the thread is 8 messages deep at most, counting the first: hops 0 to 7
         fetched(engine, live_project, sender, current)
         code, body = api(engine, live_project, sender, "POST", "/v1/messages", {"to": f"agent:{receiver}", "text": f"hop {hop}", "re": current})
         assert code in (200, 201), (hop, code, body)

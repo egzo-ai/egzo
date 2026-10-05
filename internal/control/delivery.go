@@ -3,22 +3,22 @@ package control
 import (
 	"encoding/json"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 )
 
 // Agent activity, derived from what the harness reports through its hooks and from the session
-// holder: starting, idle, busy, or blocked (waiting on a human). Every change is an `activity`
-// event, so clients follow it on the same stream as everything else.
+// holder: starting, idle, working, or blocked (stuck on the harness's own UI, which only a person at the
+// terminal can answer). Every change is an `activity` event, so clients follow it on the same stream as
+// everything else. stopped is not recorded: it is the engine's word, shown by `egzo ps`.
 const (
 	activityStarting = "starting"
 	activityIdle     = "idle"
-	activityBusy     = "busy"
+	activityWorking  = "working"
 	activityBlocked  = "blocked"
 )
 
-var activities = map[string]bool{activityStarting: true, activityIdle: true, activityBusy: true, activityBlocked: true}
+var activities = map[string]bool{activityStarting: true, activityIdle: true, activityWorking: true, activityBlocked: true}
 
 // hookActivity maps a harness hook to the activity it implies. The hook names are Claude Code's;
 // the OpenCode plugin reports the same names.
@@ -26,10 +26,8 @@ func hookActivity(name string, payload []byte, current string) (string, bool) {
 	switch name {
 	case "SessionStart", "Stop":
 		return activityIdle, true
-	case "UserPromptSubmit":
-		return activityBusy, true
-	case "PreToolUse", "PostToolUse":
-		return activityBusy, true
+	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+		return activityWorking, true
 	case "Notification":
 		var body struct {
 			Message string `json:"message"`
@@ -52,64 +50,71 @@ func (s *server) setActivity(agent, state string) error {
 	return err
 }
 
-var messageHeader = regexp.MustCompile(`\[egzo msg (m[0-9a-f]+)[ \]]`)
-
-// acknowledge marks the outstanding messages of an agent whose ids appear in text as delivered.
-func (s *server) acknowledge(agent string, ids map[string]bool) error {
-	for _, message := range s.events.outstanding(agent) {
-		if ids[message.ID] {
-			if _, err := s.events.append(Event{Type: messageDelivered, Agent: agent, Actor: "agent:" + agent, ID: message.ID}); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// onHook updates the agent's activity from a hook, and acknowledges the messages a prompt carries.
+// onHook updates the agent's activity from a hook.
 func (s *server) onHook(agent, name string, payload []byte) error {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	if name == "UserPromptSubmit" {
-		var body struct {
-			Prompt string `json:"prompt"`
-		}
-		if json.Unmarshal(payload, &body) == nil {
-			ids := map[string]bool{}
-			for _, found := range messageHeader.FindAllStringSubmatch(body.Prompt, -1) {
-				ids[found[1]] = true
-			}
-			if len(ids) > 0 {
-				if err := s.acknowledge(agent, ids); err != nil {
-					return err
-				}
-			}
-		}
-	}
 	if state, ok := hookActivity(name, payload, s.events.activity(agent)); ok {
 		return s.setActivity(agent, state)
 	}
 	return nil
 }
 
-type claimedMessage struct {
-	ID   string `json:"id"`
-	From string `json:"from"`
-	Text string `json:"text"`
-}
-
 type claimResult struct {
-	Messages  []claimedMessage `json:"messages"`
-	Interrupt bool             `json:"interrupt"`
+	// Line is what to type into the agent's terminal, empty when there is nothing to announce.
+	Line      string   `json:"line"`
+	IDs       []string `json:"ids"`
+	Interrupt bool     `json:"interrupt"`
 }
 
-// claim hands the session holder what to type: an interrupt when one was asked for, otherwise all
-// queued messages at once, but only when the agent is idle and nothing earlier is still waiting for
-// its acknowledgement.
+// announceLine composes the line that tells an agent which messages wait. It holds nothing but fixed
+// words and ids (hex), so nothing a message says can reach the terminal. Wording depends on who is
+// speaking: a person gets a user's authority, a peer agent does not.
+func announceLine(messages []Message) string {
+	var fromPeople, fromAgents, replies []string
+	for _, m := range messages {
+		switch {
+		case m.Kind == kindResolution:
+			replies = append(replies, m.ID)
+		case isHuman(m.From):
+			fromPeople = append(fromPeople, m.ID)
+		default:
+			fromAgents = append(fromAgents, m.ID)
+		}
+	}
+	var parts []string
+	switch len(fromPeople) {
+	case 0:
+	case 1:
+		parts = append(parts, "check egzo message "+fromPeople[0]+" and handle the request for me.")
+	default:
+		parts = append(parts, "check egzo messages "+strings.Join(fromPeople, ", ")+" and handle each one.")
+	}
+	switch len(fromAgents) {
+	case 0:
+	case 1:
+		parts = append(parts, "egzo message "+fromAgents[0]+" from another agent is waiting: fetch it and decide whether it fits your work.")
+	default:
+		parts = append(parts, "egzo messages "+strings.Join(fromAgents, ", ")+" from other agents are waiting: fetch them and decide whether they fit your work.")
+	}
+	switch len(replies) {
+	case 0:
+	case 1:
+		parts = append(parts, "egzo message "+replies[0]+" is the reply to your earlier request: fetch it.")
+	default:
+		parts = append(parts, "egzo messages "+strings.Join(replies, ", ")+" are the replies to your earlier requests: fetch them.")
+	}
+	return strings.Join(parts, " ")
+}
+
+// claim answers the session holder: an interrupt when one was asked for, otherwise the line announcing
+// what waits, but only for an idle agent with no announcement still waiting to be fetched. A message
+// announced and not fetched in time is announced again, up to maxAnnouncements times: the line carries
+// no content, so a repeat can never duplicate anything.
 func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, error) {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	result := claimResult{Messages: []claimedMessage{}}
+	result := claimResult{IDs: []string{}}
 	if s.events.interruptPending(agent) {
 		if _, err := s.events.append(Event{Type: "interrupted", Agent: agent, Actor: "agent:" + agent}); err != nil {
 			return result, err
@@ -117,38 +122,56 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 		result.Interrupt = true
 		return result, s.setActivity(agent, activityIdle)
 	}
-	if s.events.activity(agent) != activityIdle || len(s.events.outstanding(agent)) > 0 {
+	if s.events.activity(agent) != activityIdle {
 		return result, nil
 	}
 	if ackTimeout <= 0 {
 		ackTimeout = time.Minute
 	}
-	deadline, _ := json.Marshal(map[string]int64{"deadline_ms": time.Now().Add(ackTimeout).UnixMilli()})
-	for _, message := range s.events.pending(agent) {
-		if _, err := s.events.append(Event{Type: messageDelivering, Agent: agent, Actor: "agent:" + agent, ID: message.ID, Data: deadline}); err != nil {
+	now := time.Now()
+	to := "agent:" + agent
+	announceable := func(m Message) bool {
+		if m.To != to || m.Kind == kindUpdate {
+			return false
+		}
+		switch m.State {
+		case stateQueued:
+			return true
+		case stateAnnounced:
+			return now.After(m.Deadline) && m.Attempts < maxAnnouncements
+		}
+		return false
+	}
+	waiting := s.events.selectMessages(func(m Message) bool { return m.To == to && m.State == stateAnnounced && !now.After(m.Deadline) })
+	if len(waiting) > 0 {
+		return result, nil
+	}
+	due := s.events.selectMessages(announceable)
+	if len(due) == 0 {
+		return result, nil
+	}
+	deadline := now.Add(ackTimeout).UnixMilli()
+	for _, m := range due {
+		data, _ := json.Marshal(map[string]int64{"attempt": int64(m.Attempts + 1), "deadline_ms": deadline})
+		if _, err := s.events.append(Event{Type: "announced", Agent: agent, Actor: "agent:" + agent, ID: m.ID, Data: data}); err != nil {
 			return result, err
 		}
-		result.Messages = append(result.Messages, claimedMessage{ID: message.ID, From: message.From, Text: message.Text})
+		result.IDs = append(result.IDs, m.ID)
 	}
+	result.Line = announceLine(due)
 	return result, nil
 }
 
-// expire marks the messages nobody acknowledged in time as unconfirmed. They are never retried: a
-// second paste could duplicate a message the harness did get.
+// expire marks the messages announced maxAnnouncements times and never fetched as unconfirmed: they
+// stay findable (list_messages) but nobody announces them again.
 func (s *server) expire(now time.Time) {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	seen := map[string]bool{}
-	for _, event := range s.events.all() {
-		if event.Type != messageDelivering || seen[event.Agent] {
-			continue
-		}
-		seen[event.Agent] = true
-		for _, message := range s.events.outstanding(event.Agent) {
-			if !message.Deadline.IsZero() && now.After(message.Deadline) {
-				s.events.append(Event{Type: messageUnconfirmed, Agent: event.Agent, Actor: "agent:" + event.Agent, ID: message.ID})
-			}
-		}
+	stale := s.events.selectMessages(func(m Message) bool {
+		return m.State == stateAnnounced && now.After(m.Deadline) && m.Attempts >= maxAnnouncements
+	})
+	for _, m := range stale {
+		s.events.append(Event{Type: "unconfirmed", Agent: agentOf(m.To), Actor: m.To, ID: m.ID})
 	}
 }
 
@@ -157,7 +180,7 @@ func (a *agentAPI) activity(w http.ResponseWriter, r *http.Request, agent string
 		State string `json:"state"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !activities[body.State] {
-		http.Error(w, "expected {\"state\": starting|idle|busy|blocked}", http.StatusBadRequest)
+		http.Error(w, "expected {\"state\": starting|idle|working|blocked}", http.StatusBadRequest)
 		return
 	}
 	a.server.deliveryMu.Lock()
@@ -180,25 +203,4 @@ func (a *agentAPI) claim(w http.ResponseWriter, r *http.Request, agent string) {
 		return
 	}
 	json.NewEncoder(w).Encode(result)
-}
-
-func (a *agentAPI) ack(w http.ResponseWriter, r *http.Request, agent string) {
-	var body struct {
-		IDs []string `json:"ids"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "expected {\"ids\": [...]}", http.StatusBadRequest)
-		return
-	}
-	ids := map[string]bool{}
-	for _, id := range body.IDs {
-		ids[id] = true
-	}
-	a.server.deliveryMu.Lock()
-	defer a.server.deliveryMu.Unlock()
-	if err := a.server.acknowledge(agent, ids); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }

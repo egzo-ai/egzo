@@ -203,10 +203,14 @@ func reportedStatuses(ctx context.Context, s *session) map[string]stack.Report {
 	if err != nil {
 		return reported
 	}
-	var statuses []struct{ Agent, Status, Activity string }
+	var statuses []struct {
+		Agent, Status, Activity string
+		Open                    int
+		Waiting                 bool
+	}
 	if json.Unmarshal(reply, &statuses) == nil {
 		for _, status := range statuses {
-			reported[status.Agent] = stack.Report{Status: status.Status, Activity: status.Activity}
+			reported[status.Agent] = stack.Report{Status: status.Status, Activity: status.Activity, Open: status.Open, Waiting: status.Waiting}
 		}
 	}
 	return reported

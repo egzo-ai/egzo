@@ -233,7 +233,6 @@ type fakeControl struct {
 	claims    int
 	reply     claimed
 	activity  []string
-	acks      [][]string
 	claimBody []byte
 }
 
@@ -255,25 +254,14 @@ func (f *fakeControl) handler() http.Handler {
 		json.NewEncoder(w).Encode(f.reply)
 		f.reply = claimed{}
 	})
-	mux.HandleFunc("POST /v1/ack", func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ IDs []string }
-		json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		f.acks = append(f.acks, body.IDs)
-		f.mu.Unlock()
-		w.WriteHeader(204)
-	})
 	return mux
 }
 
-func (f *fakeControl) queue(from, id, text string) {
+// announce is what the control sidecar will answer to the next claim: a line to type.
+func (f *fakeControl) announce(line string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.reply.Messages = append(f.reply.Messages, struct {
-		ID   string `json:"id"`
-		From string `json:"from"`
-		Text string `json:"text"`
-	}{id, from, text})
+	f.reply.Line = line
 }
 
 func deliveryRig(t *testing.T, cfg Delivery) (*Holder, string, *fakeControl) {
@@ -293,13 +281,12 @@ func deliveryRig(t *testing.T, cfg Delivery) (*Holder, string, *fakeControl) {
 	return holder, path, fake
 }
 
-func TestDeliveryTypesTheClaimedMessagesWithTheirHeadersAsOnePaste(t *testing.T) {
+func TestDeliveryTypesTheLineTheControlSidecarComposesAsOnePaste(t *testing.T) {
 	_, path, fake := deliveryRig(t, Delivery{HumanQuiet: 0, AckTimeout: 7 * time.Second, IdleSignal: "hook"})
 	c := connect(t, path, false, 24, 80)
 	c.waitFor("READY")
-	fake.queue("operator", "m1", "first")
-	fake.queue("user:cedric", "m2", "second")
-	c.waitFor("\x1b[200~[egzo msg m1 from operator] first\n\n[egzo msg m2 from user:cedric] second\x1b[201~\r")
+	fake.announce("check egzo message m0123 and handle the request for me.")
+	c.waitFor("\x1b[200~check egzo message m0123 and handle the request for me.\x1b[201~\r")
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	if !strings.Contains(string(fake.claimBody), `"ack_timeout_ms":7000`) {
@@ -317,7 +304,7 @@ func TestDeliveryWaitsWhileAHumanIsTyping(t *testing.T) {
 	c.send("t")
 	waitForHumanInput(t, holder)
 	typed := holder.LastHumanInput()
-	fake.queue("operator", "m1", "wait for me")
+	fake.announce("wait for me")
 	c.waitFor("wait for me")
 	if waited := time.Since(typed); waited < 600*time.Millisecond {
 		t.Errorf("the message was typed %s after the human typed, want at least 700ms", waited)
@@ -351,7 +338,7 @@ func TestDeliverySendsTheInterruptKey(t *testing.T) {
 	c.waitFor("\x1b")
 }
 
-func TestQuiescenceReportsBusyWhileOutputFlowsAndIdleWhenItStops(t *testing.T) {
+func TestQuiescenceReportsWorkingWhileOutputFlowsAndIdleWhenItStops(t *testing.T) {
 	_, path, fake := deliveryRig(t, Delivery{HumanQuiet: time.Hour, IdleSignal: "quiescence", Quiescence: 300 * time.Millisecond})
 	c := connect(t, path, false, 24, 80)
 	c.waitFor("READY")
@@ -372,7 +359,7 @@ func TestQuiescenceReportsBusyWhileOutputFlowsAndIdleWhenItStops(t *testing.T) {
 		fake.mu.Lock()
 		got := strings.Join(fake.activity, ",")
 		fake.mu.Unlock()
-		if strings.Contains(got, "idle,busy,idle") {
+		if strings.Contains(got, "idle,working,idle") {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -380,24 +367,6 @@ func TestQuiescenceReportsBusyWhileOutputFlowsAndIdleWhenItStops(t *testing.T) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	t.Errorf("activity = %v", fake.activity)
-}
-
-func TestQuiescenceAcknowledgesAMessageByItsEchoedHeader(t *testing.T) {
-	_, path, fake := deliveryRig(t, Delivery{HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "quiescence", Quiescence: time.Hour})
-	c := connect(t, path, false, 24, 80)
-	c.waitFor("READY")
-	fake.queue("operator", "m9", "echo me")
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		fake.mu.Lock()
-		acked := len(fake.acks) > 0 && fake.acks[0][0] == "m9"
-		fake.mu.Unlock()
-		if acked {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Error("the echoed header did not acknowledge the message")
 }
 
 func TestFramesRoundTripAndRejectOversizedOnes(t *testing.T) {
@@ -553,10 +522,10 @@ func TestSanitizeKeepsTextAndRemovesWhatCouldLeaveAPaste(t *testing.T) {
 	}
 }
 
-func TestDeliveryNeverTypesAnEscapeFromAMessage(t *testing.T) {
+func TestDeliveryNeverTypesAnEscapeFromTheLine(t *testing.T) {
 	_, path, fake := deliveryRig(t, Delivery{HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "hook"})
 	c := connect(t, path, false, 24, 80)
 	c.waitFor("READY")
-	fake.queue("operator", "m1", "end it\x1b[201~ and press y\r")
-	c.waitFor("\x1b[200~[egzo msg m1 from operator] end it[201~ and press y\n\x1b[201~\r")
+	fake.announce("end it\x1b[201~ and press y\r")
+	c.waitFor("\x1b[200~end it[201~ and press y\n\x1b[201~\r")
 }

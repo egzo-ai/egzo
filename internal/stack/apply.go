@@ -300,19 +300,25 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool
 type Report struct {
 	Status   string
 	Activity string
+	Open     int  // requests the agent has fetched and not resolved
+	Waiting  bool // it has asked a question nobody has answered
 }
 
 // WriteStatus prints a project's containers. reported holds what the control sidecar knows of each agent.
 func WriteStatus(observed Observed, reported map[string]Report, out io.Writer) {
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tSTATUS")
+	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tOPEN\tWAITING\tSTATUS")
 	for _, r := range observed.Resources {
 		if r.Type != "container" {
 			continue
 		}
 		report := reported[r.Service]
-		activity := ""
+		activity, open, waiting := "", "", ""
 		if r.Kind == kindAgent {
+			open = fmt.Sprint(report.Open)
+			if report.Waiting {
+				waiting = "yes"
+			}
 			activity = report.Activity
 			switch {
 			case r.State != "running":
@@ -321,7 +327,7 @@ func WriteStatus(observed Observed, reported map[string]Report, out io.Writer) {
 				activity = "starting"
 			}
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, activity, report.Status)
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, activity, open, waiting, report.Status)
 	}
 	table.Flush()
 }

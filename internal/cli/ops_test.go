@@ -195,3 +195,57 @@ func mustEval(t *testing.T, path string) string {
 	}
 	return resolved
 }
+
+func TestLineWatcherHandsOverCompleteLinesAcrossWrites(t *testing.T) {
+	var lines []string
+	watcher := &lineWatcher{handle: func(line []byte) { lines = append(lines, string(line)) }}
+	watcher.Write([]byte("one\ntw"))
+	watcher.Write([]byte("o\nthree"))
+	watcher.Write([]byte("\n"))
+	if strings.Join(lines, "|") != "one|two|three" {
+		t.Errorf("lines = %v", lines)
+	}
+}
+
+func TestMessagesAreListedWithTheirStateAndAShortenedText(t *testing.T) {
+	var out bytes.Buffer
+	cmd := New()
+	cmd.SetOut(&out)
+	sub, _, _ := cmd.Find([]string{"messages"})
+	sub.SetOut(&out)
+	long := strings.Repeat("word ", 30)
+	err := writeMessages(sub, []messageRow{
+		{ID: "m1", From: "operator", To: "agent:coder", Kind: "request", State: "queued", Text: "short\ntext"},
+		{ID: "m2", From: "agent:coder", To: "operator", Kind: "question", State: "queued", Text: long},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "ID") || !strings.Contains(lines[1], "short text") {
+		t.Fatalf("output = %q", out.String())
+	}
+	if !strings.HasSuffix(lines[2], "...") || strings.Count(lines[2], "word") > 14 {
+		t.Errorf("a long text must be cut: %q", lines[2])
+	}
+}
+
+func TestSendAnswerAndMessagesAreCommands(t *testing.T) {
+	root := New()
+	for _, name := range []string{"send", "answer", "messages", "questions"} {
+		found, _, err := root.Find([]string{name})
+		if err != nil || found.Name() != name {
+			t.Errorf("command %s: %v", name, err)
+		}
+	}
+	send, _, _ := root.Find([]string{"send"})
+	for _, flag := range []string{"wait", "timeout", "interrupt"} {
+		if send.Flags().Lookup(flag) == nil {
+			t.Errorf("send has no --%s", flag)
+		}
+	}
+	answer, _, _ := root.Find([]string{"answer"})
+	if answer.Flags().Lookup("outcome") == nil {
+		t.Error("answer has no --outcome")
+	}
+}

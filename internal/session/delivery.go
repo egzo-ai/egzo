@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -14,10 +13,11 @@ import (
 type Delivery struct {
 	// HumanQuiet is how long no read-write client may have typed before a message is typed for it.
 	HumanQuiet time.Duration
-	// AckTimeout is how long the control sidecar waits for the harness to acknowledge a message.
+	// AckTimeout is how long the control sidecar waits for the agent to fetch an announced message before it
+	// announces it again.
 	AckTimeout time.Duration
 	// IdleSignal is "hook" (the harness reports its state through hooks) or "quiescence" (quiet
-	// output means idle, and the echoed header is the acknowledgement).
+	// output means idle).
 	IdleSignal string
 	// Quiescence is how long the output stays quiet before the agent counts as idle.
 	Quiescence time.Duration
@@ -43,22 +43,10 @@ type Delivery struct {
 }
 
 type claimed struct {
-	Messages []struct {
-		ID   string `json:"id"`
-		From string `json:"from"`
-		Text string `json:"text"`
-	} `json:"messages"`
-	Interrupt bool `json:"interrupt"`
-}
-
-func drawn(output []byte, markers []string) bool {
-	text := string(output)
-	for _, marker := range markers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	// Line is what to type, composed by the control sidecar from fixed words and message ids.
+	Line      string   `json:"line"`
+	IDs       []string `json:"ids"`
+	Interrupt bool     `json:"interrupt"`
 }
 
 // Sanitize removes what could leave a bracketed paste: the escape character and the other control
@@ -78,8 +66,15 @@ func Sanitize(text string) string {
 	}, text)
 }
 
-// Header is the line that tells the harness (and the control sidecar) which message follows.
-func Header(id, from string) string { return fmt.Sprintf("[egzo msg %s from %s]", id, from) }
+func drawn(output []byte, markers []string) bool {
+	text := string(output)
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // Run keeps the control sidecar informed and types its messages into the terminal until ctx ends or
 // the program exits.
@@ -98,7 +93,6 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 	api.Do(ctx, "POST", "/v1/activity", map[string]string{"state": "starting"})
 
 	reported := "starting"
-	outstanding := map[string]bool{} // typed, not yet seen echoed (quiescence harnesses acknowledge by echo)
 	var lastClaim time.Time
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
@@ -112,29 +106,13 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		}
 
 		if cfg.IdleSignal == "quiescence" {
-			wanted := "busy"
+			wanted := "working"
 			if time.Since(h.LastOutput()) >= cfg.Quiescence {
 				wanted = "idle"
 			}
 			if wanted != reported {
 				if _, err := api.Do(ctx, "POST", "/v1/activity", map[string]string{"state": wanted}); err == nil {
 					reported = wanted
-				}
-			}
-			if len(outstanding) > 0 {
-				output := string(h.Output())
-				var seen []string
-				for id := range outstanding {
-					if strings.Contains(output, "[egzo msg "+id) {
-						seen = append(seen, id)
-					}
-				}
-				if len(seen) > 0 {
-					if _, err := api.Do(ctx, "POST", "/v1/ack", map[string]any{"ids": seen}); err == nil {
-						for _, id := range seen {
-							delete(outstanding, id)
-						}
-					}
 				}
 			}
 		}
@@ -178,14 +156,11 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		if work.Interrupt && cfg.InterruptKey != "" {
 			h.Send(cfg.InterruptKey)
 		}
-		if len(work.Messages) == 0 {
+		if work.Line == "" {
 			continue
 		}
-		parts := make([]string, 0, len(work.Messages))
-		for _, message := range work.Messages {
-			parts = append(parts, Header(message.ID, Sanitize(message.From))+" "+Sanitize(message.Text))
-			outstanding[message.ID] = true
-		}
-		h.Inject(strings.Join(parts, "\n\n"))
+		// The line is fixed words and ids from the control sidecar, never message text; Sanitize keeps it
+		// that way even if the sidecar were wrong.
+		h.Inject(Sanitize(work.Line))
 	}
 }
