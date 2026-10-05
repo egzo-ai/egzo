@@ -39,7 +39,7 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	agents := &http.Server{Handler: (&agentAPI{server: srv}).handler(), ReadHeaderTimeout: 5 * time.Second}
+	agents := agentServer((&agentAPI{server: srv}).handler())
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	go func() {
@@ -78,4 +78,16 @@ func Request(method, path string, body io.Reader) ([]byte, error) {
 // Stream copies a long-lived response, such as the event stream, to out as it arrives.
 func Stream(method, path string, out io.Writer) error {
 	return operator.Stream(SocketPath, method, path, out)
+}
+
+// agentServer is the agent port's HTTP server. Agents are the less trusted side, so a client that is
+// slow to send, slow to read or just idle cannot hold a connection (and its goroutine) forever.
+func agentServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 }

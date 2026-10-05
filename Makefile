@@ -2,7 +2,7 @@
 GO ?= go
 BIN := bin/egzo
 
-.PHONY: build test specs clean image images
+.PHONY: build test lint specs clean image images
 
 VERSION ?= dev
 REGISTRY ?= ghcr.io/egzo-ai
@@ -22,6 +22,10 @@ build:
 test:
 	$(GO) vet ./...
 	$(GO) test -race ./...
+
+lint:
+	staticcheck ./...
+	govulncheck ./...
 
 # ENGINE is one of: docker, docker-gvisor, podman, podman-rootless; empty chooses from this machine
 ENGINE ?=

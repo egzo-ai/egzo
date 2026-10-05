@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/stack"
 	"github.com/egzo-ai/egzo/internal/version"
@@ -65,7 +66,14 @@ func openSession(ctx context.Context, opts *options) (*session, error) {
 }
 
 func commandContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	// The first Ctrl-C asks the command to stop; once it has, the default behaviour comes back, so a
+	// second one ends a command that is slow to wind down.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
 }
 
 func newUpCommand(opts *options) *cobra.Command {
@@ -86,6 +94,13 @@ func newUpCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
+			if !dryRun {
+				release, err := stack.Lock(s.Dir)
+				if err != nil {
+					return err
+				}
+				defer release()
+			}
 
 			return stack.Up(ctx, s.engine, s.Resolved, s.Dir,
 				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix), Services: args}, cmd.OutOrStdout())
@@ -114,10 +129,22 @@ func newDownCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
+			release, err := stack.Lock(s.Dir)
+			if err != nil {
+				return err
+			}
+			defer release()
 			var doomed []string
 			if workspaces {
+				// Nothing may write to a checkout while it is inspected and while the person decides:
+				// the agents are stopped first, and started again if the removal is refused.
+				stopped, err := stack.StopAgents(ctx, s.engine, s.observed)
+				if err != nil {
+					return err
+				}
 				doomed, err = chooseWorkspacesToRemove(ctx, cmd, s, yes, force)
 				if err != nil {
+					stack.StartAgents(ctx, s.engine, stopped)
 					return err
 				}
 			}
@@ -143,6 +170,22 @@ func newDownCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
+// removableCheckouts splits the directories down --workspaces could remove into real checkouts, which may
+// go, and everything else, which is left alone with the reason.
+func removableCheckouts(project *config.Resolved, projectDir string) (ok, skipped []string) {
+	for _, dir := range stack.GitDirs(project) {
+		if _, err := os.Lstat(dir); err != nil {
+			continue
+		}
+		if err := stack.RemovalProblem(dir, projectDir); err != nil {
+			skipped = append(skipped, err.Error())
+			continue
+		}
+		ok = append(ok, dir)
+	}
+	return ok, skipped
+}
+
 // chooseWorkspacesToRemove returns the checkouts down --workspaces may remove, or an error when one
 // holds unsaved work or the user says no. It runs before anything is removed.
 func chooseWorkspacesToRemove(ctx context.Context, cmd *cobra.Command, s *session, yes, force bool) ([]string, error) {
@@ -151,24 +194,38 @@ func chooseWorkspacesToRemove(ctx context.Context, cmd *cobra.Command, s *sessio
 	if err != nil {
 		return nil, err
 	}
-	if len(unsaved) > 0 && !force {
-		lines := make([]string, len(unsaved))
-		for i, u := range unsaved {
+	var blocking []stack.Unsaved
+	ignored := map[string]int{}
+	for _, u := range unsaved {
+		if u.Blocks() {
+			blocking = append(blocking, u)
+		}
+		ignored[u.Dir] = u.Ignored
+	}
+	if len(blocking) > 0 && !force {
+		lines := make([]string, len(blocking))
+		for i, u := range blocking {
 			lines[i] = "  " + u.String()
 		}
-		return nil, fmt.Errorf("refusing to remove workspaces that hold unsaved work (uncommitted files or unpushed commits):\n%s\n"+
+		return nil, fmt.Errorf("refusing to remove workspaces that hold unsaved work (uncommitted files, unpushed commits or stashes):\n%s\n"+
 			"commit and push it, or use --force to throw it away", strings.Join(lines, "\n"))
 	}
-	var existing []string
-	for _, dir := range stack.GitDirs(s.Resolved) {
-		if _, err := os.Stat(dir); err == nil {
-			existing = append(existing, dir)
-		}
+	existing, skipped := removableCheckouts(s.Resolved, s.Dir)
+	for _, reason := range skipped {
+		fmt.Fprintf(cmd.ErrOrStderr(), "not removing: %s\n", reason)
 	}
 	if len(existing) == 0 || yes {
 		return existing, nil
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Remove these workspace directories?\n  %s\n[y/N] ", strings.Join(existing, "\n  "))
+	var listing []string
+	for _, dir := range existing {
+		line := dir
+		if n := ignored[dir]; n > 0 {
+			line += fmt.Sprintf("  (%d ignored file(s) or director(ies) in no commit will be deleted too)", n)
+		}
+		listing = append(listing, line)
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "Remove these workspace directories?\n  %s\n[y/N] ", strings.Join(listing, "\n  "))
 	answer, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
 	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
 		return nil, fmt.Errorf("aborted: nothing was removed")

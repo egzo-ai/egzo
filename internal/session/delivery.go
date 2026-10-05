@@ -40,6 +40,13 @@ type Delivery struct {
 	// not strand its messages.
 	ReadyMarkers []string
 	ReadyTimeout time.Duration
+	// StuckAfter is how long the program's output may stay silent while the control sidecar still says
+	// the agent is working (a harness that hooks its turns) before the agent is released: a harness
+	// whose hook never reported the end of a turn (an interrupt with Esc, a crash of the hook) would
+	// otherwise keep its messages waiting forever. A working TUI draws continuously, so a long silence
+	// means it is not working. It defaults to three minutes. Only "working" is released: an agent that
+	// is blocked on a dialog stays blocked.
+	StuckAfter time.Duration
 }
 
 type claimed struct {
@@ -88,9 +95,12 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 	if cfg.ReadyTimeout == 0 {
 		cfg.ReadyTimeout = time.Minute
 	}
+	if cfg.StuckAfter == 0 {
+		cfg.StuckAfter = 3 * time.Minute
+	}
 	ready := false
-	var rawSince time.Time
-	api.Do(ctx, "POST", "/v1/activity", map[string]string{"state": "starting"})
+	var rawSince, released time.Time
+	startReported := false
 
 	reported := "starting"
 	var lastClaim time.Time
@@ -103,6 +113,21 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		case <-h.Done():
 			return
 		case <-ticker.C:
+		}
+
+		// Announce ourselves until the control sidecar has heard: it may not be reachable yet.
+		if !startReported {
+			if _, err := api.Do(ctx, "POST", "/v1/activity", map[string]any{"state": "starting", "if_unset": true}); err == nil {
+				startReported = true
+			}
+		}
+
+		if cfg.IdleSignal == "hook" {
+			if quiet := h.LastOutput(); time.Since(quiet) >= cfg.StuckAfter && quiet.After(released) {
+				if _, err := api.Do(ctx, "POST", "/v1/activity", map[string]string{"state": "idle", "if": "working"}); err == nil {
+					released = time.Now()
+				}
+			}
 		}
 
 		if cfg.IdleSignal == "quiescence" {

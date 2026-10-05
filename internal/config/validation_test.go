@@ -202,3 +202,29 @@ func TestSettingsThatDoNothingAreRejected(t *testing.T) {
 		t.Errorf("proxy = %+v, want nil when the file says nothing", resolved.Proxy)
 	}
 }
+
+func TestOpenCodeWithASubscriptionTokenIsWarnedAbout(t *testing.T) {
+	yaml := func(service, harness string) string {
+		return "vaults:\n  main: { secrets: { K: { from: 'env:K' } } }\negress:\n  default:\n    allow: [models.opencode.ai]\n    services:\n      " + service + ": main/K\nagents:\n  a: { harness: " + harness + " }\n"
+	}
+	_, warnings := mustResolve(t, t.TempDir(), yaml("anthropic-oauth", "opencode"))
+	found := false
+	for _, w := range warnings {
+		found = found || strings.Contains(w, "opencode") && strings.Contains(w, "bearer")
+	}
+	if !found {
+		t.Errorf("warnings = %q", warnings)
+	}
+	_, warnings = mustResolve(t, t.TempDir(), yaml("anthropic", "opencode"))
+	for _, w := range warnings {
+		if strings.Contains(w, "bearer") {
+			t.Errorf("an API key was flagged: %q", w)
+		}
+	}
+	_, warnings = mustResolve(t, t.TempDir(), yaml("anthropic-oauth", "claude-code"))
+	for _, w := range warnings {
+		if strings.Contains(w, "bearer") {
+			t.Errorf("claude-code takes a subscription token: %q", w)
+		}
+	}
+}

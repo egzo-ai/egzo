@@ -364,7 +364,7 @@ func TestAgentsRunAsTheGivenUserAndNewWorkspaceVolumesAreHandedToIt(t *testing.T
 	if findContainer(t, d, "proj-coder-1").User != "1234:5678" {
 		t.Error("the agent does not run as the given user")
 	}
-	if findContainer(t, d, "proj-control-1").User != "" || findContainer(t, d, "proj-proxy-1").User != "" {
+	if findContainer(t, d, "proj-control-1").User != sidecarUser || findContainer(t, d, "proj-proxy-1").User != sidecarUser {
 		t.Error("the sidecars must keep their own user")
 	}
 	if got := findContainer(t, d, "proj-coder-1").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home", "proj_shared"}) {

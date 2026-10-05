@@ -86,9 +86,5 @@ func (c *Client) ExecStream(ctx context.Context, containerID string, command []s
 		return 1, err
 	}
 
-	inspected, err := c.API.ContainerExecInspect(ctx, created.ID)
-	if err != nil {
-		return 1, err
-	}
-	return inspected.ExitCode, nil
+	return c.waitExit(ctx, created.ID)
 }

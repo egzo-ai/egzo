@@ -146,7 +146,6 @@ vaults:
 
 proxy:                         # infrastructure of the egress sidecar
   image: ghcr.io/egzo-ai/egzo  # optional override; default is the all-in-one egzo image (`egzo proxy`)
-  audit: true                  # log connections, and requests (no bodies) for intercepted hosts
 
 egress:                        # named profiles; an agent links to one (omitted => `default`)
   default:                     # undefined `default` = deny everything
@@ -180,8 +179,7 @@ agents:
     # workdir: repo            # optional override (name under /workspace, or a path)
     model: claude-sonnet-5-5
     prompt: ./prompts/coder.md
-    tools: [control]           # MCP servers exposed to the agent
-    resources: { cpus: 2, memory: 4g }
+    resources: { cpus: 2, memory: 4g, pids: 4096 }   # pids default 4096
     runtime: runsc             # OCI runtime, as in Compose (e.g. gVisor); engine default if omitted
     permissions: bypass        # bypass (default) | default
     env: { FOO: bar }          # non-secret only; validated, secret-looking values rejected
@@ -191,8 +189,7 @@ agents:
     workspaces: [./docs:ro]    # host dir, read-only (a git workspace cannot be :ro)
     depends_on: [coder]
 
-control:                       # orchestrator MCP + status sidecar (always present)
-  tools: [status, list_messages, get_message, resolve, update, ask, message, agents]
+control: {}                    # orchestrator MCP + status sidecar (always present); no settings yet
 
 # No bridges and no users here. Chat integrations (Discord, ...) are hub features, and who may
 # talk to agents is never declared in project YAML (see Future: egzo-hub).
@@ -703,3 +700,32 @@ without a hub (accepted). A hub-less bridge could later be a separate tool on th
 Privileged socket access (rootless + later label-scoped proxy); engine credentials for remote
 engines (ssh/TLS) stored by the hub; many exec streams (engine events + on-demand sidecar streams);
 CLI `up` recreating containers while users are attached (hub must handle disconnects cleanly).
+
+
+## Hardening decisions (code review of the first implementation)
+
+- **Names.** Agents, workspaces: 1 to 63 of `[a-z0-9_-]`, starting with a letter or digit. Reserved: agents
+  `control`, `proxy`, `prep`, `shared`; workspaces `control`, `ca`, `ca-private`, `egress` and `<agent>-home`, which
+  would otherwise be egzo's own volumes (a workspace named `control` would hand an agent the key every token
+  derives from). `depends_on` cycles are errors. Settings that would do nothing (`proxy.audit`, `control.tools`,
+  `agent.tools`) are not in the schema.
+- **Git sources** carry no credentials in the URL (the proxy injects them) and a real branch name. Git run by egzo
+  ignores hooks and file-system monitors of the repository it works in. `down --workspaces` stops the agents, inspects
+  each checkout in a container of its own, counts uncommitted files, unpushed commits (also on a detached HEAD) and
+  stashes (which block), lists ignored files (which only inform), removes only real checkouts, and starts the agents
+  again if it is refused.
+- **Proxy.** It connects only to public addresses (checked on the address a name resolved to), caps connections per agent
+  and in all, closes idle connections, refuses Encrypted Client Hello, keeps bytes sent right behind CONNECT, truncates
+  logged values, logs bytes and duration of a tunnel, bounds its certificate cache, and answers 503 "run `egzo up`" when
+  it has no policy; `egzo start|restart proxy` reloads the policy. The CA is only ever replaced by an explicit rotation.
+- **Control.** Verbs that write to the log have budgets per agent; hook payloads are reduced to a few named fields (plus
+  the line egzo typed); the log is compacted past 64 MB; the project key is created once, atomically, and never replaced;
+  snapshots are verified against their hash and retired past 50; every recipient has at most 20 open requests; the
+  holder releases an agent that sits at "working" while its screen is silent (`if: working`), and announces itself with
+  `if_unset`, so it never undoes the harness's own first report.
+- **Containers.** Sidecars run as 65532 with memory and process limits; every container has bounded engine logs; agents
+  have a process limit and, with a memory limit, no extra swap; egzo run as root still gives agents uid 1000; rootless
+  Docker is treated like Podman. Agents start only after the sidecars are healthy and attached. One command changes a
+  project at a time (`.egzo/lock`).
+- **Terminal.** Text an agent wrote is made harmless (`internal/termsafe`) before `ps`, `messages` and `send --wait`
+  print it; `attach` turns off the modes a TUI left on when the user detaches.

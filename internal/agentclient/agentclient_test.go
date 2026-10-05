@@ -29,7 +29,7 @@ func TestDoSendsTheAgentsCredentialsAndTheBody(t *testing.T) {
 }
 
 func TestDoTurnsAnErrorStatusIntoAnError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", 401) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", http.StatusUnauthorized) }))
 	defer server.Close()
 	client := &Client{URL: server.URL, Agent: "a", Token: "t", HTTP: server.Client()}
 	if _, err := client.Do(context.Background(), "GET", "/x", nil); err == nil || !strings.Contains(err.Error(), "401") {

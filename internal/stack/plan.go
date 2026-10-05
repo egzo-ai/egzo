@@ -54,7 +54,8 @@ func BuildPlan(desired Desired, observed Observed, recreate bool) []Action {
 		case existing == nil:
 			removed[spec.Name] = true
 			createContainers = append(createContainers, Action{Verb: "create", Type: "container", Name: spec.Name})
-		case existing.ConfigHash != spec.Identity.ConfigHash || recreate:
+		case existing.ConfigHash != spec.Identity.ConfigHash || recreate || existing.State == "created":
+			// a container that was created and never started was cut short before its volumes were handed over
 			removed[spec.Name] = true
 			removeContainers = append(removeContainers, Action{Verb: "remove", Type: "container", Name: spec.Name, ID: existing.ID})
 			createContainers = append(createContainers, Action{Verb: "create", Type: "container", Name: spec.Name})

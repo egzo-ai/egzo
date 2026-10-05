@@ -15,6 +15,10 @@ import (
 // Git runs git in dir with a clean environment: no terminal prompts, no user or system
 // configuration, so the result depends on nothing but its arguments.
 func Git(dir string, args ...string) (string, error) {
+	// Whatever a repository carries in its own configuration is not trusted: a hook or a file-system
+	// monitor there would run as whoever prepares or inspects it. A checkout an agent could write is
+	// exactly such a repository.
+	args = append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
@@ -85,27 +89,53 @@ func requireEmpty(dir string) error {
 // Findings are the reasons a checkout must not be thrown away.
 type Findings struct {
 	Uncommitted int // files with changes, staged or not, and untracked files
-	Unpushed    int // commits on a local branch that no remote branch has
+	Unpushed    int // commits on a local branch that no remote branch has, or that are on no branch at all
+	Stashes     int // entries of the stash
+	Ignored     int // files and directories git ignores: in no commit, so nothing else holds them
 }
 
-func (f Findings) Clean() bool { return f.Uncommitted == 0 && f.Unpushed == 0 }
+func (f Findings) Clean() bool { return f.Uncommitted == 0 && f.Unpushed == 0 && f.Stashes == 0 }
+
+func lines(text string) int {
+	if text == "" {
+		return 0
+	}
+	return len(strings.Split(text, "\n"))
+}
 
 // Inspect looks for work in dir that exists nowhere else.
 func Inspect(dir string) (Findings, error) {
 	var findings Findings
-	status, err := Git(dir, "status", "--porcelain")
+	status, err := Git(dir, "status", "--porcelain", "--ignored=traditional")
 	if err != nil {
 		return findings, err
 	}
-	if status != "" {
-		findings.Uncommitted = len(strings.Split(status, "\n"))
+	for _, line := range strings.Split(status, "\n") {
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "!! "):
+			findings.Ignored++
+		default:
+			findings.Uncommitted++
+		}
 	}
 	unpushed, err := Git(dir, "log", "--branches", "--not", "--remotes", "--oneline")
 	if err != nil {
 		return findings, err
 	}
-	if unpushed != "" {
-		findings.Unpushed = len(strings.Split(unpushed, "\n"))
+	findings.Unpushed = lines(unpushed)
+	// Commits made on a detached HEAD are on no branch, so the query above cannot see them.
+	if head, err := Git(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && head == "HEAD" {
+		detached, err := Git(dir, "log", "HEAD", "--not", "--branches", "--remotes", "--oneline")
+		if err != nil {
+			return findings, err
+		}
+		findings.Unpushed += lines(detached)
 	}
+	stash, err := Git(dir, "stash", "list")
+	if err != nil {
+		return findings, err
+	}
+	findings.Stashes = lines(stash)
 	return findings, nil
 }

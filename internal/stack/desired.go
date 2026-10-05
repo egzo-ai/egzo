@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -80,6 +81,15 @@ type ContainerSpec struct {
 	NanoCPUs    int64
 	Memory      int64
 	Healthcheck []string
+	// PidsLimit caps processes and threads; MemorySwap equals Memory when a memory limit is set, so
+	// swap does not double it.
+	PidsLimit  int64
+	MemorySwap int64
+	// BoundedLogs caps the engine's log of the container, which otherwise grows without limit.
+	BoundedLogs bool
+	// PromptDigest is the content hash of the agent's prompt file: the file is mounted, so only this
+	// makes a changed prompt a changed agent.
+	PromptDigest string
 	// Agents run under an init process that reaps children and forwards signals.
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
@@ -118,6 +128,44 @@ type Inputs struct {
 	User string
 	// HarnessPrefix is the start of a harness image's name, ending in "egzo-harness-".
 	HarnessPrefix string
+	// PromptDigests maps each agent that has a prompt file to the hash of its content (see PromptDigests).
+	PromptDigests map[string]string
+}
+
+// The sidecars run as an unprivileged user and are limited in memory and processes: they parse what
+// agents send them, and a compromise or a runaway must stay small. Agents get a generous process limit,
+// because a fork bomb in one must not take the host.
+const (
+	sidecarUser       = "65532:65532"
+	sidecarTmpfs      = "rw,noexec,nosuid,size=16m,uid=65532,gid=65532"
+	controlMemory     = 512 << 20
+	controlPids       = 512
+	proxyMemory       = 1 << 30
+	proxyPids         = 2048
+	defaultAgentPids  = 4096
+	sidecarTmpfsState = "rw,nosuid,size=1m,uid=65532,gid=65532"
+)
+
+// PromptDigests hashes the prompt file of every agent that has one, so that editing a prompt changes the
+// agent's definition. A prompt that cannot be read is an error.
+func PromptDigests(project *config.Resolved, dir string) (map[string]string, error) {
+	digests := map[string]string{}
+	for name, agent := range project.Agents {
+		if agent.Prompt == "" {
+			continue
+		}
+		path := agent.Prompt
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("agent %q: cannot read its prompt: %w", name, err)
+		}
+		sum := sha256.Sum256(data)
+		digests[name] = hex.EncodeToString(sum[:])
+	}
+	return digests, nil
 }
 
 // DefaultHarnessPrefix is where harness images are published.
@@ -137,9 +185,15 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		Name:           project.Name + "-control-1",
 		Image:          in.Image,
 		Cmd:            []string{"/egzo", "control"},
+		User:           sidecarUser,
+		OwnedVolumes:   []string{controlVolume.Name},
+		Memory:         controlMemory,
+		MemorySwap:     controlMemory,
+		PidsLimit:      controlPids,
+		BoundedLogs:    true,
 		Env:            []string{"EGZO_PROJECT=" + project.Name},
 		Mounts:         []MountSpec{{Source: controlVolume.Name, Target: controlState}},
-		Tmpfs:          map[string]string{"/tmp": "rw,noexec,nosuid,size=16m"},
+		Tmpfs:          map[string]string{"/tmp": sidecarTmpfs},
 		Network:        controlNetwork.Name,
 		Healthcheck:    []string{"/egzo", "control", "--healthcheck"},
 		ReadonlyRootfs: true,
@@ -182,7 +236,13 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 				{Source: caPrivate.Name, Target: caPrivateDir},
 				{Source: caPublic.Name, Target: caPublicDir},
 			},
-			Tmpfs:          map[string]string{"/tmp": "rw,noexec,nosuid,size=16m", "/run/egzo": "rw,nosuid,size=1m"},
+			User:           sidecarUser,
+			OwnedVolumes:   []string{caPrivate.Name, caPublic.Name},
+			Memory:         proxyMemory,
+			MemorySwap:     proxyMemory,
+			PidsLimit:      proxyPids,
+			BoundedLogs:    true,
+			Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run/egzo": sidecarTmpfsState},
 			Network:        egress.Name,
 			Healthcheck:    []string{"/egzo", "proxy", "healthcheck"},
 			ReadonlyRootfs: true,
@@ -245,6 +305,10 @@ func agentContainer(
 		Harness:    agent.Harness,
 		Init:       true,
 		Identity:   identity,
+
+		PidsLimit:    defaultAgentPids,
+		BoundedLogs:  true,
+		PromptDigest: in.PromptDigests[name],
 	}
 
 	// Agents reach the world only through the proxy and trust only the project CA on top of the
@@ -334,6 +398,10 @@ func agentContainer(
 			return spec, fmt.Errorf("agent %q: invalid memory %q: %w", name, agent.Resources.Memory, err)
 		}
 		spec.Memory = memory
+		spec.MemorySwap = memory
+	}
+	if agent.Resources.Pids > 0 {
+		spec.PidsLimit = agent.Resources.Pids
 	}
 
 	if len(workspaceNames) > 0 {

@@ -12,7 +12,7 @@ import (
 func dependencies(desired Desired, plan []Action) [][]int {
 	index := map[string]int{}
 	for i, a := range plan {
-		index[actionKey(a.Verb, a.Type, a.Name)] = i
+		index[actionKey(a.Verb, a.Type, a.Name)+peerKey(a)] = i
 	}
 	var removals, disconnects []int
 	for i, a := range plan {
@@ -34,6 +34,11 @@ func dependencies(desired Desired, plan []Action) [][]int {
 			deps[i] = append(deps[i], j)
 		}
 	}
+	afterConnect := func(i int, network, peer string) {
+		if j, ok := index[actionKey("connect", "network", network)+"|"+peer]; ok {
+			deps[i] = append(deps[i], j)
+		}
+	}
 	for i, a := range plan {
 		switch {
 		case a.Verb == "create":
@@ -49,6 +54,17 @@ func dependencies(desired Desired, plan []Action) [][]int {
 				for _, dependency := range spec.StartAfter {
 					after(i, "create", "container", dependency)
 					after(i, "start", "container", dependency)
+				}
+				// An agent starts once the sidecars it depends on are healthy and reachable on its
+				// network: its first hook and its first tool call must not find nobody there.
+				if spec.Identity.Kind == kindAgent {
+					for _, attachment := range desired.Attachments {
+						if containsString(attachment.Networks, spec.Network) {
+							after(i, "create", "container", attachment.Container)
+							after(i, "start", "container", attachment.Container)
+							afterConnect(i, spec.Network, attachment.Container)
+						}
+					}
 				}
 			}
 		case a.Verb == "start" && a.Type == "container":
@@ -70,6 +86,14 @@ func dependencies(desired Desired, plan []Action) [][]int {
 }
 
 func actionKey(verb, kind, name string) string { return verb + " " + kind + " " + name }
+
+// peerKey tells apart the actions that move different containers in or out of the same network.
+func peerKey(a Action) string {
+	if a.Peer == "" {
+		return ""
+	}
+	return "|" + a.Peer
+}
 
 // runConcurrently runs fn for every action once its dependencies are done. The first failure
 // cancels what has not started yet and is the error returned.

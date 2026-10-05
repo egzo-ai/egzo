@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -24,13 +25,6 @@ func (r *rig) request(to, text string) string {
 	var queued struct{ ID string }
 	decode(r.t, response, &queued)
 	return queued.ID
-}
-
-func mustNot(t *testing.T, what string, err error) {
-	t.Helper()
-	if err == nil {
-		t.Errorf("%s was accepted", what)
-	}
 }
 
 func statusOf(t *testing.T, err error) int {
@@ -280,7 +274,7 @@ func TestAnAgentMayNotSendMoreThanThirtyMessagesAMinuteButAPersonMay(t *testing.
 	r := newRig(t)
 	r.project("coder")
 	for n := 0; n < maxSendsPerMinute; n++ {
-		if _, err := r.srv.sendFromAgent("coder", "operator", "note", ""); err != nil {
+		if _, err := r.srv.sendFromAgent("coder", fmt.Sprintf("user:u%d", n%10), "note", ""); err != nil {
 			t.Fatalf("message %d: %v", n, err)
 		}
 	}

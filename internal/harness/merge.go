@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -15,6 +16,16 @@ func mergeFile(path string, ours []byte) ([]byte, error) {
 	} else if err != nil {
 		return nil, err
 	}
+	var probe map[string]any
+	if json.Unmarshal(existing, &probe) != nil || probe == nil {
+		// The harness's own state (its history, what it was told to trust) is not ours to discard:
+		// keep the damaged file next to the new one, and say so.
+		if err := os.WriteFile(path+".corrupt", existing, 0o600); err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(os.Stderr, "egzo: %s was not valid JSON; it is kept as %s.corrupt and a new one is written\n", path, path)
+		existing = []byte("{}")
+	}
 	return MergeJSON(existing, ours)
 }
 
@@ -23,10 +34,10 @@ func mergeFile(path string, ours []byte) ([]byte, error) {
 // that is not a JSON object is replaced.
 func MergeJSON(theirs, ours []byte) ([]byte, error) {
 	var base, overlay map[string]any
-	if err := json.Unmarshal(theirs, &base); err != nil || base == nil {
+	if err := decodeExact(theirs, &base); err != nil || base == nil {
 		base = map[string]any{}
 	}
-	if err := json.Unmarshal(ours, &overlay); err != nil {
+	if err := decodeExact(ours, &overlay); err != nil {
 		return nil, err
 	}
 	merged := mergeObjects(base, overlay)
@@ -82,4 +93,12 @@ func unite(a, b []any) []any {
 		}
 	}
 	return out
+}
+
+// decodeExact decodes JSON keeping numbers as written (json.Number), so an integer larger than a
+// float64 holds exactly survives a merge.
+func decodeExact(data []byte, into any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(into)
 }

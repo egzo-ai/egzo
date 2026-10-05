@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/egzo-ai/egzo/internal/agentclient"
 	"github.com/egzo-ai/egzo/internal/config"
 )
 
@@ -173,5 +179,52 @@ func TestTheSameProjectThroughASymlinkIsTheSameProject(t *testing.T) {
 	}
 	if viaLink.Dir != direct.Dir {
 		t.Errorf("Dir through the link = %q, direct = %q", viaLink.Dir, direct.Dir)
+	}
+}
+
+func TestAHookIsRetriedWhileTheControlSidecarIsNotReadyAndNotAfterARefusal(t *testing.T) {
+	var calls atomic.Int32
+	failures := int32(2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= failures {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := postHook(ctx, api, "Stop", []byte("{}")); err != nil {
+		t.Fatalf("postHook: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Errorf("%d attempts, want 3", calls.Load())
+	}
+
+	calls.Store(0)
+	failures = 0
+	refuse := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	defer refuse.Close()
+	api.URL, api.HTTP = refuse.URL, refuse.Client()
+	if err := postHook(ctx, api, "Stop", nil); err == nil || calls.Load() != 1 {
+		t.Errorf("a refusal was retried: %d attempts, err = %v", calls.Load(), err)
+	}
+}
+
+func TestAHookGivesUpWhenTheSidecarNeverAnswersWithinTheBudget(t *testing.T) {
+	api := &agentclient.Client{URL: "http://127.0.0.1:1", Agent: "coder", Token: "t", HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := postHook(ctx, api, "Stop", nil); err == nil {
+		t.Fatal("no error from an unreachable sidecar")
+	}
+	if time.Since(started) > 2*time.Second {
+		t.Error("the hook held the harness up")
 	}
 }

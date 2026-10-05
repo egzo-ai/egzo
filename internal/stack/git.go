@@ -1,15 +1,18 @@
 package stack
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
+
+	"github.com/docker/docker/api/types/container"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -257,15 +260,50 @@ func WorkspaceRoots(project *config.Resolved) []string {
 	return roots
 }
 
-// Unsaved describes the work a checkout holds that exists nowhere else.
+// Unsaved describes what a checkout holds that exists nowhere else.
 type Unsaved struct {
 	Dir         string
 	Uncommitted int
-	Unpushed    int
+	Unpushed    int // commits on a branch no remote has, or on no branch at all
+	Stashes     int
+	Ignored     int // files and directories git ignores: not in any commit, so lost with the checkout
 }
 
-// InspectCheckouts asks a prep container (no network, no credentials) which of the existing
-// checkouts hold work that exists nowhere else.
+// Blocks reports whether removing the checkout would lose work. Ignored files only inform: a build
+// directory is ignored too, and refusing for it would make every removal need --force.
+func (u Unsaved) Blocks() bool { return u.Uncommitted > 0 || u.Unpushed > 0 || u.Stashes > 0 }
+
+var inspection = regexp.MustCompile(`^(\S+) uncommitted=(\d+) unpushed=(\d+) stashes=(\d+) ignored=(\d+)$`)
+
+// parseInspection reads the answer of `egzo prep git status` about one directory. Anything else, no line,
+// a line about another directory, or more than one, is an error: an answer that cannot be read must stop
+// the removal, never pass for "clean".
+func parseInspection(target, stdout string) (Unsaved, error) {
+	var found []Unsaved
+	for _, line := range strings.Split(stdout, "\n") {
+		m := inspection.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		if m[1] != target {
+			return Unsaved{}, fmt.Errorf("the inspection of %s answered about %s", target, m[1])
+		}
+		var u Unsaved
+		fmt.Sscan(m[2], &u.Uncommitted)
+		fmt.Sscan(m[3], &u.Unpushed)
+		fmt.Sscan(m[4], &u.Stashes)
+		fmt.Sscan(m[5], &u.Ignored)
+		found = append(found, u)
+	}
+	if len(found) != 1 {
+		return Unsaved{}, fmt.Errorf("the inspection of %s gave %d answers, want exactly one", target, len(found))
+	}
+	return found[0], nil
+}
+
+// InspectCheckouts asks what each existing checkout holds, each in a prep container of its own (no
+// network, no credentials, only that checkout mounted read-only): what a checkout's own git
+// configuration can run then sees nothing of any other agent's work.
 func InspectCheckouts(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string) ([]Unsaved, error) {
 	var existing []string
 	for _, d := range GitDirs(project) {
@@ -279,33 +317,43 @@ func InspectCheckouts(ctx context.Context, c *engine.Client, project *config.Res
 	if err := ensureImage(ctx, c, image); err != nil {
 		return nil, err
 	}
-	cmd := []string{"/egzo", "prep", "git", "status"}
-	var mounts []MountSpec
+	results := make([]Unsaved, len(existing))
+	errs := make([]error, len(existing))
+	slots := make(chan struct{}, 4)
+	var wg sync.WaitGroup
 	for i, d := range existing {
-		target := fmt.Sprintf("/check/%d", i)
-		cmd = append(cmd, target)
-		mounts = append(mounts, MountSpec{Bind: true, Source: d, Target: target, ReadOnly: true})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			const target = "/check"
+			stdout, err := RunPrep(ctx, c, PrepSpec{
+				Image: image, Cmd: []string{"/egzo", "prep", "git", "status", target}, User: user,
+				Mounts:   []MountSpec{{Bind: true, Source: d, Target: target, ReadOnly: true}},
+				Env:      []string{"HOME=/tmp", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*"},
+				Identity: engine.Identity{Project: project.Name, Service: "prep", Kind: "prep", ProjectDir: dir},
+			})
+			if err == nil {
+				results[i], err = parseInspection(target, stdout)
+			}
+			results[i].Dir = d
+			errs[i] = err
+		}()
 	}
-	out, err := RunPrep(ctx, c, PrepSpec{
-		Image: image, Cmd: cmd, User: user, Mounts: mounts,
-		Env:      []string{"HOME=/tmp", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*"},
-		Identity: engine.Identity{Project: project.Name, Service: "prep", Kind: "prep", ProjectDir: dir},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("inspect the git workspaces: %w", err)
-	}
-	var unsaved []Unsaved
-	scanner := bufio.NewScanner(strings.NewReader(out))
-	for scanner.Scan() {
-		var target string
-		var uncommitted, unpushed int
-		if n, _ := fmt.Sscanf(scanner.Text(), "%s uncommitted=%d unpushed=%d", &target, &uncommitted, &unpushed); n == 3 && (uncommitted > 0 || unpushed > 0) {
-			var index int
-			fmt.Sscanf(target, "/check/%d", &index)
-			unsaved = append(unsaved, Unsaved{Dir: existing[index], Uncommitted: uncommitted, Unpushed: unpushed})
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			return nil, fmt.Errorf("inspect %s: %w", existing[i], err)
 		}
 	}
-	return unsaved, nil
+	var found []Unsaved
+	for _, u := range results {
+		if u.Blocks() || u.Ignored > 0 {
+			found = append(found, u)
+		}
+	}
+	return found, nil
 }
 
 func (u Unsaved) String() string {
@@ -316,5 +364,67 @@ func (u Unsaved) String() string {
 	if u.Unpushed > 0 {
 		parts = append(parts, fmt.Sprintf("%d unpushed commit(s)", u.Unpushed))
 	}
+	if u.Stashes > 0 {
+		parts = append(parts, fmt.Sprintf("%d stash(es)", u.Stashes))
+	}
+	if u.Ignored > 0 {
+		parts = append(parts, fmt.Sprintf("%d ignored file(s) or director(ies) that are in no commit", u.Ignored))
+	}
 	return fmt.Sprintf("%s: %s", u.Dir, strings.Join(parts, ", "))
+}
+
+// RemovalProblem says why dir must not be removed as a checkout, or nil when it may be: it has to be a
+// real git checkout (not a symlink, not any directory that happens to bear an agent's name), and not the
+// project directory, one of its parents, the home directory or the root.
+func RemovalProblem(dir, projectDir string) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symbolic link", dir)
+	}
+	if !exists(filepath.Join(dir, ".git")) {
+		return fmt.Errorf("%s is not a git checkout (no .git in it)", dir)
+	}
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	project, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		project = projectDir
+	}
+	home, _ := os.UserHomeDir()
+	switch {
+	case real == "/" || real == filepath.Clean(home) || real == project:
+		return fmt.Errorf("%s is the project directory, the home directory or the root", dir)
+	case strings.HasPrefix(project+"/", real+"/"):
+		return fmt.Errorf("%s contains the project directory", dir)
+	}
+	return nil
+}
+
+// StopAgents stops the running agent containers and returns them, so a refused removal can start them
+// again. Nothing may write to a checkout while it is inspected and while the person decides.
+func StopAgents(ctx context.Context, c *engine.Client, observed Observed) ([]Resource, error) {
+	var stopped []Resource
+	timeout := stopTimeoutSeconds
+	for _, r := range observed.Resources {
+		if r.Type == "container" && r.Kind == kindAgent && r.State == "running" {
+			if err := c.API.ContainerStop(ctx, r.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+				StartAgents(ctx, c, stopped)
+				return nil, fmt.Errorf("stop %s: %w", r.Service, err)
+			}
+			stopped = append(stopped, r)
+		}
+	}
+	return stopped, nil
+}
+
+// StartAgents starts containers StopAgents stopped.
+func StartAgents(ctx context.Context, c *engine.Client, stopped []Resource) {
+	for _, r := range stopped {
+		_ = c.API.ContainerStart(context.WithoutCancel(ctx), r.ID, container.StartOptions{})
+	}
 }

@@ -193,8 +193,9 @@ func (h *Holder) pump() {
 			h.lastOutput = time.Now()
 			h.wrote = true
 			h.tail = append(h.tail, chunk...)
-			if len(h.tail) > tailSize {
-				h.tail = h.tail[len(h.tail)-tailSize:]
+			if len(h.tail) > 2*tailSize {
+				// trimmed in one step per tailSize bytes written, not on every chunk
+				h.tail = h.tail[:copy(h.tail, h.tail[len(h.tail)-tailSize:])]
 			}
 			clients := make([]*client, 0, len(h.clients))
 			for c := range h.clients {
@@ -253,8 +254,8 @@ func (h *Holder) handle(conn net.Conn) {
 	// new output may overtake it: the history is queued before the client is registered, under the
 	// lock the pump takes to add output, so every byte is either in the history or sent after it.
 	h.mu.Lock()
-	if len(h.tail) > 0 {
-		c.enqueue(frameOutput, append([]byte(nil), h.tail...))
+	if recent := h.recent(); len(recent) > 0 {
+		c.enqueue(frameOutput, recent)
 	}
 	h.clients[c] = true
 	h.mu.Unlock()
@@ -390,7 +391,16 @@ func (h *Holder) LastOutput() time.Time {
 func (h *Holder) Output() []byte {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]byte(nil), h.tail...)
+	return h.recent()
+}
+
+// recent is a copy of the last tailSize bytes the program wrote. It runs under h.mu.
+func (h *Holder) recent() []byte {
+	tail := h.tail
+	if len(tail) > tailSize {
+		tail = tail[len(tail)-tailSize:]
+	}
+	return append([]byte(nil), tail...)
 }
 
 // Terminate asks the program to stop, then makes sure it does.

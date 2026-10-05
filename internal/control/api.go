@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -32,6 +33,10 @@ type server struct {
 	deliveryMu sync.Mutex
 	rateMu     sync.Mutex
 	sends      map[string][]time.Time
+	buckets    map[string]*bucket
+	// sendMu makes the checks of a send and its write one step.
+	sendMu sync.Mutex
+	key    []byte // the project key, read once
 }
 
 func newServer(dir string) (*server, error) {
@@ -67,18 +72,56 @@ func (s *server) handler() http.Handler {
 func (s *server) projectKey() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.key != nil {
+		return s.key, nil
+	}
 	path := filepath.Join(s.dir, "key")
-	if key, err := os.ReadFile(path); err == nil && len(key) == 32 {
+	key, err := os.ReadFile(path)
+	switch {
+	case err == nil && len(key) == 32:
+		s.key = key
 		return key, nil
-	}
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
+	case err == nil:
+		// Never replace it: a new key would change every token without anyone being told.
+		return nil, fmt.Errorf("the project key %s is damaged (%d bytes, want 32): restore it, or delete it to issue new tokens", path, len(key))
+	case !errors.Is(err, os.ErrNotExist):
 		return nil, err
 	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
+	fresh := make([]byte, 32)
+	if _, err := rand.Read(fresh); err != nil {
 		return nil, err
 	}
-	return key, nil
+	// Written under a temporary name and then linked into place: the link fails when another sidecar on
+	// the same volume got there first, so exactly one key is ever created, and it is never half written.
+	temp, err := os.CreateTemp(s.dir, "key.*.tmp")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(temp.Name())
+	if _, err := temp.Write(fresh); err != nil {
+		temp.Close()
+		return nil, err
+	}
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return nil, err
+	}
+	if err := temp.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Link(temp.Name(), path); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		winner, err := os.ReadFile(path)
+		if err != nil || len(winner) != 32 {
+			return nil, fmt.Errorf("the project key %s is damaged", path)
+		}
+		s.key = winner
+		return winner, nil
+	}
+	s.key = fresh
+	return fresh, nil
 }
 
 // AgentToken derives the token that identifies an agent to the proxy and the control sidecar.
@@ -109,26 +152,80 @@ func (s *server) specPath(hash string) (string, bool) {
 	return filepath.Join(s.dir, "specs", hash+".yaml"), true
 }
 
+// maxSpecSize bounds one snapshot, and maxSpecs how many are kept.
+const (
+	maxSpecSize = 4 << 20
+	maxSpecs    = 50
+)
+
 func (s *server) putSpec(w http.ResponseWriter, r *http.Request) {
-	path, ok := s.specPath(r.PathValue("hash"))
+	hash := r.PathValue("hash")
+	path, ok := s.specPath(hash)
 	if !ok {
 		http.Error(w, "invalid hash", http.StatusBadRequest)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSpecSize))
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "the snapshot is larger than the limit", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if sum := sha256.Sum256(body); hex.EncodeToString(sum[:]) != hash {
+		http.Error(w, "the snapshot is not the one this hash names", http.StatusBadRequest)
+		return
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(path, body, 0o644); err != nil {
+	temp, err := os.CreateTemp(dir, "spec.*.tmp")
+	if err == nil {
+		defer os.Remove(temp.Name())
+		_, err = temp.Write(body)
+		if closeErr := temp.Close(); err == nil {
+			err = closeErr
+		}
+	}
+	if err == nil {
+		err = os.Chmod(temp.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(temp.Name(), path)
+	}
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	retireSpecs(dir, maxSpecs)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// retireSpecs keeps the newest `keep` snapshots.
+func retireSpecs(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) <= keep {
+		return
+	}
+	type snapshot struct {
+		name string
+		time time.Time
+	}
+	var all []snapshot
+	for _, entry := range entries {
+		if info, err := entry.Info(); err == nil && strings.HasSuffix(entry.Name(), ".yaml") {
+			all = append(all, snapshot{entry.Name(), info.ModTime()})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].time.After(all[j].time) })
+	for i := keep; i < len(all); i++ {
+		os.Remove(filepath.Join(dir, all[i].name))
+	}
 }
 
 func (s *server) getSpec(w http.ResponseWriter, r *http.Request) {

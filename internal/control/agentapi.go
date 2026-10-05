@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -34,7 +36,7 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages/{id}/update", a.authenticated(a.update))
 	mux.HandleFunc("POST /v1/messages/{id}/ask", a.authenticated(a.ask))
 	mux.HandleFunc("GET /v1/agents", a.authenticated(a.agents))
-	mux.HandleFunc("POST /v1/hooks/{name}", a.authenticated(a.hook))
+	mux.HandleFunc("POST /v1/hooks/{name}", a.authenticatedLimit(maxHookPayload, a.hook))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
@@ -58,13 +60,17 @@ func (a *agentAPI) identify(r *http.Request) (string, bool) {
 }
 
 func (a *agentAPI) authenticated(next func(w http.ResponseWriter, r *http.Request, agent string)) http.HandlerFunc {
+	return a.authenticatedLimit(maxBody, next)
+}
+
+func (a *agentAPI) authenticatedLimit(limit int64, next func(w http.ResponseWriter, r *http.Request, agent string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agent, ok := a.identify(r)
 		if !ok {
 			unauthorized(w)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		next(w, r, agent)
 	}
 }
@@ -75,6 +81,7 @@ func (a *agentAPI) authenticatedHandler(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -210,25 +217,29 @@ func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) 
 	reply(w, http.StatusOK, a.server.othersOf(agent))
 }
 
-// hook ingests a harness hook payload as an event, so hooks and tool calls share one stream.
+// maxHookPayload is the largest hook payload read. A tool's output can be large and is of no interest
+// here: only the state change matters, and what is recorded is reduced to a few named fields.
+const maxHookPayload = 4 << 20
+
+// hook ingests a harness hook payload. The hook always drives the agent's activity; it is recorded as an
+// event, reduced to what the stream is for, within the agent's budget.
 func (a *agentAPI) hook(w http.ResponseWriter, r *http.Request, agent string) {
 	name := r.PathValue("name")
 	if !safeName.MatchString(name) {
 		http.Error(w, "invalid hook name", http.StatusBadRequest)
 		return
 	}
-	payload, err := io.ReadAll(r.Body)
+	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHookPayload))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	event := Event{Type: "hook", Agent: agent, Actor: "agent:" + agent, Text: name}
-	if json.Valid(payload) {
-		event.Data = payload
-	}
-	if _, err := a.server.events.append(event); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if a.server.takeBudget(agent, "hook", time.Now()) {
+		event := Event{Type: "hook", Agent: agent, Actor: "agent:" + agent, Text: name, Data: summarizeHook(name, payload)}
+		if _, err := a.server.events.append(event); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := a.server.onHook(agent, name, payload); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -237,9 +248,47 @@ func (a *agentAPI) hook(w http.ResponseWriter, r *http.Request, agent string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// hookFields are the only parts of a hook payload that are recorded: what happened, never what a tool
+// returned or what the user typed (those can hold anything the agent read, secrets included).
+var hookFields = []string{"tool_name", "message", "hook_event_name", "source", "reason", "notification_type"}
+
+// announcement matches the lines control composes (see announceLine): fixed words and message ids.
+var announcement = regexp.MustCompile(`^(check )?egzo messages? m[0-9a-f]{32}`)
+
+func summarizeHook(name string, payload []byte) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(payload, &fields) != nil {
+		return nil
+	}
+	summary := map[string]string{}
+	for _, field := range hookFields {
+		var text string
+		if raw, ok := fields[field]; ok && json.Unmarshal(raw, &text) == nil && text != "" {
+			if len(text) > 500 {
+				text = strings.ToValidUTF8(text[:500], "") + "…"
+			}
+			summary[field] = text
+		}
+	}
+	// The one prompt worth recording is what egzo itself typed: the line announcing a message. Whatever a
+	// person typed is theirs, and may hold anything.
+	var prompt string
+	if raw, ok := fields["prompt"]; ok && json.Unmarshal(raw, &prompt) == nil && announcement.MatchString(prompt) {
+		summary["prompt"] = prompt[:min(len(prompt), 2000)]
+	}
+	if len(summary) == 0 {
+		return nil
+	}
+	data, _ := json.Marshal(summary)
+	return data
+}
+
 // The verbs below are shared by the HTTP API and the MCP tools.
 
 func (s *server) reportStatus(agent, text string) error {
+	if !s.takeBudget(agent, "status", time.Now()) {
+		return tooMany("status lines")
+	}
 	_, err := s.events.append(Event{Type: "status", Agent: agent, Actor: "agent:" + agent, Text: text})
 	return err
 }

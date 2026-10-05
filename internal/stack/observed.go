@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -67,26 +68,38 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 	if err != nil {
 		return observed, fmt.Errorf("list containers: %w", err)
 	}
-	for _, item := range containers {
-		name := ""
-		if len(item.Names) > 0 {
-			name = strings.TrimPrefix(item.Names[0], "/")
-		}
-		resource := resourceFrom("container", item.ID, name, item.Labels)
-		resource.State = item.State
-		if inspected, err := c.API.ContainerInspect(ctx, item.ID); err == nil {
-			if inspected.State != nil && inspected.State.Health != nil {
-				resource.Health = inspected.State.Health.Status
+	// One inspect per container, a few at a time: each is a round trip to the engine.
+	found := make([]Resource, len(containers))
+	slots := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for i, item := range containers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			name := ""
+			if len(item.Names) > 0 {
+				name = strings.TrimPrefix(item.Names[0], "/")
 			}
-			if inspected.NetworkSettings != nil {
-				for networkName := range inspected.NetworkSettings.Networks {
-					resource.Networks = append(resource.Networks, networkName)
+			resource := resourceFrom("container", item.ID, name, item.Labels)
+			resource.State = item.State
+			if inspected, err := c.API.ContainerInspect(ctx, item.ID); err == nil {
+				if inspected.State != nil && inspected.State.Health != nil {
+					resource.Health = inspected.State.Health.Status
 				}
-				sort.Strings(resource.Networks)
+				if inspected.NetworkSettings != nil {
+					for networkName := range inspected.NetworkSettings.Networks {
+						resource.Networks = append(resource.Networks, networkName)
+					}
+					sort.Strings(resource.Networks)
+				}
 			}
-		}
-		observed.Resources = append(observed.Resources, resource)
+			found[i] = resource
+		}()
 	}
+	wg.Wait()
+	observed.Resources = append(observed.Resources, found...)
 
 	networks, err := c.API.NetworkList(ctx, network.ListOptions{Filters: f})
 	if err != nil {

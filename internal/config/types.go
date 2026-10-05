@@ -136,4 +136,6 @@ type AgentInject struct {
 type Resources struct {
 	CPUs   float64 `yaml:"cpus,omitempty"`
 	Memory string  `yaml:"memory,omitempty"`
+	// Pids caps the processes and threads of the agent; egzo sets a generous default when it is left out.
+	Pids int64 `yaml:"pids,omitempty"`
 }

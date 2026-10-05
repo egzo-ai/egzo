@@ -100,7 +100,7 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 	instructions := Instructions(opts.Prompt)
 	return Plan{
 		Files: map[string]File{
-			filepath.Join(opts.Home, ".config", "opencode", "opencode.json"):     {Content: encoded, Merge: true},
+			filepath.Join(opts.Home, ".config", "opencode", "opencode.json"):     {Content: encoded, Merge: true, Mode: 0o600},
 			filepath.Join(opts.Home, ".config", "opencode", "plugin", "egzo.js"): {Content: []byte(openCodePlugin)},
 			opts.InstructionsFile: {Content: instructions},
 		},

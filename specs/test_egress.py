@@ -315,3 +315,14 @@ def test_a_secret_bound_to_a_service_that_injects_nothing_is_an_error(project):
     result = project.config(document)
     assert result.returncode != 0
     assert "plain" in result.stderr and "inject" in result.stderr
+
+
+def test_opencode_with_a_subscription_token_is_warned_about(project):
+    """OpenCode sends its Anthropic credential as x-api-key; a bearer token injected for it cannot work."""
+    document = spec(
+        egress={"default": {"allow": ["models.opencode.ai"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}},
+        agents={"coder": agent(harness="opencode")},
+    )
+    result = project.config(document)
+    assert result.returncode == 0, result.stderr
+    assert "opencode" in result.stderr and "bearer" in result.stderr

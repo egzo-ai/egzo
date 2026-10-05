@@ -22,6 +22,7 @@ type Options struct {
 	Image    string
 	// HarnessPrefix overrides where harness images are pulled from (EGZO_HARNESS_PREFIX).
 	HarnessPrefix string
+	digests       map[string]string // content hashes of the agents' prompt files, set by Up
 	// Services limits `up` to these agents and what they need: the sidecars, their networks and the
 	// agents they depend on. Everything else is left exactly as it is.
 	Services []string
@@ -29,15 +30,23 @@ type Options struct {
 
 // AgentUser is who agents run as: the invoking user, so files they write on the host are theirs.
 // Podman maps users itself (rootless container root is the invoking user), so it keeps the image's.
-func AgentUser(c *engine.Client) string {
-	if c.Podman || os.Getuid() < 0 {
+func AgentUser(c *engine.Client) string { return agentUser(c, os.Getuid(), os.Getgid()) }
+
+// agentUser is the "uid:gid" agents run as. An engine that maps users itself (Podman, rootless Docker)
+// keeps the image's user. Root is never an agent's user: someone running egzo as root (sudo) still gets
+// agents that run unprivileged.
+func agentUser(c *engine.Client, uid, gid int) string {
+	switch {
+	case c.Podman || c.Rootless || uid < 0:
 		return ""
+	case uid == 0:
+		return "1000:1000"
 	}
-	return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	return fmt.Sprintf("%d:%d", uid, gid)
 }
 
 func (o Options) inputs(c *engine.Client, tokens map[string]string) Inputs {
-	return Inputs{Image: o.Image, Tokens: tokens, User: AgentUser(c), HarnessPrefix: o.HarnessPrefix}
+	return Inputs{Image: o.Image, Tokens: tokens, User: AgentUser(c), HarnessPrefix: o.HarnessPrefix, PromptDigests: o.digests}
 }
 
 // Up converges a project: control first, because it hands out the per-agent tokens everything
@@ -50,6 +59,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err := CheckOwnership(observed, project.Name, dir); err != nil {
 		return err
 	}
+	if opts.digests, err = PromptDigests(project, dir); err != nil {
+		return err
+	}
 
 	// Read the secrets first: an agent must not start without the credentials its profile
 	// promises, and nothing should be half-created when one is missing.
@@ -58,6 +70,8 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		if secrets, err = ResolveSecrets(project, dir); err != nil {
 			return err
 		}
+	} else if resolved, err := ResolveSecrets(project, dir); err == nil {
+		secrets = resolved // a dry run compares the policy too, when the secrets can be read
 	}
 
 	fresh := map[string]bool{} // resources created by this run: nothing can be stored in them yet
@@ -130,7 +144,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	var wg sync.WaitGroup
 	wg.Add(2)
 	if !opts.DryRun {
-		putProject(ctx, c, project, desired)
+		if err := putProject(ctx, c, project, desired); err != nil {
+			fmt.Fprintf(out, "warning: could not tell the control sidecar which agents exist: %v\n", err)
+		}
 	}
 	go func() {
 		defer wg.Done()
@@ -205,10 +221,13 @@ func fetchTokens(ctx context.Context, c *engine.Client, controlName string, name
 	values := make([]string, len(names))
 	errs := make([]error, len(names))
 	var wg sync.WaitGroup
+	slots := make(chan struct{}, 8)
 	for i, name := range names {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
 			result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/tokens/" + name}, nil)
 			switch {
 			case err != nil:
@@ -278,9 +297,24 @@ func pushPolicy(
 		if err != nil {
 			return false, err
 		}
-		if proxy := observed.find("container", desired.Proxy); proxy == nil || proxy.State != "running" {
+		proxy := observed.find("container", desired.Proxy)
+		if proxy == nil || proxy.State != "running" {
 			fmt.Fprintln(out, "would load the egress policy into the proxy")
 			return true, nil
+		}
+		if secrets != nil {
+			policy := BuildPolicy(project, tokens, secrets)
+			loaded, err := c.Exec(ctx, desired.Proxy, []string{"/egzo", "proxy", "request", "GET", "/policy"}, nil)
+			var current struct {
+				Hash string `json:"hash"`
+			}
+			if err == nil && loaded.ExitCode == 0 {
+				_ = json.Unmarshal(loaded.Stdout, &current)
+			}
+			if current.Hash != policy.Hash {
+				fmt.Fprintln(out, "would load the egress policy into the proxy")
+				return true, nil
+			}
 		}
 		fmt.Fprintln(out, "would check the egress policy loaded in the proxy")
 		return false, nil
@@ -421,8 +455,15 @@ func restrictCheckouts(plan []Checkout, included map[string]bool) []Checkout {
 	return kept
 }
 
-// putProject tells the control sidecar which agents exist. It is best effort: control works without it.
-func putProject(ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired) {
+// putProject tells the control sidecar which agents exist. A failure is reported but does not stop `up`.
+func putProject(ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired) error {
 	body, _ := json.Marshal(map[string][]string{"agents": sortedKeys(project.Agents)})
-	c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/project"}, bytes.NewReader(body))
+	result, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/project"}, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("%s", strings.TrimSpace(string(result.Stderr)))
+	}
+	return nil
 }

@@ -207,8 +207,27 @@ func newHookCommand() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
 			defer cancel()
-			api.Do(ctx, "POST", "/v1/hooks/"+args[0], payload)
+			postHook(ctx, api, args[0], payload)
 			return nil
 		},
+	}
+}
+
+// postHook delivers a hook to the control sidecar, trying again for as long as the context allows when
+// the sidecar is busy or not reachable yet: a lost "Stop" would keep the agent "working" for good. It
+// gives up at once on a refusal, which no retry would change.
+func postHook(ctx context.Context, api *agentclient.Client, name string, payload []byte) error {
+	delay := 100 * time.Millisecond
+	for {
+		_, err := api.Do(ctx, "POST", "/v1/hooks/"+name, payload)
+		if err == nil || !agentclient.Temporary(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, time.Second)
 	}
 }

@@ -240,3 +240,114 @@ def test_proxy_rules_show_what_each_agent_may_reach_without_any_secret(live_proj
     assert "very-secret-value" not in rules.stdout + rules.stderr
     only = live_project.run("proxy", "rules", "--agent", "coder").stdout
     assert "docs.example.org" in only and "api.test" not in only
+
+
+# --- secrets: private files, whole values, honest states ------------------------------------------------------------
+
+
+def test_secrets_set_never_leaves_an_existing_open_file_readable(project, tmp_path):
+    path = tmp_path / "TOKEN_A"
+    path.write_text("old\n")
+    path.chmod(0o644)
+    project.write({"vaults": file_vault(tmp_path, TOKEN_A=None)})
+    assert project.run("secrets", "set", "main/TOKEN_A", input="new-value\n").returncode == 0
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.read_text() == "new-value\n"
+
+
+def test_secrets_set_refuses_to_write_through_a_symlink(project, tmp_path):
+    target = tmp_path / "target"
+    target.write_text("precious")
+    (tmp_path / "TOKEN_A").symlink_to(target)
+    project.write({"vaults": file_vault(tmp_path, TOKEN_A=None)})
+    assert project.run("secrets", "set", "main/TOKEN_A", input="x\n").returncode != 0
+    assert target.read_text() == "precious"
+
+
+def test_secrets_set_keeps_a_multi_line_value_whole(project, tmp_path):
+    project.write({"vaults": file_vault(tmp_path, KEY=None)})
+    pem = "-----BEGIN KEY-----\nabc\ndef\n-----END KEY-----\n"
+    assert project.run("secrets", "set", "main/KEY", input=pem).returncode == 0
+    assert (tmp_path / "KEY").read_text() == pem
+
+
+def test_secrets_ls_says_why_a_secret_is_not_usable(project, tmp_path):
+    (tmp_path / "EMPTY").write_text("\n")
+    locked = tmp_path / "LOCKED"
+    locked.write_text("v")
+    locked.chmod(0)
+    project.write({"vaults": file_vault(tmp_path, EMPTY=None, LOCKED=None, GONE=None)})
+    rows = {line.split()[0]: line for line in project.run("secrets", "ls").stdout.splitlines()[1:]}
+    assert "empty" in rows["main/EMPTY"]
+    assert "missing" in rows["main/GONE"]
+    if os.getuid() != 0:
+        assert "permission denied" in rows["main/LOCKED"]
+
+
+def test_doctor_warns_about_a_secret_file_other_users_can_read(project, tmp_path, engine):
+    open_file = tmp_path / "OPEN"
+    open_file.write_text("v")
+    open_file.chmod(0o644)
+    project.write({"vaults": file_vault(tmp_path, OPEN=None)})
+    result = project.run("doctor", env=engine.env)
+    assert "main/OPEN" in result.stdout and "chmod 600" in result.stdout
+
+
+# --- diff sees what up would do: secrets and prompts too -------------------------------------------------------------
+
+
+def injecting(image, **extra):
+    return spec(
+        egress={"default": {"services": {"echo": {"hosts": ["example.com"], "inject": {"header": "X-Key"}, "secret": "main/DEPLOY_TOKEN"}}}},
+        agents={"coder": custom(image, **extra)},
+    )
+
+
+def test_diff_sees_a_rotated_secret(live_project, engine, agent_image):
+    live_project.write(injecting(agent_image))
+    assert live_project.run("up", env={"DEPLOY_TOKEN": "first-value"}, timeout=300).returncode == 0
+    assert live_project.run("diff", env={"DEPLOY_TOKEN": "first-value"}).returncode == 0
+    changed = live_project.run("diff", env={"DEPLOY_TOKEN": "second-value"})
+    assert changed.returncode == 1, changed.stdout
+    assert "policy" in changed.stdout
+    assert "second-value" not in changed.stdout + changed.stderr
+
+
+def test_editing_an_agents_prompt_is_a_change_up_applies(live_project, engine, agent_image):
+    prompt = live_project.root / "prompt.md"
+    prompt.write_text("be brief\n")
+    live_project.write(spec(agents={"coder": custom(agent_image, prompt="./prompt.md")}))
+    assert live_project.run("up", timeout=300).returncode == 0
+    before = container(engine, live_project, "coder").labels[f"{LABEL_PREFIX}config-hash"]
+    assert live_project.run("diff").returncode == 0
+    prompt.write_text("be verbose\n")
+    assert live_project.run("diff").returncode == 1
+    assert live_project.run("up", timeout=300).returncode == 0
+    assert container(engine, live_project, "coder").labels[f"{LABEL_PREFIX}config-hash"] != before
+
+
+def test_a_restarted_proxy_through_egzo_keeps_diff_clean(live_project, engine, agent_image):
+    live_project.write(injecting(agent_image))
+    assert live_project.run("up", env={"DEPLOY_TOKEN": "v"}, timeout=300).returncode == 0
+    assert live_project.run("restart", "proxy", env={"DEPLOY_TOKEN": "v"}).returncode == 0
+    assert live_project.run("diff", env={"DEPLOY_TOKEN": "v"}).returncode == 0
+
+
+def test_doctor_checks_that_the_engine_can_make_the_internal_networks_isolation_needs(project, engine):
+    result = project.run("doctor", env=engine.env)
+    assert "internal networks work" in result.stdout, result.stdout
+
+
+def test_two_commands_do_not_change_one_project_at_once(live_project, engine, agent_image):
+    import subprocess
+    import time
+
+    live_project.write(spec(agents={"coder": custom(agent_image), "second": custom(agent_image)}))
+    environment = {**os.environ, **live_project.env, "NO_COLOR": "1"}
+    first = subprocess.Popen([live_project.egzo.binary, "up"], cwd=live_project.root, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(0.7)
+    second = live_project.run("up", timeout=300)
+    first_out, first_err = first.communicate(timeout=300)
+    assert first.returncode == 0, first_err
+    assert second.returncode != 0 and "another egzo command" in second.stderr, (second.returncode, second.stderr)
+    assert live_project.run("up", timeout=300).returncode == 0, "the lock was not released"

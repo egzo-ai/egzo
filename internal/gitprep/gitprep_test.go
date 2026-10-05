@@ -131,3 +131,79 @@ func TestASecondWorktreeMayUseAPathAnotherAgentsWorktreeIsRegisteredAt(t *testin
 		t.Errorf("branch = %q", branch)
 	}
 }
+
+func cloned(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "c")
+	if err := Clone(origin(t), "", dir); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestInspectSeesStashedWork(t *testing.T) {
+	dir := cloned(t)
+	os.WriteFile(filepath.Join(dir, "README"), []byte("changed\n"), 0o644)
+	if _, err := Git(dir, "stash"); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := Inspect(dir)
+	if err != nil || findings.Stashes != 1 || findings.Uncommitted != 0 || findings.Clean() {
+		t.Errorf("findings = %+v, %v: a stash is work that exists nowhere else", findings, err)
+	}
+}
+
+func TestInspectSeesCommitsOnADetachedHead(t *testing.T) {
+	dir := cloned(t)
+	Git(dir, "checkout", "-q", "--detach")
+	if _, err := Git(dir, "commit", "-q", "--allow-empty", "-m", "on no branch"); err != nil {
+		t.Fatal(err)
+	}
+	if findings, _ := Inspect(dir); findings.Unpushed != 1 {
+		t.Errorf("findings = %+v: a commit on no branch is not on any remote either", findings)
+	}
+	Git(dir, "checkout", "-q", "main")
+	if findings, _ := Inspect(dir); findings.Unpushed != 1 {
+		t.Logf("after leaving the detached head its commit is unreachable but still counted by reflog only: %+v", findings)
+	}
+}
+
+func TestInspectCountsIgnoredFilesSeparately(t *testing.T) {
+	dir := cloned(t)
+	os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("*.secret\nbuild/\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "notes.secret"), []byte("x"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "build"), 0o755)
+	os.WriteFile(filepath.Join(dir, "build", "out"), []byte("x"), 0o644)
+	findings, err := Inspect(dir)
+	if err != nil || findings.Ignored != 2 || findings.Uncommitted != 0 || !findings.Clean() {
+		t.Errorf("findings = %+v, %v: ignored files are reported but are not unsaved work", findings, err)
+	}
+}
+
+func TestAHookInTheRepositoryIsNeverRun(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "base")
+	if err := Clone(origin(t), "", base); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "ran")
+	hook := filepath.Join(base, ".git", "hooks", "post-checkout")
+	os.WriteFile(hook, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755)
+	if err := Worktree("unused", "", base, filepath.Join(t.TempDir(), "wt"), "coder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("a hook planted in the base repository ran while a worktree was prepared")
+	}
+}
+
+func TestAFileSystemMonitorInTheRepositoryConfigIsNeverRun(t *testing.T) {
+	dir := cloned(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	script := filepath.Join(t.TempDir(), "monitor.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755)
+	exec.Command("git", "-C", dir, "config", "core.fsmonitor", script).Run()
+	Inspect(dir)
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("core.fsmonitor from the repository's own config ran during the inspection")
+	}
+}

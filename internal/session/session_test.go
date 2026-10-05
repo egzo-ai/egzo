@@ -237,17 +237,27 @@ type fakeControl struct {
 	claims    int
 	reply     claimed
 	activity  []string
+	releases  []string // the "if" of each conditional activity change
+	failFirst int      // how many activity reports to refuse before accepting
 	claimBody []byte
 }
 
 func (f *fakeControl) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/activity", func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ State string }
+		var body struct{ State, If string }
 		json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.failFirst > 0 {
+			f.failFirst--
+			http.Error(w, "not yet", http.StatusServiceUnavailable)
+			return
+		}
 		f.activity = append(f.activity, body.State)
-		f.mu.Unlock()
+		if body.If != "" {
+			f.releases = append(f.releases, body.If)
+		}
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("POST /v1/claim", func(w http.ResponseWriter, r *http.Request) {
@@ -701,5 +711,89 @@ func waitUntil(t *testing.T, condition func() bool) {
 	}
 	if !condition() {
 		t.Fatal("condition never held")
+	}
+}
+
+func (f *fakeControl) released() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.releases)
+}
+
+// An agent whose harness never said its turn was over is released when its screen has gone quiet, and
+// asked about only once per silence.
+func TestAnAgentStuckWorkingIsReleasedWhenItsOutputGoesQuiet(t *testing.T) {
+	_, path, fake := deliveryRig(t, Delivery{HumanQuiet: time.Hour, AckTimeout: time.Minute, IdleSignal: "hook", StuckAfter: 300 * time.Millisecond})
+	c := connect(t, path, false, 24, 80)
+	c.waitFor("READY")
+	waitUntil(t, func() bool { return fake.released() == 1 })
+	time.Sleep(700 * time.Millisecond)
+	if n := fake.released(); n != 1 {
+		t.Errorf("released %d times for one silence", n)
+	}
+	fake.mu.Lock()
+	if fake.releases[0] != "working" {
+		t.Errorf("the release must be conditional on working, got %q", fake.releases[0])
+	}
+	fake.mu.Unlock()
+	c.send("the agent speaks again")
+	c.waitFor("the agent speaks again")
+	waitUntil(t, func() bool { return fake.released() == 2 })
+}
+
+func TestAWorkingTUIThatKeepsDrawingIsNotReleased(t *testing.T) {
+	holder, err := Start([]string{"sh", "-c", "while :; do printf .; sleep 0.05; done"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	fake := &fakeControl{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go holder.RunDelivery(ctx, api, Delivery{HumanQuiet: time.Hour, IdleSignal: "hook", Interval: 20 * time.Millisecond, StuckAfter: 400 * time.Millisecond})
+	time.Sleep(1500 * time.Millisecond)
+	if n := fake.released(); n != 0 {
+		t.Errorf("an agent that was drawing was released %d times", n)
+	}
+}
+
+func TestTheHolderKeepsTryingToAnnounceItselfUntilControlHearsIt(t *testing.T) {
+	_, _, fake := deliveryRig(t, Delivery{HumanQuiet: time.Hour, AckTimeout: time.Minute, IdleSignal: "hook"})
+	fake.mu.Lock()
+	fake.failFirst = 0
+	fake.mu.Unlock()
+	waitUntil(t, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.activity) > 0 && fake.activity[0] == "starting"
+	})
+}
+
+func TestStartingIsRetriedWhenTheFirstReportsFail(t *testing.T) {
+	holder, path := startHolder(t, rawCat)
+	_ = path
+	fake := &fakeControl{failFirst: 3}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go holder.RunDelivery(ctx, api, Delivery{HumanQuiet: time.Hour, IdleSignal: "hook", Interval: 20 * time.Millisecond})
+	waitUntil(t, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.activity) > 0 && fake.activity[0] == "starting"
+	})
+}
+
+func TestTheHistoryASlowArrivalGetsIsTheLastTailSizeBytesExactly(t *testing.T) {
+	h, _ := startHolder(t, "head -c 300000 /dev/zero | tr '\\0' a; printf END; sleep 30")
+	waitUntil(t, func() bool { return strings.HasSuffix(string(h.Output()), "END") })
+	out := h.Output()
+	if len(out) != tailSize || !strings.HasSuffix(string(out), "aaaEND") {
+		t.Errorf("history = %d bytes ending %q, want %d", len(out), out[len(out)-6:], tailSize)
 	}
 }

@@ -23,6 +23,9 @@ type ExecResult struct {
 // never appears in `inspect`.
 func (c *Client) Exec(ctx context.Context, containerID string, command []string, stdin io.Reader) (ExecResult, error) {
 	var result ExecResult
+	// A sidecar that does not answer must not hang the CLI for ever.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	created, err := c.API.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          command,
 		AttachStdin:  stdin != nil,
@@ -50,20 +53,32 @@ func (c *Client) Exec(ctx context.Context, containerID string, command []string,
 	}
 	result.Stdout, result.Stderr = stdout.Bytes(), stderr.Bytes()
 
-	// The exit code is only reported once the process is gone.
-	deadline := time.Now().Add(10 * time.Second)
+	result.ExitCode, err = c.waitExit(ctx, created.ID)
+	return result, err
+}
+
+// exitWait is how long to wait for the engine to report that a command has finished.
+var exitWait = 10 * time.Second
+
+// waitExit returns the exit code of an exec. The engine only reports it once the process is gone, which
+// can be a moment after its output ended: asking once would read "still running, code 0".
+func (c *Client) waitExit(ctx context.Context, id string) (int, error) {
+	deadline := time.Now().Add(exitWait)
 	for {
-		inspected, err := c.API.ContainerExecInspect(ctx, created.ID)
+		inspected, err := c.API.ContainerExecInspect(ctx, id)
 		if err != nil {
-			return result, err
+			return 1, err
 		}
 		if !inspected.Running {
-			result.ExitCode = inspected.ExitCode
-			return result, nil
+			return inspected.ExitCode, nil
 		}
 		if time.Now().After(deadline) {
-			return result, fmt.Errorf("exec did not finish")
+			return 1, fmt.Errorf("exec did not finish")
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return 1, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }

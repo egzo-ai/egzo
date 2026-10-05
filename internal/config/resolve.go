@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -90,6 +91,9 @@ func resolveInject(name string, agent Agent, p *problems) ResolvedInject {
 func checkResources(agent string, r Resources, p *problems) {
 	if r.CPUs < 0 {
 		p.addf("agent %q: resources.cpus must not be negative", agent)
+	}
+	if r.Pids < 0 {
+		p.addf("agent %q: resources.pids must not be negative", agent)
 	}
 	if r.Memory != "" {
 		if bytes, err := units.RAMInBytes(r.Memory); err != nil || bytes <= 0 {
@@ -204,6 +208,17 @@ func resolveAgent(
 		}
 	}
 
+	if agent.Harness == "opencode" {
+		if profile != nil {
+			for serviceName, service := range profile.Services {
+				if service.Inject != nil && strings.EqualFold(service.Inject.Header, "Authorization") && slices.Contains(service.Hosts, "api.anthropic.com") {
+					warnings = append(warnings, fmt.Sprintf(
+						"warning: agent %q runs opencode, which sends its Anthropic key as x-api-key; service %q injects a bearer token (a subscription token), which opencode cannot use: bind an API key to the anthropic service",
+						name, serviceName))
+				}
+			}
+		}
+	}
 	mounts, workdir := resolveMounts(file, name, agent, dir, resolved.Workspaces, refs, p)
 	for _, mount := range mounts {
 		if mount.HostPath != "" {

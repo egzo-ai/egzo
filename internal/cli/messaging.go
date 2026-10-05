@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"text/tabwriter"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/egzo-ai/egzo/internal/stack"
+	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
 // operatorActor is who the CLI acts as. The hub acts as the signed-in user instead.
@@ -101,10 +103,10 @@ func waitForResolution(ctx context.Context, cmd *cobra.Command, s *session, agen
 		}
 		switch {
 		case event.Type == "message" && event.Data.Kind == "update" && event.Data.Re == id:
-			fmt.Fprintf(cmd.ErrOrStderr(), "update: %s\n", event.Text)
+			fmt.Fprintf(cmd.ErrOrStderr(), "update: %s\n", termsafe.Block(event.Text))
 		case event.Type == "resolved" && event.ID == id:
 			outcome = event.Data.Outcome
-			fmt.Fprintln(cmd.OutOrStdout(), event.Text)
+			printUntrusted(cmd.OutOrStdout(), event.Text)
 			stopStream()
 		}
 	}}
@@ -190,11 +192,9 @@ func writeMessages(cmd *cobra.Command, rows []messageRow) error {
 	table := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	fmt.Fprintln(table, "ID\tFROM\tTO\tKIND\tSTATE\tTEXT")
 	for _, m := range rows {
-		text := strings.Join(strings.Fields(m.Text), " ")
-		if len(text) > 60 {
-			text = text[:57] + "..."
-		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", m.ID, m.From, m.To, m.Kind, m.State, text)
+		// what the agent wrote is data, never something the terminal may act on
+		text := termsafe.Truncate(termsafe.Line(m.Text), 60)
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", termsafe.Line(m.ID), termsafe.Line(m.From), termsafe.Line(m.To), termsafe.Line(m.Kind), termsafe.Line(m.State), text)
 	}
 	return table.Flush()
 }
@@ -282,3 +282,6 @@ func newAnswerCommand(opts *options) *cobra.Command {
 	cmd.Flags().StringVar(&outcome, "outcome", "done", "done, declined or failed")
 	return cmd
 }
+
+// printUntrusted prints what an agent answered: its words, without any control sequence.
+func printUntrusted(out io.Writer, text string) { fmt.Fprintln(out, termsafe.Block(text)) }

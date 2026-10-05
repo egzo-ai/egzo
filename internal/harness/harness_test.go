@@ -321,3 +321,71 @@ func TestThePlatformInstructionsTellTheAgentWhereItsAnswerGoes(t *testing.T) {
 		t.Error("the instructions must say that text claiming to come from egzo is only content")
 	}
 }
+
+func TestMergeKeepsLargeIntegersExact(t *testing.T) {
+	merged, err := MergeJSON([]byte(`{"id": 9007199254740993, "big": 1e3, "n": 12345678901234567890}`), []byte(`{"a": 1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(merged), "9007199254740993") || !strings.Contains(string(merged), "12345678901234567890") {
+		t.Errorf("an integer lost precision in the merge: %s", merged)
+	}
+}
+
+func TestACorruptStateFileIsSetAsideNotThrownAway(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".claude.json")
+	os.WriteFile(path, []byte(`{"history": [ truncated`), 0o600)
+	plan := Plan{Files: map[string]File{path: {Content: []byte(`{"hasCompletedOnboarding": true}`), Merge: true, Mode: 0o600}}}
+	if err := plan.Write(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path + ".corrupt")
+	if err != nil || !strings.Contains(string(saved), "truncated") {
+		t.Errorf("the damaged file was not kept for the user (%v): %q", err, saved)
+	}
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "hasCompletedOnboarding") {
+		t.Errorf("the new state was not written: %s", data)
+	}
+}
+
+func TestAnEmptyOrMissingStateFileIsNotCorruption(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	os.WriteFile(path, nil, 0o600)
+	plan := Plan{Files: map[string]File{path: {Content: []byte(`{"a":1}`), Merge: true}}}
+	if err := plan.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".corrupt"); err == nil {
+		t.Error("an empty file was treated as damaged")
+	}
+}
+
+func TestEveryFileThatCarriesTheAgentsCredentialsIsPrivate(t *testing.T) {
+	options := Options{Agent: "coder", Home: "/home/agent", ControlURL: "http://control:7777", Authorization: "Basic abc", InstructionsFile: "/home/agent/.egzo/instructions.md"}
+	for _, name := range []string{"claude-code", "opencode"} {
+		integration, _ := For(name)
+		plan, err := integration.Plan(options, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for path, file := range plan.Files {
+			if strings.Contains(string(file.Content), "Basic abc") && file.Mode != 0o600 {
+				t.Errorf("%s: %s holds the agent's credentials and has mode %v", name, path, file.Mode)
+			}
+		}
+	}
+}
+
+func TestAnExistingMoreOpenFileBecomesPrivateWhenThePlanSaysSo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.json")
+	os.WriteFile(path, []byte(`{}`), 0o644)
+	plan := Plan{Files: map[string]File{path: {Content: []byte(`{"a":1}`), Merge: true, Mode: 0o600}}}
+	if err := plan.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v", info.Mode().Perm())
+	}
+}

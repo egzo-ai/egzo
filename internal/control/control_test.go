@@ -75,7 +75,8 @@ func decode(t *testing.T, response *http.Response, into any) {
 
 func TestTokensAreStablePerAgentAndDifferBetweenAgents(t *testing.T) {
 	r := newRig(t)
-	if r.token("coder") != r.token("coder") {
+	first := r.token("coder")
+	if first != r.token("coder") {
 		t.Error("a token changed between calls")
 	}
 	if r.token("coder") == r.token("reviewer") {
@@ -156,15 +157,15 @@ func TestEmptyAndOversizedTextIsRefused(t *testing.T) {
 	}
 }
 
-func TestHooksBecomeEventsWithTheirPayload(t *testing.T) {
+func TestHooksBecomeEventsWithTheNameOfWhatHappened(t *testing.T) {
 	r := newRig(t)
-	response := r.asAgent("coder", "POST", "/v1/hooks/Stop", `{"last_assistant_message":"done"}`)
+	response := r.asAgent("coder", "POST", "/v1/hooks/PreToolUse", `{"tool_name":"Bash","tool_input":{"command":"ls"}}`)
 	response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("status %d", response.StatusCode)
 	}
 	events := r.srv.events.all()
-	if len(events) < 1 || events[0].Type != "hook" || events[0].Text != "Stop" || !strings.Contains(string(events[0].Data), "done") {
+	if len(events) < 1 || events[0].Type != "hook" || events[0].Text != "PreToolUse" || !strings.Contains(string(events[0].Data), "Bash") {
 		t.Errorf("events = %+v", events)
 	}
 	bad := r.asAgent("coder", "POST", "/v1/hooks/..%2Fx", `{}`)

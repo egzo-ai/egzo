@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -29,12 +30,7 @@ func newPrepCommand() *cobra.Command {
 				return err
 			}
 			for _, root := range args[1:] {
-				err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-					if err != nil {
-						return err
-					}
-					return os.Lchown(path, uid, gid)
-				})
+				err := chownTree(root, uid, gid, os.Lchown)
 				if err != nil {
 					return err
 				}
@@ -60,4 +56,21 @@ func parseOwner(spec string) (int, int, error) {
 		return 0, 0, fmt.Errorf("owner %q must be UID:GID", spec)
 	}
 	return uid, gid, nil
+}
+
+// chownTree gives a directory tree to uid:gid, touching only what is not theirs already: a recreated
+// agent finds its volumes (a workspace with a whole node_modules in it) owned correctly, and walking
+// them to say so again would cost seconds for nothing. Symbolic links are changed, never followed.
+func chownTree(root string, uid, gid int, chown func(path string, uid, gid int) error) error {
+	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if info, err := entry.Info(); err == nil {
+			if stat, ok := info.Sys().(*syscall.Stat_t); ok && int(stat.Uid) == uid && int(stat.Gid) == gid {
+				return nil
+			}
+		}
+		return chown(path, uid, gid)
+	})
 }

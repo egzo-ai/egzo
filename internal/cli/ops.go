@@ -15,6 +15,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/spf13/cobra"
 
 	"github.com/egzo-ai/egzo/internal/config"
@@ -91,6 +92,7 @@ func checkEngine(ctx context.Context, c *engine.Client, report func(level, forma
 	} else {
 		report("ok", "engine runs rootful: agents run as your user without capabilities, but a container escape is root; consider rootless or gVisor")
 	}
+	checkInternalNetworks(ctx, c, report)
 	if _, ok := info.Runtimes["runsc"]; ok {
 		report("ok", "gVisor (runsc) is registered: set runtime: runsc on an agent to sandbox it further")
 	} else {
@@ -113,6 +115,9 @@ func checkProject(opts *options, report func(level, format string, a ...any)) {
 	report("ok", "%s is valid (project %s, %d agent(s))", config.FileName, p.Resolved.Name, len(p.Resolved.Agents))
 	for _, warning := range p.Warnings {
 		report("warn", "%s", strings.TrimPrefix(warning, "warning: "))
+	}
+	for _, warning := range secretFileWarnings(p.Resolved.SecretSources, p.Dir) {
+		report("warn", "%s", warning)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		if _, err := exec.LookPath("git"); err == nil {
@@ -293,4 +298,22 @@ func (w *agentLines) Write(p []byte) (int, error) {
 		w.buffer = w.buffer[end+1:]
 	}
 	return len(p), nil
+}
+
+// checkInternalNetworks makes sure the engine can make an internal network, the one thing the isolation
+// of every agent stands on: no route out except through the proxy.
+func checkInternalNetworks(ctx context.Context, c *engine.Client, report func(level, format string, a ...any)) {
+	name := fmt.Sprintf("egzo-doctor-%d", os.Getpid())
+	created, err := c.API.NetworkCreate(ctx, name, network.CreateOptions{Driver: "bridge", Internal: true})
+	if err != nil {
+		report("fail", "network: the engine cannot create an internal network, which agents' isolation needs: %s", firstLine(err.Error()))
+		return
+	}
+	defer c.API.NetworkRemove(context.WithoutCancel(ctx), created.ID)
+	inspected, err := c.API.NetworkInspect(ctx, created.ID, network.InspectOptions{})
+	if err != nil || !inspected.Internal {
+		report("fail", "network: the engine made a network that is not internal: agents would have a route out")
+		return
+	}
+	report("ok", "network: internal networks work (no route out except the proxy)")
 }

@@ -1,9 +1,10 @@
 package cli
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,11 +52,7 @@ func newSecretsLsCommand(opts *options) *cobra.Command {
 			fmt.Fprintln(table, "SECRET\tSOURCE\tSTATE")
 			for _, ref := range sortedSecretRefs(p) {
 				source := p.Resolved.SecretSources[ref]
-				state := "set"
-				if _, err := stack.ReadSecret(source, p.Dir); err != nil {
-					state = "missing"
-				}
-				fmt.Fprintf(table, "%s\t%s\t%s\n", ref, source, state)
+				fmt.Fprintf(table, "%s\t%s\t%s\n", ref, source, secretState(source, p.Dir))
 			}
 			return table.Flush()
 		},
@@ -100,10 +97,9 @@ func newSecretsSetCommand(opts *options) *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
+			if err := storeSecret(path, value); err != nil {
 				return err
 			}
-			os.Chmod(path, 0o600)
 			fmt.Fprintf(cmd.OutOrStdout(), "stored %s in %s; run `egzo up` to give it to the proxy\n", args[0], path)
 			return nil
 		},
@@ -118,11 +114,82 @@ func readValue(cmd *cobra.Command) (string, error) {
 		fmt.Fprintln(cmd.ErrOrStderr())
 		return strings.TrimSpace(string(data)), err
 	}
-	line, err := bufio.NewReader(io.LimitReader(in, 1<<20)).ReadString('\n')
-	if err != nil && err != io.EOF {
+	return readSecretValue(in)
+}
+
+// readSecretValue reads a secret from a stream whole, up to 1 MB: a key in a file has several lines.
+// Only the line breaks at the end are not part of it.
+func readSecretValue(in io.Reader) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(in, 1<<20))
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+	return strings.TrimRight(string(data), "\r\n"), nil
+}
+
+// storeSecret writes a secret file that nobody else could ever read: it is written under a name of its
+// own with mode 0600 and moved into place, so an older, more open file is never filled with the new
+// value, and a symbolic link is refused rather than written through.
+func storeSecret(path, value string) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symbolic link: refusing to write a secret through it", path)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".secret-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.WriteString(value + "\n"); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), path)
+}
+
+// secretState is what `secrets ls` says about a secret, with the reason when it cannot be used.
+func secretState(source, dir string) string {
+	_, err := stack.ReadSecret(source, dir)
+	switch {
+	case err == nil:
+		return "set"
+	case errors.Is(err, fs.ErrPermission):
+		return "unreadable (permission denied)"
+	case errors.Is(err, stack.ErrEmptySecret):
+		return "empty"
+	case errors.Is(err, fs.ErrNotExist):
+		return "missing"
+	case strings.Contains(err.Error(), "is not set"):
+		return "missing"
+	}
+	return "unreadable (" + firstLine(err.Error()) + ")"
+}
+
+// secretFileWarnings names the secret files that other users of this machine can read.
+func secretFileWarnings(sources map[string]string, dir string) []string {
+	var warnings []string
+	refs := make([]string, 0, len(sources))
+	for ref := range sources {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	for _, ref := range refs {
+		scheme, location, _ := strings.Cut(sources[ref], ":")
+		if scheme != "file" {
+			continue
+		}
+		path := stack.SecretFilePath(location, dir)
+		if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 {
+			warnings = append(warnings, fmt.Sprintf("secret %s: %s can be read by other users (mode %v): chmod 600 %s", ref, path, info.Mode().Perm(), path))
+		}
+	}
+	return warnings
 }
 
 func newSecretsRmCommand(opts *options) *cobra.Command {

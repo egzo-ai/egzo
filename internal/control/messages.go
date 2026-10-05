@@ -35,7 +35,57 @@ const (
 	maxThreadDepth      = 8
 	maxSendsPerMinute   = 30
 	maxAnnouncements    = 3
+	maxChoices          = 10
+	maxChoiceLength     = 200
 )
+
+// Budgets: what an agent may do per unit of time with the verbs that write to the log. A budget is a
+// token bucket, `burst` tokens that refill at `perSecond`, so ordinary use never notices it.
+var budgets = map[string]struct {
+	burst     float64
+	perSecond float64
+}{
+	"hook":   {200, 50},
+	"status": {20, 1},
+	"update": {30, 0.5},
+}
+
+type bucket struct {
+	tokens float64
+	last   time.Time
+}
+
+// takeBudget spends one token of an agent's budget for a class of verb, or says there is none.
+func (s *server) takeBudget(agent, class string, now time.Time) bool {
+	budget, ok := budgets[class]
+	if !ok {
+		return true
+	}
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	if s.buckets == nil {
+		s.buckets = map[string]*bucket{}
+	}
+	key := agent + "\x00" + class
+	b := s.buckets[key]
+	if b == nil {
+		b = &bucket{tokens: budget.burst, last: now}
+		s.buckets[key] = b
+	}
+	if elapsed := now.Sub(b.last).Seconds(); elapsed > 0 {
+		b.tokens = min(budget.burst, b.tokens+elapsed*budget.perSecond)
+		b.last = now
+	}
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
+func tooMany(what string) *apiError {
+	return &apiError{http.StatusTooManyRequests, "too many " + what + " too fast: wait a little"}
+}
 
 var outcomes = map[string]bool{"done": true, "declined": true, "failed": true}
 
@@ -66,6 +116,30 @@ type messageData struct {
 	Choices []string `json:"choices,omitempty"`
 }
 
+// terminal reports whether nothing will ever be done with a message again: it is resolved, or it is a
+// reply or an update that has been read.
+func terminal(m *Message) bool {
+	return m.State == stateResolved || ((m.Kind == kindResolution || m.Kind == kindUpdate) && m.State == stateFetched)
+}
+
+// setState moves a message to a state and keeps the counters of what each agent owes in step: the
+// requests it fetched and has not resolved, and the questions it asked that nobody answered.
+func (s *store) setState(m *Message, state string) {
+	old := m.State
+	m.State = state
+	if agent := agentOf(m.To); agent != "" && (m.Kind == kindRequest || m.Kind == kindQuestion) {
+		if old == stateFetched && state != stateFetched {
+			s.open[agent]--
+		}
+		if old != stateFetched && state == stateFetched {
+			s.open[agent]++
+		}
+	}
+	if agent := agentOf(m.From); agent != "" && m.Kind == kindQuestion && old != stateResolved && state == stateResolved {
+		s.waiting[agent]--
+	}
+}
+
 // index folds one event into the message view. It runs under the store's lock.
 func (s *store) index(event Event) {
 	switch event.Type {
@@ -79,27 +153,55 @@ func (s *store) index(event Event) {
 			State: stateQueued, Outcome: data.Outcome, Choices: data.Choices, Time: event.Time, Hops: data.Hops,
 		}
 		s.order = append(s.order, event.ID)
+		if from := agentOf(event.Actor); from != "" && data.Kind == kindQuestion {
+			s.waiting[from]++
+		}
+		s.byAddress[data.To] = append(s.byAddress[data.To], event.ID)
+		if event.Actor != data.To {
+			s.byAddress[event.Actor] = append(s.byAddress[event.Actor], event.ID)
+		}
+	case "status":
+		entry := s.latest[event.Agent]
+		entry.Agent, entry.Status, entry.Updated = event.Agent, event.Text, event.Time
+		s.latest[event.Agent] = entry
+	case "activity":
+		entry := s.latest[event.Agent]
+		entry.Agent, entry.Activity = event.Agent, event.Text
+		if entry.Updated.Before(event.Time) {
+			entry.Updated = event.Time
+		}
+		s.latest[event.Agent] = entry
+	case "interrupt":
+		s.pending[event.Agent] = true
+	case "interrupted":
+		delete(s.pending, event.Agent)
 	case "announced":
-		if m := s.messages[event.ID]; m != nil && m.State != stateResolved {
+		// An announcement that lost the race with the fetch must not undo it.
+		if m := s.messages[event.ID]; m != nil && m.State != stateResolved && m.State != stateFetched {
 			var data struct {
 				Attempt    int   `json:"attempt"`
 				DeadlineMs int64 `json:"deadline_ms"`
 			}
 			json.Unmarshal(event.Data, &data)
-			m.State, m.Attempts = stateAnnounced, data.Attempt
+			s.setState(m, stateAnnounced)
+			m.Attempts = data.Attempt
 			m.Deadline = time.UnixMilli(data.DeadlineMs)
+			s.announced[event.ID] = true
 		}
 	case "fetched":
 		if m := s.messages[event.ID]; m != nil && m.State != stateResolved {
-			m.State = stateFetched
+			s.setState(m, stateFetched)
+			delete(s.announced, event.ID)
 		}
 	case "unconfirmed":
 		if m := s.messages[event.ID]; m != nil && m.State == stateAnnounced {
-			m.State = stateUnconfirmed
+			s.setState(m, stateUnconfirmed)
+			delete(s.announced, event.ID)
 		}
 	case "resolved":
 		if m := s.messages[event.ID]; m != nil {
-			m.State = stateResolved
+			s.setState(m, stateResolved)
+			delete(s.announced, event.ID)
 			var data struct {
 				Outcome string `json:"outcome"`
 			}
@@ -129,6 +231,46 @@ func (s *store) selectMessages(match func(Message) bool) []Message {
 		if m := *s.messages[id]; match(m) {
 			out = append(out, m)
 		}
+	}
+	return out
+}
+
+// messagesOf returns copies of the messages an address sent or received that are not finished and
+// match, oldest first. It looks only at that address's own open messages, not at the whole history.
+func (s *store) messagesOf(address string, match func(Message) bool) []Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []Message{}
+	live := s.byAddress[address][:0]
+	for _, id := range s.byAddress[address] {
+		m := s.messages[id]
+		if terminal(m) {
+			continue // nothing asks about it any more: forget it here, so the list stays as long as what is open
+		}
+		live = append(live, id)
+		if match(*m) {
+			out = append(out, *m)
+		}
+	}
+	s.byAddress[address] = live
+	return out
+}
+
+// owed is what an agent owes: the requests it fetched and has not resolved, and whether a question it
+// asked is waiting for an answer.
+func (s *store) owed(agent string) (open int, waiting bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.open[agent], s.waiting[agent] > 0
+}
+
+// announcedMessages returns copies of the messages announced and not yet fetched.
+func (s *store) announcedMessages() []Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Message, 0, len(s.announced))
+	for id := range s.announced {
+		out = append(out, *s.messages[id])
 	}
 	return out
 }
@@ -228,6 +370,9 @@ type sendRequest struct {
 // send creates a message after checking who it is for, its thread and the limits. It is the one way a
 // request or a question comes to exist.
 func (s *server) send(req sendRequest) (Message, Event, error) {
+	// The checks and the write are one step: concurrent senders must not each see room for one more.
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 	if !validText(req.Text) {
 		return Message{}, Event{}, badRequest("text must not be empty or longer than 16 KB")
 	}
@@ -254,18 +399,37 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 			return Message{}, Event{}, badRequest("this thread is already %d messages deep: finish it or start a new one", maxThreadDepth)
 		}
 	}
-	if kind == "agent" {
-		open := s.events.selectMessages(func(m Message) bool {
-			return m.To == req.To && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
-		})
-		if len(open) >= maxOpenPerRecipient {
-			return Message{}, Event{}, conflict("%s already has %d open requests: wait for it to resolve some", req.To, maxOpenPerRecipient)
-		}
+	if err := checkChoices(req.Choices); err != nil {
+		return Message{}, Event{}, err
+	}
+	open := s.events.messagesOf(req.To, func(m Message) bool {
+		return m.To == req.To && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
+	})
+	if len(open) >= maxOpenPerRecipient {
+		return Message{}, Event{}, conflict("%s already has %d open requests: wait for it to resolve some", req.To, maxOpenPerRecipient)
 	}
 	if err := s.rateLimit(req.From, time.Now()); err != nil {
 		return Message{}, Event{}, err
 	}
 	return s.write(req, hops)
+}
+
+// checkChoices keeps the quick answers an agent offers short and plain: a person reads them.
+func checkChoices(choices []string) error {
+	if len(choices) > maxChoices {
+		return badRequest("at most %d choices", maxChoices)
+	}
+	for _, choice := range choices {
+		if strings.TrimSpace(choice) == "" || len(choice) > maxChoiceLength {
+			return badRequest("a choice is 1 to %d characters", maxChoiceLength)
+		}
+		for _, r := range choice {
+			if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+				return badRequest("a choice must be plain text")
+			}
+		}
+	}
+	return nil
 }
 
 // write appends a message event, and an interrupt when one was asked for.
@@ -302,6 +466,10 @@ func (s *server) ownMessage(agent, id string) (Message, error) {
 // fetch gives an agent a message addressed to it and marks it fetched: fetching is the
 // acknowledgement of its announcement.
 func (s *server) fetch(agent, id string) (Message, error) {
+	// Announcing and fetching are decided one at a time, or an announcement could be recorded after the
+	// fetch it raced with.
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
 	m, err := s.ownMessage(agent, id)
 	if err != nil {
 		return Message{}, err
@@ -388,6 +556,9 @@ func (s *server) update(agent, id, text string) (string, error) {
 	if !validText(text) {
 		return "", badRequest("text must not be empty or longer than 16 KB")
 	}
+	if !s.takeBudget(agent, "update", time.Now()) {
+		return "", tooMany("updates")
+	}
 	message, _, err := s.write(sendRequest{From: "agent:" + agent, To: m.From, Text: text, Re: id, Kind: kindUpdate}, m.Hops)
 	return message.ID, err
 }
@@ -411,7 +582,7 @@ func (s *server) sendFromAgent(agent, to, text, re string) (string, error) {
 // listFor is list_messages: what an agent owes and has not read, never what has not been announced.
 func (s *server) listFor(agent string) []Message {
 	to := "agent:" + agent
-	return s.events.selectMessages(func(m Message) bool {
+	return s.events.messagesOf(to, func(m Message) bool {
 		if m.To != to {
 			return false
 		}
@@ -430,14 +601,5 @@ func (s *server) listFor(agent string) []Message {
 // overlay is what an agent owes: the requests it fetched and has not resolved, and whether a question
 // it asked is waiting for an answer.
 func (s *server) overlay(agent string) (open int, waiting bool) {
-	to, from := "agent:"+agent, "agent:"+agent
-	for _, m := range s.events.selectMessages(func(m Message) bool { return m.To == to || m.From == from }) {
-		if m.To == to && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State == stateFetched {
-			open++
-		}
-		if m.From == from && m.Kind == kindQuestion && m.State != stateResolved {
-			waiting = true
-		}
-	}
-	return open, waiting
+	return s.events.owed(agent)
 }

@@ -36,7 +36,7 @@ func newPrepGitCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s uncommitted=%d unpushed=%d\n", dir, findings.Uncommitted, findings.Unpushed)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s uncommitted=%d unpushed=%d stashes=%d ignored=%d\n", dir, findings.Uncommitted, findings.Unpushed, findings.Stashes, findings.Ignored)
 			}
 			return nil
 		},

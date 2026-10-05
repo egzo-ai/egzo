@@ -127,6 +127,12 @@ func (p Plan) Write() error {
 		if err := os.WriteFile(path, content, mode); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
+		if file.Mode != 0 {
+			// the mode of WriteFile only applies to a file it creates
+			if err := os.Chmod(path, file.Mode); err != nil {
+				return fmt.Errorf("chmod %s: %w", path, err)
+			}
+		}
 	}
 	return nil
 }

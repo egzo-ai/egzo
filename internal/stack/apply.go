@@ -2,11 +2,19 @@ package stack
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/distribution/reference"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -14,10 +22,9 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
 const (
@@ -131,7 +138,14 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		SecurityOpt:    []string{"no-new-privileges"},
 		Runtime:        spec.Runtime,
 		Init:           &spec.Init,
-		Resources:      container.Resources{NanoCPUs: spec.NanoCPUs, Memory: spec.Memory},
+		Resources:      container.Resources{NanoCPUs: spec.NanoCPUs, Memory: spec.Memory, MemorySwap: spec.MemorySwap},
+	}
+	if spec.PidsLimit > 0 {
+		limit := spec.PidsLimit
+		host.Resources.PidsLimit = &limit
+	}
+	if spec.BoundedLogs {
+		host.LogConfig = container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}}
 	}
 	host.Tmpfs = spec.Tmpfs
 	for _, m := range spec.Mounts {
@@ -247,22 +261,93 @@ func tail(ctx context.Context, c *engine.Client, id string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// ensureImage pulls image when it is not already present.
+// ensureImage pulls image when it is not already present, with the credentials of the Docker
+// configuration for its registry when it has any.
 func ensureImage(ctx context.Context, c *engine.Client, ref string) error {
 	if _, err := c.API.ImageInspect(ctx, ref); err == nil {
 		return nil
-	} else if !client.IsErrNotFound(err) {
+	} else if !cerrdefs.IsNotFound(err) {
 		return err
 	}
-	reader, err := c.API.ImagePull(ctx, ref, image.PullOptions{})
+	options := image.PullOptions{}
+	if data, err := os.ReadFile(filepath.Join(dockerConfigDir(), "config.json")); err == nil {
+		options.RegistryAuth = registryAuth(ref, data)
+	}
+	reader, err := c.API.ImagePull(ctx, ref, options)
+	if err == nil {
+		defer reader.Close()
+		err = checkPullStream(reader)
+	}
 	if err != nil {
 		return fmt.Errorf("image %s is not available locally and could not be pulled: %w\n"+
 			"(sidecar images come from EGZO_IMAGE; a harness image comes from EGZO_HARNESS_PREFIX, which replaces "+
-			"%q, or from the agent's image: key)", ref, err, DefaultHarnessPrefix)
+			"%q, or from the agent's image: key; a private registry needs `docker login`)", ref, err, DefaultHarnessPrefix)
 	}
-	defer reader.Close()
-	_, err = io.Copy(io.Discard, reader)
-	return err
+	return nil
+}
+
+// checkPullStream reads the progress of a pull to its end. The engine answers 200 and reports a failed
+// layer or a missing manifest inside the stream, so success is the absence of an error message there.
+func checkPullStream(reader io.Reader) error {
+	decoder := json.NewDecoder(reader)
+	for {
+		var message struct {
+			Error       string `json:"error"`
+			ErrorDetail struct {
+				Message string `json:"message"`
+			} `json:"errorDetail"`
+		}
+		if err := decoder.Decode(&message); err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("unreadable pull progress: %w", err)
+		}
+		if message.Error != "" || message.ErrorDetail.Message != "" {
+			return errors.New(strings.TrimSpace(message.Error + " " + message.ErrorDetail.Message))
+		}
+	}
+}
+
+func dockerConfigDir() string {
+	if dir := os.Getenv("DOCKER_CONFIG"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".docker")
+}
+
+// registryAuth is the X-Registry-Auth value for the registry of ref, from a Docker config.json, or ""
+// when that file has no credentials for it (credential helpers are not supported).
+func registryAuth(ref string, configJSON []byte) string {
+	named, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return ""
+	}
+	var config struct {
+		Auths map[string]struct {
+			Auth string `json:"auth"`
+		} `json:"auths"`
+	}
+	if json.Unmarshal(configJSON, &config) != nil {
+		return ""
+	}
+	domain := reference.Domain(named)
+	for key, entry := range config.Auths {
+		host := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(key, "https://"), "http://"), "/")
+		host, _, _ = strings.Cut(host, "/")
+		if host != domain && !(domain == "docker.io" && (host == "index.docker.io" || host == "registry-1.docker.io")) {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(entry.Auth)
+		user, password, ok := strings.Cut(string(raw), ":")
+		if err != nil || !ok {
+			continue
+		}
+		encoded, _ := json.Marshal(map[string]string{"username": user, "password": password})
+		return base64.URLEncoding.EncodeToString(encoded)
+	}
+	return ""
 }
 
 // Down removes a project's containers and networks, and its volumes when volumes is true.
@@ -327,14 +412,7 @@ func WriteStatus(observed Observed, reported map[string]Report, out io.Writer) {
 				activity = "starting"
 			}
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, activity, open, waiting, report.Status)
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, activity, open, waiting, termsafe.Truncate(termsafe.Line(report.Status), 200))
 	}
 	table.Flush()
-}
-
-// demux splits an engine log stream into its text, stdout and stderr together.
-func demux(reader io.Reader) string {
-	var out strings.Builder
-	_, _ = stdcopy.StdCopy(&out, &out, reader)
-	return out.String()
 }

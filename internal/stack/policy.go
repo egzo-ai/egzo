@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -127,6 +128,9 @@ func SecretFilePath(location, dir string) string {
 // ReadSecret reads the value a secret source points to.
 func ReadSecret(source, dir string) (string, error) { return readSecret(source, dir) }
 
+// ErrEmptySecret is wrapped by the error for a secret file that holds nothing.
+var ErrEmptySecret = errors.New("empty secret")
+
 func readSecret(source, dir string) (string, error) {
 	scheme, location, _ := strings.Cut(source, ":")
 	switch scheme {
@@ -140,11 +144,11 @@ func readSecret(source, dir string) (string, error) {
 		path := SecretFilePath(location, dir)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return "", fmt.Errorf("cannot read %s: %v", path, err)
+			return "", fmt.Errorf("cannot read %s: %w", path, err)
 		}
 		value := strings.TrimRight(string(data), "\r\n")
 		if value == "" {
-			return "", fmt.Errorf("%s is empty", path)
+			return "", fmt.Errorf("%s is empty: %w", path, ErrEmptySecret)
 		}
 		return value, nil
 	}

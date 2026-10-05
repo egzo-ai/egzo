@@ -2,7 +2,9 @@ package control
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -22,7 +24,7 @@ var activities = map[string]bool{activityStarting: true, activityIdle: true, act
 
 // hookActivity maps a harness hook to the activity it implies. The hook names are Claude Code's;
 // the OpenCode plugin reports the same names.
-func hookActivity(name string, payload []byte, current string) (string, bool) {
+func hookActivity(name string, payload []byte) (string, bool) {
 	switch name {
 	case "SessionStart", "Stop":
 		return activityIdle, true
@@ -54,7 +56,7 @@ func (s *server) setActivity(agent, state string) error {
 func (s *server) onHook(agent, name string, payload []byte) error {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	if state, ok := hookActivity(name, payload, s.events.activity(agent)); ok {
+	if state, ok := hookActivity(name, payload); ok {
 		return s.setActivity(agent, state)
 	}
 	return nil
@@ -142,11 +144,11 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 		}
 		return false
 	}
-	waiting := s.events.selectMessages(func(m Message) bool { return m.To == to && m.State == stateAnnounced && !now.After(m.Deadline) })
+	waiting := s.events.messagesOf(to, func(m Message) bool { return m.To == to && m.State == stateAnnounced && !now.After(m.Deadline) })
 	if len(waiting) > 0 {
 		return result, nil
 	}
-	due := s.events.selectMessages(announceable)
+	due := s.events.messagesOf(to, announceable)
 	if len(due) == 0 {
 		return result, nil
 	}
@@ -167,24 +169,36 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 func (s *server) expire(now time.Time) {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	stale := s.events.selectMessages(func(m Message) bool {
-		return m.State == stateAnnounced && now.After(m.Deadline) && m.Attempts >= maxAnnouncements
-	})
-	for _, m := range stale {
-		s.events.append(Event{Type: "unconfirmed", Agent: agentOf(m.To), Actor: m.To, ID: m.ID})
+	for _, m := range s.events.announcedMessages() {
+		if now.After(m.Deadline) && m.Attempts >= maxAnnouncements {
+			if _, err := s.events.append(Event{Type: "unconfirmed", Agent: agentOf(m.To), Actor: m.To, ID: m.ID}); err != nil {
+				fmt.Fprintf(os.Stderr, "control: recording unconfirmed message %s: %v\n", m.ID, err)
+			}
+		}
 	}
 }
 
 func (a *agentAPI) activity(w http.ResponseWriter, r *http.Request, agent string) {
 	var body struct {
 		State string `json:"state"`
+		// If makes the change conditional: the holder uses {"state":"idle","if":"working"} to release an
+		// agent whose harness never reported the end of its turn, without ever overriding "blocked" (a
+		// dialog that only a person can answer) or anything else.
+		If string `json:"if"`
+		// IfUnset makes it apply only when nothing is known about the agent yet: the holder's "starting",
+		// which may arrive after the harness's own first report and must not undo it.
+		IfUnset bool `json:"if_unset"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !activities[body.State] {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !activities[body.State] || (body.If != "" && !activities[body.If]) {
 		http.Error(w, "expected {\"state\": starting|idle|working|blocked}", http.StatusBadRequest)
 		return
 	}
 	a.server.deliveryMu.Lock()
 	defer a.server.deliveryMu.Unlock()
+	if (body.If != "" && a.server.events.activity(agent) != body.If) || (body.IfUnset && a.server.events.activity(agent) != "") {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := a.server.setActivity(agent, body.State); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

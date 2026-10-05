@@ -318,8 +318,8 @@ def test_a_recipient_cannot_be_buried_in_open_requests(live_project, engine, age
 
 def test_a_sender_cannot_flood_the_minute(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    for n in range(30):
-        code, body = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": "operator", "text": f"note {n}"})
+    for n in range(30):  # to ten different people: the limit is on the sender, not on one recipient
+        code, body = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": f"user:u{n % 10}", "text": f"note {n}"})
         assert code in (200, 201), (n, code, body)
     code, text = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": "operator", "text": "note 31"})
     assert code == 429 and "minute" in json.dumps(text)
@@ -387,7 +387,8 @@ def test_hooks_arrive_as_events(live_project, engine, agent_image):
     code, _ = as_agent(engine, live_project, "coder", "POST", "/v1/hooks/Stop", {"last_assistant_message": "all done"})
     assert code == 204
     hooks = [e for e in events(live_project) if e["type"] == "hook"]
-    assert hooks and hooks[0]["text"] == "Stop" and "all done" in json.dumps(hooks[0]["data"])
+    assert hooks and hooks[0]["text"] == "Stop"
+    assert "all done" not in json.dumps(hooks), "what the agent said is not recorded, only that the hook happened"
 
 
 def test_events_can_be_filtered_by_agent(live_project, engine, agent_image):
@@ -516,3 +517,99 @@ def test_send_wait_times_out_with_its_own_exit_code_and_leaves_the_message_open(
     )
     assert waiter.returncode == 5, waiter.stderr
     assert any("never answered" in row["TEXT"] for row in messages(live_project).values())
+
+
+# --- what an agent can make the control sidecar record or hold -------------------------------------------
+
+
+def test_what_a_tool_returned_or_a_user_typed_never_reaches_the_event_log(live_project, engine, agent_image):
+    """Hook payloads carry tool output and prompts: anything the agent read, secrets included."""
+    two_agents(live_project, agent_image)
+    secret = "ghp_SPECSECRETSPECSECRETSPECSECRET"
+    code, _ = as_agent(
+        engine, live_project, "coder", "POST", "/v1/hooks/PostToolUse",
+        {"tool_name": "Read", "tool_response": {"content": f"TOKEN={secret}"}},
+    )
+    assert code == 204
+    as_agent(engine, live_project, "coder", "POST", "/v1/hooks/UserPromptSubmit", {"prompt": f"my key is {secret}"})
+    stream = live_project.run("events").stdout
+    assert secret not in stream
+    hooks = [e for e in events(live_project) if e["type"] == "hook"]
+    assert any(e.get("data", {}).get("tool_name") == "Read" for e in hooks), "the tool name is what the stream is for"
+    on_volume = engine.exec(container(engine, live_project, "control").name, "sh", "-c", "cat /state/events.jsonl 2>/dev/null || true")
+    assert secret not in on_volume.stdout
+
+
+def test_a_hook_with_a_large_payload_still_counts(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    command = (
+        "(printf '{\"prompt\":\"'; head -c 150000 /dev/zero | tr '\\0' x; printf '\"}') | "
+        'curl -sS -m 20 -o /dev/null -w "%{http_code}" -u "$EGZO_AGENT:$EGZO_TOKEN" -X POST '
+        '-H "content-type: application/json" --data-binary @- "$EGZO_CONTROL_URL/v1/hooks/UserPromptSubmit"'
+    )
+    code = engine.exec(container(engine, live_project, "coder").name, "sh", "-c", command).stdout.strip()
+    assert code == "204", code
+    assert live_project.run("ps").stdout.split("\n")[1:], "ps still works"
+    activity = [e for e in events(live_project, "--agent", "coder") if e["type"] == "activity"]
+    assert activity and activity[-1]["text"] == "working"
+
+
+def test_an_agent_that_floods_the_status_line_is_slowed_down(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    codes = [as_agent(engine, live_project, "coder", "POST", "/v1/status", {"text": f"line {n}"})[0] for n in range(45)]
+    assert 429 in codes, codes
+    recorded = [e for e in events(live_project, "--agent", "coder") if e["type"] == "status"]
+    assert len(recorded) < 45
+    other, _ = as_agent(engine, live_project, "reviewer", "POST", "/v1/status", {"text": "fine"})
+    assert other == 204, "one agent's flood must not limit another"
+
+
+def test_a_person_is_not_flooded_with_open_messages_either(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    codes = [as_agent(engine, live_project, "coder", "POST", "/v1/messages", {"to": "operator", "text": f"look {n}"})[0] for n in range(25)]
+    assert codes.count(201) == 20, codes
+    assert set(codes) - {201} <= {409, 429}
+    open_for_operator = [row for row in messages(live_project).values() if row["TO"] == "operator"]
+    assert len(open_for_operator) == 20
+
+
+def test_choices_offered_with_a_question_are_short_plain_text(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    message_id = send(live_project, "coder", "do something")
+    fetched(engine, live_project, "coder", message_id)
+    bad = as_agent(engine, live_project, "coder", "POST", f"/v1/messages/{message_id}/ask",
+                   {"text": "which?", "choices": ["yes\u001b[2J", "no"]})[0]
+    assert bad == 400
+    too_many = as_agent(engine, live_project, "coder", "POST", f"/v1/messages/{message_id}/ask",
+                        {"text": "which?", "choices": [str(n) for n in range(11)]})[0]
+    assert too_many == 400
+    good = as_agent(engine, live_project, "coder", "POST", f"/v1/messages/{message_id}/ask",
+                    {"text": "which?", "choices": ["yes", "no"]})[0]
+    assert good == 201
+
+
+# --- what an agent writes never acts on the operator's terminal ------------------------------------------------------
+
+
+def test_ps_and_messages_never_pass_an_agents_escape_sequences_to_the_terminal(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    nasty = "working\n\x1b]52;c;ZXZpbA==\x07p-forged-1  forged  running\x1b[2J"
+    code, _ = as_agent(engine, live_project, "coder", "POST", "/v1/status", {"text": nasty})
+    assert code == 204
+    as_agent(engine, live_project, "coder", "POST", "/v1/messages", {"to": "operator", "text": nasty})
+    shown = live_project.run("ps").stdout
+    assert "\x1b" not in shown and "\x07" not in shown
+    assert len(shown.strip().splitlines()) == 5, f"the status forged rows:\n{shown}"  # header, control, proxy, 2 agents
+    listed = live_project.run("messages").stdout
+    assert "\x1b" not in listed and "\x07" not in listed
+    assert len(listed.strip().splitlines()) == 2
+
+
+def test_send_wait_prints_an_answer_without_escape_sequences(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    message_id = send(live_project, "coder", "do it")
+    fetched(engine, live_project, "coder", message_id)
+    as_agent(engine, live_project, "coder", "POST", f"/v1/messages/{message_id}/resolve",
+             {"text": "done \x1b]0;pwned\x07 \x1b[31mred", "outcome": "done"})
+    waited = live_project.run("send", "--wait", "--timeout", "20s", "coder", "again")
+    assert "\x1b" not in waited.stdout + waited.stderr

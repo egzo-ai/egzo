@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,24 @@ func FromEnv() (*Client, error) {
 	}
 	c.HTTP = &http.Client{Timeout: 5 * time.Second}
 	return c, nil
+}
+
+// StatusError is a refusal by the control sidecar.
+type StatusError struct {
+	Code    int
+	Message string
+}
+
+func (e *StatusError) Error() string { return e.Message }
+
+// Temporary reports whether trying again could help: the sidecar was busy or not there yet, as opposed
+// to refusing the request itself.
+func Temporary(err error) bool {
+	var refused *StatusError
+	if errors.As(err, &refused) {
+		return refused.Code == http.StatusTooManyRequests || refused.Code >= 500
+	}
+	return err != nil
 }
 
 // Do sends one request and returns the response body. A non-2xx status is an error.
@@ -57,7 +76,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) ([]byte,
 	defer response.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if response.StatusCode/100 != 2 {
-		return data, fmt.Errorf("control answered %s: %s", response.Status, strings.TrimSpace(string(data)))
+		return data, &StatusError{Code: response.StatusCode, Message: fmt.Sprintf("control answered %s: %s", response.Status, strings.TrimSpace(string(data)))}
 	}
 	return data, nil
 }

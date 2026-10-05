@@ -212,3 +212,85 @@ def test_down_workspaces_force_removes_even_unsaved_work(live_project, engine, a
     (clone / "wip.txt").write_text("not committed\n")
     assert live_project.run("down", "--workspaces", "--yes", "--force").returncode == 0
     assert not clone.exists()
+
+
+# --- down --workspaces never throws away work it did not look at ---------------------------------------------
+
+
+def clone_of(project, agent_name="coder"):
+    return project.root / ".egzo" / "workspaces" / "repo" / agent_name
+
+
+def test_down_workspaces_refuses_a_clone_with_stashed_work(live_project, engine, agent_image):
+    up_ok(live_project, project_spec(agent_image))
+    clone = clone_of(live_project)
+    (clone / "README").write_text("changed\n")
+    git(clone, "-c", "user.email=a@b.c", "-c", "user.name=a", "stash")
+    result = live_project.run("down", "--workspaces", "--yes")
+    assert result.returncode != 0
+    assert "stash" in result.stderr
+    assert clone.exists()
+
+
+def test_down_workspaces_refuses_commits_that_are_on_no_branch(live_project, engine, agent_image):
+    up_ok(live_project, project_spec(agent_image))
+    clone = clone_of(live_project)
+    git(clone, "checkout", "-q", "--detach")
+    git(clone, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "--allow-empty", "-qm", "on no branch")
+    result = live_project.run("down", "--workspaces", "--yes")
+    assert result.returncode != 0
+    assert "unpushed" in result.stderr or "detached" in result.stderr
+    assert clone.exists()
+
+
+def test_down_workspaces_says_what_ignored_files_it_is_about_to_delete(live_project, engine, agent_image):
+    """Ignored files (a .env, local data) are not in git, so they exist nowhere else: the person is told."""
+    up_ok(live_project, project_spec(agent_image))
+    clone = clone_of(live_project)
+    (clone / ".git" / "info" / "exclude").write_text("*.secret\n")
+    (clone / "notes.secret").write_text("only here\n")
+    result = live_project.run("down", "--workspaces", input="n\n")
+    assert result.returncode != 0
+    assert "ignored" in result.stderr
+    assert (clone / "notes.secret").exists()
+
+
+def test_a_refused_down_workspaces_leaves_the_agents_running(live_project, engine, agent_image):
+    up_ok(live_project, project_spec(agent_image))
+    (clone_of(live_project) / "wip.txt").write_text("not committed\n")
+    assert live_project.run("down", "--workspaces", "--yes").returncode != 0
+    rows = [line.split() for line in live_project.run("ps").stdout.splitlines()[1:]]
+    assert [r[2] for r in rows if r[1] == "coder"] == ["running"]
+
+
+def test_down_workspaces_only_removes_directories_that_are_checkouts(live_project, engine, agent_image):
+    up_ok(live_project, project_spec(agent_image))
+    clone = clone_of(live_project)
+    subprocess.run(["rm", "-rf", str(clone / ".git")], check=True)  # no longer a checkout
+    (clone / "precious.txt").write_text("not a git work tree any more\n")
+    live_project.run("down", "--workspaces", "--yes")
+    assert (clone / "precious.txt").exists()
+
+
+def test_down_workspaces_never_removes_the_project_directory(live_project, engine, agent_image):
+    """`path: .` puts checkouts next to egzo.yaml; a name clash must not make the project itself removable."""
+    document = project_spec(agent_image, workspace={"path": "."})
+    up_ok(live_project, document)
+    assert (live_project.root / "coder" / "README").exists()
+    assert live_project.run("down", "--workspaces", "--yes").returncode == 0
+    assert (live_project.root / "egzo.yaml").exists()
+
+
+def test_a_hook_planted_in_a_shared_base_does_not_run_when_another_agent_is_prepared(live_project, engine, agent_image):
+    """In worktree mode every agent can write the base .git; preparing the next agent runs git with that
+    agent's network identity, so a hook there would be code running as someone else."""
+    one = {"coder": custom(agent_image, workspaces=["repo"])}
+    two = {**one, "reviewer": custom(agent_image, workspaces=["repo"])}
+    up_ok(live_project, project_spec(agent_image, workspace={"mode": "worktree"}, agents=one))
+    base = live_project.root / ".egzo" / "workspaces" / "repo" / ".base"
+    hook = base / ".git" / "hooks" / "post-checkout"
+    hook.write_text("#!/bin/sh\ntouch hook-ran\n")
+    hook.chmod(0o755)
+    up_ok(live_project, project_spec(agent_image, workspace={"mode": "worktree"}, agents=two))
+    assert not (clone_of(live_project, "reviewer") / "hook-ran").exists()
+    assert (clone_of(live_project, "reviewer") / "README").exists()

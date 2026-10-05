@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -83,20 +85,24 @@ func RunPrep(ctx context.Context, c *engine.Client, spec PrepSpec) (string, erro
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	output := prepLogs(context.WithoutCancel(ctx), c, created.ID)
+	stdout, stderr := prepLogs(context.WithoutCancel(ctx), c, created.ID)
 	if exit != 0 {
-		return output, fmt.Errorf("%s", strings.TrimSpace(output))
+		return stdout, fmt.Errorf("%s", strings.TrimSpace(stderr+"\n"+stdout))
 	}
-	return output, nil
+	// Only standard output is the job's answer: what git or anything else says on standard error is a
+	// diagnostic, never something to parse.
+	return stdout, nil
 }
 
-func prepLogs(ctx context.Context, c *engine.Client, id string) string {
+func prepLogs(ctx context.Context, c *engine.Client, id string) (stdout, stderr string) {
 	reader, err := c.API.ContainerLogs(ctx, id, container.LogsOptions{ShowStdout: true, ShowStderr: true})
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer reader.Close()
-	return demux(reader)
+	var out, errs bytes.Buffer
+	_, _ = stdcopy.StdCopy(&out, &errs, reader)
+	return out.String(), errs.String()
 }
 
 func boolPointer(b bool) *bool { return &b }
