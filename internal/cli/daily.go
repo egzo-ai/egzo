@@ -190,6 +190,14 @@ func newLifecycleCommand(opts *options, verb, short string) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", verb, args[0])
+			if args[0] == "proxy" && verb != "stop" {
+				// the proxy keeps its policy in memory: give it back what it lost
+				if err := stack.ReloadPolicy(ctx, s.engine, s.Resolved, s.Dir); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: the proxy has no egress policy: %v\nrun `egzo up` once the problem is fixed\n", err)
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "load egress policy into proxy")
+				}
+			}
 			return nil
 		},
 	}

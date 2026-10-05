@@ -276,3 +276,17 @@ def test_attach_to_an_agent_without_a_session_explains_what_is_missing(live_proj
     client.close()
     assert client.exitstatus != 0
     assert b"session" in client.before
+
+
+def test_detaching_turns_off_the_terminal_modes_the_program_turned_on(session):
+    """A TUI that enabled mouse tracking, bracketed paste or focus events cannot reset them once the user
+    has detached: the user's shell must not be left garbled."""
+    session("modes")
+    client = attach(session)
+    client.expect(b"READY")
+    client.send(CTRL_RIGHT_BRACKET)
+    client.expect(pexpect.EOF)
+    tail = client.before
+    client.close()
+    for off in (b"\x1b[?1000l", b"\x1b[?1006l", b"\x1b[?2004l", b"\x1b[?1004l", b"\x1b[?25h"):
+        assert off in tail, f"{off!r} missing after detach: {tail!r}"

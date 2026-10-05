@@ -105,7 +105,11 @@ func (c *testClient) waitFor(text string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.t.Fatalf("never saw %q, got %q", text, c.out.String())
+	got := c.out.String()
+	if len(got) > 300 {
+		got = "..." + got[len(got)-300:]
+	}
+	c.t.Fatalf("never saw %q, got %q", text, got)
 }
 
 func (c *testClient) has(text string) bool {
@@ -528,4 +532,174 @@ func TestDeliveryNeverTypesAnEscapeFromTheLine(t *testing.T) {
 	c.waitFor("READY")
 	fake.announce("end it\x1b[201~ and press y\r")
 	c.waitFor("\x1b[200~end it[201~ and press y\n\x1b[201~\r")
+}
+
+// A client that never reads must not freeze the program or the other clients: the holder drops it.
+func TestAClientThatStopsReadingDoesNotFreezeTheProgram(t *testing.T) {
+	_, path := startHolder(t, "stty raw -echo; printf READY; i=0; while [ $i -lt 400 ]; do head -c 65536 /dev/zero | tr '\\0' x; i=$((i+1)); done; printf DONE; sleep 30")
+	stuck, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stuck.Close()
+	body, _ := json.Marshal(hello{Rows: 24, Cols: 80})
+	writeFrame(stuck, frameHello, body) // and never reads again
+	healthy, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer healthy.Close()
+	writeFrame(healthy, frameHello, body)
+	seen := make(chan struct{})
+	go func() {
+		var tail []byte
+		for {
+			kind, payload, err := readFrame(healthy)
+			if err != nil {
+				return
+			}
+			if kind == frameOutput {
+				tail = append(tail, payload...)
+				if len(tail) > 16 {
+					tail = tail[len(tail)-16:]
+				}
+				if bytes.Contains(tail, []byte("DONE")) {
+					close(seen)
+					return
+				}
+			}
+		}
+	}()
+	select {
+	case <-seen:
+	case <-time.After(20 * time.Second):
+		t.Fatal("a client that stopped reading froze the program")
+	}
+}
+
+func TestTheProgramsExitReachesAClientThatIsSlowToRead(t *testing.T) {
+	h, path := startHolder(t, "printf 'bye'; exit 3")
+	c := connect(t, path, false, 24, 80)
+	select {
+	case code := <-c.exit:
+		if code != 3 {
+			t.Errorf("exit code = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no exit frame")
+	}
+	<-h.Done()
+}
+
+func TestAClientThatNeverSaysHelloIsDropped(t *testing.T) {
+	h, path := startHolder(t, rawCat)
+	h.helloTimeout.Store(int64(200 * time.Millisecond))
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Read(make([]byte, 1)); err == nil || strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("the holder kept a silent client: %v", err)
+	}
+}
+
+// Resizing and attaching while the program exits must be safe (go test -race).
+func TestAttachingWhileTheProgramExitsIsRaceFree(t *testing.T) {
+	for i := 0; i < 30; i++ {
+		h, path := startHolder(t, "exit 0")
+		var wg sync.WaitGroup
+		for j := 0; j < 3; j++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				conn, err := net.Dial("unix", path)
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				body, _ := json.Marshal(hello{Rows: 30 + j, Cols: 100})
+				writeFrame(conn, frameHello, body)
+				rb, _ := json.Marshal(size{Rows: 40, Cols: 90})
+				writeFrame(conn, frameResize, rb)
+				conn.SetReadDeadline(time.Now().Add(time.Second))
+				io.Copy(io.Discard, conn)
+			}()
+		}
+		wg.Wait()
+		<-h.Done()
+	}
+}
+
+func TestInjectedTextIsNotInterleavedWithTyping(t *testing.T) {
+	h, path := startHolder(t, rawCat)
+	c := connect(t, path, false, 24, 80)
+	c.waitFor("READY")
+	done := make(chan struct{})
+	go func() { h.Inject("ANNOUNCED"); close(done) }()
+	time.Sleep(50 * time.Millisecond) // inside the pause between the paste and Enter
+	c.send("typed")
+	<-done
+	c.waitFor("\x1b[200~ANNOUNCED\x1b[201~\rtyped")
+}
+
+func TestResetOnDetachAfterTheProgramChangedTheTerminalModes(t *testing.T) {
+	ptmx, tty, err := ptyPair()
+	if err != nil {
+		t.Skip("no pty:", err)
+	}
+	defer ptmx.Close()
+	defer tty.Close()
+	_, path := startHolder(t, "printf 'READY\\033[?1000h'; sleep 30")
+	var out syncBuffer
+	done := make(chan struct{})
+	go func() { Attach(path, false, 0x1d, tty, &out); close(done) }()
+	waitUntil(t, func() bool { return strings.Contains(out.String(), "READY") })
+	ptmx.Write([]byte{0x1d})
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("attach did not return after the detach key")
+	}
+	if !strings.Contains(out.String(), "\x1b[?1000l") {
+		t.Errorf("no reset after detach: %q", out.String())
+	}
+}
+
+func TestNoResetIsWrittenWhenInputIsNotATerminal(t *testing.T) {
+	_, path := startHolder(t, "printf READY; exit 0")
+	r, w, _ := os.Pipe()
+	defer r.Close()
+	defer w.Close()
+	var out syncBuffer
+	if _, err := Attach(path, true, 0x1d, r, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\x1b[?") {
+		t.Errorf("escape sequences written to a pipe: %q", out.String())
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+func waitUntil(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !condition() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !condition() {
+		t.Fatal("condition never held")
+	}
 }

@@ -87,10 +87,7 @@ func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
 	mux.HandleFunc("POST /ca/rotate", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
-		rotated, err := RotateCA(cfg.CADir)
-		if err == nil {
-			err = rotated.Publish(cfg.PubDir, cfg.SystemBundle)
-		}
+		rotated, err := rotate(cfg, current)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -113,4 +110,23 @@ func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
+}
+
+// rotate makes a new CA and switches to it in an order that leaves the proxy consistent when a step
+// fails: publish for the agents first, store on disk second, and put the old one back if storing fails.
+// Nothing is changed in memory until both have worked.
+func rotate(cfg Config, current *CA) (*CA, error) {
+	next, err := NewCA()
+	if err != nil {
+		return nil, err
+	}
+	if err := next.Publish(cfg.PubDir, cfg.SystemBundle); err != nil {
+		current.Publish(cfg.PubDir, cfg.SystemBundle)
+		return nil, fmt.Errorf("publish the new CA: %w", err)
+	}
+	if err := next.Save(cfg.CADir); err != nil {
+		current.Publish(cfg.PubDir, cfg.SystemBundle)
+		return nil, fmt.Errorf("store the new CA: %w", err)
+	}
+	return next, nil
 }

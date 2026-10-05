@@ -16,14 +16,48 @@ const leafValidity = 24 * time.Hour
 
 // Minter signs short-lived certificates for the hosts the proxy intercepts and caches them in memory.
 type Minter struct {
-	ca    *CA
-	mu    sync.Mutex
-	cache map[string]*tls.Certificate
-	now   func() time.Time
+	ca       *CA
+	mu       sync.Mutex
+	cache    map[string]*tls.Certificate
+	order    []string // host names, oldest first
+	maxCache int
+	now      func() time.Time
 }
 
+// defaultMaxCache bounds the cache: with a wildcard service the host names are the agent's to choose.
+const defaultMaxCache = 1024
+
 func NewMinter(ca *CA) *Minter {
-	return &Minter{ca: ca, cache: map[string]*tls.Certificate{}, now: time.Now}
+	return &Minter{ca: ca, cache: map[string]*tls.Certificate{}, maxCache: defaultMaxCache, now: time.Now}
+}
+
+func (m *Minter) size() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.cache)
+}
+
+// remember stores a certificate, first making room: expired ones go, then the oldest. It runs under m.mu.
+func (m *Minter) remember(host string, certificate *tls.Certificate) {
+	if _, present := m.cache[host]; !present && len(m.cache) >= m.maxCache {
+		kept := m.order[:0]
+		for _, name := range m.order {
+			if cached, ok := m.cache[name]; ok && cached.Leaf.NotAfter.After(m.now().Add(time.Hour)) {
+				kept = append(kept, name)
+			} else {
+				delete(m.cache, name)
+			}
+		}
+		m.order = kept
+		for len(m.cache) >= m.maxCache && len(m.order) > 0 {
+			delete(m.cache, m.order[0])
+			m.order = m.order[1:]
+		}
+	}
+	if _, present := m.cache[host]; !present {
+		m.order = append(m.order, host)
+	}
+	m.cache[host] = certificate
 }
 
 // SetCA switches to a new CA: the certificates minted by the old one are forgotten.
@@ -32,6 +66,7 @@ func (m *Minter) SetCA(ca *CA) {
 	defer m.mu.Unlock()
 	m.ca = ca
 	m.cache = map[string]*tls.Certificate{}
+	m.order = nil
 }
 
 // Certificate returns a certificate for host, valid for at least another hour.
@@ -72,6 +107,6 @@ func (m *Minter) Certificate(host string) (*tls.Certificate, error) {
 		return nil, err
 	}
 	certificate := &tls.Certificate{Certificate: [][]byte{der, m.ca.Cert.Raw}, PrivateKey: key, Leaf: leaf}
-	m.cache[host] = certificate
+	m.remember(host, certificate)
 	return certificate, nil
 }

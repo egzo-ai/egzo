@@ -32,13 +32,23 @@ type Server struct {
 	Transport http.RoundTripper
 	// Dial reaches the real upstream for tunnelled hosts. Tests replace it.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+
+	// MaxPerAgent and MaxTotal bound the connections one agent, and all of them, may hold open;
+	// IdleTimeout closes a connection that has moved no data for that long.
+	MaxPerAgent int
+	MaxTotal    int
+	IdleTimeout time.Duration
+	limits      limiter
 }
 
 func NewServer(ca *CA, audit *Audit) *Server {
-	dialer := &net.Dialer{Timeout: dialTimeout}
+	dialer := &net.Dialer{Timeout: dialTimeout, Control: publicOnly}
 	return &Server{
-		minter: NewMinter(ca),
-		audit:  audit,
+		MaxPerAgent: defaultMaxPerAgent,
+		MaxTotal:    defaultMaxTotal,
+		IdleTimeout: defaultIdleTimeout,
+		minter:      NewMinter(ca),
+		audit:       audit,
 		Transport: &http.Transport{
 			ForceAttemptHTTP2:     true,
 			DialContext:           dialer.DialContext,
@@ -79,9 +89,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host = strings.ToLower(host)
 
 	policy := s.policy.Load()
+	if policy == nil {
+		// Not the agent's fault, and no use asking for credentials: the proxy lost its policy (it
+		// lives in memory) and is waiting for `egzo up` to load it again.
+		s.audit.Log(Event{Host: host, Action: "deny", Reason: "no egress policy loaded: run `egzo up`"})
+		http.Error(w, "egzo: this proxy has no egress policy loaded (it was restarted): run `egzo up`", http.StatusServiceUnavailable)
+		return
+	}
 	agent, token, hasCredentials := proxyCredentials(r)
 	var agentPolicy *AgentPolicy
-	if policy != nil && hasCredentials {
+	if hasCredentials {
 		agentPolicy, _ = policy.Authenticate(agent, token)
 	}
 	if agentPolicy == nil {
@@ -102,19 +119,37 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "egzo: "+host+" is not allowed by this agent's egress profile", http.StatusForbidden)
 		return
 	}
+	if ip := net.ParseIP(host); ip != nil && !isPublic(ip) {
+		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "not a public address"})
+		http.Error(w, "egzo: "+host+" is not a public address", http.StatusForbidden)
+		return
+	}
+	release, reason := s.limits.acquire(agent, s.MaxPerAgent, s.MaxTotal)
+	if release == nil {
+		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: reason})
+		http.Error(w, "egzo: "+reason, http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "cannot hijack connection", http.StatusInternalServerError)
 		return
 	}
-	conn, _, err := hijacker.Hijack()
+	conn, buffered, err := hijacker.Hijack()
 	if err != nil {
 		return
 	}
 	if _, err := io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		conn.Close()
 		return
+	}
+	// A client may send its first TLS bytes without waiting for the 200: the HTTP server may already
+	// have read them, and they belong to the tunnel.
+	if n := buffered.Reader.Buffered(); n > 0 {
+		pending, _ := buffered.Reader.Peek(n)
+		conn = &prefixedConn{Conn: conn, pending: append([]byte(nil), pending...)}
 	}
 
 	if decision.Inject != nil || decision.Inspect {
@@ -145,6 +180,7 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 
 	// The tunnel was approved for host: the TLS server name must say the same, or an allowed name
 	// could be used to reach a different server (domain fronting).
+	started := time.Now()
 	hello, serverName, err := readClientHello(client)
 	switch {
 	case err != nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)):
@@ -173,24 +209,50 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 	s.audit.Log(Event{Agent: agent, Host: host, Action: "allow"})
 
 	var wg sync.WaitGroup
+	var up, down int64
 	wg.Add(2)
-	pump := func(dst, src net.Conn) {
+	pump := func(dst, src net.Conn, counted *int64) {
 		defer wg.Done()
-		io.Copy(dst, src)
+		*counted = copyIdle(dst, src, s.IdleTimeout)
 		if closer, ok := dst.(interface{ CloseWrite() error }); ok {
 			closer.CloseWrite()
 		}
 	}
-	go pump(upstream, client)
-	go pump(client, upstream)
+	up = int64(len(hello))
+	var sent int64
+	go pump(upstream, client, &sent)
+	go pump(client, upstream, &down)
 	wg.Wait()
+	s.audit.Log(Event{Agent: agent, Host: host, Action: "close", BytesUp: up + sent, BytesDown: down, DurationMs: time.Since(started).Milliseconds()})
+}
+
+// prefixedConn reads bytes that were already taken off the connection before the rest.
+type prefixedConn struct {
+	net.Conn
+	pending []byte
+}
+
+func (c *prefixedConn) Read(p []byte) (int, error) {
+	if len(c.pending) > 0 {
+		n := copy(p, c.pending)
+		c.pending = c.pending[n:]
+		return n, nil
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *prefixedConn) CloseWrite() error {
+	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return nil
 }
 
 // intercept terminates the agent's TLS with a certificate from the project CA so the proxy can add
 // the credential, then forwards each request to the real host. Toward the agent it always speaks
 // HTTP/1.1, whatever the upstream speaks.
 func (s *Server) intercept(client net.Conn, agent, host string, decision Decision) {
-	tlsConn := tls.Server(client, &tls.Config{
+	tlsConn := tls.Server(idleConn{client, s.IdleTimeout}, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"http/1.1"},
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -223,6 +285,7 @@ func (s *Server) intercept(client net.Conn, agent, host string, decision Decisio
 	server := &http.Server{
 		Handler:           s.interceptHandler(agent, host, decision.Inject),
 		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       s.IdleTimeout,
 		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 	server.Serve(listener)

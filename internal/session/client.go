@@ -40,6 +40,20 @@ func DetachKeys(spec string) (byte, error) {
 // Attach connects the terminal on stdin and stdout to the holder's session until the program exits
 // (its exit code is returned) or the detach key is typed (0).
 func Attach(socket string, readOnly bool, detach byte, in *os.File, out io.Writer) (int, error) {
+	code, err := attach(socket, readOnly, detach, in, out)
+	// The program can no longer turn off what it turned on (mouse tracking, bracketed paste, focus
+	// events, the keyboard protocol, a hidden cursor): leave the user's terminal as we found it. Only for
+	// a terminal; a pipe gets exactly the program's bytes.
+	if term.IsTerminal(int(in.Fd())) {
+		io.WriteString(out, resetTerminal)
+	}
+	return code, err
+}
+
+// resetTerminal turns off the terminal modes a TUI commonly enables and shows the cursor again.
+const resetTerminal = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[<u\x1b[?25h"
+
+func attach(socket string, readOnly bool, detach byte, in *os.File, out io.Writer) (int, error) {
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
 		return 0, fmt.Errorf("no session in this container (is the agent's harness running through `egzo agent run`?): %w", err)

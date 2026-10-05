@@ -30,26 +30,42 @@ type CA struct {
 const caValidity = 5 * 365 * 24 * time.Hour
 
 // LoadOrCreateCA reads the CA from dir, creating it on first use. It persists across proxy
-// recreation: regenerating it would force every agent to restart to pick up the new trust.
+// recreation: regenerating it would force every agent to restart to pick up the new trust. A CA that is
+// there but cannot be used (half present, unreadable, corrupt, a key that is not the certificate's) is an
+// error and never replaced: replacing it silently would change what every agent trusts.
 func LoadOrCreateCA(dir string) (*CA, error) {
 	keyPath, certPath := filepath.Join(dir, "ca.key"), filepath.Join(dir, "ca.crt")
 	keyPEM, keyErr := os.ReadFile(keyPath)
 	certPEM, certErr := os.ReadFile(certPath)
-	if keyErr == nil && certErr == nil {
+	switch {
+	case keyErr == nil && certErr == nil:
 		return parseCA(keyPEM, certPEM)
-	}
-	if !errors.Is(keyErr, os.ErrNotExist) && keyErr != nil {
+	case errors.Is(keyErr, os.ErrNotExist) && errors.Is(certErr, os.ErrNotExist):
+		ca, err := NewCA()
+		if err != nil {
+			return nil, err
+		}
+		return ca, ca.Save(dir)
+	case keyErr != nil && !errors.Is(keyErr, os.ErrNotExist):
 		return nil, keyErr
+	case certErr != nil && !errors.Is(certErr, os.ErrNotExist):
+		return nil, certErr
 	}
-	return generateCA(dir)
+	return nil, fmt.Errorf("the CA in %s is incomplete (ca.key: %v, ca.crt: %v): restore the missing file, or remove both to start a new CA", dir, keyErr == nil, certErr == nil)
 }
 
 // RotateCA replaces the CA in dir with a new one. Everything signed by the old one stops being
 // trusted by agents once they have the new certificate, which is why agents are restarted after.
-func RotateCA(dir string) (*CA, error) { return generateCA(dir) }
+func RotateCA(dir string) (*CA, error) {
+	ca, err := NewCA()
+	if err != nil {
+		return nil, err
+	}
+	return ca, ca.Save(dir)
+}
 
-func generateCA(dir string) (*CA, error) {
-	keyPath, certPath := filepath.Join(dir, "ca.key"), filepath.Join(dir, "ca.crt")
+// NewCA makes a CA in memory.
+func NewCA() (*CA, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -77,18 +93,26 @@ func generateCA(dir string) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
-		return nil, err
-	}
 	return parseCA(keyPEM, certPEM)
+}
+
+// Save stores the CA in dir. Each file is written to a temporary name and renamed, so a crash leaves
+// the old file or the new one, never half of one.
+func (ca *CA) Save(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(ca.Key)
+	if err != nil {
+		return err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	if err := writeAtomic(filepath.Join(dir, "ca.key"), keyPEM, 0o600); err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Join(dir, "ca.crt"), ca.CertPEM, 0o644)
 }
 
 func parseCA(keyPEM, certPEM []byte) (*CA, error) {
@@ -105,6 +129,9 @@ func parseCA(keyPEM, certPEM []byte) (*CA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("CA certificate: %w", err)
 	}
+	if public, ok := cert.PublicKey.(*ecdsa.PublicKey); !ok || !public.Equal(&key.PublicKey) {
+		return nil, errors.New("the CA key does not match the CA certificate")
+	}
 	return &CA{Cert: cert, Key: key, CertPEM: certPEM}, nil
 }
 
@@ -120,7 +147,7 @@ func (ca *CA) Publish(dir, systemBundle string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(dir, "ca.crt"), ca.CertPEM); err != nil {
+	if err := writeAtomic(filepath.Join(dir, "ca.crt"), ca.CertPEM, 0o644); err != nil {
 		return err
 	}
 	system, err := os.ReadFile(systemBundle)
@@ -132,15 +159,27 @@ func (ca *CA) Publish(dir, systemBundle string) error {
 		bundle = append(bundle, '\n')
 	}
 	bundle = append(bundle, ca.CertPEM...)
-	return writeAtomic(filepath.Join(dir, "ca-bundle.crt"), bundle)
+	return writeAtomic(filepath.Join(dir, "ca-bundle.crt"), bundle, 0o644)
 }
 
-func writeAtomic(path string, data []byte) error {
-	temp := path + ".tmp"
-	if err := os.WriteFile(temp, data, 0o644); err != nil {
+func writeAtomic(path string, data []byte, mode os.FileMode) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(temp, path)
+	defer os.Remove(temp.Name())
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Chmod(mode); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), path)
 }
 
 func randomSerial() (*big.Int, error) {

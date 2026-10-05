@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -195,7 +196,12 @@ func agentTokens(
 		}
 	}
 
-	names := sortedKeys(project.Agents)
+	tokens, err := fetchTokens(ctx, c, controlName, sortedKeys(project.Agents))
+	return tokens, observed, err
+}
+
+// fetchTokens asks the control sidecar for the token of each agent, all at once.
+func fetchTokens(ctx context.Context, c *engine.Client, controlName string, names []string) (map[string]string, error) {
 	values := make([]string, len(names))
 	errs := make([]error, len(names))
 	var wg sync.WaitGroup
@@ -218,11 +224,44 @@ func agentTokens(
 	tokens := map[string]string{}
 	for i, name := range names {
 		if errs[i] != nil {
-			return nil, observed, errs[i]
+			return nil, errs[i]
 		}
 		tokens[name] = values[i]
 	}
-	return tokens, observed, nil
+	return tokens, nil
+}
+
+// ReloadPolicy loads the egress policy into a proxy that was started again: the policy lives in the
+// proxy's memory, so a restarted proxy refuses everything until it is given one. The proxy needs a
+// moment before its operator API answers, so this retries for a while.
+func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolved, dir string) error {
+	secrets, err := ResolveSecrets(project, dir)
+	if err != nil {
+		return err
+	}
+	tokens, err := fetchTokens(ctx, c, project.Name+"-control-1", sortedKeys(project.Agents))
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(BuildPolicy(project, tokens, secrets))
+	if err != nil {
+		return err
+	}
+	proxyName := project.Name + "-proxy-1"
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		result, err := c.Exec(ctx, proxyName, []string{"/egzo", "proxy", "request", "PUT", "/policy"}, bytes.NewReader(body))
+		if err == nil && result.ExitCode == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			if err == nil {
+				err = fmt.Errorf("%s", strings.TrimSpace(string(result.Stderr)))
+			}
+			return fmt.Errorf("load proxy policy: %w", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // pushPolicy loads the egress policy into the proxy when the proxy does not already have it. The

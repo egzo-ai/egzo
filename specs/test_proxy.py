@@ -272,3 +272,69 @@ def test_up_refuses_an_api_key_bound_to_the_oauth_service(live_project, engine, 
     assert result.returncode != 0
     assert "API key" in result.stderr and "anthropic" in result.stderr
     assert "api03" not in result.stderr and not engine.containers(live_project.name)
+
+
+# --- the proxy reaches the public internet only ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("target", ["10.0.0.1", "169.254.169.254", "192.168.1.1", "172.17.0.1"])
+def test_the_proxy_never_connects_to_a_private_address_even_when_everything_is_allowed(live_project, engine, agent_image, target):
+    up(live_project, with_allow("*", coder=custom(agent_image)))
+    result = status(engine, live_project, target)
+    assert result.returncode != 0
+    assert "403" in result.stderr
+    logs = engine.run("logs", container(engine, live_project, "proxy").name)
+    assert "not a public address" in logs.stdout + logs.stderr
+
+
+def test_an_agent_cannot_reach_another_agent_through_the_proxy(live_project, engine, agent_image):
+    up(live_project, with_allow("*", coder=custom(agent_image), reviewer=custom(agent_image)))
+    reviewer = container(engine, live_project, "reviewer")
+    networks = reviewer.raw["NetworkSettings"]["Networks"]
+    address = networks[f"{live_project.name}_reviewer"]["IPAddress"]
+    result = status(engine, live_project, address, "coder")
+    assert result.returncode != 0
+    assert "403" in result.stderr
+
+
+@needs_internet
+def test_a_restarted_proxy_gets_its_egress_policy_back(live_project, engine, agent_image):
+    """The policy lives in the proxy's memory: restarting it must not cut every agent off until the next `up`."""
+    up(live_project, with_allow("example.com", coder=custom(agent_image)))
+    assert status(engine, live_project, "example.com").stdout == "200"
+    restarted = live_project.run("restart", "proxy")
+    assert restarted.returncode == 0, restarted.stderr
+    assert status(engine, live_project, "example.com").stdout == "200"
+
+
+def test_a_proxy_that_has_no_policy_tells_the_agent_what_to_do(live_project, engine, agent_image):
+    up(live_project, with_allow("example.com", coder=custom(agent_image)))
+    proxy = container(engine, live_project, "proxy").name
+    engine.run("restart", proxy)  # not through egzo: nobody reloads the policy
+    import time
+
+    time.sleep(3)
+    refused = curl(engine, live_project, "coder", "-o", "/dev/null", "https://example.com/")
+    assert refused.returncode != 0
+    assert "503" in refused.stderr or "egzo up" in refused.stderr
+    assert "407" not in refused.stderr, "a missing policy is not an authentication problem"
+
+
+@needs_internet
+def test_the_audit_log_records_how_much_went_through_a_tunnel(live_project, engine, agent_image):
+    up(live_project, with_allow("example.com", coder=custom(agent_image)))
+    status(engine, live_project, "example.com")
+    logs = engine.run("logs", container(engine, live_project, "proxy").name)
+    events = [json.loads(line) for line in (logs.stdout + logs.stderr).splitlines() if line.startswith("{")]
+    closed = [e for e in events if e["action"] == "close" and e["host"] == "example.com"]
+    assert closed, events
+    assert closed[0]["bytes_up"] > 0 and closed[0]["bytes_down"] > 0 and "duration_ms" in closed[0]
+
+
+def test_the_audit_log_cannot_be_filled_by_one_long_value(live_project, engine, agent_image):
+    up(live_project, with_allow("*", coder=custom(agent_image)))
+    huge = "h" * 4000
+    curl(engine, live_project, "coder", "-o", "/dev/null", "--proxy", f"http://{huge}:x@proxy:3128", "https://example.com/")
+    logs = engine.run("logs", container(engine, live_project, "proxy").name)
+    for line in (logs.stdout + logs.stderr).splitlines():
+        assert len(line) < 2000, line[:200]

@@ -42,6 +42,11 @@ draw) # repaints the whole screen when it is resized, like a real TUI
 	paint
 	while :; do sleep 0.2; done
 	;;
+modes) # a TUI that turns terminal modes on: mouse tracking, bracketed paste, focus events, hidden cursor
+	printf 'READY\r\n'
+	printf '\033[?1000h\033[?1006h\033[?2004h\033[?1004h\033[?25l'
+	while :; do sleep 1; done
+	;;
 emit) # escape sequences a terminal passes on: OSC 52, OSC 8, truecolor, wide characters
 	printf 'READY\r\n'
 	printf '\033]52;c;aGVsbG8=\007'

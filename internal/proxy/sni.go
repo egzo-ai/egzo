@@ -18,6 +18,15 @@ const (
 
 var errNotClientHello = errors.New("the first bytes are not a TLS ClientHello")
 
+// With Encrypted Client Hello the name in the clear can differ from the real one, which defeats the
+// check that the tunnel carries TLS for the host it was approved for.
+var errECH = errors.New("the ClientHello uses Encrypted Client Hello, which hides the real server name")
+
+const (
+	extensionECH      = 0xfe0d
+	extensionECHDraft = 0xff03
+)
+
 // readClientHello reads the client's first TLS record and returns the raw bytes, which must be
 // replayed to the upstream, and the server name the client asks for ("" when it sends none).
 func readClientHello(conn net.Conn) (raw []byte, serverName string, err error) {
@@ -70,6 +79,7 @@ func parseServerName(hello []byte) (string, error) {
 	if !ok {
 		return "", errNotClientHello
 	}
+	name := ""
 	for len(extensions) >= 4 {
 		kind := binary.BigEndian.Uint16(extensions[:2])
 		size := int(binary.BigEndian.Uint16(extensions[2:4]))
@@ -78,32 +88,45 @@ func parseServerName(hello []byte) (string, error) {
 		}
 		body := extensions[4 : 4+size]
 		extensions = extensions[4+size:]
-		if kind != extensionServerName {
-			continue
-		}
-		list := reader(body)
-		if _, ok := list.length(2); !ok {
-			return "", errNotClientHello
-		}
-		for {
-			nameType, ok := list.byte()
-			if !ok {
-				return "", nil
+		switch kind {
+		case extensionECH, extensionECHDraft:
+			return "", errECH
+		case extensionServerName:
+			found, err := serverNameFrom(body)
+			if err != nil {
+				return "", err
 			}
-			nameLength, ok := list.length(2)
-			if !ok {
-				return "", errNotClientHello
-			}
-			name, ok := list.take(nameLength)
-			if !ok {
-				return "", errNotClientHello
-			}
-			if nameType == 0 {
-				return string(name), nil
+			if name == "" {
+				name = found
 			}
 		}
 	}
-	return "", nil
+	return name, nil
+}
+
+// serverNameFrom reads the host_name entry of a server_name extension.
+func serverNameFrom(body []byte) (string, error) {
+	list := reader(body)
+	if _, ok := list.length(2); !ok {
+		return "", errNotClientHello
+	}
+	for {
+		nameType, ok := list.byte()
+		if !ok {
+			return "", nil
+		}
+		nameLength, ok := list.length(2)
+		if !ok {
+			return "", errNotClientHello
+		}
+		entry, ok := list.take(nameLength)
+		if !ok {
+			return "", errNotClientHello
+		}
+		if nameType == 0 {
+			return string(entry), nil
+		}
+	}
 }
 
 type reader []byte
