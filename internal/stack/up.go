@@ -170,24 +170,26 @@ func bindMissing(ctx context.Context, c *engine.Client, project string, instance
 // BindInstances gives the proxy the credentials of the instances, bound to their templates' profiles.
 // It binds every instance it can and reports each one it could not.
 func BindInstances(ctx context.Context, c *engine.Client, project string, instances []Instance, p Published) error {
-	if len(instances) == 0 {
-		return nil
+	var bindable []Instance
+	var names []string
+	for _, instance := range instances {
+		// a stale instance whose template is gone stays denied; what is left of a removed one has no
+		// registration and needs nothing
+		if _, ok := p.Templates[instance.Template]; ok && instance.State != "missing" {
+			bindable = append(bindable, instance)
+			names = append(names, instance.Name)
+		}
 	}
-	names := make([]string, len(instances))
-	for i, instance := range instances {
-		names[i] = instance.Name
+	if len(bindable) == 0 {
+		return nil
 	}
 	tokens, err := fetchTokens(ctx, c, project+"-control-1", names)
 	if err != nil {
 		return err
 	}
 	var failures []error
-	for _, instance := range instances {
-		template, ok := p.Templates[instance.Template]
-		if !ok {
-			continue // a stale instance whose template is gone: it stays denied
-		}
-		if err := bindProxy(ctx, c, project, instance.Name, tokens[instance.Name], template.Agent.Egress); err != nil {
+	for _, instance := range bindable {
+		if err := bindProxy(ctx, c, project, instance.Name, tokens[instance.Name], p.Templates[instance.Template].Agent.Egress); err != nil {
 			failures = append(failures, err)
 		}
 	}

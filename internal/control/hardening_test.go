@@ -257,6 +257,8 @@ func TestAMalformedKeyFileIsAnErrorAndIsNeverReplaced(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "key"), []byte("short"), 0o600)
 	srv, _ := newServer(dir)
+	os.MkdirAll(filepath.Join(dir, "agents"), 0o755)
+	os.WriteFile(filepath.Join(dir, "agents", "coder"), []byte("nonce\n"), 0o644)
 	if _, err := srv.projectKey(); err == nil {
 		t.Fatal("a malformed key was replaced with a new one: every token would change silently")
 	}

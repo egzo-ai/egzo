@@ -32,13 +32,14 @@ func (o Observed) Instances() []Instance {
 		}
 	}
 	// What is left of an instance whose container is gone (removed by hand, or a spawn that could not undo
-	// itself) is still an instance to remove: its network, home volume and registrations stay otherwise.
+	// itself) is still an instance to remove: its network, home volume and registrations stay otherwise. The
+	// network says so: `down` keeps the home volumes, and a kept home is not an instance.
 	seen := map[string]bool{}
 	for _, instance := range instances {
 		seen[instance.Name] = true
 	}
 	for _, r := range o.Resources {
-		if r.Kind == kindAgent && r.Instance != "" && (r.Type == "network" || r.Type == "volume") && !seen[r.Instance] {
+		if r.Kind == kindAgent && r.Instance != "" && r.Type == "network" && !seen[r.Instance] {
 			seen[r.Instance] = true
 			instances = append(instances, Instance{Name: r.Instance, Template: r.Service, Actor: r.Actor, State: "missing", TemplateHash: r.TemplateHash})
 		}

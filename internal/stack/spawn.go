@@ -99,11 +99,16 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 		return Spawned{}, &ExistsError{Name: name, Template: existing.Template}
 	}
 	for _, taken := range []struct{ kind, name string }{
-		{"container", InstanceContainer(project, name)}, {"network", InstanceNetwork(project, name)}, {"volume", homeVolume(project, name)},
+		{"container", InstanceContainer(project, name)}, {"network", InstanceNetwork(project, name)},
 	} {
 		if r := observed.find(taken.kind, taken.name); r != nil {
 			return Spawned{}, fmt.Errorf("the name %q is taken: the %s %s already exists", name, taken.kind, r.Name)
 		}
+	}
+	// The home of an instance that went away with `down` is kept, and a spawn of the name takes it up again;
+	// a volume of that name that is not an instance's home is something else's.
+	if r := observed.find("volume", homeVolume(project, name)); r != nil && r.Instance != name {
+		return Spawned{}, fmt.Errorf("the name %q is taken: the volume %s already exists", name, r.Name)
 	}
 	if dir == "" {
 		dir = published.Dir
@@ -117,13 +122,11 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	}
 
 	instances := map[string]string{name: req.Template}
-	tokens, err := fetchTokens(ctx, c, project+"-control-1", []string{name})
-	if err != nil {
-		return Spawned{}, err
-	}
 	view := published.View(instances)
-	desired, err := DesireInstance(view, dir, published.inputs(instances, tokens, nil), name,
-		InstanceIdentity{Template: req.Template, Actor: actor, TemplateHash: template.Hash})
+	identity := InstanceIdentity{Template: req.Template, Actor: actor, TemplateHash: template.Hash}
+	// The resources first: their specs do not depend on the token, which only exists once the instance is
+	// registered, and the registration must wait until the network has decided who wins a race.
+	desired, err := DesireInstance(view, dir, published.inputs(instances, map[string]string{}, nil), name, identity)
 	if err != nil {
 		return Spawned{}, err
 	}
@@ -131,10 +134,22 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if err != nil {
 		return Spawned{}, err
 	}
+	homeExisted := observed.find("volume", homeVolume(project, name)) != nil
 
 	var undo undoStack
 	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
-	if err := spawnSteps(ctx, c, project, dir, published, view, desired, tokens, checkouts, template, name, &undo, out); err != nil {
+	plan := spawnPlan{
+		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
+		checkouts: checkouts, homeExisted: homeExisted,
+		container: func(tokens map[string]string) (ContainerSpec, error) {
+			full, err := DesireInstance(view, dir, published.inputs(instances, tokens, nil), name, identity)
+			if err != nil {
+				return ContainerSpec{}, err
+			}
+			return full.Containers[0], nil
+		},
+	}
+	if err := spawnSteps(ctx, c, plan, &undo, out); err != nil {
 		cleanup := context.WithoutCancel(ctx)
 		undo.run(cleanup)
 		// Another spawn of the same name may have won the race. The network is the arbiter: its name is the
@@ -149,6 +164,19 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	return spawned, nil
 }
 
+// spawnPlan is everything spawnSteps needs.
+type spawnPlan struct {
+	project, dir, name string
+	published          Published
+	view               *config.Resolved
+	template           Template
+	resources          Desired // the network, the home volume and the attachments
+	checkouts          []Checkout
+	homeExisted        bool
+	// container builds the container once the instance's token is known.
+	container func(tokens map[string]string) (ContainerSpec, error)
+}
+
 // undoStack remembers what a spawn made, so that a failure removes exactly that.
 type undoStack struct{ steps []func(context.Context) }
 
@@ -160,58 +188,78 @@ func (u *undoStack) run(ctx context.Context) {
 	}
 }
 
-func spawnSteps(
-	ctx context.Context, c *engine.Client, project, dir string, published Published, view *config.Resolved, desired Desired,
-	tokens map[string]string, checkouts []Checkout, template Template, name string, undo *undoStack, out io.Writer,
-) error {
+func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoStack, out io.Writer) error {
 	out = &lockedWriter{w: out}
 	do := func(action Action) error {
 		fmt.Fprintln(out, action)
-		if err := run(ctx, c, desired, action); err != nil {
+		if err := run(ctx, c, p.resources, action); err != nil {
 			return fmt.Errorf("%s: %w", action, err)
 		}
 		return nil
 	}
-	network := desired.Networks[0]
+	network := p.resources.Networks[0]
 	if err := do(Action{Verb: "create", Type: "network", Name: network.Name}); err != nil {
 		return err
 	}
 	undo.add(func(ctx context.Context) { c.API.NetworkRemove(ctx, network.Name) })
-	for _, volume := range desired.Volumes {
+	for _, volume := range p.resources.Volumes {
+		if p.homeExisted {
+			fmt.Fprintf(out, "reuse volume %s\n", volume.Name) // kept by `down`: the instance's home
+			continue
+		}
 		if err := do(Action{Verb: "create", Type: "volume", Name: volume.Name}); err != nil {
 			return err
 		}
 		undo.add(func(ctx context.Context) { c.API.VolumeRemove(ctx, volume.Name, true) })
 	}
-	for _, attachment := range desired.Attachments {
+	for _, attachment := range p.resources.Attachments {
 		if err := do(Action{Verb: "connect", Type: "network", Name: network.Name, Peer: attachment.Container, Alias: attachment.Alias}); err != nil {
 			return err
 		}
 		undo.add(func(ctx context.Context) { c.API.NetworkDisconnect(ctx, network.Name, attachment.Container, true) })
 	}
-	if err := registerControl(ctx, c, project, name); err != nil {
-		return fmt.Errorf("register %s with the control sidecar: %w", name, err)
+
+	// Registering makes the agent known and gives it a token of its own. Whatever an earlier agent of the
+	// name left in the control sidecar (it may have been stopped when that agent went away) goes first.
+	unregisterControl(ctx, c, p.project, p.name)
+	if err := registerControl(ctx, c, p.project, p.name); err != nil {
+		return fmt.Errorf("register %s with the control sidecar: %w", p.name, err)
 	}
-	undo.add(func(ctx context.Context) { unregisterControl(ctx, c, project, name) })
-	if err := bindProxy(ctx, c, project, name, tokens[name], template.Agent.Egress); err != nil {
+	undo.add(func(ctx context.Context) { unregisterControl(ctx, c, p.project, p.name) })
+	tokens, err := fetchTokens(ctx, c, p.project+"-control-1", []string{p.name})
+	if err != nil {
 		return err
 	}
-	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, project, name) })
+	if err := bindProxy(ctx, c, p.project, p.name, tokens[p.name], p.template.Agent.Egress); err != nil {
+		return err
+	}
+	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
 
-	if len(checkouts) > 0 {
+	if len(p.checkouts) > 0 || len(InstanceGitDirs(p.view, p.name)) > 0 {
+		// Recorded before the clone starts: what a failed clone leaves is egzo's, and `down --workspaces`
+		// can offer to remove it. A checkout that exists already (one a removed instance of the name left)
+		// is recorded too.
+		if err := recordCheckouts(p.view, p.name); err != nil {
+			return err
+		}
+	}
+	if len(p.checkouts) > 0 {
 		// The clones go through the proxy as the instance, so its network and its binding come first. They
 		// are never undone: a checkout holds work.
-		if err := RunGitPreps(ctx, c, view, dir, published.Image, published.User, tokens, checkouts, out); err != nil {
+		if err := RunGitPreps(ctx, c, p.view, p.dir, p.published.Image, p.published.User, tokens, p.checkouts, out); err != nil {
 			return err
 		}
 	}
 
-	spec := desired.Containers[0]
+	spec, err := p.container(tokens)
+	if err != nil {
+		return err
+	}
 	if err := ensureImage(ctx, c, spec.Image); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, Action{Verb: "create", Type: "container", Name: spec.Name})
-	id, err := createContainer(ctx, c, spec, desired.PrepImage)
+	id, err := createContainer(ctx, c, spec, p.resources.PrepImage)
 	if id != "" {
 		undo.add(func(ctx context.Context) {
 			timeout := stopTimeoutSeconds

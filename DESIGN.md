@@ -549,7 +549,7 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 - `egzo answer ID TEXT [--outcome done|declined|failed]`: resolve a message addressed to a person: it
   answers a question, and closes a request an agent made of the operator.
 - `egzo events`: the raw typed stream (`message`, `announced`, `fetched`, `resolved`, `unconfirmed`,
-  `interrupt`, `interrupted`, `activity`, `hook`, `status`).
+  `interrupt`, `interrupted`, `activity`, `hook`, `status`, `retired`).
 
 ## Spec visibility (decided)
 - Labels stay small, flat, readable (see Reconciliation model); observed state (image, env, mounts,
@@ -743,7 +743,7 @@ Decisions taken while building (reversible; each is covered by specs):
   `POST /messages` (`interrupt: true` asks for the current turn to be stopped), `GET /messages?agent=&kind=&all=1`,
   `GET /messages/{id}`, `POST /messages/{id}/resolve`, `GET /agents`, `PUT|DELETE /agents/{name}`, `PUT|GET /templates`. Event types: `status`,
   `message` (with `data.to`, `kind`, `re`, `hops`), `announced`, `fetched`, `resolved` (with the resolution's text and
-  `data.outcome`), `unconfirmed`, `interrupt`, `interrupted`, `activity`, `hook`.
+  `data.outcome`), `unconfirmed`, `interrupt`, `interrupted`, `activity`, `hook`, `retired` (an agent was unregistered: its status is forgotten).
 - **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,
   with the resolved config, the label contract version and the config hash of every container.
 

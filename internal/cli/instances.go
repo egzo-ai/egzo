@@ -137,6 +137,7 @@ func lockOrWait(s *session, cmd *cobra.Command) (func(), error) {
 func warnIfTemplateMoved(cmd *cobra.Command, s *session, spawned stack.Spawned) {
 	current, err := currentTemplates(s)
 	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot tell whether egzo.yaml still matches the published templates: %v\n", err)
 		return
 	}
 	if template, ok := current.Templates[spawned.Template]; !ok || template.Hash != spawned.TemplateHash {
@@ -172,7 +173,7 @@ type removalPlan struct {
 
 // viewOfInstances is the project with the given instances as its agents, from the published templates
 // when they can be read and from the file otherwise: it says which checkouts belong to each instance.
-func viewOfInstances(ctx context.Context, s *session, instances []stack.Instance) *config.Resolved {
+func viewOfInstances(ctx context.Context, cmd *cobra.Command, s *session, instances []stack.Instance) *config.Resolved {
 	byName := map[string]string{}
 	for _, instance := range instances {
 		byName[instance.Name] = instance.Template
@@ -180,6 +181,7 @@ func viewOfInstances(ctx context.Context, s *session, instances []stack.Instance
 	if published, err := stack.ReadPublished(ctx, s.engine, s.Resolved.Name); err == nil {
 		return published.View(byName)
 	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "warning: the published templates cannot be read: the checkouts are found from egzo.yaml")
 	view := *s.Resolved
 	view.Agents = map[string]config.ResolvedAgent{}
 	for name, template := range byName {
@@ -225,7 +227,7 @@ func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observe
 
 	var doomed []string
 	if workspaces {
-		view := viewOfInstances(ctx, s, instances)
+		view := viewOfInstances(ctx, cmd, s, instances)
 		var dirs []string
 		for _, instance := range instances {
 			dirs = append(dirs, stack.InstanceGitDirs(view, instance.Name)...)

@@ -50,11 +50,11 @@ func (r *rig) register(name string) {
 }
 
 func (r *rig) token(agent string) string {
-	key, err := r.srv.projectKey()
+	token, err := r.srv.agentToken(agent)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	return AgentToken(key, agent)
+	return token
 }
 
 func (r *rig) asAgent(agent, method, path, body string) *http.Response {
@@ -96,8 +96,7 @@ func TestTokensAreStablePerAgentAndDifferBetweenAgents(t *testing.T) {
 		t.Error("two agents share a token")
 	}
 	again, _ := newServer(r.srv.dir) // a restarted sidecar on the same volume
-	key, _ := again.projectKey()
-	if AgentToken(key, "coder") != r.token("coder") {
+	if token, _ := again.agentToken("coder"); token != r.token("coder") {
 		t.Error("tokens did not survive a restart of the sidecar")
 	}
 }

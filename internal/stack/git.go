@@ -257,6 +257,32 @@ func markCheckouts(path string, names ...string) error {
 	return err
 }
 
+// recordCheckouts records, for each git workspace an instance lists, the directories it uses: its own
+// clone or worktree, the shared checkout, and a worktree workspace's base.
+func recordCheckouts(view *config.Resolved, instance string) error {
+	agent, ok := view.Agents[instance]
+	if !ok {
+		return nil
+	}
+	for _, mount := range agent.Workspaces {
+		ws, ok := view.Workspaces[mount.Name]
+		if mount.HostPath != "" || !ok || ws.Git == nil {
+			continue
+		}
+		if err := os.MkdirAll(ws.Path, 0o755); err != nil {
+			return err
+		}
+		names := []string{filepath.Base(CheckoutDir(ws, instance))}
+		if ws.Mode == "worktree" {
+			names = append(names, filepath.Base(BaseDir(ws)))
+		}
+		if err := markCheckouts(ws.Path, names...); err != nil {
+			return fmt.Errorf("record the checkouts of %s: %w", instance, err)
+		}
+	}
+	return nil
+}
+
 // managedCheckouts reads the names markCheckouts wrote.
 func managedCheckouts(path string) map[string]bool {
 	known := map[string]bool{}

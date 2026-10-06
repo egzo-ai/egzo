@@ -127,11 +127,27 @@ func (s *server) projectKey() ([]byte, error) {
 	return fresh, nil
 }
 
-// AgentToken derives the token that identifies an agent to the proxy and the control sidecar.
-func AgentToken(key []byte, agent string) string {
+// AgentToken derives the token that identifies an agent to the proxy and the control sidecar. The nonce is
+// the one the agent's registration holds: a new instance of the same name gets another, so a token that
+// leaked out of a removed instance opens nothing.
+func AgentToken(key []byte, agent, nonce string) string {
 	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte("agent:" + agent))
+	mac.Write([]byte("agent:" + agent + ":" + nonce))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// agentToken is the token of an agent: stable while the agent stays registered, whatever restarts.
+func (s *server) agentToken(agent string) (string, error) {
+	key, err := s.projectKey()
+	if err != nil {
+		return "", err
+	}
+	path, ok := s.agentFile(agent)
+	if !ok {
+		return "", errors.New("invalid agent name")
+	}
+	nonce, _ := os.ReadFile(path)
+	return AgentToken(key, agent, strings.TrimSpace(string(nonce))), nil
 }
 
 func (s *server) token(w http.ResponseWriter, r *http.Request) {
@@ -140,12 +156,16 @@ func (s *server) token(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid agent name", http.StatusBadRequest)
 		return
 	}
-	key, err := s.projectKey()
+	if !s.knownAgent(agent) {
+		http.Error(w, fmt.Sprintf("no agent %q in this project", agent), http.StatusNotFound)
+		return
+	}
+	token, err := s.agentToken(agent)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	io.WriteString(w, AgentToken(key, agent))
+	io.WriteString(w, token)
 }
 
 func (s *server) specPath(hash string) (string, bool) {
@@ -398,7 +418,17 @@ func (s *server) registerAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
+	// Registering again keeps what the registration holds: the agent is the same agent.
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(nonce)+"\n"), 0o644); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -417,8 +447,13 @@ func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
 	// A send that already found the agent registered finishes before the agent is retired.
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
+	registered := s.knownAgent(name)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !registered {
+		w.WriteHeader(http.StatusNoContent) // nothing to retire: a spawn clears the name this way before it registers
 		return
 	}
 	if err := s.retire(name); err != nil {

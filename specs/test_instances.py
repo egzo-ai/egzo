@@ -471,3 +471,41 @@ def test_after_down_and_up_a_name_that_was_an_instance_no_longer_takes_messages(
     refused = live_project.run("send", "coder-1", "anyone there?")
     assert refused.returncode != 0
     assert "coder-1" in refused.stderr
+
+
+def test_down_keeps_the_home_of_an_instance_and_a_spawn_of_the_name_takes_it_up_again(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": agent(harness="claude-code", image=agent_image)}))
+    live_project.spawn("coder")
+    assert in_home(engine, live_project, "coder-1", "echo kept > /home/agent/marker").returncode == 0
+    assert live_project.run("down").returncode == 0
+    live_project.up()
+    assert [r for r in engine.resources(live_project.name) if r.name.endswith("_coder-1-home")], "down removed the home volume"
+    assert live_project.spawn("coder", "coder-1") == "coder-1"  # a kept home is not an instance in the way
+    assert in_home(engine, live_project, "coder-1", "cat /home/agent/marker").stdout.strip() == "kept"
+    assert live_project.run("ps").returncode == 0 and "stale" not in live_project.run("up", "--dry-run").stdout
+
+
+def test_a_new_instance_of_a_removed_name_has_a_token_of_its_own(live_project, engine, agent_image):
+    started(live_project, agent_image)
+    live_project.spawn("coder", "again")
+
+    def token():
+        env = dict(item.split("=", 1) for item in engine.instance(live_project.name, "again").raw["Config"]["Env"])
+        return env["EGZO_TOKEN"]
+
+    first = token()
+    assert live_project.run("rm", "--force", "again").returncode == 0
+    live_project.spawn("coder", "again")
+    assert token() != first, "what leaked from the first instance opens the second"
+
+
+def test_a_name_removed_while_control_was_stopped_starts_clean_when_spawned_again(live_project, engine, agent_image):
+    started(live_project, agent_image)
+    live_project.spawn("coder", "ghost")
+    assert live_project.run("send", "ghost", "unfinished business").returncode == 0
+    assert live_project.run("stop", "control").returncode == 0
+    assert live_project.run("down").returncode == 0  # control is not running: nothing could unregister the agent
+    live_project.up()
+    live_project.spawn("coder", "ghost")
+    open_items = live_project.run("messages").stdout
+    assert "unfinished business" not in open_items

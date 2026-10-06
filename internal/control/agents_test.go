@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestAnAgentIsKnownOnlyOnceRegisteredAndRegisteringTwiceIsFine(t *testing.T) {
@@ -241,5 +242,87 @@ func TestACompactedLogReplaysARetirementBetweenTwoStatuses(t *testing.T) {
 	}
 	if status := reopened.events.statuses()["coder"]; status.Status != "after" {
 		t.Errorf("after compaction and a restart the status is %+v, want the new coder's", status)
+	}
+}
+
+func TestATokenDoesNotOutliveTheInstanceItWasIssuedFor(t *testing.T) {
+	r := newRig(t)
+	r.register("issue-1")
+	old := r.token("issue-1")
+	r.register("issue-1") // registering again is the same agent: the same token
+	if r.token("issue-1") != old {
+		t.Fatal("registering twice changed the token")
+	}
+	r.asOperator("DELETE", "/agents/issue-1", "").Body.Close()
+	r.register("issue-1")
+	if fresh := r.token("issue-1"); fresh == old {
+		t.Fatal("a new instance of the name got the old token: whatever leaked from the old one opens the new one")
+	}
+	request, _ := http.NewRequest("POST", r.agent.URL+"/v1/status", strings.NewReader(`{"text":"x"}`))
+	request.SetBasicAuth("issue-1", old)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Errorf("the old token was accepted: status %d", response.StatusCode)
+	}
+	// the token survives a restart of the sidecar, because the nonce is on the volume
+	again, _ := newServer(r.srv.dir)
+	if token, _ := again.agentToken("issue-1"); token != r.token("issue-1") {
+		t.Error("the token changed with a restart of the sidecar")
+	}
+}
+
+func TestOnlyARegisteredAgentCanBeGivenAToken(t *testing.T) {
+	r := newRig(t)
+	if response := r.asOperator("GET", "/tokens/stranger", ""); response.StatusCode != http.StatusNotFound {
+		t.Errorf("a token for an agent nobody registered: status %d", response.StatusCode)
+	}
+	if response := r.asOperator("GET", "/tokens/coder", ""); response.StatusCode != http.StatusOK {
+		t.Errorf("a token for a registered agent: status %d", response.StatusCode)
+	}
+}
+
+func TestRetiringWhileMessagesAreFetchedClaimedAndSentLeavesNothingOpenOrNegative(t *testing.T) {
+	for round := 0; round < 15; round++ {
+		r := newRig(t)
+		r.register("racer")
+		var ids []string
+		for i := 0; i < 4; i++ {
+			ids = append(ids, r.request("racer", fmt.Sprintf("job %d", i)))
+		}
+		var wg sync.WaitGroup
+		for _, id := range ids {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r.srv.fetch("racer", id)
+			}()
+		}
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			r.srv.claim("racer", time.Millisecond)
+		}()
+		go func() {
+			defer wg.Done()
+			r.asOperator("POST", "/messages", `{"to":"agent:racer","text":"late"}`).Body.Close()
+		}()
+		r.asOperator("DELETE", "/agents/racer", "").Body.Close()
+		wg.Wait()
+		for _, m := range r.srv.events.messagesOf("agent:racer", func(m Message) bool { return m.To == "agent:racer" && !terminal(&m) }) {
+			// a message that was sent after the agent went away is refused, so none is left open
+			if m.Kind == kindRequest {
+				t.Fatalf("round %d: a request is still open for the removed agent: %+v", round, m)
+			}
+		}
+		r.srv.events.mu.Lock()
+		negative := r.srv.events.open["racer"] < 0 || r.srv.events.waiting["racer"] < 0
+		r.srv.events.mu.Unlock()
+		if negative {
+			t.Fatalf("round %d: an owed counter went negative", round)
+		}
 	}
 }
