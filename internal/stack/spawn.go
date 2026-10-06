@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -17,9 +18,11 @@ type SpawnRequest struct {
 	Template string
 	// Name is the instance's name; empty gives `<template>-<n>`.
 	Name string
-	// Actor is who asks: "operator" for the CLI, "user:<id>" or a service for another tool.
+	// Actor is who asks: "operator" for the CLI, "user:<id>" or "service:<name>" for another tool.
 	Actor string
 }
+
+var actorName = regexp.MustCompile(`^(operator|(user|service):[A-Za-z0-9][A-Za-z0-9._@-]{0,62})$`)
 
 // Spawned is the instance a spawn made.
 type Spawned struct {
@@ -27,6 +30,8 @@ type Spawned struct {
 	Template  string
 	Container string
 	Actor     string
+	// TemplateHash is the hash of the template the instance was made from.
+	TemplateHash string
 }
 
 // ExistsError is what a spawn answers when the name is taken by an instance.
@@ -87,14 +92,18 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if name == "" {
 		name = freeName(observed, req.Template)
 	}
-	if err := config.CheckInstanceName(name, published.Names()); err != nil {
+	if err := config.CheckInstanceName(name, published.Names(), published.WorkspaceNames); err != nil {
 		return Spawned{}, err
 	}
 	if existing, ok := observed.Instance(name); ok {
 		return Spawned{}, &ExistsError{Name: name, Template: existing.Template}
 	}
-	if r := observed.find("container", InstanceContainer(project, name)); r != nil {
-		return Spawned{}, fmt.Errorf("the name %q is taken by the container %s", name, r.Name)
+	for _, taken := range []struct{ kind, name string }{
+		{"container", InstanceContainer(project, name)}, {"network", InstanceNetwork(project, name)}, {"volume", homeVolume(project, name)},
+	} {
+		if r := observed.find(taken.kind, taken.name); r != nil {
+			return Spawned{}, fmt.Errorf("the name %q is taken: the %s %s already exists", name, taken.kind, r.Name)
+		}
 	}
 	if dir == "" {
 		dir = published.Dir
@@ -102,6 +111,9 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	actor := req.Actor
 	if actor == "" {
 		actor = "operator"
+	}
+	if !actorName.MatchString(actor) {
+		return Spawned{}, fmt.Errorf("invalid actor %q: use operator, user:<id> or service:<name>", actor)
 	}
 
 	instances := map[string]string{name: req.Template}
@@ -121,11 +133,12 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	}
 
 	var undo undoStack
-	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor}
+	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
 	if err := spawnSteps(ctx, c, project, dir, published, view, desired, tokens, checkouts, template, name, &undo, out); err != nil {
 		cleanup := context.WithoutCancel(ctx)
 		undo.run(cleanup)
-		// Another spawn of the same name may have won the race: say so, not whatever clash we hit.
+		// Another spawn of the same name may have won the race. The network is the arbiter: its name is the
+		// first thing a spawn creates, so a spawn that created nothing lost, and says so instead of the clash.
 		if again, observeErr := Observe(cleanup, c, project); observeErr == nil {
 			if existing, ok := again.Instance(name); ok && undo.empty() {
 				return Spawned{}, &ExistsError{Name: name, Template: existing.Template}
@@ -241,6 +254,7 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, p
 		}
 	}
 	var removed []string
+	control, proxy := observed.find("container", project+"-control-1"), observed.find("container", project+"-proxy-1")
 	for _, name := range names {
 		var container, network, home *Resource
 		for i := range observed.Resources {
@@ -254,7 +268,14 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, p
 				home = r
 			}
 		}
-		control, proxy := observed.find("container", project+"-control-1"), observed.find("container", project+"-proxy-1")
+		// The container goes first: while it runs it can still report to control, which would bring a
+		// forgotten agent back.
+		if container != nil {
+			fmt.Fprintf(out, "remove container %s\n", container.Name)
+			if err := run(ctx, c, Desired{}, Action{Verb: "remove", Type: "container", Name: container.Name, ID: container.ID}); err != nil {
+				return removed, fmt.Errorf("remove container %s: %w", container.Name, err)
+			}
+		}
 		if proxy != nil && proxy.State == "running" {
 			if err := unbindProxy(ctx, c, project, name); err != nil {
 				return removed, fmt.Errorf("unbind %s in the proxy: %w", name, err)
@@ -263,12 +284,6 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, p
 		if control != nil && control.State == "running" {
 			if err := unregisterControl(ctx, c, project, name); err != nil {
 				return removed, fmt.Errorf("unregister %s: %w", name, err)
-			}
-		}
-		if container != nil {
-			fmt.Fprintf(out, "remove container %s\n", container.Name)
-			if err := run(ctx, c, Desired{}, Action{Verb: "remove", Type: "container", Name: container.Name, ID: container.ID}); err != nil {
-				return removed, fmt.Errorf("remove container %s: %w", container.Name, err)
 			}
 		}
 		if network != nil {

@@ -144,3 +144,102 @@ func TestTemplatesAreStoredWholeAndRefusedWhenOversizedOrEmpty(t *testing.T) {
 		t.Errorf("after a restart: %q", recorder.Body.String())
 	}
 }
+
+func TestWhatAnAgentAskedAndWhatWasOnItsWayToItDiesWithIt(t *testing.T) {
+	r := newRig(t)
+	// coder is asked something, fetches it, and asks the operator a question of its own
+	id := r.request("coder", "do the thing")
+	if _, err := r.srv.fetch("coder", id); err != nil {
+		t.Fatal(err)
+	}
+	question, err := r.srv.ask("coder", id, "which one?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// reviewer replies to coder: a resolution that coder has not read
+	reviewerRequest, err := r.srv.sendFromAgent("coder", "agent:reviewer", "look at this", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.srv.fetch("reviewer", reviewerRequest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.srv.resolve("reviewer", reviewerRequest, "looked", "done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, waiting := r.srv.overlay("coder"); !waiting {
+		t.Fatal("setup: the question is not waiting")
+	}
+
+	r.asOperator("DELETE", "/agents/coder", "").Body.Close()
+	r.register("coder")
+
+	if _, waiting := r.srv.overlay("coder"); waiting {
+		t.Error("a new coder is still waiting for an answer to the old coder's question")
+	}
+	if m, _ := r.srv.events.message(question); m.State != stateResolved {
+		t.Errorf("the old question is still open: %+v", m)
+	}
+	if listed := r.srv.listFor("coder"); len(listed) != 0 {
+		t.Errorf("a new coder inherited %d items: %+v", len(listed), listed)
+	}
+}
+
+func TestAnAgentThatIsNotRegisteredCannotReportEvenWithAValidToken(t *testing.T) {
+	r := newRig(t)
+	token := r.token("ghost") // derived from the project key: a valid token for a name nobody registered
+	if response := r.asAgent("ghost", "POST", "/v1/status", `{"text":"hi"}`); response.StatusCode != http.StatusUnauthorized {
+		t.Errorf("an unregistered agent was served: status %d (token %s...)", response.StatusCode, token[:6])
+	}
+	r.register("ghost")
+	if response := r.asAgent("ghost", "POST", "/v1/status", `{"text":"hi"}`); response.StatusCode >= 300 {
+		t.Errorf("a registered agent was refused: status %d", response.StatusCode)
+	}
+	r.asOperator("DELETE", "/agents/ghost", "").Body.Close()
+	if response := r.asAgent("ghost", "POST", "/v1/status", `{"text":"again"}`); response.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a removed agent still reports: status %d", response.StatusCode)
+	}
+	for _, status := range r.srv.agentStatuses() {
+		if status.Agent == "ghost" {
+			t.Errorf("a removed agent is listed: %+v", status)
+		}
+	}
+}
+
+func TestASendAndAnUnregisterAtTheSameTimeLeaveNothingOpenForTheRemovedAgent(t *testing.T) {
+	for i := 0; i < 25; i++ {
+		r := newRig(t)
+		r.register("racer")
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			r.asOperator("POST", "/messages", `{"to":"agent:racer","text":"x"}`).Body.Close()
+		}()
+		r.asOperator("DELETE", "/agents/racer", "").Body.Close()
+		<-done
+		for _, m := range r.srv.events.messagesOf("agent:racer", func(m Message) bool { return m.To == "agent:racer" && m.State != stateResolved }) {
+			t.Fatalf("round %d: a message stays open for the removed agent: %+v", i, m)
+		}
+	}
+}
+
+func TestACompactedLogReplaysARetirementBetweenTwoStatuses(t *testing.T) {
+	r := newRig(t)
+	r.srv.reportStatus("coder", "before")
+	r.asOperator("DELETE", "/agents/coder", "").Body.Close()
+	r.register("coder")
+	r.srv.reportStatus("coder", "after")
+	r.srv.events.mu.Lock()
+	err := r.srv.events.compact()
+	r.srv.events.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := newServer(r.srv.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := reopened.events.statuses()["coder"]; status.Status != "after" {
+		t.Errorf("after compaction and a restart the status is %+v, want the new coder's", status)
+	}
+}

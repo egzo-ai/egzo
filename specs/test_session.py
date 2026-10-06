@@ -28,12 +28,15 @@ def tui(image, mode="cat", **env):
 
 
 @pytest.fixture
-def session(live_project, session_image, egzo):
+def session(live_project, session_image, egzo, engine):
     """Bring up one agent running the fake TUI in the given mode; returns a function that attaches to it."""
 
     def start(mode="cat", agents=None, **env):
         # one template per agent (`<name>-template`) and one instance of each, named `<name>`
         agents = agents or {"coder": tui(session_image, mode, **env)}
+        # a project holds one set of templates: what an earlier call spawned is stale once they change
+        for earlier in engine.instances(live_project.name):
+            live_project.run("rm", "--force", earlier.labels[f"{LABEL_PREFIX}instance"])
         live_project.up(spec(agents={f"{name}-template": fields for name, fields in agents.items()}))
         for name in agents:
             live_project.spawn(f"{name}-template", name)

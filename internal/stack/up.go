@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -97,9 +98,10 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	go func() {
 		defer wg.Done()
 		pushed, pushErr = pushPolicy(ctx, c, project, desired, secrets, opts, fresh[desired.Proxy], out)
-		if pushErr == nil && !opts.DryRun && desired.Proxy != "" && fresh[desired.Proxy] {
-			// A proxy created by this run has no bindings: the instances that exist get theirs back.
-			pushErr = BindInstances(ctx, c, project.Name, observed.Instances(), published)
+		if pushErr == nil && !opts.DryRun && desired.Proxy != "" {
+			// A proxy that was created, started again or restarted has no bindings: the instances that
+			// exist and are not bound get theirs back.
+			pushErr = bindMissing(ctx, c, project.Name, observed.Instances(), published)
 		}
 	}()
 	go func() {
@@ -142,8 +144,31 @@ func dryRunTemplates(ctx context.Context, c *engine.Client, controlName string, 
 	return true
 }
 
+// bindMissing binds the instances the proxy does not know. The proxy keeps its bindings in memory, so
+// whatever made it start again took them.
+func bindMissing(ctx context.Context, c *engine.Client, project string, instances []Instance, p Published) error {
+	if len(instances) == 0 {
+		return nil
+	}
+	result, err := c.Exec(ctx, project+"-proxy-1", []string{"/egzo", "proxy", "request", "GET", "/agents"}, nil)
+	if err != nil {
+		return fmt.Errorf("list the agents bound in the proxy: %w", err)
+	}
+	var bound []string
+	if result.ExitCode == 0 {
+		_ = json.Unmarshal(result.Stdout, &bound)
+	}
+	var missing []Instance
+	for _, instance := range instances {
+		if instance.State != "missing" && !slices.Contains(bound, instance.Name) {
+			missing = append(missing, instance)
+		}
+	}
+	return BindInstances(ctx, c, project, missing, p)
+}
+
 // BindInstances gives the proxy the credentials of the instances, bound to their templates' profiles.
-// The proxy keeps bindings in memory, so a proxy that was created or restarted has none.
+// It binds every instance it can and reports each one it could not.
 func BindInstances(ctx context.Context, c *engine.Client, project string, instances []Instance, p Published) error {
 	if len(instances) == 0 {
 		return nil
@@ -156,16 +181,17 @@ func BindInstances(ctx context.Context, c *engine.Client, project string, instan
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, instance := range instances {
 		template, ok := p.Templates[instance.Template]
 		if !ok {
 			continue // a stale instance whose template is gone: it stays denied
 		}
 		if err := bindProxy(ctx, c, project, instance.Name, tokens[instance.Name], template.Agent.Egress); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // fetchTokens asks the control sidecar for the token of each agent, all at once.
@@ -239,14 +265,22 @@ func unregisterControl(ctx context.Context, c *engine.Client, project, name stri
 
 // ReloadPolicy loads the egress policy into a proxy that was started again, and binds the instances
 // again: the policy and the bindings live in the proxy's memory, so a restarted proxy refuses everything
-// until it is given them. The proxy needs a moment before its operator API answers, so this retries for a
-// while.
+// until it is given them. The policy comes from the published templates, as spawn does, so a file edited
+// since `up` changes nothing for the instances that run; only the secrets' locations come from the file.
+// The proxy needs a moment before its operator API answers, so this retries for a while.
 func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolved, dir string) error {
-	secrets, err := ResolveSecrets(project, dir)
+	published, err := ReadPublished(ctx, c, project.Name)
+	source, notPublished := project, errors.Is(err, ErrNotPublished)
+	if err == nil {
+		source = published.AsProject(project.SecretSources)
+	} else if !notPublished {
+		return err
+	}
+	secrets, err := ResolveSecrets(source, dir)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(BuildPolicy(project, secrets))
+	body, err := json.Marshal(BuildPolicy(source, secrets))
 	if err != nil {
 		return err
 	}
@@ -265,14 +299,11 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+	if notPublished {
+		return nil
+	}
 	observed, err := Observe(ctx, c, project.Name)
 	if err != nil {
-		return err
-	}
-	published, err := ReadPublished(ctx, c, project.Name)
-	if errors.Is(err, ErrNotPublished) {
-		return nil
-	} else if err != nil {
 		return err
 	}
 	return BindInstances(ctx, c, project.Name, observed.Instances(), published)

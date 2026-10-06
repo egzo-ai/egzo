@@ -1,6 +1,8 @@
 package stack
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -289,6 +291,69 @@ func TestRowsMarkStaleInstancesAndAgeIsReadable(t *testing.T) {
 	for d, want := range map[time.Duration]string{5 * time.Second: "5s", 7 * time.Minute: "7m", 3 * time.Hour: "3h", 49 * time.Hour: "2d", -time.Second: ""} {
 		if got := Age(d); got != want {
 			t.Errorf("Age(%s) = %q, want %q", d, got, want)
+		}
+	}
+}
+
+func TestWhatIsLeftOfAnInstanceWithoutItsContainerIsStillAnInstanceToRemove(t *testing.T) {
+	observed := Observed{Resources: []Resource{
+		{Type: "container", Name: "proj-a", Kind: kindAgent, Service: "coder", Instance: "a", State: "running"},
+		{Type: "network", Name: "proj_a", Kind: kindAgent, Service: "coder", Instance: "a"},
+		{Type: "network", Name: "proj_b", Kind: kindAgent, Service: "coder", Instance: "b", Actor: "operator"},
+		{Type: "volume", Name: "proj_b-home", Kind: kindAgent, Service: "coder", Instance: "b"},
+		{Type: "volume", Name: "proj_c-home", Kind: kindAgent, Service: "review", Instance: "c"},
+		{Type: "volume", Name: "proj_shared", Kind: kindWorkspace, Service: "shared"},
+	}}
+	got := observed.Instances()
+	if len(got) != 3 || got[0].Name != "a" || got[1].Name != "b" || got[2].Name != "c" {
+		t.Fatalf("instances = %+v", got)
+	}
+	if got[0].State != "running" || got[1].State != "missing" || got[1].Template != "coder" || got[2].Template != "review" {
+		t.Errorf("states and templates = %+v", got)
+	}
+}
+
+func TestRemovingChecksEveryNameBeforeTouchingAnything(t *testing.T) {
+	observed := Observed{Resources: []Resource{
+		{Type: "container", Name: "proj-a", Kind: kindAgent, Service: "coder", Instance: "a", State: "exited"},
+		{Type: "container", Name: "proj-b", Kind: kindAgent, Service: "coder", Instance: "b", State: "running"},
+	}}
+	// a nil client: anything that reaches the engine panics, so these must fail first
+	for name, names := range map[string][]string{"an unknown name": {"a", "ghost"}, "a running instance": {"a", "b"}} {
+		removed, err := RemoveInstances(context.Background(), nil, observed, "proj", names, false, io.Discard)
+		if err == nil || len(removed) != 0 {
+			t.Errorf("%s: removed %v, err %v", name, removed, err)
+		}
+	}
+}
+
+func TestUndoRunsInReverseOrder(t *testing.T) {
+	var undo undoStack
+	var order []int
+	for i := 1; i <= 3; i++ {
+		undo.add(func(context.Context) { order = append(order, i) })
+	}
+	if undo.empty() {
+		t.Error("an undo with steps is empty")
+	}
+	undo.run(context.Background())
+	if !slices.Equal(order, []int{3, 2, 1}) {
+		t.Errorf("order = %v", order)
+	}
+	if !(&undoStack{}).empty() {
+		t.Error("a new undo is not empty")
+	}
+}
+
+func TestOnlyPlainActorsAreWrittenToLabels(t *testing.T) {
+	for _, ok := range []string{"operator", "user:ann", "user:ann@example.org", "service:github-webhooks"} {
+		if !actorName.MatchString(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{"", "root", "user:", "user:a b", "service:" + strings.Repeat("x", 64), "operator\n", "agent:coder", "user:\x1b[2J"} {
+		if actorName.MatchString(bad) {
+			t.Errorf("%q accepted", bad)
 		}
 	}
 }

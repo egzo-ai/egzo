@@ -44,6 +44,9 @@ type Published struct {
 	// User is the "uid:gid" instances run as: the user who ran `up`.
 	User      string
 	Templates map[string]Template
+	// WorkspaceNames are all the workspaces the file declares, so an instance's name cannot collide with
+	// one of their volumes.
+	WorkspaceNames []string
 }
 
 // Publish resolves the templates of a project. It reads the prompt files, since an instance mounts
@@ -54,6 +57,7 @@ func Publish(project *config.Resolved, dir, image, harnessPrefix, user string) (
 		return Published{}, err
 	}
 	published := Published{Version: publishedVersion, Project: project.Name, Dir: dir, Image: image, User: user, Templates: map[string]Template{}}
+	published.WorkspaceNames = sortedKeys(project.Workspaces)
 	for _, name := range sortedKeys(project.Agents) {
 		agent := project.Agents[name]
 		template := Template{
@@ -130,6 +134,19 @@ func (p Published) View(instances map[string]string) *config.Resolved {
 			view.Egress[agent.Egress] = template.Profile
 		}
 	}
+	return view
+}
+
+// AsProject is the project as the published templates describe it, each template an agent under its own
+// name: what restarting the proxy builds its policy from, so a file edited since `up` changes nothing.
+// secretSources are the file's, since the templates hold references and never where a secret lives.
+func (p Published) AsProject(secretSources map[string]string) *config.Resolved {
+	instances := map[string]string{}
+	for name := range p.Templates {
+		instances[name] = name
+	}
+	view := p.View(instances)
+	view.SecretSources = secretSources
 	return view
 }
 

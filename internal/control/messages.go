@@ -607,19 +607,31 @@ func (s *server) overlay(agent string) (open int, waiting bool) {
 	return s.events.owed(agent)
 }
 
-// retire ends an agent's life in the control sidecar. Every request or question still open for it is
-// closed as failed, so whoever asked (`egzo send --wait`, another agent) is told instead of waiting for
-// an agent that is gone, and its status is forgotten, so a new agent of the same name starts clean.
+// retire ends an agent's life in the control sidecar, so that a new agent of the same name starts clean.
+// Every request or question still open for it is closed as failed, so whoever asked (`egzo send --wait`,
+// another agent) is told instead of waiting for an agent that is gone. What the agent asked itself is
+// closed without a word to it, so nobody is waiting for an answer to it, and the replies and updates that
+// were still on their way to it are dropped. Its status is forgotten.
 func (s *server) retire(agent string) error {
 	address := "agent:" + agent
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	open := s.events.messagesOf(address, func(m Message) bool {
-		return m.To == address && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
-	})
-	for _, m := range open {
-		if _, err := s.resolveMessage("operator", m, "agent "+agent+" was removed before it could answer", "failed"); err != nil {
-			return err
+	for _, m := range s.events.messagesOf(address, func(m Message) bool { return !terminal(&m) }) {
+		switch {
+		case m.To == address && (m.Kind == kindRequest || m.Kind == kindQuestion):
+			if _, err := s.resolveMessage("operator", m, "agent "+agent+" was removed before it could answer", "failed"); err != nil {
+				return err
+			}
+		case m.To == address:
+			// a resolution or an update nobody will read
+			if _, err := s.events.append(Event{Type: "fetched", Agent: agent, Actor: address, ID: m.ID}); err != nil {
+				return err
+			}
+		case m.From == address && (m.Kind == kindRequest || m.Kind == kindQuestion):
+			resolved, _ := json.Marshal(map[string]string{"outcome": "failed"})
+			if _, err := s.events.append(Event{Type: "resolved", Agent: involved(m.From, m.To), Actor: "operator", ID: m.ID, Text: "the agent that asked was removed", Data: resolved}); err != nil {
+				return err
+			}
 		}
 	}
 	_, err := s.events.append(Event{Type: "retired", Agent: agent, Actor: "operator"})

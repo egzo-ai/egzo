@@ -79,7 +79,9 @@ def test_an_instance_carries_the_required_labels_and_its_own(live_project, engin
 
 
 def test_the_container_the_network_and_the_home_volume_of_an_instance_are_all_labelled_as_its_own(live_project, engine, agent_image):
-    up(live_project, agent_image)
+    # a custom harness has no home volume; a harness with a home (here claude-code on the spec image) has one
+    live_project.up(spec(agents={"coder": agent(harness="claude-code", image=agent_image)}))
+    live_project.spawn("coder")
     found = {(r.kind, r.name) for r in instance_resources(engine, live_project)}
     assert found == {
         ("container", f"{live_project.name}-coder-1"),

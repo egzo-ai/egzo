@@ -33,7 +33,7 @@ func TestReservedAndMalformedNames(t *testing.T) {
 func TestInstanceNames(t *testing.T) {
 	templates := []string{"coder", "reviewer"}
 	for _, name := range []string{"issue-412", "coder-1", "a", "pr_88", "x" + strings.Repeat("y", 62)} {
-		if err := CheckInstanceName(name, templates); err != nil {
+		if err := CheckInstanceName(name, templates, []string{"notes-home"}); err != nil {
 			t.Errorf("%q: %v", name, err)
 		}
 	}
@@ -51,8 +51,10 @@ func TestInstanceNames(t *testing.T) {
 		"control-1":                   "name of a sidecar",
 		"proxy-1":                     "name of a sidecar",
 		"coder-home":                  "-home",
+		"egress":                      "proxy's",
+		"notes":                       "home volume would be the workspace",
 	} {
-		err := CheckInstanceName(name, templates)
+		err := CheckInstanceName(name, templates, []string{"notes-home"})
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: error %v, want it to mention %q", name, err, want)
 		}

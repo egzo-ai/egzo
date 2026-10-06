@@ -186,7 +186,7 @@ def test_shared_mode_is_one_checkout_for_two_instances_of_one_template(live_proj
     up_ok(live_project, project_spec(agent_image, workspace={"mode": "shared"}))
     spawn_ok(live_project)
     spawn_ok(live_project)
-    assert sorted(p.name for p in workspaces_dir(live_project).iterdir()) == ["shared"]
+    assert sorted(p.name for p in workspaces_dir(live_project).iterdir() if p.name != ".egzo-checkouts") == ["shared"]
 
 
 def test_worktree_mode_gives_each_instance_a_worktree_of_one_base_clone(live_project, engine, agent_image):
@@ -256,6 +256,19 @@ def test_down_workspaces_finds_the_checkouts_of_instances_that_were_removed(live
     assert live_project.run("down", "--workspaces", "--yes").returncode == 0
     assert not clone_of(live_project, "gone").exists()
     assert not (workspaces_dir(live_project) / ".base").exists()
+
+
+def test_down_workspaces_leaves_a_checkout_alone_that_egzo_did_not_make(live_project, engine, agent_image):
+    """A workspace path may hold the user's own clones: only what egzo recorded is offered for removal."""
+    up_ok(live_project, project_spec(agent_image))
+    spawn_ok(live_project)
+    foreign = workspaces_dir(live_project) / "my-own-clone"
+    (foreign / ".git").mkdir(parents=True)
+    (foreign / "work.txt").write_text("mine\n")
+    result = live_project.run("down", "--workspaces", "--yes")
+    assert result.returncode == 0, result.stderr
+    assert not clone_of(live_project, "coder-1").exists()
+    assert (foreign / "work.txt").read_text() == "mine\n"
 
 
 def test_down_workspaces_refuses_a_clone_with_uncommitted_work(live_project, engine, agent_image):

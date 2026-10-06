@@ -24,7 +24,7 @@ var reservedWorkspaces = map[string]bool{"control": true, "ca": true, "ca-privat
 // CheckInstanceName reports why name cannot be the name of an instance, or nil. An instance is addressed
 // by its name alone, so the name must be a plain identifier, must not be one of the project's templates
 // and must not make a container, network or directory that egzo already uses for something else.
-func CheckInstanceName(name string, templates []string) error {
+func CheckInstanceName(name string, templates, workspaces []string) error {
 	switch {
 	case !identifier.MatchString(name):
 		return fmt.Errorf("invalid instance name %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
@@ -32,12 +32,19 @@ func CheckInstanceName(name string, templates []string) error {
 		return fmt.Errorf("invalid instance name %q: it is reserved for egzo's own use", name)
 	case name == "control-1" || name == "proxy-1":
 		return fmt.Errorf("invalid instance name %q: its container would take the name of a sidecar", name)
+	case name == "egress":
+		return fmt.Errorf("invalid instance name %q: its network would be the proxy's", name)
 	case strings.HasSuffix(name, "-home"):
 		return fmt.Errorf("invalid instance name %q: names ending in -home are reserved for the volumes of instances", name)
 	}
 	for _, template := range templates {
 		if name == template {
 			return fmt.Errorf("invalid instance name %q: it is the name of a template; an instance needs a name of its own", name)
+		}
+	}
+	for _, workspace := range workspaces {
+		if name+"-home" == workspace {
+			return fmt.Errorf("invalid instance name %q: its home volume would be the workspace %q", name, workspace)
 		}
 	}
 	return nil

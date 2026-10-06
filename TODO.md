@@ -1,5 +1,8 @@
 # Review items for the Go implementation
 
+> Written before agents became templates (see DESIGN.md, "Templates and instances"): items that mention `depends_on`,
+> `up AGENT`, `project.json` or `putProject` describe code that no longer exists; they are kept as history.
+
 Full code review of `cmd/` and `internal/` (about 15.9k lines), on `main` at 832cd57, on 2026-10-05. It was done
 by reading all the code, then checking suspicious points: `go vet`, `go test -race -cover`, `staticcheck`,
 `golangci-lint`, `govulncheck`, and a few throwaway tests (since deleted).

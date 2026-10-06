@@ -343,15 +343,15 @@ def test_doctor_checks_that_the_engine_can_make_the_internal_networks_isolation_
 
 
 def test_two_commands_do_not_change_one_project_at_once(live_project, engine, agent_image):
-    import subprocess
-    import time
+    """While one command holds the project's lock, `up` and `down` refuse, and they work again once it is released."""
+    import fcntl
 
     live_project.write(spec(agents={"coder": custom(agent_image), "second": custom(agent_image)}))
-    environment = {**os.environ, **live_project.env, "NO_COLOR": "1"}
-    first = subprocess.Popen([live_project.egzo.binary, "up"], cwd=live_project.root, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time.sleep(0.7)
-    second = live_project.run("up", timeout=300)
-    first_out, first_err = first.communicate(timeout=300)
-    assert first.returncode == 0, first_err
-    assert second.returncode != 0 and "another egzo command" in second.stderr, (second.returncode, second.stderr)
+    lock_dir = live_project.root / ".egzo"
+    lock_dir.mkdir(exist_ok=True)
+    with open(lock_dir / "lock", "w") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)  # what another egzo command that is changing the project does
+        for command in ("up", "down"):
+            refused = live_project.run(command, timeout=300)
+            assert refused.returncode != 0 and "another egzo command" in refused.stderr, (command, refused.returncode, refused.stderr)
     assert live_project.run("up", timeout=300).returncode == 0, "the lock was not released"

@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-// Instance is an agent spawned from a template, as the engine shows it.
+// Instance is an agent spawned from a template, as the engine shows it. State is "missing" for what is
+// left of an instance that has no container any more.
 type Instance struct {
 	Name         string
 	Template     string // the key of the template, from the service label
@@ -28,6 +29,18 @@ func (o Observed) Instances() []Instance {
 				Name: r.Instance, Template: r.Service, Actor: r.Actor, Container: r.Name,
 				State: r.State, Created: r.Created, TemplateHash: r.TemplateHash,
 			})
+		}
+	}
+	// What is left of an instance whose container is gone (removed by hand, or a spawn that could not undo
+	// itself) is still an instance to remove: its network, home volume and registrations stay otherwise.
+	seen := map[string]bool{}
+	for _, instance := range instances {
+		seen[instance.Name] = true
+	}
+	for _, r := range o.Resources {
+		if r.Kind == kindAgent && r.Instance != "" && (r.Type == "network" || r.Type == "volume") && !seen[r.Instance] {
+			seen[r.Instance] = true
+			instances = append(instances, Instance{Name: r.Instance, Template: r.Service, Actor: r.Actor, State: "missing", TemplateHash: r.TemplateHash})
 		}
 	}
 	sort.Slice(instances, func(i, j int) bool { return instances[i].Name < instances[j].Name })

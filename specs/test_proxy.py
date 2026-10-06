@@ -325,6 +325,29 @@ def test_a_restarted_proxy_gets_its_egress_policy_back(live_project, engine, age
     assert status(engine, live_project, "example.com").stdout == "200"
 
 
+@needs_internet
+def test_a_proxy_that_was_stopped_and_started_again_gets_its_bindings_back_from_up(live_project, engine, agent_image):
+    """The bindings live in the proxy's memory: `docker stop` and `start` lose them, and `up` must give them back."""
+    up(live_project, with_allow("example.com", coder=custom(agent_image)))
+    live_project.spawn("coder")
+    assert status(engine, live_project, "example.com").stdout == "200"
+    proxy = container(engine, live_project, "proxy").name
+    engine.run("stop", proxy)
+    engine.run("start", proxy)
+    again = live_project.run("up")
+    assert again.returncode == 0, again.stderr
+    assert status(engine, live_project, "example.com").stdout == "200"
+
+
+@needs_internet
+def test_restarting_the_proxy_uses_the_published_profiles_not_a_file_edited_since(live_project, engine, agent_image):
+    up(live_project, with_allow("example.com", coder=custom(agent_image)))
+    live_project.spawn("coder")
+    live_project.write(with_allow("example.org", coder=custom(agent_image)))  # edited, not applied by `up`
+    assert live_project.run("restart", "proxy").returncode == 0
+    assert status(engine, live_project, "example.com").stdout == "200"  # the instance still has what it was spawned with
+
+
 def test_a_proxy_that_has_no_policy_tells_the_agent_what_to_do(live_project, engine, agent_image):
     up(live_project, with_allow("example.com", coder=custom(agent_image)))
     proxy = container(engine, live_project, "proxy").name

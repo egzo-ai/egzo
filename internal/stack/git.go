@@ -219,14 +219,63 @@ func RunGitPreps(ctx context.Context, c *engine.Client, project *config.Resolved
 			return fmt.Errorf("agent %q: could not prepare git workspace %q from %s: %w\n"+
 				"the agent's egress profile %q must allow %s", checkout.Agent, checkout.Workspace, checkout.URL, err, profile, host)
 		}
+		names := []string{filepath.Base(checkout.Dir)}
+		if checkout.Base != "" {
+			names = append(names, filepath.Base(checkout.Base))
+		}
+		if err := markCheckouts(filepath.Dir(checkout.Dir), names...); err != nil {
+			return fmt.Errorf("record the checkout %s: %w", checkout.Dir, err)
+		}
 	}
 	return nil
 }
 
-// GitDirs lists the host directories that hold git checkouts of the project's workspaces, whether or not
-// an instance still exists for them: what `down --workspaces` may remove. They are found on disk, so work
-// left by an instance that was removed is found too: a real checkout (it has a .git), a worktree
-// workspace's base, and a symbolic link, which is listed only so that removing it can be refused.
+// checkoutRegistry is the file in a git workspace's path that names the checkouts egzo made there. A
+// workspace path may hold other things (a path of `./repos` next to the user's own clones), and
+// `down --workspaces` must only offer to remove what egzo made.
+const checkoutRegistry = ".egzo-checkouts"
+
+// markCheckouts records directories under path as made by egzo.
+func markCheckouts(path string, names ...string) error {
+	known := managedCheckouts(path)
+	var added []string
+	for _, name := range names {
+		if !known[name] {
+			known[name] = true
+			added = append(added, name)
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	file, err := os.OpenFile(filepath.Join(path, checkoutRegistry), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(strings.Join(added, "\n") + "\n")
+	return err
+}
+
+// managedCheckouts reads the names markCheckouts wrote.
+func managedCheckouts(path string) map[string]bool {
+	known := map[string]bool{}
+	data, err := os.ReadFile(filepath.Join(path, checkoutRegistry))
+	if err != nil {
+		return known
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.ContainsAny(line, "/\\") && line != ".." && line != "." {
+			known[line] = true
+		}
+	}
+	return known
+}
+
+// GitDirs lists the host directories that hold git checkouts egzo made for the project's workspaces,
+// whether or not an instance still exists for them: what `down --workspaces` may remove. They are found
+// on disk, so work left by an instance that was removed is found too. A symbolic link egzo recorded is
+// listed only so that removing it can be refused.
 func GitDirs(project *config.Resolved) []string {
 	var dirs []string
 	for _, name := range sortedKeys(project.Workspaces) {
@@ -234,12 +283,16 @@ func GitDirs(project *config.Resolved) []string {
 		if ws.Git == nil {
 			continue
 		}
+		managed := managedCheckouts(ws.Path)
 		entries, err := os.ReadDir(ws.Path)
 		if err != nil {
 			continue
 		}
 		for _, entry := range entries {
 			path := filepath.Join(ws.Path, entry.Name())
+			if !managed[entry.Name()] {
+				continue
+			}
 			if entry.Type()&os.ModeSymlink != 0 || entry.Name() == ".base" || (entry.IsDir() && exists(filepath.Join(path, ".git"))) {
 				dirs = append(dirs, path)
 			}
@@ -353,9 +406,13 @@ func InspectDirs(ctx context.Context, c *engine.Client, projectName string, dirs
 			slots <- struct{}{}
 			defer func() { <-slots }()
 			const target = "/check"
+			mounts := []MountSpec{{Bind: true, Source: d, Target: target, ReadOnly: true}}
+			if base, ok := worktreeBaseMount(d); ok {
+				mounts = append(mounts, base)
+			}
 			stdout, err := RunPrep(ctx, c, PrepSpec{
 				Image: image, Cmd: []string{"/egzo", "prep", "git", "status", target}, User: user,
-				Mounts:   []MountSpec{{Bind: true, Source: d, Target: target, ReadOnly: true}},
+				Mounts:   mounts,
 				Env:      []string{"HOME=/tmp", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*"},
 				Identity: engine.Identity{Project: projectName, Service: "prep", Kind: "prep", ProjectDir: dir},
 			})
@@ -379,6 +436,29 @@ func InspectDirs(ctx context.Context, c *engine.Client, projectName string, dirs
 		}
 	}
 	return found, nil
+}
+
+// worktreeBaseMount is the mount a worktree needs to be read: its .git is a file that points into the base
+// clone at the path the base has inside every container (/.egzo/base/<workspace>), so an inspection that
+// mounts only the worktree finds no repository. The base is read-only: status takes no lock it must have.
+func worktreeBaseMount(dir string) (MountSpec, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return MountSpec{}, false
+	}
+	target, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
+	if !ok {
+		return MountSpec{}, false
+	}
+	rest, ok := strings.CutPrefix(target, baseMount+"/")
+	if !ok || rest == "" {
+		return MountSpec{}, false
+	}
+	workspace, _, _ := strings.Cut(rest, "/")
+	if workspace == "" || workspace == "." || workspace == ".." {
+		return MountSpec{}, false
+	}
+	return MountSpec{Bind: true, Source: filepath.Join(filepath.Dir(dir), ".base"), Target: baseMountPath(workspace), ReadOnly: true}, true
 }
 
 func (u Unsaved) String() string {
@@ -439,7 +519,7 @@ func StopAgents(ctx context.Context, c *engine.Client, observed Observed) ([]Res
 		if r.Type == "container" && r.Kind == kindAgent && r.State == "running" {
 			if err := c.API.ContainerStop(ctx, r.ID, container.StopOptions{Timeout: &timeout}); err != nil {
 				StartAgents(ctx, c, stopped)
-				return nil, fmt.Errorf("stop %s: %w", r.Service, err)
+				return nil, fmt.Errorf("stop %s: %w", r.Instance, err)
 			}
 			stopped = append(stopped, r)
 		}

@@ -414,6 +414,9 @@ func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid agent name", http.StatusBadRequest)
 		return
 	}
+	// A send that already found the agent registered finishes before the agent is retired.
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

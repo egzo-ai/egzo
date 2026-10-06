@@ -293,7 +293,7 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
 - Harness integrations map extra workspaces to the harness (e.g. Claude Code additional
   directories) and seed workspace trust for each directory.
 
-## Templates and instances (decided, not built)
+## Templates and instances (decided, built)
 
 **Dropped by this model:** `depends_on` (nothing starts at `up`, so there is nothing to order), `egzo up AGENT...`
 (there are no agents to select) and the cross-agent workspace reference `agent/workspace:ro` (a template cannot name
@@ -654,6 +654,22 @@ Decisions taken while building (reversible; each is covered by specs):
 - **The control sidecar registers agents one at a time** (`PUT|DELETE /agents/{name}`, a file each under
   `/state/agents`). Unregistering closes every request still open for the agent as failed (so `send --wait`
   returns 4) and forgets its status. Messages to an unregistered name are refused.
+- **What is left of an instance counts as the instance.** If its container was removed by hand, or a spawn could
+  not undo itself, the network and home volume (labelled with the instance) still make it an instance: `rm`,
+  `prune` and a second spawn of the name see it, and removing it clears its registrations too. `down` unregisters
+  every instance from control before it removes anything, because the control volume outlives the project unless
+  `--volumes` is given.
+- **Only what egzo made is offered by `down --workspaces`.** Cloning records each checkout's directory name in
+  `<workspace path>/.egzo-checkouts`; a path shared with the user's own clones is safe. Checkouts made before the
+  registry existed are never offered (they are left alone, not removed).
+- **An agent must be registered to be heard**, not only hold a valid token: a removed instance that is still
+  running, and a name nobody spawned, are refused by the agent API. Tokens are still the HMAC of the name, so a
+  token leaked into a shared workspace stays valid for any future instance of that name until the control volume
+  is recreated: accepted for now (a per-spawn nonce would fix it).
+- **Spawn and rm wait for the project lock** (up to ten minutes, saying so) instead of failing, so several
+  spawns can be started at once and take turns; the network, the first thing a spawn creates, decides a race
+  between two spawns of one name (the loser exits 17). A project made before instances existed has agent
+  containers without an instance label: only `down` sees them.
 - **Runtime errors belong to spawn.** A Podman project that asks for an OCI runtime, an unpullable harness image,
   a program that exits at once and a git mode conflict fail the spawn, and `up` succeeds.
 - **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy

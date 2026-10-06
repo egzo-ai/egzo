@@ -95,7 +95,11 @@ def prompts(project, agent_name="coder"):
 
 
 def container(engine, project, name):
-    return engine.instance(project.name, name)
+    """An instance by its name, or a sidecar (`control`, `proxy`) by its service."""
+    found = engine.instance(project.name, name)
+    if found is None:
+        found = next((c for c in engine.containers(project.name) if c.labels.get(f"{LABEL_PREFIX}service") == name), None)
+    return found
 
 
 def as_agent(engine, project, verb, path, body=None, name="coder"):

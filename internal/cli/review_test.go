@@ -145,6 +145,7 @@ func TestOnlyCheckoutsAreOfferedForRemoval(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, "ws", "reviewer"), 0o755) // no .git: not a checkout
 	os.WriteFile(filepath.Join(root, "ws", "reviewer", "precious"), []byte("x"), 0o644)
 	os.Symlink("/", filepath.Join(root, "ws", "link")) // must be refused, with the reason
+	os.WriteFile(filepath.Join(root, "ws", ".egzo-checkouts"), []byte("coder\nreviewer\nlink\n"), 0o644)
 	ok, skipped := removableCheckouts(project, root)
 	if len(ok) != 1 || !strings.HasSuffix(ok[0], "coder") {
 		t.Errorf("removable = %v (a directory that is not a checkout is never even offered)", ok)

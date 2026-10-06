@@ -425,3 +425,54 @@ def test_the_agent_environment_names_the_instance_not_the_template(live_project,
     assert env["EGZO_AGENT"] == "issue-9"
     assert env["HTTPS_PROXY"].startswith("http://issue-9:")
     assert re.fullmatch(r"[0-9a-f]{64}", env["EGZO_TOKEN"])
+
+
+def test_a_name_that_would_clash_with_the_proxys_network_is_refused(live_project, engine, agent_image):
+    project_with(live_project, agent_image)
+    result = live_project.run("spawn", "coder", "egress")
+    assert result.returncode == 1 and "egress" in result.stderr
+    assert engine.instance(live_project.name, "egress") is None
+    assert live_project.run("spawn", "coder", "notes").returncode == 0  # an ordinary name is fine
+
+
+def test_a_name_whose_home_volume_is_a_workspace_is_refused(live_project, engine, agent_image):
+    live_project.up(spec(workspaces={"notes-home": {}}, agents={"coder": custom(agent_image, workspaces=["notes-home"])}))
+    result = live_project.run("spawn", "coder", "notes")
+    assert result.returncode == 1 and "notes-home" in result.stderr
+    assert engine.instance(live_project.name, "notes") is None
+    assert [r for r in engine.resources(live_project.name) if r.name.endswith("_notes-home")][0].kind == "volume"  # the workspace is untouched
+
+
+@pytest.mark.parametrize("flags", [("--json", "--wait", "-m", "x"), ("--json", "--attach")])
+def test_json_cannot_be_combined_with_what_takes_over_the_terminal(live_project, engine, agent_image, flags):
+    project_with(live_project, agent_image)
+    result = live_project.run("spawn", "coder", *flags)
+    assert result.returncode == 1 and "--json" in result.stderr
+    assert not engine.instances(live_project.name)
+
+
+def test_spawns_started_together_take_turns_and_all_succeed(live_project, engine, agent_image):
+    project_with(live_project, agent_image)
+    environment = {**os.environ, **live_project.env, "NO_COLOR": "1"}
+    environment.pop("EGZO_PROJECT_NAME", None)
+    processes = [
+        subprocess.Popen(
+            [live_project.egzo.binary, "spawn", "coder", f"batch-{n}"], cwd=live_project.root, env=environment,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        for n in range(3)
+    ]
+    for process in processes:
+        process.communicate(timeout=300)
+    assert [p.returncode for p in processes] == [0, 0, 0]
+    assert {i.labels[f"{LABEL_PREFIX}instance"] for i in engine.instances(live_project.name)} == {"batch-0", "batch-1", "batch-2"}
+
+
+def test_spawning_after_the_file_changed_warns_that_the_instance_is_stale_already(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image, env={"V": "1"})}))
+    live_project.write(spec(agents={"coder": custom(agent_image, env={"V": "2"})}))
+    result = live_project.run("spawn", "coder")
+    assert result.returncode == 0, result.stderr
+    assert "warning" in result.stderr and "egzo up" in result.stderr and "coder-1" in result.stderr
+    assert result.stdout.strip() == "coder-1"
+    assert live_project.run("ps").stdout.count("stale") >= 1

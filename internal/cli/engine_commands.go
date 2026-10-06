@@ -135,6 +135,10 @@ func newDownCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer release()
+			// what an instance made while this command waited for the lock must be removed too
+			if s.observed, err = stack.Observe(ctx, s.engine, s.Resolved.Name); err != nil {
+				return err
+			}
 			var doomed []string
 			if workspaces {
 				// Nothing may write to a checkout while it is inspected and while the person decides:
@@ -252,6 +256,8 @@ func newPsCommand(opts *options) *cobra.Command {
 			var published *stack.Published
 			if p, err := currentTemplates(s); err == nil {
 				published = &p
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot tell which instances are stale: %v\n", err)
 			}
 			rows := stack.Rows(s.observed, reportedStatuses(ctx, s), published)
 			if asJSON {

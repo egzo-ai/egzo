@@ -357,6 +357,16 @@ func registryAuth(ref string, configJSON []byte) string {
 // Workspace directories on the host are never touched.
 func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool, out io.Writer) error {
 	out = &lockedWriter{w: out}
+	// The control volume outlives the project unless --volumes is given: the agents registered in it must
+	// not, or the next `up` would accept messages for instances that do not exist.
+	for _, r := range observed.Resources {
+		if r.Type == "container" && r.Kind == kindControl && r.State == "running" {
+			project := strings.TrimSuffix(r.Name, "-control-1")
+			for _, name := range observed.InstanceNames() {
+				unregisterControl(ctx, c, project, name)
+			}
+		}
+	}
 	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
 	// depends on anything, and stopping containers is where the time goes, so do it together.
 	for _, kind := range []string{"container", "network", "volume"} {

@@ -56,6 +56,10 @@ func (a *agentAPI) identify(r *http.Request) (string, bool) {
 	if !hmac.Equal([]byte(AgentToken(key, agent)), []byte(token)) {
 		return "", false
 	}
+	// A removed agent that is still running, and a name nobody spawned, are not agents of the project.
+	if !a.server.knownAgent(agent) {
+		return "", false
+	}
 	return agent, true
 }
 

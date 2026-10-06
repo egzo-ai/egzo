@@ -156,17 +156,51 @@ func TestGitDirsAreFoundOnDiskSoWorkOfRemovedInstancesIsFoundToo(t *testing.T) {
 		os.MkdirAll(filepath.Join(path, dir), 0o755)
 	}
 	os.Symlink("/", filepath.Join(path, "link"))
+	// a checkout of the user's own that egzo did not make is not egzo's to offer for removal
+	os.MkdirAll(filepath.Join(path, "mine", ".git"), 0o755)
+	if err := markCheckouts(path, "coder", "gone", ".base", "link", "notes", "empty"); err != nil {
+		t.Fatal(err)
+	}
 	got := GitDirs(project)
 	for _, want := range []string{filepath.Join(path, "coder"), filepath.Join(path, "gone"), filepath.Join(path, ".base"), filepath.Join(path, "link")} {
 		if !slices.Contains(got, want) {
 			t.Errorf("GitDirs lacks %s: %v", want, got)
 		}
 	}
-	for _, unwanted := range []string{filepath.Join(path, "notes"), filepath.Join(path, "empty")} {
+	for _, unwanted := range []string{filepath.Join(path, "notes"), filepath.Join(path, "empty"), filepath.Join(path, "mine")} {
 		if slices.Contains(got, unwanted) {
 			t.Errorf("GitDirs lists %s, which is not a checkout: %v", unwanted, got)
 		}
 	}
+}
+
+func TestTheRegistryOfCheckoutsIsAppendOnlyAndIgnoresWhatIsNotAName(t *testing.T) {
+	path := t.TempDir()
+	markCheckouts(path, "a", "b")
+	markCheckouts(path, "b", "c")
+	os.WriteFile(filepath.Join(path, checkoutRegistry), append(mustRead(t, filepath.Join(path, checkoutRegistry)), []byte("../etc\na/b\n..\n\n")...), 0o644)
+	got := managedCheckouts(path)
+	if len(got) != 3 || !got["a"] || !got["b"] || !got["c"] {
+		t.Errorf("registry = %v, want exactly a, b, c: a path in it must never name something else", got)
+	}
+	count := 0
+	for _, line := range strings.Split(string(mustRead(t, filepath.Join(path, checkoutRegistry))), "\n") {
+		if line == "b" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("b was recorded %d times", count)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestInstanceGitDirsAreTheInstancesOwnCheckoutsOnly(t *testing.T) {
@@ -255,5 +289,33 @@ func TestBearerProviderSaysWhetherTheAnthropicCredentialIsABearerToken(t *testin
 	}
 	if bearerProvider(credProject("anthropic", apiKeyService), config.ResolvedAgent{Egress: "missing"}) {
 		t.Error("an unknown profile counted as bearer")
+	}
+}
+
+func TestInspectingAWorktreeMountsItsBaseWhereItsGitFilePoints(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "coder")
+	os.MkdirAll(worktree, 0o755)
+	os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: /.egzo/base/repo/.git/worktrees/coder\n"), 0o644)
+	got, ok := worktreeBaseMount(worktree)
+	want := MountSpec{Bind: true, Source: filepath.Join(root, ".base"), Target: "/.egzo/base/repo", ReadOnly: true}
+	if !ok || got != want {
+		t.Errorf("mount = %+v (%v), want %+v", got, ok, want)
+	}
+	for name, content := range map[string]string{
+		"a clone has a .git directory, not a file": "",
+		"a path outside the base":                  "gitdir: /etc/passwd\n",
+		"a traversal":                              "gitdir: /.egzo/base/../../etc\n",
+		"nothing after the prefix":                 "gitdir: /.egzo/base/\n",
+		"not a gitdir line":                        "hello\n",
+	} {
+		other := filepath.Join(root, "x-"+strings.ReplaceAll(name, " ", "-"))
+		os.MkdirAll(other, 0o755)
+		if content != "" {
+			os.WriteFile(filepath.Join(other, ".git"), []byte(content), 0o644)
+		}
+		if mount, ok := worktreeBaseMount(other); ok {
+			t.Errorf("%s: got a mount %+v", name, mount)
+		}
 	}
 }

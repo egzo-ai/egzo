@@ -67,10 +67,11 @@ type queued struct {
 
 // queueMessage sends a request from the operator to an instance.
 func queueMessage(ctx context.Context, s *session, agent, text string, interrupt bool) (queued, error) {
-	if _, isInstance := s.observed.Instance(agent); !isInstance {
+	if instance, isInstance := s.observed.Instance(agent); !isInstance || instance.State == "missing" {
 		if _, isTemplate := s.Resolved.Agents[agent]; isTemplate {
 			return queued{}, fmt.Errorf("%s is a template; spawn it first: egzo spawn %s", agent, agent)
 		}
+		return queued{}, fmt.Errorf("no instance %q in this project (instances: %s)", agent, strings.Join(s.observed.InstanceNames(), ", "))
 	}
 	body, _ := json.Marshal(map[string]any{"to": "agent:" + agent, "from": operatorActor, "text": text, "interrupt": interrupt})
 	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/messages", body)

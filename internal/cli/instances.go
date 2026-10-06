@@ -46,6 +46,8 @@ func newSpawnCommand(opts *options) *cobra.Command {
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
+			case asJSON && (wait || attach):
+				return fmt.Errorf("--json cannot be used with --wait or --attach: they print and take over the terminal themselves")
 			case wait && message == "":
 				return fmt.Errorf("--wait needs -m: it waits for the first message to be resolved")
 			case wait && attach:
@@ -77,6 +79,11 @@ func newSpawnCommand(opts *options) *cobra.Command {
 			}
 			if err != nil {
 				return err
+			}
+			warnIfTemplateMoved(cmd, s, spawned)
+			// the new instance is a fact now: messages and attach find it
+			if observed, err := stack.Observe(ctx, s.engine, s.Resolved.Name); err == nil {
+				s.observed = observed
 			}
 
 			switch {
@@ -116,9 +123,31 @@ func newSpawnCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
+// lockOrWait takes the project lock, saying so when it has to wait for another command.
+func lockOrWait(s *session, cmd *cobra.Command) (func(), error) {
+	if release, err := stack.Lock(s.Dir); err == nil {
+		return release, nil
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "waiting for another egzo command that is changing this project...")
+	return stack.LockWait(s.Dir, lockWait)
+}
+
+// warnIfTemplateMoved says so when egzo.yaml no longer matches the template an instance was made from:
+// spawn uses what `up` published, and an instance of an outdated template is stale at once.
+func warnIfTemplateMoved(cmd *cobra.Command, s *session, spawned stack.Spawned) {
+	current, err := currentTemplates(s)
+	if err != nil {
+		return
+	}
+	if template, ok := current.Templates[spawned.Template]; !ok || template.Hash != spawned.TemplateHash {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: egzo.yaml has changed since `egzo up`: %s was made from the published template, so it is stale already; "+
+			"run `egzo rm %s`, then `egzo up`, then spawn it again\n", spawned.Name, spawned.Name)
+	}
+}
+
 // spawnLocked spawns under the project lock, which is released before the caller waits or attaches.
 func spawnLocked(ctx context.Context, s *session, request stack.SpawnRequest, cmd *cobra.Command) (stack.Spawned, error) {
-	release, err := stack.LockWait(s.Dir, lockWait)
+	release, err := lockOrWait(s, cmd)
 	if err != nil {
 		return stack.Spawned{}, err
 	}
@@ -164,7 +193,7 @@ func viewOfInstances(ctx context.Context, s *session, instances []stack.Instance
 // removeInstances removes the instances named, and with workspaces the checkouts of their own, after the
 // inspection `down --workspaces` does. Nothing is removed unless everything may be.
 func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names []string, workspaces, force, yes bool) ([]string, error) {
-	release, err := stack.LockWait(s.Dir, lockWait)
+	release, err := lockOrWait(s, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +202,12 @@ func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names 
 	if err != nil {
 		return nil, err
 	}
+	return removeObserved(ctx, cmd, s, observed, names, workspaces, force, yes)
+}
+
+// removeObserved is removeInstances under the lock, for what was just observed.
+func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observed stack.Observed, names []string, workspaces, force, yes bool) ([]string, error) {
+	var err error
 	var instances []stack.Instance
 	for _, name := range names {
 		instance, ok := observed.Instance(name)
@@ -420,7 +455,28 @@ func newPruneCommand(opts *options) *cobra.Command {
 					return fmt.Errorf("aborted: nothing was removed")
 				}
 			}
-			removed, err := removeInstances(ctx, cmd, s, names, false, true, true)
+			// What was listed and confirmed may have changed meanwhile: under the lock, only what still matches
+			// every filter and was confirmed is removed.
+			release, err := lockOrWait(s, cmd)
+			if err != nil {
+				return err
+			}
+			defer release()
+			observed, err := stack.Observe(ctx, s.engine, s.Resolved.Name)
+			if err != nil {
+				return err
+			}
+			confirmed := map[string]bool{}
+			for _, name := range names {
+				confirmed[name] = true
+			}
+			var still []string
+			for _, c := range pruneCandidates(observed.Instances(), pruneFilters{stopped: stopped, stale: stale, olderThan: olderThan}, current, time.Now()) {
+				if confirmed[c.Name] {
+					still = append(still, c.Name)
+				}
+			}
+			removed, err := removeObserved(ctx, cmd, s, observed, still, false, true, true)
 			if asJSON {
 				if removed == nil {
 					removed = []string{}
