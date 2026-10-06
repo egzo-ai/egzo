@@ -34,9 +34,29 @@ func desireProject() *config.Resolved {
 
 var desireInputs = Inputs{Image: "egzo:test", Tokens: map[string]string{"coder": "tok-coder", "review": "tok-review"}}
 
+// desireErr is the infrastructure of the project plus every agent of the project as an instance of the
+// same name: what the project looks like once each template was spawned once.
+func desireErr(project *config.Resolved, dir string, inputs Inputs) (Desired, error) {
+	inputs.Instances = sortedKeys(project.Agents)
+	desired, err := Desire(project, dir, inputs)
+	if err != nil {
+		return desired, err
+	}
+	for _, name := range sortedKeys(project.Agents) {
+		instance, err := DesireInstance(project, dir, inputs, name, InstanceIdentity{Template: name, Actor: "operator", TemplateHash: "th"})
+		if err != nil {
+			return desired, err
+		}
+		desired.Networks = append(desired.Networks, instance.Networks...)
+		desired.Volumes = append(desired.Volumes, instance.Volumes...)
+		desired.Containers = append(desired.Containers, instance.Containers...)
+	}
+	return desired, nil
+}
+
 func desire(t *testing.T, project *config.Resolved) Desired {
 	t.Helper()
-	desired, err := Desire(project, "/dir", desireInputs)
+	desired, err := desireErr(project, "/dir", desireInputs)
 	if err != nil {
 		t.Fatalf("Desire: %v", err)
 	}
@@ -65,7 +85,7 @@ func containerNames(d Desired) []string {
 func TestDesireLayout(t *testing.T) {
 	d := desire(t, desireProject())
 
-	if want := []string{"proj-control-1", "proj-proxy-1", "proj-coder-1", "proj-review-1"}; !slices.Equal(containerNames(d), want) {
+	if want := []string{"proj-control-1", "proj-proxy-1", "proj-coder", "proj-review"}; !slices.Equal(containerNames(d), want) {
 		t.Errorf("containers = %v, want %v", containerNames(d), want)
 	}
 	if d.Control != "proj-control-1" || d.Proxy != "proj-proxy-1" {
@@ -144,14 +164,14 @@ func TestDesireSidecarsAreHardened(t *testing.T) {
 			t.Errorf("%s runs under init; only agents do", name)
 		}
 	}
-	if c := findContainer(t, d, "proj-coder-1"); c.ReadonlyRootfs || !c.Init {
+	if c := findContainer(t, d, "proj-coder"); c.ReadonlyRootfs || !c.Init {
 		t.Errorf("agent: readonly=%v init=%v, want a writable rootfs under init", c.ReadonlyRootfs, c.Init)
 	}
 }
 
 func TestDesireAgentContainer(t *testing.T) {
 	d := desire(t, desireProject())
-	coder := findContainer(t, d, "proj-coder-1")
+	coder := findContainer(t, d, "proj-coder")
 
 	if coder.Network != "proj_coder" || coder.WorkingDir != "/workspace/shared" || coder.Harness != "claude-code" {
 		t.Errorf("coder = %+v", coder)
@@ -159,7 +179,7 @@ func TestDesireAgentContainer(t *testing.T) {
 	if want := "ghcr.io/egzo-ai/egzo-harness-claude-code:"; !strings.HasPrefix(coder.Image, want) {
 		t.Errorf("default image = %q, want prefix %q", coder.Image, want)
 	}
-	if findContainer(t, d, "proj-review-1").Image != "example/review:1" {
+	if findContainer(t, d, "proj-review").Image != "example/review:1" {
 		t.Error("an explicit image was not used")
 	}
 
@@ -185,7 +205,7 @@ func TestDesireAgentContainer(t *testing.T) {
 	if !slices.Equal(coder.Mounts, wantMounts) {
 		t.Errorf("mounts = %+v, want %+v", coder.Mounts, wantMounts)
 	}
-	review := findContainer(t, d, "proj-review-1")
+	review := findContainer(t, d, "proj-review")
 	if want := (MountSpec{Bind: true, Source: "/host/src", Target: "/workspace/src", ReadOnly: true}); !slices.Contains(review.Mounts, want) {
 		t.Errorf("review mounts = %+v, want %+v", review.Mounts, want)
 	}
@@ -196,7 +216,7 @@ func TestDesireAgentEnvOverridesTheDefaults(t *testing.T) {
 	agent := project.Agents["coder"]
 	agent.Env = map[string]string{"NO_PROXY": "custom"}
 	project.Agents["coder"] = agent
-	coder := findContainer(t, desire(t, project), "proj-coder-1")
+	coder := findContainer(t, desire(t, project), "proj-coder")
 	if !slices.Contains(coder.Env, "NO_PROXY=custom") || slices.Contains(coder.Env, "NO_PROXY=control,localhost,127.0.0.1") {
 		t.Errorf("env = %v", coder.Env)
 	}
@@ -208,7 +228,7 @@ func TestDesireResources(t *testing.T) {
 	agent.Resources = config.Resources{CPUs: 1.5, Memory: "2g"}
 	agent.Runtime = "runsc"
 	project.Agents["coder"] = agent
-	coder := findContainer(t, desire(t, project), "proj-coder-1")
+	coder := findContainer(t, desire(t, project), "proj-coder")
 
 	if coder.NanoCPUs != 1_500_000_000 {
 		t.Errorf("NanoCPUs = %d", coder.NanoCPUs)
@@ -219,7 +239,7 @@ func TestDesireResources(t *testing.T) {
 	if coder.Runtime != "runsc" {
 		t.Errorf("Runtime = %q", coder.Runtime)
 	}
-	if review := findContainer(t, desire(t, project), "proj-review-1"); review.NanoCPUs != 0 || review.Memory != 0 {
+	if review := findContainer(t, desire(t, project), "proj-review"); review.NanoCPUs != 0 || review.Memory != 0 {
 		t.Errorf("unset resources should stay zero: %+v", review)
 	}
 }
@@ -230,7 +250,7 @@ func TestDesireErrors(t *testing.T) {
 		agent := project.Agents["coder"]
 		agent.Resources.Memory = "lots"
 		project.Agents["coder"] = agent
-		if _, err := Desire(project, "/dir", desireInputs); err == nil || !strings.Contains(err.Error(), "invalid memory") {
+		if _, err := desireErr(project, "/dir", desireInputs); err == nil || !strings.Contains(err.Error(), "invalid memory") {
 			t.Errorf("err = %v", err)
 		}
 	})
@@ -239,7 +259,7 @@ func TestDesireErrors(t *testing.T) {
 		agent := project.Agents["coder"]
 		agent.Workspaces = []config.Mount{{Name: "ghost", Mount: "/workspace/ghost", Mode: "rw"}}
 		project.Agents["coder"] = agent
-		if _, err := Desire(project, "/dir", desireInputs); err == nil || !strings.Contains(err.Error(), "not declared") {
+		if _, err := desireErr(project, "/dir", desireInputs); err == nil || !strings.Contains(err.Error(), "not declared") {
 			t.Errorf("err = %v", err)
 		}
 	})
@@ -247,7 +267,7 @@ func TestDesireErrors(t *testing.T) {
 
 func TestDesireIdentityAndLabels(t *testing.T) {
 	d := desire(t, desireProject())
-	coder := findContainer(t, d, "proj-coder-1")
+	coder := findContainer(t, d, "proj-coder")
 	labels := coder.Identity.Labels()
 
 	for key, want := range map[string]string{
@@ -292,13 +312,13 @@ func TestDesireIsDeterministic(t *testing.T) {
 }
 
 func TestConfigHashTracksWhatRunsNotWhereItIsDeclared(t *testing.T) {
-	base := findContainer(t, desire(t, desireProject()), "proj-coder-1").Identity.ConfigHash
+	base := findContainer(t, desire(t, desireProject()), "proj-coder").Identity.ConfigHash
 
-	moved, err := Desire(desireProject(), "/another/dir", desireInputs)
+	moved, err := desireErr(desireProject(), "/another/dir", desireInputs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := findContainer(t, moved, "proj-coder-1").Identity.ConfigHash; got != base {
+	if got := findContainer(t, moved, "proj-coder").Identity.ConfigHash; got != base {
 		t.Error("moving the project directory changed the config hash, which would recreate every container")
 	}
 
@@ -322,11 +342,11 @@ func TestConfigHashTracksWhatRunsNotWhereItIsDeclared(t *testing.T) {
 	} {
 		project, inputs := desireProject(), Inputs{Image: "egzo:test", Tokens: map[string]string{"coder": "tok-coder"}}
 		change(project, &inputs)
-		changed, err := Desire(project, "/dir", inputs)
+		changed, err := desireErr(project, "/dir", inputs)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := findContainer(t, changed, "proj-coder-1").Identity.ConfigHash; got == base {
+		if got := findContainer(t, changed, "proj-coder").Identity.ConfigHash; got == base {
 			t.Errorf("changing the %s did not change the config hash", name)
 		}
 	}
@@ -357,20 +377,20 @@ func TestSortedKeys(t *testing.T) {
 func TestAgentsRunAsTheGivenUserAndNewWorkspaceVolumesAreHandedToIt(t *testing.T) {
 	in := desireInputs
 	in.User = "1234:5678"
-	d, err := Desire(desireProject(), "/dir", in)
+	d, err := desireErr(desireProject(), "/dir", in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if findContainer(t, d, "proj-coder-1").User != "1234:5678" {
+	if findContainer(t, d, "proj-coder").User != "1234:5678" {
 		t.Error("the agent does not run as the given user")
 	}
 	if findContainer(t, d, "proj-control-1").User != sidecarUser || findContainer(t, d, "proj-proxy-1").User != sidecarUser {
 		t.Error("the sidecars must keep their own user")
 	}
-	if got := findContainer(t, d, "proj-coder-1").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home", "proj_shared"}) {
+	if got := findContainer(t, d, "proj-coder").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home", "proj_shared"}) {
 		t.Errorf("volumes handed to the agent = %v", got)
 	}
-	if got := findContainer(t, d, "proj-review-1").OwnedVolumes; len(got) != 0 {
+	if got := findContainer(t, d, "proj-review").OwnedVolumes; len(got) != 0 {
 		t.Errorf("a host-bound or custom agent was given volumes: %v", got)
 	}
 	if d.PrepImage != in.Image {
@@ -388,7 +408,7 @@ func TestHarnessAgentsCarryTheirIntegrationInTheirDefinition(t *testing.T) {
 	coder.Inject = config.ResolvedInject{HumanQuiet: "30s", AckTimeout: "60s", IdleSignal: "hook", Quiescence: "5s"}
 	project.Agents["coder"] = coder
 	d := desire(t, project)
-	spec := findContainer(t, d, "proj-coder-1")
+	spec := findContainer(t, d, "proj-coder")
 	for _, want := range []string{
 		"EGZO_HARNESS=claude-code", "EGZO_MODEL=claude-sonnet-5-5", "EGZO_PERMISSIONS=bypass", "IS_SANDBOX=1",
 		"EGZO_HUMAN_QUIET=30s", "EGZO_ACK_TIMEOUT=60s", "EGZO_IDLE_SIGNAL=hook", "EGZO_WORKSPACES=/workspace/shared",
@@ -404,7 +424,7 @@ func TestHarnessAgentsCarryTheirIntegrationInTheirDefinition(t *testing.T) {
 	}
 	coder.Permissions = "default"
 	project.Agents["coder"] = coder
-	if slices.Contains(findContainer(t, desire(t, project), "proj-coder-1").Env, "IS_SANDBOX=1") {
+	if slices.Contains(findContainer(t, desire(t, project), "proj-coder").Env, "IS_SANDBOX=1") {
 		t.Error("IS_SANDBOX is set although permissions are not bypassed")
 	}
 }
@@ -414,7 +434,7 @@ func TestAnAgentPromptIsMountedReadOnlyFromTheProjectDirectory(t *testing.T) {
 	coder := project.Agents["coder"]
 	coder.Prompt = "./prompts/coder.md"
 	project.Agents["coder"] = coder
-	spec := findContainer(t, desire(t, project), "proj-coder-1")
+	spec := findContainer(t, desire(t, project), "proj-coder")
 	want := MountSpec{Bind: true, Source: "/dir/prompts/coder.md", Target: "/etc/egzo/prompt.md", ReadOnly: true}
 	if !slices.Contains(spec.Mounts, want) || !slices.Contains(spec.Env, "EGZO_PROMPT_FILE=/etc/egzo/prompt.md") {
 		t.Errorf("mounts = %+v env = %v", spec.Mounts, spec.Env)

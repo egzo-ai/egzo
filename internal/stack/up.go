@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,10 +23,6 @@ type Options struct {
 	Image    string
 	// HarnessPrefix overrides where harness images are pulled from (EGZO_HARNESS_PREFIX).
 	HarnessPrefix string
-	digests       map[string]string // content hashes of the agents' prompt files, set by Up
-	// Services limits `up` to these agents and what they need: the sidecars, their networks and the
-	// agents they depend on. Everything else is left exactly as it is.
-	Services []string
 }
 
 // AgentUser is who agents run as: the invoking user, so files they write on the host are theirs.
@@ -45,12 +42,10 @@ func agentUser(c *engine.Client, uid, gid int) string {
 	return fmt.Sprintf("%d:%d", uid, gid)
 }
 
-func (o Options) inputs(c *engine.Client, tokens map[string]string) Inputs {
-	return Inputs{Image: o.Image, Tokens: tokens, User: AgentUser(c), HarnessPrefix: o.HarnessPrefix, PromptDigests: o.digests}
-}
-
-// Up converges a project: control first, because it hands out the per-agent tokens everything
-// else needs, then every other resource, then the proxy's policy.
+// Up converges a project's infrastructure: the sidecars, their networks and volumes, the proxy's
+// policy, and the published templates. It starts no agent: instances are spawned from the templates.
+// It refuses while an instance is stale, because converging would leave it running something the file no
+// longer says.
 func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir string, opts Options, out io.Writer) error {
 	observed, err := Observe(ctx, c, project.Name)
 	if err != nil {
@@ -59,12 +54,21 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err := CheckOwnership(observed, project.Name, dir); err != nil {
 		return err
 	}
-	if opts.digests, err = PromptDigests(project, dir); err != nil {
+	published, err := Publish(project, dir, opts.Image, opts.HarnessPrefix, AgentUser(c))
+	if err != nil {
 		return err
 	}
+	if stale := StaleInstances(observed, published); len(stale) > 0 {
+		if !opts.DryRun {
+			return StaleError(stale)
+		}
+		for _, instance := range stale {
+			fmt.Fprintf(out, "stale: %s\n", instance.Name)
+		}
+		fmt.Fprintln(out, "up would refuse until the stale instances are removed")
+	}
 
-	// Read the secrets first: an agent must not start without the credentials its profile
-	// promises, and nothing should be half-created when one is missing.
+	// Read the secrets first: nothing should be half-created when one is missing.
 	var secrets map[string]string
 	if !opts.DryRun {
 		if secrets, err = ResolveSecrets(project, dir); err != nil {
@@ -75,82 +79,28 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	}
 
 	fresh := map[string]bool{} // resources created by this run: nothing can be stored in them yet
-	tokens := map[string]string{}
-	if len(project.Agents) > 0 {
-		tokens, observed, err = agentTokens(ctx, c, project, dir, opts, observed, fresh, out)
-		if err != nil {
-			return err
-		}
-	}
-
-	desired, err := Desire(project, dir, opts.inputs(c, tokens))
-	if err != nil {
-		return err
-	}
-	if err := refuseRuntimes(c, desired); err != nil {
-		return err
-	}
-	checkouts, err := PlanGit(project)
+	desired, err := Desire(project, dir, Inputs{Image: opts.Image, User: AgentUser(c), HarnessPrefix: opts.HarnessPrefix, Instances: observed.InstanceNames()})
 	if err != nil {
 		return err
 	}
 	plan := BuildPlan(desired, observed, opts.Recreate)
-	if len(opts.Services) > 0 {
-		included, err := ScopeAgents(project, opts.Services)
-		if err != nil {
-			return err
-		}
-		plan = restrictPlan(plan, project, included)
-		checkouts = restrictCheckouts(checkouts, included)
+	if err := Apply(ctx, c, desired, plan, opts.DryRun, out); err != nil {
+		return err
 	}
-	switch {
-	case opts.DryRun:
-		if err := Apply(ctx, c, desired, plan, true, out); err != nil {
-			return err
-		}
-		for _, checkout := range checkouts {
-			fmt.Fprintf(out, "would clone %s\n", checkout)
-		}
-	case len(checkouts) > 0:
-		// The clones go through the proxy as the agent, so the sidecars, the agent's network and the
-		// policy must be in place before the agent's container, which needs the clone, exists.
-		sidecars, agents := splitAgentContainers(plan, project)
-		if err := Apply(ctx, c, desired, sidecars, false, out); err != nil {
-			return err
-		}
-		markFresh(fresh, sidecars)
-		if _, err := pushPolicy(ctx, c, project, desired, tokens, secrets, opts, fresh[desired.Proxy], out); err != nil {
-			return err
-		}
-		fresh[desired.Proxy] = false // it has its policy now
-		if err := RunGitPreps(ctx, c, project, dir, opts.Image, AgentUser(c), tokens, checkouts, out); err != nil {
-			return err
-		}
-		if err := Apply(ctx, c, desired, agents, false, out); err != nil {
-			return err
-		}
-		markFresh(fresh, agents)
-	default:
-		if err := Apply(ctx, c, desired, plan, false, out); err != nil {
-			return err
-		}
-		markFresh(fresh, plan)
-	}
+	markFresh(fresh, plan)
 
-	// The proxy and the control sidecar are independent: talk to them at the same time.
 	out = &lockedWriter{w: out}
-	var pushed, stored bool
-	var pushErr, storeErr error
+	var pushed, stored, published2 bool
+	var pushErr, storeErr, publishErr error
 	var wg sync.WaitGroup
-	wg.Add(2)
-	if !opts.DryRun {
-		if err := putProject(ctx, c, project, desired); err != nil {
-			fmt.Fprintf(out, "warning: could not tell the control sidecar which agents exist: %v\n", err)
-		}
-	}
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		pushed, pushErr = pushPolicy(ctx, c, project, desired, tokens, secrets, opts, fresh[desired.Proxy], out)
+		pushed, pushErr = pushPolicy(ctx, c, project, desired, secrets, opts, fresh[desired.Proxy], out)
+		if pushErr == nil && !opts.DryRun && desired.Proxy != "" && fresh[desired.Proxy] {
+			// A proxy created by this run has no bindings: the instances that exist get theirs back.
+			pushErr = BindInstances(ctx, c, project.Name, observed.Instances(), published)
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -158,62 +108,64 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 			stored, storeErr = pushSnapshot(ctx, c, project, desired, fresh[project.Name+"_control"], out)
 		}
 	}()
+	go func() {
+		defer wg.Done()
+		if opts.DryRun {
+			published2 = dryRunTemplates(ctx, c, desired.Control, published, out)
+			return
+		}
+		published2, publishErr = publishTemplates(ctx, c, published, desired.Control, fresh[desired.Control], out)
+	}()
 	wg.Wait()
-	if pushErr != nil {
-		return pushErr
+	for _, err := range []error{pushErr, storeErr, publishErr} {
+		if err != nil {
+			return err
+		}
 	}
-	if storeErr != nil {
-		return storeErr
-	}
-	if len(plan) == 0 && len(checkouts) == 0 && !pushed && !stored {
+	if len(plan) == 0 && !pushed && !stored && !published2 {
 		fmt.Fprintln(out, "nothing to do")
 	}
 	return nil
 }
 
-// agentTokens makes sure the control sidecar runs, then asks it for each agent's token. In a dry
-// run nothing is created, so agents get a placeholder when control is not there yet.
-func agentTokens(
-	ctx context.Context, c *engine.Client, project *config.Resolved, dir string, opts Options, observed Observed, fresh map[string]bool, out io.Writer,
-) (map[string]string, Observed, error) {
-	controlName := project.Name + "-control-1"
-	control := observed.find("container", controlName)
-	if control == nil || control.State != "running" {
-		if opts.DryRun {
-			tokens := map[string]string{}
-			for name := range project.Agents {
-				tokens[name] = "(assigned by the control sidecar)"
-			}
-			return tokens, observed, nil
+// dryRunTemplates reports whether `up` would publish different templates than the control sidecar holds.
+func dryRunTemplates(ctx context.Context, c *engine.Client, controlName string, p Published, out io.Writer) bool {
+	data, err := p.Marshal()
+	if err != nil {
+		return false
+	}
+	current, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/templates"}, nil)
+	if err == nil && current.ExitCode == 0 && bytes.Equal(bytes.TrimSpace(current.Stdout), data) {
+		return false
+	}
+	fmt.Fprintln(out, "would publish templates "+strings.Join(p.Names(), ", "))
+	return true
+}
+
+// BindInstances gives the proxy the credentials of the instances, bound to their templates' profiles.
+// The proxy keeps bindings in memory, so a proxy that was created or restarted has none.
+func BindInstances(ctx context.Context, c *engine.Client, project string, instances []Instance, p Published) error {
+	if len(instances) == 0 {
+		return nil
+	}
+	names := make([]string, len(instances))
+	for i, instance := range instances {
+		names[i] = instance.Name
+	}
+	tokens, err := fetchTokens(ctx, c, project+"-control-1", names)
+	if err != nil {
+		return err
+	}
+	for _, instance := range instances {
+		template, ok := p.Templates[instance.Template]
+		if !ok {
+			continue // a stale instance whose template is gone: it stays denied
 		}
-		bootstrap, err := Desire(project, dir, opts.inputs(c, nil))
-		if err != nil {
-			return nil, observed, err
-		}
-		// Everything but the agents can come up now: only the agents need the tokens, and the
-		// proxy starts while control does.
-		agentOwned := map[string]bool{}
-		for name := range project.Agents {
-			agentOwned[project.Name+"_"+name] = true
-			agentOwned[project.Name+"-"+name+"-1"] = true
-		}
-		var sidecars []Action
-		for _, action := range BuildPlan(bootstrap, observed, false) {
-			if !agentOwned[action.Name] && action.Verb != "connect" {
-				sidecars = append(sidecars, action)
-			}
-		}
-		if err := Apply(ctx, c, bootstrap, sidecars, false, out); err != nil {
-			return nil, observed, err
-		}
-		markFresh(fresh, sidecars)
-		if observed, err = Observe(ctx, c, project.Name); err != nil {
-			return nil, observed, err
+		if err := bindProxy(ctx, c, project, instance.Name, tokens[instance.Name], template.Agent.Egress); err != nil {
+			return err
 		}
 	}
-
-	tokens, err := fetchTokens(ctx, c, controlName, sortedKeys(project.Agents))
-	return tokens, observed, err
+	return nil
 }
 
 // fetchTokens asks the control sidecar for the token of each agent, all at once.
@@ -250,19 +202,51 @@ func fetchTokens(ctx context.Context, c *engine.Client, controlName string, name
 	return tokens, nil
 }
 
-// ReloadPolicy loads the egress policy into a proxy that was started again: the policy lives in the
-// proxy's memory, so a restarted proxy refuses everything until it is given one. The proxy needs a
-// moment before its operator API answers, so this retries for a while.
+// bindProxy lets an instance through the proxy under a profile: its token and the profile's name, never
+// a secret.
+func bindProxy(ctx context.Context, c *engine.Client, project, name, token, profile string) error {
+	body, _ := json.Marshal(BindingFor(token, profile))
+	result, err := c.Exec(ctx, project+"-proxy-1", []string{"/egzo", "proxy", "request", "PUT", "/agents/" + name}, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("bind %s in the proxy: %w", name, err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("bind %s in the proxy: %s", name, strings.TrimSpace(string(result.Stderr)))
+	}
+	return nil
+}
+
+func unbindProxy(ctx context.Context, c *engine.Client, project, name string) error {
+	result, err := c.Exec(ctx, project+"-proxy-1", []string{"/egzo", "proxy", "request", "DELETE", "/agents/" + name}, nil)
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("%s", strings.TrimSpace(string(result.Stderr)))
+	}
+	return nil
+}
+
+func registerControl(ctx context.Context, c *engine.Client, project, name string) error {
+	_, err := ControlRequest(ctx, c, project, "PUT", "/agents/"+name, nil)
+	return err
+}
+
+func unregisterControl(ctx context.Context, c *engine.Client, project, name string) error {
+	_, err := ControlRequest(ctx, c, project, "DELETE", "/agents/"+name, nil)
+	return err
+}
+
+// ReloadPolicy loads the egress policy into a proxy that was started again, and binds the instances
+// again: the policy and the bindings live in the proxy's memory, so a restarted proxy refuses everything
+// until it is given them. The proxy needs a moment before its operator API answers, so this retries for a
+// while.
 func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolved, dir string) error {
 	secrets, err := ResolveSecrets(project, dir)
 	if err != nil {
 		return err
 	}
-	tokens, err := fetchTokens(ctx, c, project.Name+"-control-1", sortedKeys(project.Agents))
-	if err != nil {
-		return err
-	}
-	body, err := json.Marshal(BuildPolicy(project, tokens, secrets))
+	body, err := json.Marshal(BuildPolicy(project, secrets))
 	if err != nil {
 		return err
 	}
@@ -271,7 +255,7 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 	for {
 		result, err := c.Exec(ctx, proxyName, []string{"/egzo", "proxy", "request", "PUT", "/policy"}, bytes.NewReader(body))
 		if err == nil && result.ExitCode == 0 {
-			return nil
+			break
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			if err == nil {
@@ -281,13 +265,24 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+	observed, err := Observe(ctx, c, project.Name)
+	if err != nil {
+		return err
+	}
+	published, err := ReadPublished(ctx, c, project.Name)
+	if errors.Is(err, ErrNotPublished) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return BindInstances(ctx, c, project.Name, observed.Instances(), published)
 }
 
 // pushPolicy loads the egress policy into the proxy when the proxy does not already have it. The
 // policy carries secret values, so it goes through exec stdin and lives only in the proxy's memory.
 func pushPolicy(
 	ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired,
-	tokens, secrets map[string]string, opts Options, fresh bool, out io.Writer,
+	secrets map[string]string, opts Options, fresh bool, out io.Writer,
 ) (bool, error) {
 	if desired.Proxy == "" {
 		return false, nil
@@ -303,7 +298,7 @@ func pushPolicy(
 			return true, nil
 		}
 		if secrets != nil {
-			policy := BuildPolicy(project, tokens, secrets)
+			policy := BuildPolicy(project, secrets)
 			loaded, err := c.Exec(ctx, desired.Proxy, []string{"/egzo", "proxy", "request", "GET", "/policy"}, nil)
 			var current struct {
 				Hash string `json:"hash"`
@@ -320,7 +315,7 @@ func pushPolicy(
 		return false, nil
 	}
 
-	policy := BuildPolicy(project, tokens, secrets)
+	policy := BuildPolicy(project, secrets)
 
 	// The policy lives in the proxy's memory only: a proxy this run just created has none.
 	if !fresh {
@@ -363,107 +358,14 @@ func markFresh(fresh map[string]bool, plan []Action) {
 	}
 }
 
-// refuseRuntimes stops a project that asks for an OCI runtime on Podman. Podman's Docker-compatible
+// refuseRuntime stops a spawn that asks for an OCI runtime on Podman. Podman's Docker-compatible
 // API cannot select a runtime, so egzo could neither apply nor verify it, and the runtime is
 // usually a security boundary (gVisor): starting the agent without it would be a silent downgrade.
-func refuseRuntimes(c *engine.Client, desired Desired) error {
-	if !c.Podman {
+func refuseRuntime(c *engine.Client, agent, runtime string) error {
+	if !c.Podman || runtime == "" {
 		return nil
 	}
-	for _, spec := range desired.Containers {
-		if spec.Runtime != "" {
-			return fmt.Errorf("%s asks for the %s runtime, but Podman's Docker-compatible API cannot select a runtime, "+
-				"so egzo can neither apply nor verify it and will not start the agent without it: "+
-				"remove runtime: from the agent, or use Docker with the runtime registered", spec.Name, spec.Runtime)
-		}
-	}
-	return nil
-}
-
-// splitAgentContainers separates what must exist before an agent's container (networks, volumes,
-// the sidecars) from the agent containers themselves.
-func splitAgentContainers(plan []Action, project *config.Resolved) (before, agents []Action) {
-	agentContainers := map[string]bool{}
-	for name := range project.Agents {
-		agentContainers[project.Name+"-"+name+"-1"] = true
-	}
-	for _, action := range plan {
-		if action.Type == "container" && agentContainers[action.Name] {
-			agents = append(agents, action)
-		} else {
-			before = append(before, action)
-		}
-	}
-	return before, agents
-}
-
-// ScopeAgents returns the agents `up SERVICE...` acts on: the named ones and, transitively, the
-// agents they depend on. control and proxy may be named; they are always part of it.
-func ScopeAgents(project *config.Resolved, services []string) (map[string]bool, error) {
-	included := map[string]bool{}
-	var visit func(string)
-	visit = func(name string) {
-		if included[name] {
-			return
-		}
-		included[name] = true
-		for _, dependency := range project.Agents[name].DependsOn {
-			visit(dependency)
-		}
-	}
-	for _, name := range services {
-		if name == controlService || name == proxyService {
-			continue
-		}
-		if _, ok := project.Agents[name]; !ok {
-			known := append([]string{controlService, proxyService}, sortedKeys(project.Agents)...)
-			return nil, fmt.Errorf("no service %q in egzo.yaml (services: %s)", name, strings.Join(known, ", "))
-		}
-		visit(name)
-	}
-	return included, nil
-}
-
-// restrictPlan drops the actions that concern agents outside the scope, so their containers are
-// neither created nor changed nor removed.
-func restrictPlan(plan []Action, project *config.Resolved, included map[string]bool) []Action {
-	excluded := map[string]bool{}
-	for name := range project.Agents {
-		if !included[name] {
-			excluded[project.Name+"-"+name+"-1"] = true
-			excluded[project.Name+"_"+name] = true
-			excluded[homeVolume(project.Name, name)] = true
-		}
-	}
-	var kept []Action
-	for _, action := range plan {
-		if excluded[action.Name] || excluded[action.Peer] {
-			continue
-		}
-		kept = append(kept, action)
-	}
-	return kept
-}
-
-func restrictCheckouts(plan []Checkout, included map[string]bool) []Checkout {
-	var kept []Checkout
-	for _, checkout := range plan {
-		if included[checkout.Agent] {
-			kept = append(kept, checkout)
-		}
-	}
-	return kept
-}
-
-// putProject tells the control sidecar which agents exist. A failure is reported but does not stop `up`.
-func putProject(ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired) error {
-	body, _ := json.Marshal(map[string][]string{"agents": sortedKeys(project.Agents)})
-	result, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/project"}, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("%s", strings.TrimSpace(string(result.Stderr)))
-	}
-	return nil
+	return fmt.Errorf("agent %q asks for the %s runtime, but Podman's Docker-compatible API cannot select a runtime, "+
+		"so egzo can neither apply nor verify it and will not start the agent without it: "+
+		"remove runtime: from the agent, or use Docker with the runtime registered", agent, runtime)
 }

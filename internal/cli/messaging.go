@@ -24,8 +24,8 @@ func newSendCommand(opts *options) *cobra.Command {
 	var interrupt, wait bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
-		Use:   "send AGENT MESSAGE...",
-		Short: "Send a request to an agent",
+		Use:   "send INSTANCE MESSAGE...",
+		Short: "Send a request to an instance",
 		Long: "Send a request to an agent, as the operator. The message waits in the control sidecar; when the agent is idle\n" +
 			"and nobody has typed for a while, a short line is typed into its terminal naming the message, and the agent\n" +
 			"fetches it and answers through its tools. --wait waits for that answer and prints it: updates go to stderr,\n" +
@@ -40,19 +40,10 @@ func newSendCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			if _, ok := s.Resolved.Agents[args[0]]; !ok {
-				return fmt.Errorf("no agent %q in egzo.yaml (agents: %s)", args[0], strings.Join(agentNames(s.Resolved.Agents), ", "))
-			}
-			body, _ := json.Marshal(map[string]any{"to": "agent:" + args[0], "from": operatorActor, "text": strings.Join(args[1:], " "), "interrupt": interrupt})
-			reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/messages", body)
+			queued, err := queueMessage(ctx, s, args[0], strings.Join(args[1:], " "), interrupt)
 			if err != nil {
 				return err
 			}
-			var queued struct {
-				ID  string
-				Seq int
-			}
-			json.Unmarshal(reply, &queued)
 			line := fmt.Sprintf("queued %s for %s\n", queued.ID, args[0])
 			if !wait {
 				fmt.Fprint(cmd.OutOrStdout(), line)
@@ -66,6 +57,29 @@ func newSendCommand(opts *options) *cobra.Command {
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the agent to resolve the request and print its answer")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "with --wait, give up after this long (exit code 5); the message stays open")
 	return cmd
+}
+
+// queued is a message waiting in the control sidecar.
+type queued struct {
+	ID  string
+	Seq int
+}
+
+// queueMessage sends a request from the operator to an instance.
+func queueMessage(ctx context.Context, s *session, agent, text string, interrupt bool) (queued, error) {
+	if _, isInstance := s.observed.Instance(agent); !isInstance {
+		if _, isTemplate := s.Resolved.Agents[agent]; isTemplate {
+			return queued{}, fmt.Errorf("%s is a template; spawn it first: egzo spawn %s", agent, agent)
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"to": "agent:" + agent, "from": operatorActor, "text": text, "interrupt": interrupt})
+	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/messages", body)
+	if err != nil {
+		return queued{}, err
+	}
+	var q queued
+	json.Unmarshal(reply, &q)
+	return q, nil
 }
 
 // Exit codes of `send --wait`.

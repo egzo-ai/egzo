@@ -103,6 +103,34 @@ class Project:
         assert result.returncode == 0, f"egzo config rejected the file:\n{result.stderr}"
         return result.yaml()
 
+    def container(self, instance):
+        """The engine name of an instance's container: `<project>-<instance>`."""
+        return f"{self.name}-{instance}"
+
+    def up(self, document=None, **kwargs):
+        """`egzo up`, which must succeed. With a document, writes it first. A template starts nothing:
+        use spawn (or start) for an agent."""
+        if document is not None:
+            self.write(document)
+        result = self.run("up", **{"timeout": 300, **kwargs})
+        assert result.returncode == 0, f"egzo up failed:\n{result.stderr}"
+        return result
+
+    def spawn(self, template, name=None, *args, **kwargs):
+        """`egzo spawn TEMPLATE [NAME] ARGS...`, which must succeed; returns the instance name it printed.
+        Without a name the instance is `<template>-<n>`, so `spawn("claude")` is `claude-1`, whose container
+        is `<project>-claude-1`."""
+        command = ["spawn", template, *([name] if name else []), *args]
+        result = self.run(*command, **{"timeout": 300, **kwargs})
+        assert result.returncode == 0, f"egzo spawn {template} failed:\n{result.stderr}"
+        return result.stdout.strip().splitlines()[-1]
+
+    def start(self, *templates, document=None, **kwargs):
+        """`up`, then one instance of each template (auto names); returns their names in order. This is what
+        a spec that needs running agents does: `up` itself starts none."""
+        self.up(document, **kwargs)
+        return [self.spawn(template) for template in templates]
+
 
 @dataclass
 class Resource:
@@ -278,6 +306,15 @@ class Engine:
 
     def containers(self, project):
         return self._list("container", project)
+
+    def instances(self, project):
+        """The containers of a project that are agent instances."""
+        return [r for r in self.containers(project) if r.labels.get(f"{LABEL_PREFIX}kind") == "agent"]
+
+    def instance(self, project, name):
+        """The container of one instance, or None."""
+        found = [r for r in self.instances(project) if r.labels.get(f"{LABEL_PREFIX}instance") == name]
+        return found[0] if found else None
 
     def cleanup(self, project):
         for resource in self.containers(project):

@@ -29,11 +29,24 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r := &rig{t: t, srv: srv}
+	for _, name := range []string{"coder", "reviewer"} {
+		r.register(name)
+	}
 	r.agent = httptest.NewServer((&agentAPI{server: srv}).handler())
 	r.operator = httptest.NewServer(srv.handler())
 	t.Cleanup(r.agent.Close)
 	t.Cleanup(r.operator.Close)
 	return r
+}
+
+// register makes an agent known to the sidecar, as spawning an instance does.
+func (r *rig) register(name string) {
+	r.t.Helper()
+	response := httptest.NewRecorder()
+	r.srv.handler().ServeHTTP(response, httptest.NewRequest("PUT", "/agents/"+name, nil))
+	if response.Code != http.StatusNoContent {
+		r.t.Fatalf("register %s: status %d", name, response.Code)
+	}
 }
 
 func (r *rig) token(agent string) string {

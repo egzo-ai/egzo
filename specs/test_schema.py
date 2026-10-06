@@ -141,29 +141,18 @@ def test_plain_names_with_dashes_underscores_and_digits_are_accepted(project):
     assert project.config(document).returncode == 0
 
 
-# --- depends_on -----------------------------------------------------------------------------------------
+# --- depends_on is gone: nothing starts at `up`, so there is nothing to order -------------------------------
 
 
-def test_a_depends_on_cycle_is_rejected_and_the_cycle_is_named(project):
-    custom = {"harness": "custom", "image": "alpine"}
-    result = project.config(
-        spec(agents={"a": {**custom, "depends_on": ["b"]}, "b": {**custom, "depends_on": ["c"]}, "c": {**custom, "depends_on": ["a"]}})
-    )
+def test_depends_on_is_an_unknown_key_of_an_agent(project):
+    result = project.config(spec(agents={"a": {"harness": "custom", "image": "alpine", "depends_on": ["b"]}, "b": agent()}))
     assert result.returncode != 0
-    assert "cycle" in result.stderr
-    assert "a -> b -> c -> a" in result.stderr
+    assert "depends_on" in result.stderr
 
 
-def test_an_agent_cannot_depend_on_itself(project):
-    result = project.config(spec(agents={"a": {"harness": "custom", "image": "alpine", "depends_on": ["a"]}}))
-    assert result.returncode != 0
-    assert "cycle" in result.stderr or "itself" in result.stderr
-
-
-def test_a_depends_on_chain_without_a_cycle_is_accepted(project):
-    custom = {"harness": "custom", "image": "alpine"}
-    document = spec(agents={"a": custom, "b": {**custom, "depends_on": ["a"]}, "c": {**custom, "depends_on": ["a", "b"]}})
-    assert project.config(document).returncode == 0
+def test_the_resolved_configuration_has_no_depends_on(project):
+    resolved = project.resolved(spec(agents={"a": {"harness": "custom", "image": "alpine"}}))
+    assert "depends_on" not in resolved["agents"]["a"]
 
 
 # --- env: egzo owns its own variables -------------------------------------------------------------------

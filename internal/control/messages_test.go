@@ -1,7 +1,6 @@
 package control
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,8 +10,9 @@ import (
 
 func (r *rig) project(agents ...string) {
 	r.t.Helper()
-	body, _ := json.Marshal(map[string][]string{"agents": agents})
-	r.asOperator("PUT", "/project", string(body)).Body.Close()
+	for _, agent := range agents {
+		r.register(agent)
+	}
 }
 
 // request is an operator request to an agent; it returns the message id.

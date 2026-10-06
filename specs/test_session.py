@@ -32,9 +32,11 @@ def session(live_project, session_image, egzo):
     """Bring up one agent running the fake TUI in the given mode; returns a function that attaches to it."""
 
     def start(mode="cat", agents=None, **env):
-        live_project.write(spec(agents=agents or {"coder": tui(session_image, mode, **env)}))
-        result = live_project.run("up", timeout=300)
-        assert result.returncode == 0, result.stderr
+        # one template per agent (`<name>-template`) and one instance of each, named `<name>`
+        agents = agents or {"coder": tui(session_image, mode, **env)}
+        live_project.up(spec(agents={f"{name}-template": fields for name, fields in agents.items()}))
+        for name in agents:
+            live_project.spawn(f"{name}-template", name)
 
     start.project = live_project
     start.egzo = egzo
@@ -58,10 +60,10 @@ def detach(client):
     return client.exitstatus
 
 
-def state_of(project, service):
+def state_of(project, name):
     for line in project.run("ps").stdout.splitlines()[1:]:
         cells = line.split()
-        if len(cells) > 2 and cells[1] == service:
+        if len(cells) > 2 and cells[0] == name:
             return cells[2]
 
 
@@ -232,9 +234,9 @@ def test_a_read_only_observer_sees_everything_and_types_nothing(session):
     detach(writer)
 
 
-def test_an_agent_whose_program_exits_at_once_fails_up_with_its_exit_code(live_project, session_image):
-    live_project.write(spec(agents={"coder": tui(session_image, "exit")}))
-    result = live_project.run("up", timeout=300)
+def test_an_agent_whose_program_exits_at_once_fails_spawn_with_its_exit_code(live_project, session_image):
+    live_project.up(spec(agents={"coder": tui(session_image, "exit")}))
+    result = live_project.run("spawn", "coder", timeout=300)
     assert result.returncode != 0
     assert "code 3" in result.stderr and "bye" in result.stderr
 
@@ -269,8 +271,8 @@ def test_attach_to_an_unknown_agent_names_the_known_ones(session):
 
 
 def test_attach_to_an_agent_without_a_session_explains_what_is_missing(live_project, engine, agent_image, egzo):
-    live_project.write(spec(agents={"coder": agent(harness="custom", image=agent_image)}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    live_project.up(spec(agents={"coder-template": agent(harness="custom", image=agent_image)}))
+    live_project.spawn("coder-template", "coder")
     client = pexpect.spawn(egzo.binary, ["attach", "coder"], cwd=live_project.root, env={**os.environ, **live_project.env}, encoding=None)
     client.expect(pexpect.EOF)
     client.close()

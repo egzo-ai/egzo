@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"crypto/x509"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,8 +101,7 @@ func TestLeafCertificatesAreCachedAndRenewed(t *testing.T) {
 }
 
 func TestPolicyDecisions(t *testing.T) {
-	agent := AgentPolicy{
-		Token: "t",
+	agent := Profile{
 		Allow: []string{"*.pypi.org", "example.com"},
 		Services: []Service{
 			{Name: "anthropic", Hosts: []string{"api.anthropic.com"}, Header: "x-api-key", Secret: "KEY"},
@@ -124,25 +124,68 @@ func TestPolicyDecisions(t *testing.T) {
 	if d := agent.Decide("evil.example"); d.Allowed {
 		t.Errorf("unlisted host allowed: %+v", d)
 	}
-	everything := AgentPolicy{Allow: []string{"*"}}
+	everything := Profile{Allow: []string{"*"}}
 	if d := everything.Decide("anything.example"); !d.Allowed || d.Inject != nil {
 		t.Errorf("allow * decision = %+v", d)
 	}
 }
 
 func TestAuthenticateNeedsTheRightTokenForTheRightAgent(t *testing.T) {
-	policy := &Policy{Agents: map[string]AgentPolicy{"coder": {Token: "tc"}, "reviewer": {Token: "tr"}, "nobody": {}}}
-	if _, ok := policy.Authenticate("coder", "tc"); !ok {
+	server := NewServer(nil, NewAudit(io.Discard))
+	policy := &Policy{Hash: "h", Profiles: map[string]Profile{"p": {Allow: []string{"example.com"}}}}
+	server.SetPolicy(policy)
+	for name, token := range map[string]string{"coder": "tc", "reviewer": "tr"} {
+		if err := server.BindAgent(name, Binding{Token: token, Profile: "p"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if server.authenticate(policy, "coder", "tc") == nil {
 		t.Error("valid credentials refused")
 	}
-	if _, ok := policy.Authenticate("coder", "tr"); ok {
+	if server.authenticate(policy, "coder", "tr") != nil {
 		t.Error("another agent's token accepted")
 	}
-	if _, ok := policy.Authenticate("ghost", "tc"); ok {
+	if server.authenticate(policy, "ghost", "tc") != nil {
 		t.Error("unknown agent accepted")
 	}
-	if _, ok := policy.Authenticate("nobody", ""); ok {
-		t.Error("an agent without a token accepted an empty one")
+	if server.authenticate(policy, "coder", "") != nil {
+		t.Error("an empty token accepted")
+	}
+	if err := server.BindAgent("nobody", Binding{Profile: "p"}); err == nil {
+		t.Error("a binding without a token was accepted")
+	}
+}
+
+func TestBindingsNeedALoadedProfileAndFollowItsChanges(t *testing.T) {
+	server := NewServer(nil, NewAudit(io.Discard))
+	if err := server.BindAgent("coder", Binding{Token: "t", Profile: "p"}); err == nil {
+		t.Error("an agent was bound before any policy was loaded")
+	}
+	first := &Policy{Hash: "1", Profiles: map[string]Profile{"p": {Allow: []string{"a.example"}}}}
+	server.SetPolicy(first)
+	if err := server.BindAgent("coder", Binding{Token: "t", Profile: "missing"}); err == nil {
+		t.Error("an agent was bound to a profile that does not exist")
+	}
+	if err := server.BindAgent("coder", Binding{Token: "t", Profile: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	// Loading a new policy keeps the binding and gives the agent the new profile at once.
+	second := &Policy{Hash: "2", Profiles: map[string]Profile{"p": {Allow: []string{"b.example"}}}}
+	server.SetPolicy(second)
+	profile := server.authenticate(second, "coder", "t")
+	if profile == nil || !profile.Decide("b.example").Allowed || profile.Decide("a.example").Allowed {
+		t.Errorf("profile after the change = %+v", profile)
+	}
+	// A policy without the profile leaves the agent bound but denied.
+	third := &Policy{Hash: "3", Profiles: map[string]Profile{}}
+	server.SetPolicy(third)
+	if server.authenticate(third, "coder", "t") != nil {
+		t.Error("an agent kept a profile that was removed")
+	}
+	server.UnbindAgent("coder")
+	server.UnbindAgent("never-bound")
+	if len(server.BoundAgents()) != 0 {
+		t.Errorf("bound agents = %v", server.BoundAgents())
 	}
 }
 

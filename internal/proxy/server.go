@@ -2,14 +2,17 @@ package proxy
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +30,10 @@ type Server struct {
 	minter *Minter
 	audit  *Audit
 	policy atomic.Pointer[Policy]
+	// agents maps each bound agent to its credentials and profile. It is replaced as a whole on every
+	// change (agentsMu orders the changes), so a connection reads it without a lock.
+	agents   atomic.Pointer[map[string]Binding]
+	agentsMu sync.Mutex
 
 	// Transport reaches the real upstream for intercepted hosts. Tests replace it.
 	Transport http.RoundTripper
@@ -64,8 +71,83 @@ func NewServer(ca *CA, audit *Audit) *Server {
 // SetCA switches the CA that signs the certificates of intercepted hosts.
 func (s *Server) SetCA(ca *CA) { s.minter.SetCA(ca) }
 
-// SetPolicy atomically replaces the policy. Until one is set, everything is denied.
+// SetPolicy atomically replaces the profiles. Until one is set, everything is denied. The agents bound
+// to profiles stay bound: a changed profile takes effect for them at once.
 func (s *Server) SetPolicy(policy *Policy) { s.policy.Store(policy) }
+
+// BindAgent lets an agent use a profile of the loaded policy, under a token. The policy comes first:
+// a binding to a profile nobody loaded would silently deny everything.
+func (s *Server) BindAgent(name string, binding Binding) error {
+	if binding.Token == "" {
+		return errors.New("a binding needs a token")
+	}
+	policy := s.policy.Load()
+	if policy == nil {
+		return errors.New("no egress policy is loaded: run `egzo up` first")
+	}
+	if _, ok := policy.Profiles[binding.Profile]; !ok {
+		return fmt.Errorf("the loaded policy has no egress profile %q", binding.Profile)
+	}
+	s.agentsMu.Lock()
+	defer s.agentsMu.Unlock()
+	next := map[string]Binding{name: binding}
+	if current := s.agents.Load(); current != nil {
+		for key, value := range *current {
+			if key != name {
+				next[key] = value
+			}
+		}
+	}
+	s.agents.Store(&next)
+	return nil
+}
+
+// UnbindAgent removes an agent's credentials: it cannot reach anything through the proxy again. Unknown
+// names are fine.
+func (s *Server) UnbindAgent(name string) {
+	s.agentsMu.Lock()
+	defer s.agentsMu.Unlock()
+	current := s.agents.Load()
+	if current == nil {
+		return
+	}
+	next := make(map[string]Binding, len(*current))
+	for key, value := range *current {
+		if key != name {
+			next[key] = value
+		}
+	}
+	s.agents.Store(&next)
+}
+
+// BoundAgents lists the agents that may use the proxy, sorted.
+func (s *Server) BoundAgents() []string {
+	names := []string{}
+	if current := s.agents.Load(); current != nil {
+		for name := range *current {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// authenticate finds the profile an agent's proxy credentials give it.
+func (s *Server) authenticate(policy *Policy, agent, token string) *Profile {
+	current := s.agents.Load()
+	if current == nil {
+		return nil
+	}
+	binding, ok := (*current)[agent]
+	if !ok || binding.Token == "" || subtle.ConstantTimeCompare([]byte(binding.Token), []byte(token)) != 1 {
+		return nil
+	}
+	profile, ok := policy.Profiles[binding.Profile]
+	if !ok {
+		return nil
+	}
+	return &profile
+}
 
 // PolicyHash is the hash of the loaded policy, or empty when none is loaded.
 func (s *Server) PolicyHash() string {
@@ -97,9 +179,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agent, token, hasCredentials := proxyCredentials(r)
-	var agentPolicy *AgentPolicy
+	var agentPolicy *Profile
 	if hasCredentials {
-		agentPolicy, _ = policy.Authenticate(agent, token)
+		agentPolicy = s.authenticate(policy, agent, token)
 	}
 	if agentPolicy == nil {
 		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "missing or invalid proxy credentials"})

@@ -1,9 +1,9 @@
 # egzo
 
-**Docker Compose for AI coding agents.** Describe a team of agents in one YAML file, start them in
+**Docker Compose for AI coding agents.** Describe your agents as templates in one YAML file, start as many as you need in
 sandboxes, and attach to any of them with the real TUI you already know, Claude Code included.
 
-> Status: working on Docker, early everywhere else. Config validation, `up` / `down`, isolated agents
+> Status: working on Docker, early everywhere else. Config validation, `up` / `spawn` / `rm` / `down`, agent templates and instances, isolated agents
 > running as you, the egress proxy with credential injection, git workspaces (clone, shared, worktree),
 > Claude Code and OpenCode in their native TUI (`egzo attach`), message delivery into the terminal, and the
 > operator commands (`secrets`, `doctor`, `diff`, `ca rotate`, `proxy rules`) are built. Not yet: pi, and the
@@ -72,28 +72,30 @@ agents:
 
 No `egress:` on the agents: with no profile named, each gets `default`.
 
-Start it, look around, talk to your agents:
+Bring the project up, then start the agents you need from their templates. Each `agents:` entry is a
+template: `egzo up` starts the proxy and the control sidecar and starts no agent.
 
 ```console
 $ export ANTHROPIC_API_KEY=... GITHUB_TOKEN=...
-$ egzo up                  # prepares a worktree per agent, starts the proxy and the agents
+$ egzo up                                     # the proxy, the control sidecar, the templates
+$ egzo spawn architect -m "How should we add rate limiting to the checkout API?"
+$ egzo spawn coder issue-412 -m "Add rate limiting to the checkout API, then open a PR" --attach
 $ egzo ps
-NAME            SERVICE    STATE    HEALTH   ACTIVITY  STATUS
-shop-architect-1  architect  running           idle
-shop-coder-1      coder      running           idle
-shop-control-1    control    running  healthy
-shop-proxy-1      proxy      running  healthy
-shop-reviewer-1   reviewer   running           idle
+NAME        SERVICE    STATE    HEALTH   ACTIVITY  OPEN  WAITING  ACTOR     AGE  STALE  STATUS
+architect-1 architect  running           working   1              operator  2m
+issue-412   coder      running           working   1              operator  1m
+shop-control-1  control  running  healthy
+shop-proxy-1    proxy    running  healthy
 
-$ egzo send architect "How should we add rate limiting to the checkout API?"
-$ egzo send coder "Add rate limiting to the checkout API, then open a PR"
-$ egzo attach coder        # the real Claude Code TUI; detach with Ctrl-]
-$ egzo send reviewer "Review the new PR when the coder opens it"
+$ egzo attach architect-1  # the real Claude Code TUI; detach with Ctrl-]
+$ egzo spawn reviewer pr-88 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
+$ egzo rm issue-412        # when the work is pushed
 ```
 
-The coder works in its own worktree and pushes its branch. The reviewer and the architect each have
-their own worktree and fetch what they need from GitHub. The agents never hold the API key or the
-GitHub token: the proxy injects them into outgoing requests, and everything else is denied.
+An instance is named by you (`issue-412`) or by egzo (`architect-1`). The same template can be spawned as
+often as you like, each with its own worktree, network and home. Spawning needs no edit of `egzo.yaml`.
+The agents never hold the API key or the GitHub token: the proxy injects them into outgoing requests, and
+everything else is denied.
 
 ## How it works
 
@@ -106,7 +108,8 @@ GitHub token: the proxy injects them into outgoing requests, and everything else
 
 - Agents can reach only the proxy and the control sidecar, never each other or your network.
 - Messages and status flow through harness hooks and a small MCP tool set, not screen scraping.
-- Projects are plain containers with labels, like Compose projects. `egzo up` converges to the file.
+- Projects are plain containers with labels, like Compose projects. `egzo up` converges the infrastructure to the file
+  and publishes the templates; `egzo spawn` makes agents from them, so day-to-day work needs no file edits.
 
 ## Requirements
 

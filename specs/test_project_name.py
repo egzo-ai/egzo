@@ -46,8 +46,8 @@ def test_a_name_in_use_from_another_directory_refuses_every_command(live_project
     assert live_project.run("up").returncode == 0
 
     other = make_project(env=live_project.env)
-    other.write(spec())
-    for command in (["ps"], ["up"], ["down"]):
+    other.write(spec(agents={"coder": {"harness": "custom", "image": "alpine"}}))
+    for command in (["ps"], ["up"], ["down"], ["spawn", "coder"], ["rm", "coder-1"], ["prune", "--stale"], ["send", "coder-1", "hi"]):
         result = other.run("-p", live_project.name, *command)
         assert result.returncode != 0, command
         assert str(live_project.root) in result.stderr, command

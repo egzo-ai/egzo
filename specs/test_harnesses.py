@@ -36,6 +36,18 @@ def harness(request):
     return request.param
 
 
+def bring_up(project, document, timeout=900):
+    """Write the document with each agent as a template named `<name>-template`, `up`, and spawn one instance
+    of each named `<name>` (the addresses and container names the specs below use are the instance names)."""
+    names = list(document["agents"])
+    project.write({**document, "agents": {f"{name}-template": fields for name, fields in document["agents"].items()}})
+    result = project.run("up", timeout=timeout)
+    assert result.returncode == 0, result.stderr
+    for name in names:
+        project.spawn(f"{name}-template", name, timeout=timeout)
+    return project
+
+
 @pytest.fixture
 def environment_secrets(live_project):
     live_project.env["ANTHROPIC_API_KEY"] = "sk-ant-egzo-spec-not-a-real-key-0000000000"
@@ -52,16 +64,13 @@ def launched(environment_secrets, harness_image, harness):
         document = spec(egress={"default": ANTHROPIC}, agents={"coder": agent(**fields)}, **extra)
         if workspaces:
             document["workspaces"] = workspaces
-        environment_secrets.write(document)
-        result = environment_secrets.run("up", timeout=900)
-        assert result.returncode == 0, result.stderr
-        return environment_secrets
+        return bring_up(environment_secrets, document)
 
     return start
 
 
-def container(engine, project, service="coder"):
-    return [r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}service") == service][0]
+def container(engine, project, name="coder"):
+    return engine.instance(project.name, name)
 
 
 def read_in_agent(engine, project, path):
@@ -134,11 +143,18 @@ def test_the_tui_reaches_its_prompt_with_no_first_run_question(launched, engine,
     client.expect(pexpect.EOF)
 
 
-def test_the_tui_survives_a_recreate_with_its_conversation_home(launched, engine):
+def test_the_tui_keeps_its_conversation_home_across_a_stop_and_start(launched, engine):
     project = launched()
     engine.exec(container(engine, project).name, "sh", "-c", "echo kept > $HOME/marker")
-    assert project.run("up", "--recreate", timeout=300).returncode == 0
+    assert project.run("stop", "coder").returncode == 0
+    assert project.run("start", "coder", timeout=300).returncode == 0
     assert read_in_agent(engine, project, "$HOME/marker").strip() == "kept"
+
+
+def test_removing_an_instance_removes_its_conversation_home(launched, engine):
+    project = launched()
+    assert project.run("rm", "--force", "coder").returncode == 0
+    assert not [r for r in engine.resources(project.name) if r.kind == "volume" and r.name.endswith("coder-home")]
 
 
 # --- bypass mode ------------------------------------------------------------------------------------
@@ -150,10 +166,7 @@ def claude(environment_secrets, harness_image):
         document = spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"), **(agent_fields or {}))})
         if workspaces:
             document["workspaces"] = workspaces
-        environment_secrets.write(document)
-        result = environment_secrets.run("up", timeout=900)
-        assert result.returncode == 0, result.stderr
-        return environment_secrets
+        return bring_up(environment_secrets, document)
 
     return start
 
@@ -164,10 +177,7 @@ def opencode(environment_secrets, harness_image):
         document = spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="opencode", image=harness_image("opencode"), **(agent_fields or {}))})
         if workspaces:
             document["workspaces"] = workspaces
-        environment_secrets.write(document)
-        result = environment_secrets.run("up", timeout=900)
-        assert result.returncode == 0, result.stderr
-        return environment_secrets
+        return bring_up(environment_secrets, document)
 
     return start
 
@@ -239,9 +249,7 @@ def test_claude_code_model_and_prompt_come_from_the_agent_definition(claude, eng
 
 def test_the_prompt_file_is_added_to_the_instructions(environment_secrets, harness_image, engine):
     (environment_secrets.root / "coder.md").write_text("Always answer in rhyme.\n")
-    document = spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"), prompt="./coder.md")})
-    environment_secrets.write(document)
-    assert environment_secrets.run("up", timeout=900).returncode == 0
+    bring_up(environment_secrets, spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"), prompt="./coder.md")}))
     text = read_in_agent(engine, environment_secrets, "$HOME/.egzo/instructions.md")
     assert "Always answer in rhyme." in text and "get_message" in text
 
@@ -286,8 +294,7 @@ def test_opencode_reports_its_life_cycle_through_a_plugin(opencode, engine):
 def test_opencode_model_and_instructions_come_from_the_agent_definition(environment_secrets, harness_image, engine):
     (environment_secrets.root / "coder.md").write_text("Always answer in rhyme.\n")
     fields = {"model": "anthropic/claude-sonnet-5-5", "prompt": "./coder.md"}
-    environment_secrets.write(spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="opencode", image=harness_image("opencode"), **fields)}))
-    assert environment_secrets.run("up", timeout=900).returncode == 0
+    bring_up(environment_secrets, spec(egress={"default": ANTHROPIC}, agents={"coder": agent(harness="opencode", image=harness_image("opencode"), **fields)}))
     config = json.loads(read_in_agent(engine, environment_secrets, "$HOME/.config/opencode/opencode.json"))
     assert config["model"] == "anthropic/claude-sonnet-5-5"
     assert any("instructions.md" in path for path in config["instructions"])
@@ -298,8 +305,7 @@ def test_opencode_model_and_instructions_come_from_the_agent_definition(environm
 
 
 def test_the_hook_command_posts_its_payload_as_a_hook_event(live_project, engine, session_image):
-    live_project.write(spec(agents={"coder": agent(harness="custom", image=session_image, env={"FAKE_TUI": "emit"})}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    bring_up(live_project, spec(agents={"coder": agent(harness="custom", image=session_image, env={"FAKE_TUI": "emit"})}), timeout=300)
     name = container(engine, live_project).name
     import subprocess
 
@@ -314,8 +320,7 @@ def test_the_hook_command_posts_its_payload_as_a_hook_event(live_project, engine
 
 
 def test_the_hook_command_never_blocks_or_fails_the_harness(live_project, engine, session_image):
-    live_project.write(spec(agents={"coder": agent(harness="custom", image=session_image, env={"FAKE_TUI": "emit"})}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    bring_up(live_project, spec(agents={"coder": agent(harness="custom", image=session_image, env={"FAKE_TUI": "emit"})}), timeout=300)
     name = container(engine, live_project).name
     start = time.time()
     broken = engine.exec(name, "sh", "-c", "EGZO_CONTROL_URL=http://127.0.0.1:9 egzo hook Stop </dev/null; echo exit=$?")
@@ -372,10 +377,7 @@ def subscription(environment_secrets, harness_image):
     environment_secrets.env["CLAUDE_CODE_OAUTH_TOKEN"] = OAUTH_TOKEN
     vaults = {"main": {"backend": "env", "secrets": {"CLAUDE_CODE_OAUTH_TOKEN": {"from": "env:CLAUDE_CODE_OAUTH_TOKEN"}}}}
     egress = {"default": {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/CLAUDE_CODE_OAUTH_TOKEN"}}}
-    environment_secrets.write(spec(vaults=vaults, egress=egress, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"))}))
-    result = environment_secrets.run("up", timeout=900)
-    assert result.returncode == 0, result.stderr
-    return environment_secrets
+    return bring_up(environment_secrets, spec(vaults=vaults, egress=egress, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"))}))
 
 
 def test_claude_code_gets_an_oauth_placeholder_when_the_profile_injects_a_bearer_token(subscription, engine):

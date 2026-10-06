@@ -121,7 +121,6 @@ type Agent struct {
 	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
-	DependsOn   []string          `yaml:"depends_on,omitempty"`
 	Inject      *AgentInject      `yaml:"inject,omitempty"`
 }
 

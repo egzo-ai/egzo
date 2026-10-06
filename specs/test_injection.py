@@ -35,15 +35,21 @@ def harness(image, *, inject=None, **env):
     return agent(**fields)
 
 
+def start(project, **agents):
+    """`up` with one template per name (`<name>-template`) and one instance of each, named `<name>`: the
+    addresses the specs below use (`agent:coder`) are instance names."""
+    project.up(spec(agents={f"{name}-template": fields for name, fields in agents.items()}))
+    for name in agents:
+        project.spawn(f"{name}-template", name)
+    return project
+
+
 @pytest.fixture
 def run(live_project, session_image):
-    def start(**kwargs):
-        live_project.write(spec(agents={"coder": harness(session_image, **kwargs)}))
-        result = live_project.run("up", timeout=300)
-        assert result.returncode == 0, result.stderr
-        return live_project
+    def launch(**kwargs):
+        return start(live_project, coder=harness(session_image, **kwargs))
 
-    return start
+    return launch
 
 
 def events(project, *args):
@@ -57,7 +63,7 @@ def when(event):
 
 def activity(project, name="coder"):
     for row in table(project.run("ps").stdout):
-        if row["SERVICE"] == name:
+        if row["NAME"] == name:
             return row["ACTIVITY"]
 
 
@@ -88,8 +94,8 @@ def prompts(project, agent_name="coder"):
     ]
 
 
-def container(engine, project, service):
-    return [r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}service") == service][0]
+def container(engine, project, name):
+    return engine.instance(project.name, name)
 
 
 def as_agent(engine, project, verb, path, body=None, name="coder"):
@@ -144,8 +150,7 @@ def test_an_agent_is_idle_once_its_harness_says_the_session_started(run):
 
 
 def test_hooks_drive_the_activity_of_an_agent(live_project, engine, agent_image):
-    live_project.write(spec(agents={"coder": agent(harness="custom", image=agent_image)}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    start(live_project, coder=agent(harness="custom", image=agent_image))
     steps = [
         ("SessionStart", {}, "idle"),
         ("UserPromptSubmit", {"prompt": "work"}, "working"),
@@ -215,8 +220,7 @@ def test_a_person_other_than_the_operator_is_announced_with_the_same_line(run, e
 
 
 def test_a_request_from_another_agent_is_announced_in_other_words(live_project, engine, session_image):
-    live_project.write(spec(agents={"coder": harness(session_image), "reviewer": harness(session_image)}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    start(live_project, coder=harness(session_image), reviewer=harness(session_image))
     wait_activity(live_project, "idle")
     wait_activity(live_project, "idle", "reviewer")
     code, body = as_agent(engine, live_project, "POST", "/v1/messages", {"to": "agent:reviewer", "text": "please look at branch x"}, name="coder")
@@ -229,8 +233,7 @@ def test_a_request_from_another_agent_is_announced_in_other_words(live_project, 
 
 
 def test_the_reply_to_a_request_is_announced_to_the_agent_that_sent_it(live_project, engine, session_image):
-    live_project.write(spec(agents={"coder": harness(session_image), "reviewer": harness(session_image)}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    start(live_project, coder=harness(session_image), reviewer=harness(session_image))
     wait_activity(live_project, "idle")
     wait_activity(live_project, "idle", "reviewer")
     code, body = as_agent(engine, live_project, "POST", "/v1/messages", {"to": "agent:reviewer", "text": "please look at branch x"}, name="coder")
@@ -303,11 +306,11 @@ def test_a_question_makes_the_agent_wait_and_the_answer_is_announced_to_it(run):
     project.run("send", "coder", "deploy it, and need-answer first")
     question = wait_for(lambda: next((r for r in messages(project).values() if r["KIND"] == "question"), None), "the question", timeout=60)
     wait_activity(project, "idle")  # asking ends the turn
-    row = next(r for r in table(project.run("ps").stdout) if r["SERVICE"] == "coder")
+    row = next(r for r in table(project.run("ps").stdout) if r["NAME"] == "coder")
     assert row["WAITING"] == "yes" and row["OPEN"] == "1"
     assert project.run("answer", question["ID"], "to staging").returncode == 0
     wait_for(lambda: any(REPLY.match(p) for p in prompts(project)), "the answer to be announced", timeout=60)
-    assert next(r for r in table(project.run("ps").stdout) if r["SERVICE"] == "coder")["WAITING"] == ""
+    assert next(r for r in table(project.run("ps").stdout) if r["NAME"] == "coder")["WAITING"] == ""
 
 
 def test_send_wait_returns_what_the_agent_resolves_with(run, egzo):
@@ -359,8 +362,7 @@ def test_a_message_for_a_stopped_agent_waits_and_is_announced_after_it_starts(ru
 
 
 def test_a_message_is_never_announced_while_a_person_is_typing(live_project, session_image, egzo):
-    live_project.write(spec(agents={"coder": harness(session_image, inject={"human_quiet": "6s"})}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    start(live_project, coder=harness(session_image, inject={"human_quiet": "6s"}))
     wait_activity(live_project, "idle")
     environment = {**os.environ, **live_project.env}
     environment.pop("EGZO_PROJECT_NAME", None)
@@ -376,8 +378,7 @@ def test_a_message_is_never_announced_while_a_person_is_typing(live_project, ses
 
 
 def test_a_read_only_observer_never_holds_an_announcement_back(live_project, session_image, egzo):
-    live_project.write(spec(agents={"coder": harness(session_image, inject={"human_quiet": "30s"})}))
-    assert live_project.run("up", timeout=300).returncode == 0
+    start(live_project, coder=harness(session_image, inject={"human_quiet": "30s"}))
     wait_activity(live_project, "idle")
     environment = {**os.environ, **live_project.env}
     environment.pop("EGZO_PROJECT_NAME", None)
@@ -402,12 +403,10 @@ def test_send_interrupt_stops_the_current_turn_and_then_announces(run):
 
 
 def test_without_hooks_quiet_output_means_idle_and_a_message_is_still_announced(live_project, session_image):
-    document = spec(agents={"coder": agent(
+    start(live_project, coder=agent(
         harness="custom", image=session_image, env={"FAKE_TUI": "cat"},
         inject={"idle_signal": "quiescence", "quiescence": "2s", "human_quiet": "1s", "ack_timeout": "15s"},
-    )})
-    live_project.write(document)
-    assert live_project.run("up", timeout=300).returncode == 0
+    ))
     wait_activity(live_project, "idle")
     live_project.run("send", "coder", "no hooks here")
     wait_for(lambda: of_type(live_project, "announced"), "the announcement by quiescence", timeout=40)

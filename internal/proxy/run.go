@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os/signal"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -72,7 +73,11 @@ func Run(cfg Config, audit io.Writer) error {
 	}
 }
 
-// operatorHandler is the proxy's operator API: load a policy, report which one is loaded.
+// agentName is what an instance may be called (the identifier rule of the project file).
+var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+// operatorHandler is the proxy's operator API: load a policy, report which one is loaded, bind agents
+// to its profiles.
 func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
 	mux := http.NewServeMux()
 	var mu sync.Mutex // the CA in use, and rotating it
@@ -95,6 +100,35 @@ func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
 		server.SetCA(rotated)
 		current = rotated
 		json.NewEncoder(w).Encode(map[string]string{"ca": rotated.Fingerprint()})
+	})
+	mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(server.BoundAgents())
+	})
+	mux.HandleFunc("PUT /agents/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if !agentName.MatchString(name) {
+			http.Error(w, "invalid agent name", http.StatusBadRequest)
+			return
+		}
+		var binding Binding
+		if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&binding); err != nil {
+			http.Error(w, "expected {\"token\": ..., \"profile\": ...}: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := server.BindAgent(name, binding); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /agents/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if !agentName.MatchString(name) {
+			http.Error(w, "invalid agent name", http.StatusBadRequest)
+			return
+		}
+		server.UnbindAgent(name)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("PUT /policy", func(w http.ResponseWriter, r *http.Request) {
 		var policy Policy

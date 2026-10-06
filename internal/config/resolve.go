@@ -42,7 +42,6 @@ type ResolvedAgent struct {
 	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions"`
 	Env         map[string]string `yaml:"env,omitempty"`
-	DependsOn   []string          `yaml:"depends_on,omitempty"`
 	Inject      ResolvedInject    `yaml:"inject"`
 }
 
@@ -112,7 +111,6 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	}
 	checkVaults(file.Vaults, p)
 	checkNames(file, p)
-	checkDependencies(file, p)
 
 	resolved := &Resolved{
 		Name:       name,
@@ -174,11 +172,6 @@ func resolveAgent(
 	}
 	if agent.Permissions != "" && agent.Permissions != "bypass" && agent.Permissions != "default" {
 		p.addf("agent %q: unknown permissions %q (use bypass or default)", name, agent.Permissions)
-	}
-	for _, dependency := range agent.DependsOn {
-		if !hasAgent(file, dependency) {
-			p.addf("agent %q: depends_on names unknown agent %q", name, dependency)
-		}
 	}
 	checkEnv(name, agent.Env, p)
 	if agent.Prompt != "" {
@@ -245,7 +238,6 @@ func resolveAgent(
 		Runtime:     agent.Runtime,
 		Permissions: permissions,
 		Env:         agent.Env,
-		DependsOn:   agent.DependsOn,
 		Inject:      resolveInject(name, agent, p),
 	}, warnings
 }

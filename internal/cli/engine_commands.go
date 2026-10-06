@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -79,13 +80,13 @@ func commandContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 func newUpCommand(opts *options) *cobra.Command {
 	var dryRun, recreate bool
 	cmd := &cobra.Command{
-		Use:   "up [AGENT...]",
-		Short: "Converge the running project to egzo.yaml",
-		Long: "Converge the running project to egzo.yaml. up always returns once the project is converged:\n" +
-			"there is no foreground mode, agents are reached with `egzo attach`.\n" +
-			"With agent names, only those agents and what they need (the sidecars, the agents they depend on) are\n" +
-			"converged; the others are left as they are.",
-		Args: cobra.ArbitraryArgs,
+		Use:   "up",
+		Short: "Bring up the project's infrastructure and publish its templates",
+		Long: "Bring up the project's infrastructure (the control sidecar, the egress proxy, their networks and volumes),\n" +
+			"load the egress policy and publish the agent templates in egzo.yaml. up starts no agent: spawn one\n" +
+			"with `egzo spawn TEMPLATE`. up always returns once converged; there is no foreground mode.\n" +
+			"It refuses while an instance is stale (its template changed or is gone): remove those first.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
 			defer stop()
@@ -103,11 +104,11 @@ func newUpCommand(opts *options) *cobra.Command {
 			}
 
 			return stack.Up(ctx, s.engine, s.Resolved, s.Dir,
-				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix), Services: args}, cmd.OutOrStdout())
+				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix)}, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without changing anything")
-	cmd.Flags().BoolVar(&recreate, "recreate", false, "recreate containers even when their configuration is unchanged")
+	cmd.Flags().BoolVar(&recreate, "recreate", false, "recreate the sidecars even when their configuration is unchanged")
 	return cmd
 }
 
@@ -234,9 +235,10 @@ func chooseWorkspacesToRemove(ctx context.Context, cmd *cobra.Command, s *sessio
 }
 
 func newPsCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "ps",
-		Short: "List the project's containers",
+		Short: "List the project's containers: the sidecars and the instances",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -246,10 +248,26 @@ func newPsCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			stack.WriteStatus(s.observed, reportedStatuses(ctx, s), cmd.OutOrStdout())
+			// Stale is judged against what `up` would publish from the file: up refuses before it publishes.
+			var published *stack.Published
+			if p, err := currentTemplates(s); err == nil {
+				published = &p
+			}
+			rows := stack.Rows(s.observed, reportedStatuses(ctx, s), published)
+			if asJSON {
+				if rows == nil {
+					rows = []stack.Row{}
+				}
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				return encoder.Encode(rows)
+			}
+			stack.WriteStatus(rows, time.Now(), cmd.OutOrStdout())
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the containers as a JSON array")
+	return cmd
 }
 
 // reportedStatuses asks the control sidecar what each agent last said about itself. It is best

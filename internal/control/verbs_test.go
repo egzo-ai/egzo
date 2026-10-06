@@ -131,15 +131,11 @@ func TestTheOperatorVerbs(t *testing.T) {
 		t.Errorf("an agent address as the actor of a person: %d", response.StatusCode)
 	}
 
-	response := r.asOperator("PUT", "/project", `{"agents":["a","b"]}`)
-	if response.StatusCode != http.StatusNoContent || strings.Join(r.srv.projectAgents(), ",") != "a,b" {
-		t.Errorf("project: %d %v", response.StatusCode, r.srv.projectAgents())
+	if response := r.asOperator("PUT", "/agents/zzz", ""); response.StatusCode != http.StatusNoContent || !r.srv.knownAgent("zzz") {
+		t.Errorf("register: %d", response.StatusCode)
 	}
-	if response := r.asOperator("PUT", "/project", `nope`); response.StatusCode != http.StatusBadRequest {
-		t.Errorf("a bad project body: %d", response.StatusCode)
-	}
-	if !r.srv.knownAgent("a") || r.srv.knownAgent("zzz") {
-		t.Error("knownAgent does not follow the project")
+	if r.srv.knownAgent("never") || r.srv.knownAgent("../key") || r.srv.knownAgent("") {
+		t.Error("knownAgent accepts what was never registered")
 	}
 }
 

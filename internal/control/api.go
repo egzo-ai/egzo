@@ -62,7 +62,10 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /messages/{id}", s.getMessage)
 	mux.HandleFunc("POST /messages/{id}/resolve", s.resolveForOperator)
 	mux.HandleFunc("GET /agents", s.agents)
-	mux.HandleFunc("PUT /project", s.putProject)
+	mux.HandleFunc("PUT /agents/{name}", s.registerAgent)
+	mux.HandleFunc("DELETE /agents/{name}", s.unregisterAgent)
+	mux.HandleFunc("PUT /templates", s.putTemplates)
+	mux.HandleFunc("GET /templates", s.getTemplates)
 	return mux
 }
 
@@ -375,55 +378,128 @@ func (s *server) agents(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s.agentStatuses())
 }
 
-// putProject records which agents the project has, so an agent cannot hand work to one that does not exist.
-func (s *server) putProject(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Agents []string `json:"agents"`
+// agentFile is the registration of one agent: a file of its own, so adding and removing agents never
+// reads, rewrites or races over a list.
+func (s *server) agentFile(name string) (string, bool) {
+	if !safeName.MatchString(name) {
+		return "", false
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil {
-		http.Error(w, "expected {\"agents\": [...]}", http.StatusBadRequest)
+	return filepath.Join(s.dir, "agents", name), true
+}
+
+// registerAgent makes an agent known: messages can be sent to it. Registering twice is fine.
+func (s *server) registerAgent(w http.ResponseWriter, r *http.Request) {
+	path, ok := s.agentFile(r.PathValue("name"))
+	if !ok {
+		http.Error(w, "invalid agent name", http.StatusBadRequest)
 		return
 	}
-	data, _ := json.Marshal(body)
-	if err := os.WriteFile(filepath.Join(s.dir, "project.json"), data, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// projectAgents lists the agents the project said it has, or none before it has.
-func (s *server) projectAgents() []string {
-	data, err := os.ReadFile(filepath.Join(s.dir, "project.json"))
-	if err != nil {
-		return nil
+// unregisterAgent forgets an agent: nothing more can be sent to it, what was still asked of it is
+// closed as failed (the sender is told), and its status disappears. Unknown names are fine.
+func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	path, ok := s.agentFile(name)
+	if !ok {
+		http.Error(w, "invalid agent name", http.StatusBadRequest)
+		return
 	}
-	var project struct {
-		Agents []string `json:"agents"`
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	if json.Unmarshal(data, &project) != nil {
-		return nil
+	if err := s.retire(name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	return project.Agents
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// knownAgent reports whether name is an agent of the project. Before the project has said which
-// agents it has, any well-formed name is accepted.
-func (s *server) knownAgent(name string) bool {
-	data, err := os.ReadFile(filepath.Join(s.dir, "project.json"))
+// projectAgents lists the registered agents.
+func (s *server) projectAgents() []string {
+	entries, err := os.ReadDir(filepath.Join(s.dir, "agents"))
 	if err != nil {
-		return safeName.MatchString(name)
+		return nil
 	}
-	var project struct {
-		Agents []string `json:"agents"`
-	}
-	if json.Unmarshal(data, &project) != nil {
-		return safeName.MatchString(name)
-	}
-	for _, agent := range project.Agents {
-		if agent == name {
-			return true
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && safeName.MatchString(entry.Name()) {
+			names = append(names, entry.Name())
 		}
 	}
-	return false
+	sort.Strings(names)
+	return names
+}
+
+// knownAgent reports whether name is a registered agent of the project.
+func (s *server) knownAgent(name string) bool {
+	path, ok := s.agentFile(name)
+	if !ok {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// maxTemplates bounds the published templates.
+const maxTemplates = 4 << 20
+
+// putTemplates stores the templates `up` published: what a spawn instantiates. The body is opaque to
+// the control sidecar.
+func (s *server) putTemplates(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxTemplates))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "the templates are larger than the limit", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(body) == 0 {
+		http.Error(w, "no templates", http.StatusBadRequest)
+		return
+	}
+	temp, err := os.CreateTemp(s.dir, "templates.*.tmp")
+	if err == nil {
+		defer os.Remove(temp.Name())
+		_, err = temp.Write(body)
+		if closeErr := temp.Close(); err == nil {
+			err = closeErr
+		}
+	}
+	if err == nil {
+		err = os.Chmod(temp.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(temp.Name(), filepath.Join(s.dir, "templates.json"))
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) getTemplates(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(filepath.Join(s.dir, "templates.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		http.Error(w, "no templates published: run `egzo up`", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write(data)
 }

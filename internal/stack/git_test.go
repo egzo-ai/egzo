@@ -15,20 +15,17 @@ func gitProject(t *testing.T, mode string) (*config.Resolved, string) {
 	t.Helper()
 	root := t.TempDir()
 	path := filepath.Join(root, ".egzo", "workspaces", "repo")
-	mount := func(from string) config.Mount {
-		return config.Mount{Name: "repo", Mount: "/workspace/repo", Mode: "rw", From: from}
-	}
-	reviewer := mount("coder")
-	reviewer.Mount, reviewer.Mode = "/workspace/coder/repo", "ro"
+	mount := config.Mount{Name: "repo", Mount: "/workspace/repo", Mode: "rw"}
+	// The agents are instances: each one's checkout is a directory named after it.
 	return &config.Resolved{
 		Name: "proj",
 		Workspaces: map[string]config.ResolvedWorkspace{
 			"repo": {Git: &config.Git{URL: "https://github.com/acme/shop.git", Branch: "main"}, Mode: mode, Path: path},
 		},
 		Agents: map[string]config.ResolvedAgent{
-			"coder":    {Harness: "custom", Image: "x", Workdir: "/workspace/repo", Workspaces: []config.Mount{mount("")}},
-			"tester":   {Harness: "custom", Image: "x", Workdir: "/workspace/repo", Workspaces: []config.Mount{mount("")}},
-			"reviewer": {Harness: "custom", Image: "x", Workdir: "/workspace", Workspaces: []config.Mount{reviewer}},
+			"coder":  {Harness: "custom", Image: "x", Workdir: "/workspace/repo", Workspaces: []config.Mount{mount}},
+			"tester": {Harness: "custom", Image: "x", Workdir: "/workspace/repo", Workspaces: []config.Mount{mount}},
+			"docs":   {Harness: "custom", Image: "x", Workdir: "/workspace", Workspaces: []config.Mount{{Name: "docs", Mount: "/workspace/docs", Mode: "ro", HostPath: "/host/docs"}}},
 		},
 	}, path
 }
@@ -47,7 +44,7 @@ func TestCloneModePlansOneCheckoutPerAgentThatListsTheWorkspace(t *testing.T) {
 		}
 	}
 	if want := []string{filepath.Join(path, "coder"), filepath.Join(path, "tester")}; !slices.Equal(dirs, want) {
-		t.Errorf("dirs = %v, want %v (a read-only reference makes no checkout of its own)", dirs, want)
+		t.Errorf("dirs = %v, want %v (a host path makes no checkout)", dirs, want)
 	}
 }
 
@@ -105,26 +102,39 @@ func TestAWorkspaceNoAgentListsIsLeftAlone(t *testing.T) {
 	}
 }
 
-func TestGitAgentsMountTheirCheckoutAndAReviewerMountsTheCodersReadOnly(t *testing.T) {
+func TestGitInstancesMountTheirOwnCheckout(t *testing.T) {
 	project, path := gitProject(t, "clone")
-	d, err := Desire(project, "/dir", Inputs{Image: "egzo:test", Tokens: map[string]string{"coder": "a", "tester": "b", "reviewer": "c"}})
+	d, err := desireErr(project, "/dir", Inputs{Image: "egzo:test", Tokens: map[string]string{"coder": "a", "tester": "b", "docs": "c"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	coder := findContainer(t, d, "proj-coder-1")
-	if want := (MountSpec{Bind: true, Source: filepath.Join(path, "coder"), Target: "/workspace/repo"}); !slices.Contains(coder.Mounts, want) {
-		t.Errorf("coder mounts = %+v", coder.Mounts)
+	for _, name := range []string{"coder", "tester"} {
+		spec := findContainer(t, d, "proj-"+name)
+		if want := (MountSpec{Bind: true, Source: filepath.Join(path, name), Target: "/workspace/repo"}); !slices.Contains(spec.Mounts, want) {
+			t.Errorf("%s mounts = %+v", name, spec.Mounts)
+		}
+		for _, m := range spec.Mounts {
+			if m.Bind && strings.HasPrefix(m.Source, path) && m.Source != filepath.Join(path, name) {
+				t.Errorf("%s mounts another instance's checkout: %+v", name, m)
+			}
+		}
 	}
-	reviewer := findContainer(t, d, "proj-reviewer-1")
-	if want := (MountSpec{Bind: true, Source: filepath.Join(path, "coder"), Target: "/workspace/coder/repo", ReadOnly: true}); !slices.Contains(reviewer.Mounts, want) {
-		t.Errorf("reviewer mounts = %+v", reviewer.Mounts)
+}
+
+func TestASharedCheckoutIsTheSameDirectoryForEveryInstance(t *testing.T) {
+	project, path := gitProject(t, "shared")
+	d, _ := desireErr(project, "/dir", Inputs{Image: "egzo:test", Tokens: map[string]string{}})
+	for _, name := range []string{"coder", "tester"} {
+		if want := (MountSpec{Bind: true, Source: filepath.Join(path, "shared"), Target: "/workspace/repo"}); !slices.Contains(findContainer(t, d, "proj-"+name).Mounts, want) {
+			t.Errorf("%s does not mount the shared checkout: %+v", name, findContainer(t, d, "proj-"+name).Mounts)
+		}
 	}
 }
 
 func TestWorktreeAgentsMountTheirWorktreeAndTheBaseButNeverAnotherAgents(t *testing.T) {
 	project, path := gitProject(t, "worktree")
-	d, _ := Desire(project, "/dir", Inputs{Image: "egzo:test", Tokens: map[string]string{}})
-	coder := findContainer(t, d, "proj-coder-1")
+	d, _ := desireErr(project, "/dir", Inputs{Image: "egzo:test", Tokens: map[string]string{}})
+	coder := findContainer(t, d, "proj-coder")
 	for _, want := range []MountSpec{
 		{Bind: true, Source: filepath.Join(path, "coder"), Target: "/workspace/repo"},
 		{Bind: true, Source: filepath.Join(path, ".base"), Target: "/.egzo/base/repo"},
@@ -134,19 +144,45 @@ func TestWorktreeAgentsMountTheirWorktreeAndTheBaseButNeverAnotherAgents(t *test
 		}
 	}
 	for _, m := range coder.Mounts {
-		if strings.Contains(m.Source, "tester") || strings.Contains(m.Source, "reviewer") {
+		if strings.Contains(m.Source, "tester") {
 			t.Errorf("coder mounts another agent's directory: %+v", m)
 		}
 	}
 }
 
-func TestGitDirsListEveryCheckoutAWorkspaceCanHave(t *testing.T) {
+func TestGitDirsAreFoundOnDiskSoWorkOfRemovedInstancesIsFoundToo(t *testing.T) {
 	project, path := gitProject(t, "worktree")
+	for _, dir := range []string{"coder/.git", "gone/.git", ".base/.git", "notes", "empty"} {
+		os.MkdirAll(filepath.Join(path, dir), 0o755)
+	}
+	os.Symlink("/", filepath.Join(path, "link"))
 	got := GitDirs(project)
-	for _, want := range []string{filepath.Join(path, "coder"), filepath.Join(path, "tester"), filepath.Join(path, ".base")} {
+	for _, want := range []string{filepath.Join(path, "coder"), filepath.Join(path, "gone"), filepath.Join(path, ".base"), filepath.Join(path, "link")} {
 		if !slices.Contains(got, want) {
 			t.Errorf("GitDirs lacks %s: %v", want, got)
 		}
+	}
+	for _, unwanted := range []string{filepath.Join(path, "notes"), filepath.Join(path, "empty")} {
+		if slices.Contains(got, unwanted) {
+			t.Errorf("GitDirs lists %s, which is not a checkout: %v", unwanted, got)
+		}
+	}
+}
+
+func TestInstanceGitDirsAreTheInstancesOwnCheckoutsOnly(t *testing.T) {
+	for mode, want := range map[string]int{"clone": 1, "worktree": 1, "shared": 0} {
+		project, path := gitProject(t, mode)
+		dirs := InstanceGitDirs(project, "coder")
+		if len(dirs) != want || (want == 1 && dirs[0] != filepath.Join(path, "coder")) {
+			t.Errorf("%s: dirs = %v", mode, dirs)
+		}
+	}
+	project, _ := gitProject(t, "clone")
+	if dirs := InstanceGitDirs(project, "docs"); len(dirs) != 0 {
+		t.Errorf("a host path is not a checkout: %v", dirs)
+	}
+	if dirs := InstanceGitDirs(project, "nobody"); len(dirs) != 0 {
+		t.Errorf("an unknown instance has checkouts: %v", dirs)
 	}
 }
 
@@ -157,120 +193,15 @@ func TestUnsavedWorkIsDescribedWithItsDirectory(t *testing.T) {
 	}
 }
 
-func TestSplitAgentContainersKeepsTheSidecarsAndNetworksFirst(t *testing.T) {
-	project, _ := gitProject(t, "clone")
-	plan := []Action{
-		{Verb: "create", Type: "network", Name: "proj_coder"},
-		{Verb: "create", Type: "container", Name: "proj-proxy-1"},
-		{Verb: "create", Type: "container", Name: "proj-coder-1"},
-		{Verb: "start", Type: "container", Name: "proj-tester-1"},
-		{Verb: "connect", Type: "network", Name: "proj_coder", Peer: "proj-proxy-1"},
-	}
-	before, agents := splitAgentContainers(plan, project)
-	if len(before) != 3 || len(agents) != 2 || agents[0].Name != "proj-coder-1" {
-		t.Errorf("before = %+v agents = %+v", before, agents)
-	}
-}
-
-func scopeProject() *config.Resolved {
-	return &config.Resolved{Name: "proj", Agents: map[string]config.ResolvedAgent{
-		"coder":    {},
-		"reviewer": {DependsOn: []string{"coder"}},
-		"deployer": {DependsOn: []string{"reviewer"}},
-		"loner":    {},
-	}}
-}
-
-func TestScopeAgentsFollowsDependsOnTransitively(t *testing.T) {
-	got, err := ScopeAgents(scopeProject(), []string{"deployer"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got["deployer"] || !got["reviewer"] || !got["coder"] || got["loner"] {
-		t.Errorf("scope = %v", got)
-	}
-}
-
-func TestScopeAgentsAcceptsTheSidecarsAndNamesTheKnownServicesOtherwise(t *testing.T) {
-	got, err := ScopeAgents(scopeProject(), []string{"proxy", "control"})
-	if err != nil || len(got) != 0 {
-		t.Errorf("scope = %v, err = %v", got, err)
-	}
-	_, err = ScopeAgents(scopeProject(), []string{"nobody"})
-	if err == nil || !strings.Contains(err.Error(), `"nobody"`) || !strings.Contains(err.Error(), "loner") || !strings.Contains(err.Error(), "control") {
+func TestPodmanRefusesASpawnThatAsksForARuntime(t *testing.T) {
+	err := refuseRuntime(&engine.Client{Podman: true}, "coder", "runsc")
+	if err == nil || !strings.Contains(err.Error(), "coder") || !strings.Contains(err.Error(), "runsc") || !strings.Contains(err.Error(), "Podman") {
 		t.Errorf("err = %v", err)
 	}
-}
-
-func TestRestrictPlanDropsEverythingOfAgentsOutsideTheScope(t *testing.T) {
-	project := scopeProject()
-	plan := []Action{
-		{Verb: "create", Type: "container", Name: "proj-control-1"},
-		{Verb: "create", Type: "network", Name: "proj_coder"},
-		{Verb: "create", Type: "container", Name: "proj-coder-1"},
-		{Verb: "create", Type: "network", Name: "proj_loner"},
-		{Verb: "create", Type: "container", Name: "proj-loner-1"},
-		{Verb: "remove", Type: "container", Name: "proj-loner-1"},
-		{Verb: "connect", Type: "network", Name: "proj_loner", Peer: "proj-proxy-1"},
-		{Verb: "connect", Type: "network", Name: "proj_coder", Peer: "proj-proxy-1"},
-		{Verb: "create", Type: "volume", Name: "proj_loner-home"},
-		{Verb: "create", Type: "volume", Name: "proj_shared"},
+	if err := refuseRuntime(&engine.Client{Podman: true}, "coder", ""); err != nil {
+		t.Errorf("an agent without a runtime was refused: %v", err)
 	}
-	kept := restrictPlan(plan, project, map[string]bool{"coder": true})
-	var names []string
-	for _, action := range kept {
-		names = append(names, action.Verb+" "+action.Name)
-	}
-	want := []string{"create proj-control-1", "create proj_coder", "create proj-coder-1", "connect proj_coder", "create proj_shared"}
-	if !slices.Equal(names, want) {
-		t.Errorf("kept = %v, want %v", names, want)
-	}
-}
-
-func TestDependsOnOrdersTheCreationOfAgentContainers(t *testing.T) {
-	desired := Desired{Containers: []ContainerSpec{
-		{Name: "proj-coder-1"},
-		{Name: "proj-reviewer-1", StartAfter: []string{"proj-coder-1"}},
-	}}
-	plan := []Action{
-		{Verb: "create", Type: "container", Name: "proj-reviewer-1"},
-		{Verb: "create", Type: "container", Name: "proj-coder-1"},
-		{Verb: "start", Type: "container", Name: "proj-reviewer-1"},
-	}
-	deps := dependencies(desired, plan)
-	if !slices.Contains(deps[0], 1) {
-		t.Errorf("the reviewer is not created after the coder: %v", deps)
-	}
-	if len(deps[1]) != 0 {
-		t.Errorf("the coder waits for something: %v", deps[1])
-	}
-}
-
-func TestDependsOnDoesNotChangeWhatAContainerIs(t *testing.T) {
-	project := desireProject()
-	before := findContainer(t, desire(t, project), "proj-review-1").Identity.ConfigHash
-	review := project.Agents["review"]
-	review.DependsOn = []string{"coder"}
-	project.Agents["review"] = review
-	spec := findContainer(t, desire(t, project), "proj-review-1")
-	if spec.Identity.ConfigHash != before {
-		t.Error("an ordering hint recreated the container")
-	}
-	if !slices.Equal(spec.StartAfter, []string{"proj-coder-1"}) {
-		t.Errorf("StartAfter = %v", spec.StartAfter)
-	}
-}
-
-func TestPodmanRefusesAProjectThatAsksForARuntime(t *testing.T) {
-	desired := Desired{Containers: []ContainerSpec{{Name: "proj-control-1"}, {Name: "proj-coder-1", Runtime: "runsc"}}}
-	err := refuseRuntimes(&engine.Client{Podman: true}, desired)
-	if err == nil || !strings.Contains(err.Error(), "proj-coder-1") || !strings.Contains(err.Error(), "runsc") || !strings.Contains(err.Error(), "Podman") {
-		t.Errorf("err = %v", err)
-	}
-	if err := refuseRuntimes(&engine.Client{Podman: true}, Desired{Containers: []ContainerSpec{{Name: "a"}}}); err != nil {
-		t.Errorf("a project without a runtime was refused: %v", err)
-	}
-	if err := refuseRuntimes(&engine.Client{}, desired); err != nil {
+	if err := refuseRuntime(&engine.Client{}, "coder", "runsc"); err != nil {
 		t.Errorf("Docker applies the runtime itself: %v", err)
 	}
 }

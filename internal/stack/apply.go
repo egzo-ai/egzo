@@ -97,7 +97,8 @@ func run(ctx context.Context, c *engine.Client, desired Desired, action Action) 
 	case "create container":
 		for _, spec := range desired.Containers {
 			if spec.Name == action.Name {
-				return createContainer(ctx, c, spec, desired.PrepImage)
+				_, err := createContainer(ctx, c, spec, desired.PrepImage)
+				return err
 			}
 		}
 	case "connect network":
@@ -119,7 +120,9 @@ func removeContainer(ctx context.Context, c *engine.Client, id string) error {
 	return c.API.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
 }
 
-func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, prepImage string) error {
+// createContainer creates, starts and waits for a container. It returns the container's id as soon as
+// there is one, even with an error, so that a caller that created it can remove it again.
+func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, prepImage string) (string, error) {
 	config := &container.Config{
 		Image:      spec.Image,
 		Cmd:        strslice.StrSlice(spec.Cmd),
@@ -160,24 +163,24 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 	created, err := c.API.ContainerCreate(ctx, config, host, networking, nil, spec.Name)
 	if err != nil {
 		if spec.Runtime != "" && strings.Contains(strings.ToLower(err.Error()), "runtime") {
-			return fmt.Errorf("%w\nthe engine must have the %q runtime registered (Docker: \"runtimes\" in /etc/docker/daemon.json)", err, spec.Runtime)
+			return "", fmt.Errorf("%w\nthe engine must have the %q runtime registered (Docker: \"runtimes\" in /etc/docker/daemon.json)", err, spec.Runtime)
 		}
-		return err
+		return "", err
 	}
 	if err := chownVolumes(ctx, c, prepImage, spec.User, spec.OwnedVolumes, spec.Identity); err != nil {
 		c.API.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true})
-		return err
+		return "", err
 	}
 	if err := c.API.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-		return err
+		return created.ID, err
 	}
 	if err := waitHealthy(ctx, c, created.ID); err != nil {
-		return err
+		return created.ID, err
 	}
 	if spec.Identity.Kind == kindAgent {
-		return settle(ctx, c, created.ID)
+		return created.ID, settle(ctx, c, created.ID)
 	}
-	return nil
+	return created.ID, nil
 }
 
 // settleTime is how long an agent must stay up before `up` calls it converged: a harness that
@@ -389,30 +392,83 @@ type Report struct {
 	Waiting  bool // it has asked a question nobody has answered
 }
 
-// WriteStatus prints a project's containers. reported holds what the control sidecar knows of each agent.
-func WriteStatus(observed Observed, reported map[string]Report, out io.Writer) {
-	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tOPEN\tWAITING\tSTATUS")
+// Row is one container of a project as `egzo ps` shows it.
+type Row struct {
+	Name     string    `json:"name"`
+	Service  string    `json:"service"`
+	Kind     string    `json:"kind"`
+	State    string    `json:"state"`
+	Health   string    `json:"health"`
+	Activity string    `json:"activity"`
+	Open     int       `json:"open"`
+	Waiting  bool      `json:"waiting"`
+	Status   string    `json:"status"`
+	Actor    string    `json:"actor"`
+	Created  time.Time `json:"created"`
+	Stale    bool      `json:"stale"`
+}
+
+// Rows describes a project's containers. reported holds what the control sidecar knows of each agent,
+// by instance name; published, when the templates could be read, says which instances are stale.
+func Rows(observed Observed, reported map[string]Report, published *Published) []Row {
+	var rows []Row
 	for _, r := range observed.Resources {
 		if r.Type != "container" {
 			continue
 		}
-		report := reported[r.Service]
-		activity, open, waiting := "", "", ""
+		row := Row{Name: r.Name, Service: r.Service, Kind: r.Kind, State: r.State, Health: r.Health, Actor: r.Actor, Created: r.Created}
 		if r.Kind == kindAgent {
-			open = fmt.Sprint(report.Open)
-			if report.Waiting {
-				waiting = "yes"
-			}
-			activity = report.Activity
+			row.Name = r.Instance // what every command takes
+			report := reported[r.Instance]
+			row.Open, row.Waiting, row.Status = report.Open, report.Waiting, termsafe.Truncate(termsafe.Line(report.Status), 200)
+			row.Activity = report.Activity
 			switch {
 			case r.State != "running":
-				activity = "stopped"
-			case activity == "":
-				activity = "starting"
+				row.Activity = "stopped"
+			case row.Activity == "":
+				row.Activity = "starting"
+			}
+			if published != nil {
+				row.Stale = Instance{Template: r.Service, TemplateHash: r.TemplateHash}.Stale(*published)
 			}
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Name, r.Service, r.State, r.Health, activity, open, waiting, termsafe.Truncate(termsafe.Line(report.Status), 200))
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// WriteStatus prints a project's containers.
+func WriteStatus(rows []Row, now time.Time, out io.Writer) {
+	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tOPEN\tWAITING\tACTOR\tAGE\tSTALE\tSTATUS")
+	for _, row := range rows {
+		open, waiting, stale := "", "", ""
+		if row.Kind == kindAgent {
+			open = fmt.Sprint(row.Open)
+			if row.Waiting {
+				waiting = "yes"
+			}
+			if row.Stale {
+				stale = "stale"
+			}
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.Name, row.Service, row.State, row.Health, row.Activity, open, waiting, termsafe.Line(row.Actor), Age(now.Sub(row.Created)), stale, row.Status)
 	}
 	table.Flush()
+}
+
+// Age is a duration as ps shows it: the largest unit that fits, 5s, 7m, 3h, 2d.
+func Age(d time.Duration) string {
+	switch {
+	case d < 0:
+		return ""
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }

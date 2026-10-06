@@ -118,6 +118,13 @@ def test_ro_on_a_git_workspace_is_an_error_that_explains_why(project):
     assert "git" in result.stderr.lower()
 
 
+def test_the_ro_error_offers_a_host_path_or_a_shared_workspace_and_no_cross_agent_reference(project):
+    result = project.config(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo:ro"])}))
+    assert result.returncode != 0
+    assert "./path:ro" in result.stderr and "shared" in result.stderr
+    assert "cross-agent" not in result.stderr.lower() and "<agent>" not in result.stderr
+
+
 @pytest.mark.parametrize("url", ["git@github.com:acme/shop.git", "ssh://git@github.com/acme/shop.git", "/srv/repos/shop.git", "./shop"])
 def test_git_sources_must_be_https(project, url):
     result = project.config(spec(workspaces={"repo": {"git": {"url": url}}}))
@@ -163,53 +170,22 @@ def test_path_may_be_absolute(project, tmp_path):
     assert Path(project.resolved(document)["workspaces"]["repo"]["path"]) == target
 
 
-def test_a_cross_agent_reference_mounts_the_other_agents_workspace_read_only(project):
-    resolved = project.resolved(
-        spec(
-            workspaces=workspaces(),
-            agents={"coder": agent(workspaces=["repo"]), "reviewer": agent(workspaces=["coder/repo:ro"])},
-        )
-    )
-    mount = mounts(resolved, "reviewer")["/workspace/coder/repo"]
-    assert mount["mode"] == "ro"
-    assert mount["from"] == "coder"
-
-
-def test_a_cross_agent_reference_must_be_read_only(project):
+@pytest.mark.parametrize("reference", ["coder/repo:ro", "coder/repo", "ghost/repo:ro"])
+def test_a_cross_agent_reference_is_not_a_workspace(project, reference):
+    """A template cannot name an instance that does not exist yet, so one agent cannot mount another's checkout."""
     result = project.config(
         spec(
             workspaces=workspaces(),
-            agents={"coder": agent(workspaces=["repo"]), "reviewer": agent(workspaces=["coder/repo"])},
+            agents={"coder": agent(workspaces=["repo"]), "reviewer": agent(workspaces=[reference])},
         )
     )
     assert result.returncode != 0
-    assert ":ro" in result.stderr
+    assert "repo" in result.stderr
 
 
-def test_an_agent_cannot_reference_itself(project):
-    result = project.config(
-        spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo", "coder/repo:ro"])})
-    )
-    assert result.returncode != 0
-
-
-def test_a_cross_agent_reference_needs_the_other_agent_to_list_the_workspace(project):
-    result = project.config(
-        spec(
-            workspaces=workspaces(scratch={}),
-            agents={"coder": agent(workspaces=["repo"]), "reviewer": agent(workspaces=["coder/scratch:ro"])},
-        )
-    )
-    assert result.returncode != 0
-    assert "scratch" in result.stderr
-
-
-def test_a_cross_agent_reference_to_an_unknown_agent_is_an_error(project):
-    result = project.config(
-        spec(workspaces=workspaces(), agents={"reviewer": agent(workspaces=["ghost/repo:ro"])})
-    )
-    assert result.returncode != 0
-    assert "ghost" in result.stderr
+def test_the_resolved_mounts_have_no_from_key(project):
+    resolved = project.resolved(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
+    assert all("from" not in m for m in resolved["agents"]["coder"]["workspaces"])
 
 
 # --- git sources carry no credentials and no option-looking values ---------------------------------------

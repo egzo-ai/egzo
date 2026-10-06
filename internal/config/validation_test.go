@@ -30,25 +30,33 @@ func TestReservedAndMalformedNames(t *testing.T) {
 	})
 }
 
-func TestDependsOnCycles(t *testing.T) {
-	agent := func(name, deps string) string {
-		return "  " + name + ": { harness: custom, image: x, depends_on: [" + deps + "] }\n"
+func TestInstanceNames(t *testing.T) {
+	templates := []string{"coder", "reviewer"}
+	for _, name := range []string{"issue-412", "coder-1", "a", "pr_88", "x" + strings.Repeat("y", 62)} {
+		if err := CheckInstanceName(name, templates); err != nil {
+			t.Errorf("%q: %v", name, err)
+		}
 	}
-	t.Run("self", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), "agents:\n"+agent("a", "a"), "depends_on cycle: a -> a")
-	})
-	t.Run("two", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), "agents:\n"+agent("a", "b")+agent("b", "a"), "depends_on cycle: a -> b -> a")
-	})
-	t.Run("a cycle reached through a tail", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), "agents:\n"+agent("a", "b")+agent("b", "c")+agent("c", "b"), "b -> c -> b")
-	})
-	t.Run("a diamond is not a cycle", func(t *testing.T) {
-		mustResolve(t, t.TempDir(), "agents:\n"+agent("a", "")+agent("b", "a")+agent("c", "a")+agent("d", "b, c"))
-	})
-	t.Run("an unknown dependency is still reported once", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), "agents:\n"+agent("a", "ghost"), `unknown agent "ghost"`)
-	})
+	for name, want := range map[string]string{
+		"":                            "invalid instance name",
+		"Issue":                       "invalid instance name",
+		"-x":                          "invalid instance name",
+		"a/b":                         "invalid instance name",
+		"x" + strings.Repeat("y", 63): "invalid instance name",
+		"coder":                       "name of a template",
+		"control":                     "reserved",
+		"proxy":                       "reserved",
+		"prep":                        "reserved",
+		"shared":                      "reserved",
+		"control-1":                   "name of a sidecar",
+		"proxy-1":                     "name of a sidecar",
+		"coder-home":                  "-home",
+	} {
+		err := CheckInstanceName(name, templates)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want it to mention %q", name, err, want)
+		}
+	}
 }
 
 func TestEnvOwnedByEgzoCannotBeOverridden(t *testing.T) {

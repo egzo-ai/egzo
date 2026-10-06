@@ -113,7 +113,6 @@ func TestResolveAgentValidation(t *testing.T) {
 		{"custom needs an image", "agents:\n  a: { harness: custom }\n", []string{"custom harness needs an image"}},
 		{"unknown permissions", "agents:\n  a: { harness: custom, image: x, permissions: yolo }\n", []string{`unknown permissions "yolo"`}},
 		{"agent names cannot contain a slash", "agents:\n  a/b: { harness: custom, image: x }\n", []string{"a name is 1 to 63 lowercase"}},
-		{"unknown dependency", "agents:\n  a: { harness: custom, image: x, depends_on: [ghost] }\n", []string{`unknown agent "ghost"`}},
 		{"unknown egress profile", "agents:\n  a: { harness: custom, image: x, egress: nowhere }\n", []string{`egress profile "nowhere" is not defined`}},
 	}
 	for _, c := range cases {
@@ -341,19 +340,6 @@ agents:
 		}
 	})
 
-	t.Run("read-only references to another agent", func(t *testing.T) {
-		resolved, _ := mustResolve(t, dir, `
-workspaces: { shared: {} }
-agents:
-  writer: { harness: custom, image: x, workspaces: [shared] }
-  reader: { harness: custom, image: x, workspaces: ["writer/shared:ro"] }
-`)
-		want := Mount{Name: "shared", Mount: "/workspace/writer/shared", Mode: "ro", From: "writer"}
-		if got := resolved.Agents["reader"].Workspaces[0]; got != want {
-			t.Errorf("mount = %+v, want %+v", got, want)
-		}
-	})
-
 	t.Run("workdir", func(t *testing.T) {
 		base := `
 workspaces: { one: {}, two: {} }
@@ -385,11 +371,9 @@ agents:
 		{"missing host directory", "agents:\n  a: { harness: custom, image: x, workspaces: ['./nope'] }\n", "not an existing directory"},
 		{"host path is a file", "agents:\n  a: { harness: custom, image: x, workspaces: ['./afile'] }\n", "not an existing directory"},
 		{"read-only git workspace", "workspaces:\n  r: { git: { url: https://x/y } }\nagents:\n  a: { harness: custom, image: x, workspaces: ['r:ro'] }\n", "cannot be read-only"},
+		{"read-only git workspace points at the alternatives", "workspaces:\n  r: { git: { url: https://x/y } }\nagents:\n  a: { harness: custom, image: x, workspaces: ['r:ro'] }\n", "host path (./path:ro) or a shared workspace"},
 		{"mount collision", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w, './docs', 'w'] }\n", "two workspaces mount at /workspace/w"},
-		{"self reference", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w, 'a/w:ro'] }\n", "points at itself"},
-		{"unknown agent", "agents:\n  a: { harness: custom, image: x, workspaces: ['ghost/w:ro'] }\n", `unknown agent "ghost"`},
-		{"writable cross reference", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w] }\n  b: { harness: custom, image: x, workspaces: ['a/w:rw'] }\n", "must be read-only (a/w:ro)"},
-		{"owner does not list it", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x }\n  b: { harness: custom, image: x, workspaces: ['a/w:ro'] }\n", `does not list workspace "w"`},
+		{"another agent's checkout cannot be mounted", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w] }\n  b: { harness: custom, image: x, workspaces: ['a/w:ro'] }\n", "unsupported workspace reference"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { wantProblems(t, dir, c.yaml, c.want) })
@@ -451,5 +435,12 @@ func TestAPromptThatIsNotAFileIsRejectedAndOneThatIsIsAccepted(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "prompts", "coder.md"), 0o755)
 	if _, _, err := resolve(t, dir, yaml); err == nil {
 		t.Error("a directory was accepted as a prompt")
+	}
+}
+
+func TestDependsOnIsNotAKey(t *testing.T) {
+	_, err := Parse([]byte("agents:\n  a: { harness: custom, image: x, depends_on: [b] }\n  b: { harness: custom, image: x }\n"))
+	if err == nil || !strings.Contains(err.Error(), "depends_on") {
+		t.Fatalf("depends_on was accepted or not named: %v", err)
 	}
 }

@@ -68,19 +68,16 @@ type ContainerSpec struct {
 	// OwnedVolumes are volumes the container writes as User: the engine creates volumes owned by
 	// root and agents do not run as root, so they are handed over once the container exists.
 	OwnedVolumes []string
-	// StartAfter names the containers this one is created after (depends_on). It does not change
-	// what the container is, so it is left out of the hash.
-	StartAfter  []string `json:"-"`
-	Env         []string
-	Mounts      []MountSpec
-	Tmpfs       map[string]string
-	Network     string
-	WorkingDir  string
-	Harness     string
-	Runtime     string
-	NanoCPUs    int64
-	Memory      int64
-	Healthcheck []string
+	Env          []string
+	Mounts       []MountSpec
+	Tmpfs        map[string]string
+	Network      string
+	WorkingDir   string
+	Harness      string
+	Runtime      string
+	NanoCPUs     int64
+	Memory       int64
+	Healthcheck  []string
 	// PidsLimit caps processes and threads; MemorySwap equals Memory when a memory limit is set, so
 	// swap does not double it.
 	PidsLimit  int64
@@ -97,8 +94,8 @@ type ContainerSpec struct {
 	Identity       engine.Identity `json:"-"`
 }
 
-// Attachment joins a sidecar to every agent network under an alias. It is not part of the sidecar's
-// definition: agents come and go without recreating the sidecar.
+// Attachment joins a sidecar to agent networks under an alias. It is not part of the sidecar's
+// definition: instances come and go without recreating the sidecar.
 type Attachment struct {
 	Container string
 	Alias     string
@@ -121,7 +118,7 @@ type Desired struct {
 type Inputs struct {
 	// Image is the all-in-one egzo image that runs every sidecar role.
 	Image string
-	// Tokens maps each agent to the token that identifies it to the proxy.
+	// Tokens maps each instance to the token that identifies it to the proxy and control.
 	Tokens map[string]string
 	// User is the "uid:gid" agents run as, so what they write on the host is the invoking user's.
 	// Empty leaves it to the image (Podman maps users itself).
@@ -130,6 +127,8 @@ type Inputs struct {
 	HarnessPrefix string
 	// PromptDigests maps each agent that has a prompt file to the hash of its content (see PromptDigests).
 	PromptDigests map[string]string
+	// Instances are the names of the instances that exist: the sidecars are attached to their networks.
+	Instances []string
 }
 
 // The sidecars run as an unprivileged user and are limited in memory and processes: they parse what
@@ -214,11 +213,13 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 	containers := []ContainerSpec{control}
 	agentNames := sortedKeys(project.Agents)
 
-	var agentNetworks []string
-	for _, name := range agentNames {
-		agentNetworks = append(agentNetworks, project.Name+"_"+name)
+	// The sidecars join the network of every instance. The instances are spawned, not declared: the
+	// attachments only keep the ones that exist when a sidecar is created again.
+	var instanceNetworks []string
+	for _, name := range in.Instances {
+		instanceNetworks = append(instanceNetworks, project.Name+"_"+name)
 	}
-	desired.Attachments = []Attachment{{Container: control.Name, Alias: "control", Networks: agentNetworks}}
+	desired.Attachments = []Attachment{{Container: control.Name, Alias: "control", Networks: instanceNetworks}}
 
 	if len(agentNames) > 0 {
 		egress := NetworkSpec{Name: project.Name + "_egress", Identity: identity(proxyService, kindProxy)}
@@ -252,23 +253,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		volumes = append(volumes, caPrivate, caPublic)
 		containers = append(containers, proxy)
 		desired.Proxy = proxy.Name
-		desired.Attachments = append(desired.Attachments, Attachment{Container: proxy.Name, Alias: "proxy", Networks: agentNetworks})
-	}
-
-	for _, name := range agentNames {
-		network := NetworkSpec{Name: project.Name + "_" + name, Internal: true, Identity: identity(name, kindAgent)}
-		spec, err := agentContainer(project, dir, name, project.Agents[name], network.Name, in, identity(name, kindAgent))
-		if err != nil {
-			return desired, err
-		}
-		for _, dependency := range project.Agents[name].DependsOn {
-			spec.StartAfter = append(spec.StartAfter, project.Name+"-"+dependency+"-1")
-		}
-		networks = append(networks, network)
-		containers = append(containers, spec)
-		if hasHome(project.Agents[name]) {
-			volumes = append(volumes, VolumeSpec{Name: homeVolume(project.Name, name), Identity: identity(name, kindAgent)})
-		}
+		desired.Attachments = append(desired.Attachments, Attachment{Container: proxy.Name, Alias: "proxy", Networks: instanceNetworks})
 	}
 
 	for i := range networks {
@@ -281,6 +266,61 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		containers[i].Identity.ConfigHash = hash(containers[i])
 	}
 	desired.Networks, desired.Volumes, desired.Containers = networks, volumes, containers
+	return desired, nil
+}
+
+// InstanceContainer is the name of an instance's container.
+func InstanceContainer(project, instance string) string { return project + "-" + instance }
+
+// InstanceNetwork is the name of an instance's network.
+func InstanceNetwork(project, instance string) string { return project + "_" + instance }
+
+// InstanceIdentity says where an instance came from.
+type InstanceIdentity struct {
+	Template     string
+	Actor        string
+	TemplateHash string
+}
+
+// DesireInstance computes the resources of one instance: its network, its home volume, its container,
+// and the attachments of the sidecars to its network. view is the project with the instance as an
+// agent (see Published.View); name is the instance's key in it.
+func DesireInstance(view *config.Resolved, dir string, in Inputs, name string, from InstanceIdentity) (Desired, error) {
+	identity := func(kind string) engine.Identity {
+		return engine.Identity{
+			Project: view.Name, Service: from.Template, Kind: kind, ProjectDir: dir,
+			Instance: name, Actor: from.Actor, TemplateHash: from.TemplateHash,
+		}
+	}
+	agent, ok := view.Agents[name]
+	if !ok {
+		return Desired{}, fmt.Errorf("no instance %q in the project view", name)
+	}
+	desired := Desired{PrepImage: in.Image, Control: view.Name + "-control-1"}
+	network := NetworkSpec{Name: InstanceNetwork(view.Name, name), Internal: true, Identity: identity(kindAgent)}
+	spec, err := agentContainer(view, dir, name, agent, network.Name, in, identity(kindAgent))
+	if err != nil {
+		return desired, err
+	}
+	desired.Networks = []NetworkSpec{network}
+	desired.Containers = []ContainerSpec{spec}
+	if hasHome(agent) {
+		desired.Volumes = []VolumeSpec{{Name: homeVolume(view.Name, name), Identity: identity(kindAgent)}}
+	}
+	desired.Attachments = []Attachment{{Container: desired.Control, Alias: "control", Networks: []string{network.Name}}}
+	if len(view.Agents) > 0 {
+		desired.Proxy = view.Name + "-proxy-1"
+		desired.Attachments = append(desired.Attachments, Attachment{Container: desired.Proxy, Alias: "proxy", Networks: []string{network.Name}})
+	}
+	for i := range desired.Networks {
+		desired.Networks[i].Identity.ConfigHash = hash(desired.Networks[i])
+	}
+	for i := range desired.Volumes {
+		desired.Volumes[i].Identity.ConfigHash = hash(desired.Volumes[i])
+	}
+	for i := range desired.Containers {
+		desired.Containers[i].Identity.ConfigHash = hash(desired.Containers[i])
+	}
 	return desired, nil
 }
 
@@ -297,7 +337,7 @@ func agentContainer(
 ) (ContainerSpec, error) {
 	token := in.Tokens[name]
 	spec := ContainerSpec{
-		Name:       project.Name + "-" + name + "-1",
+		Name:       InstanceContainer(project.Name, name),
 		Image:      agentImage(agent, in.HarnessPrefix),
 		User:       in.User,
 		Network:    network,
@@ -369,12 +409,8 @@ func agentContainer(
 				return spec, fmt.Errorf("agent %q: workspace %q is not declared", name, mount.Name)
 			}
 			if declared.Git != nil {
-				owner := name
-				if mount.From != "" {
-					owner = mount.From
-				}
-				spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: CheckoutDir(declared, owner), Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
-				if declared.Mode == "worktree" && mount.From == "" {
+				spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: CheckoutDir(declared, name), Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
+				if declared.Mode == "worktree" {
 					spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: BaseDir(declared), Target: baseMountPath(mount.Name)})
 				}
 				workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))

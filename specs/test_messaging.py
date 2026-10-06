@@ -27,18 +27,15 @@ def custom(image, **fields):
     return agent(harness="custom", image=image, **fields)
 
 
-def up(project, document):
-    project.write(document)
-    result = project.run("up", timeout=300)
-    assert result.returncode == 0, result.stderr
-
-
 def two_agents(project, image):
-    up(project, spec(agents={"coder": custom(image), "reviewer": custom(image)}))
+    """One template, `worker`, and two instances of it named `coder` and `reviewer` (the addresses below)."""
+    project.up(spec(agents={"worker": custom(image)}))
+    project.spawn("worker", "coder")
+    project.spawn("worker", "reviewer")
 
 
-def container(engine, project, service):
-    return [r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}service") == service][0]
+def container(engine, project, name):
+    return engine.instance(project.name, name)
 
 
 def as_agent(engine, project, name, verb, path, body=None):
@@ -223,7 +220,7 @@ def test_ask_questions_the_requester_keeps_the_request_open_and_the_answer_comes
     assert messages(live_project)[message_id]["STATE"] == "fetched"  # still open
 
     ps = table(live_project.run("ps").stdout)
-    coder = next(row for row in ps if row["SERVICE"] == "coder")
+    coder = next(row for row in ps if row["NAME"] == "coder")
     assert coder["OPEN"] == "1" and coder["WAITING"] == "yes"
 
     answered = live_project.run("answer", question_id, "yes", "after", "the", "tests")
@@ -231,7 +228,7 @@ def test_ask_questions_the_requester_keeps_the_request_open_and_the_answer_comes
     answer = next(e for e in events(live_project) if e["type"] == "message" and e["data"]["kind"] == "resolution")
     assert answer["data"]["to"] == "agent:coder" and answer["data"]["re"] == question_id and answer["actor"] == "operator"
     assert answer["text"] == "yes after the tests"
-    assert next(row for row in table(live_project.run("ps").stdout) if row["SERVICE"] == "coder")["WAITING"] == ""
+    assert next(row for row in table(live_project.run("ps").stdout) if row["NAME"] == "coder")["WAITING"] == ""
     assert live_project.run("answer", question_id, "again").returncode != 0  # terminal
 
 
@@ -350,7 +347,8 @@ def test_an_agent_reports_its_status_and_ps_shows_it(live_project, engine, agent
 def test_ps_shows_the_open_and_waiting_columns(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
     header = live_project.run("ps").stdout.splitlines()[0].split()
-    assert header[:4] == ["NAME", "SERVICE", "STATE", "HEALTH"] and {"ACTIVITY", "OPEN", "WAITING", "STATUS"} <= set(header)
+    assert header[:4] == ["NAME", "SERVICE", "STATE", "HEALTH"]
+    assert {"ACTIVITY", "OPEN", "WAITING", "ACTOR", "AGE", "STALE", "STATUS"} <= set(header)
 
 
 def test_the_control_api_refuses_missing_and_wrong_credentials(live_project, engine, agent_image):
@@ -613,3 +611,48 @@ def test_send_wait_prints_an_answer_without_escape_sequences(live_project, engin
              {"text": "done \x1b]0;pwned\x07 \x1b[31mred", "outcome": "done"})
     waited = live_project.run("send", "--wait", "--timeout", "20s", "coder", "again")
     assert "\x1b" not in waited.stdout + waited.stderr
+
+
+# --- agents are registered with control when they are spawned and forgotten when they are removed -----------------------
+
+
+def test_a_spawned_instance_can_be_sent_a_message_at_once(live_project, engine, agent_image):
+    live_project.up(spec(agents={"worker": custom(agent_image)}))
+    name = live_project.spawn("worker")
+    sent = live_project.run("send", name, "hello")
+    assert sent.returncode == 0, sent.stderr
+    assert messages(live_project)[sent.stdout.split()[1]]["TO"] == f"agent:{name}"
+
+
+def test_a_message_to_a_template_name_is_refused_and_says_to_spawn_it(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    result = live_project.run("send", "worker", "hello")
+    assert result.returncode != 0
+    assert "worker is a template" in result.stderr and "egzo spawn worker" in result.stderr
+
+
+def test_a_removed_instance_no_longer_receives_messages_from_people_or_agents(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    assert live_project.run("rm", "--force", "reviewer").returncode == 0
+    refused = live_project.run("send", "reviewer", "anyone there?")
+    assert refused.returncode != 0 and "reviewer" in refused.stderr
+    code, body = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": "agent:reviewer", "text": "x"})
+    assert code in (400, 404, 409), (code, body)
+    assert "reviewer" in json.dumps(body)
+
+
+def test_an_agent_can_message_an_instance_spawned_after_it(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    live_project.spawn("worker", "latecomer")
+    code, body = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": "agent:latecomer", "text": "welcome"})
+    assert code == 201, (code, body)
+
+
+def test_the_removed_instance_keeps_its_history_but_a_new_instance_of_the_same_name_does_not_inherit_open_requests(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    message_id = send(live_project, "reviewer", "review this")
+    assert live_project.run("rm", "--force", "reviewer").returncode == 0
+    assert message_id in messages(live_project, "--all")  # the record stays
+    live_project.spawn("worker", "reviewer")
+    assert api(engine, live_project, "reviewer", "GET", "/v1/messages")[1] == []  # the old request is not announced to the new agent
+    assert messages(live_project, "--all")[message_id]["STATE"] == "resolved"  # removing an instance fails what it still owed

@@ -8,7 +8,7 @@ func TestParseRef(t *testing.T) {
 		ok       bool
 		kind     refKind
 		target   string
-		agent    string
+		agent    string // unused: kept so the table reads as before
 		readOnly bool
 	}{
 		{"repo", true, refWorkspace, "repo", "", false},
@@ -17,8 +17,8 @@ func TestParseRef(t *testing.T) {
 		{"./docs:ro", true, refHost, "./docs", "", true},
 		{"../shared", true, refHost, "../shared", "", false},
 		{"/srv/data", true, refHost, "/srv/data", "", false},
-		{"coder/repo:ro", true, refAgent, "repo", "coder", true},
-		{"coder/repo", true, refAgent, "repo", "coder", false},
+		{"coder/repo:ro", false, 0, "", "", false}, // another agent's checkout cannot be mounted
+		{"coder/repo", false, 0, "", "", false},
 		{"", false, 0, "", "", false},
 		{":ro", false, 0, "", "", false},
 		{"a:b:ro", false, 0, "", "", false},
@@ -34,7 +34,7 @@ func TestParseRef(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if got.kind != c.kind || got.target != c.target || got.agent != c.agent || got.readOnly != c.readOnly {
+		if got.kind != c.kind || got.target != c.target || got.readOnly != c.readOnly {
 			t.Errorf("parseRef(%q) = %+v", c.raw, got)
 		}
 	}

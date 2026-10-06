@@ -112,7 +112,7 @@ func checkProject(opts *options, report func(level, format string, a ...any)) {
 		report("fail", "%s: %s", config.FileName, firstLine(err.Error()))
 		return
 	}
-	report("ok", "%s is valid (project %s, %d agent(s))", config.FileName, p.Resolved.Name, len(p.Resolved.Agents))
+	report("ok", "%s is valid (project %s, %d template(s))", config.FileName, p.Resolved.Name, len(p.Resolved.Agents))
 	for _, warning := range p.Warnings {
 		report("warn", "%s", strings.TrimPrefix(warning, "warning: "))
 	}
@@ -211,9 +211,9 @@ func newCACommand(opts *options) *cobra.Command {
 			timeout := 5
 			for _, r := range s.observed.Resources {
 				if r.Type == "container" && r.Kind == "agent" && r.State == "running" {
-					fmt.Fprintf(cmd.OutOrStdout(), "restart %s\n", r.Service)
+					fmt.Fprintf(cmd.OutOrStdout(), "restart %s\n", r.Instance)
 					if err := s.engine.API.ContainerRestart(ctx, r.ID, container.StopOptions{Timeout: &timeout}); err != nil {
-						return fmt.Errorf("restart %s: %w", r.Service, err)
+						return fmt.Errorf("restart %s: %w", r.Instance, err)
 					}
 				}
 			}
@@ -238,17 +238,24 @@ func newProxyRulesCommand(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			agents := agentNames(p.Resolved.Agents)
+			// The rules belong to templates; an instance has those of its template.
+			templates := map[string]string{} // the name shown -> the template it is read from
+			for _, name := range agentNames(p.Resolved.Agents) {
+				templates[name] = name
+			}
 			if only != "" {
-				if _, ok := p.Resolved.Agents[only]; !ok {
-					return fmt.Errorf("no agent %q in egzo.yaml (agents: %s)", only, strings.Join(agents, ", "))
+				if _, ok := p.Resolved.Agents[only]; ok {
+					templates = map[string]string{only: only}
+				} else if template, ok := instanceTemplate(cmd.Context(), p.Resolved.Name, only); ok && p.Resolved.Agents[template].Harness != "" {
+					templates = map[string]string{only: template}
+				} else {
+					return fmt.Errorf("no template or instance %q (templates: %s)", only, strings.Join(agentNames(p.Resolved.Agents), ", "))
 				}
-				agents = []string{only}
 			}
 			table := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			fmt.Fprintln(table, "AGENT\tPROFILE\tHOST\tACCESS")
-			for _, name := range agents {
-				profileName := p.Resolved.Agents[name].Egress
+			for _, name := range sortedNames(templates) {
+				profileName := p.Resolved.Agents[templates[name]].Egress
 				profile := p.Resolved.Egress[profileName]
 				for _, host := range profile.Allow {
 					fmt.Fprintf(table, "%s\t%s\t%s\tallowed\n", name, profileName, host)
@@ -272,8 +279,32 @@ func newProxyRulesCommand(opts *options) *cobra.Command {
 			return table.Flush()
 		},
 	}
-	cmd.Flags().StringVar(&only, "agent", "", "only this agent")
+	cmd.Flags().StringVar(&only, "agent", "", "only this template, or the template of this instance")
 	return cmd
+}
+
+// instanceTemplate finds the template an instance was spawned from, when the engine can say.
+func instanceTemplate(ctx context.Context, project, name string) (string, bool) {
+	c, err := engine.Connect(ctx)
+	if err != nil {
+		return "", false
+	}
+	defer c.Close()
+	observed, err := stack.Observe(ctx, c, project)
+	if err != nil {
+		return "", false
+	}
+	instance, ok := observed.Instance(name)
+	return instance.Template, ok
+}
+
+func sortedNames(m map[string]string) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // agentLines passes on the audit lines of one agent.

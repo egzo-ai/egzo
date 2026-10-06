@@ -51,10 +51,6 @@ func dependencies(desired Desired, plan []Action) [][]int {
 						after(i, "create", "volume", m.Source)
 					}
 				}
-				for _, dependency := range spec.StartAfter {
-					after(i, "create", "container", dependency)
-					after(i, "start", "container", dependency)
-				}
 				// An agent starts once the sidecars it depends on are healthy and reachable on its
 				// network: its first hook and its first tool call must not find nobody there.
 				if spec.Identity.Kind == kindAgent {
@@ -66,11 +62,6 @@ func dependencies(desired Desired, plan []Action) [][]int {
 						}
 					}
 				}
-			}
-		case a.Verb == "start" && a.Type == "container":
-			for _, dependency := range specs[a.Name].StartAfter {
-				after(i, "create", "container", dependency)
-				after(i, "start", "container", dependency)
 			}
 		case a.Verb == "remove" && a.Type == "network":
 			deps[i] = append(deps[i], removals...)

@@ -34,19 +34,27 @@ func IsExitError(err error) (int, bool) {
 	return 0, false
 }
 
-// service finds the project's container for a service name (control, proxy, or an agent).
+// service finds the project's container for a name: a sidecar (control, proxy) or an instance.
 func (s *session) service(name string) (*stack.Resource, error) {
 	var found *stack.Resource
 	for i := range s.observed.Resources {
 		r := &s.observed.Resources[i]
-		if r.Type == "container" && r.Service == name {
+		if r.Type != "container" {
+			continue
+		}
+		if (r.Kind == "agent" && r.Instance == name) || (r.Kind != "agent" && r.Service == name) {
 			found = r
 		}
 	}
-	if found == nil {
-		return nil, fmt.Errorf("no service %q in project %q (run `egzo up`?)", name, s.Resolved.Name)
+	if found != nil {
+		return found, nil
 	}
-	return found, nil
+	if _, isTemplate := s.Resolved.Agents[name]; isTemplate {
+		return nil, fmt.Errorf("%s is a template; spawn it first: egzo spawn %s", name, name)
+	}
+	known := []string{"control", "proxy"}
+	known = append(known, s.observed.InstanceNames()...)
+	return nil, fmt.Errorf("no service or instance %q in project %q (%s); is the project up?", name, s.Resolved.Name, strings.Join(known, ", "))
 }
 
 func newLogsCommand(opts *options) *cobra.Command {
@@ -219,16 +227,14 @@ func newProxyLogCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 			if only != "" {
-				if _, ok := s.Resolved.Agents[only]; !ok {
-					return fmt.Errorf("no agent %q in egzo.yaml (agents: %s)", only, strings.Join(agentNames(s.Resolved.Agents), ", "))
-				}
+				// An instance that was removed still has its history in the audit trail.
 				cmd.SetOut(&agentLines{out: cmd.OutOrStdout(), agent: only})
 			}
 			return streamLogs(ctx, s, "proxy", follow, "all", cmd)
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow the audit trail")
-	cmd.Flags().StringVar(&only, "agent", "", "only the connections of this agent")
+	cmd.Flags().StringVar(&only, "agent", "", "only the connections of this instance")
 	return cmd
 }
 
@@ -236,16 +242,13 @@ func newAttachCommand(opts *options) *cobra.Command {
 	var readOnly bool
 	var detachKeys string
 	cmd := &cobra.Command{
-		Use:   "attach AGENT",
-		Short: "Attach to an agent's harness TUI",
+		Use:   "attach INSTANCE",
+		Short: "Attach to an instance's harness TUI",
 		Long: "Attach to the native TUI of an agent's harness. Nothing is drawn around it: your terminal shows\n" +
 			"exactly what the harness draws, and keeps its own scrollback. Detach with Ctrl-] (--detach-keys).\n" +
 			"Several people can attach at once; --read-only watches without typing.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
-				return fmt.Errorf("attach needs a terminal on both stdin and stdout")
-			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
 			s, err := openSession(ctx, opts)
@@ -253,34 +256,46 @@ func newAttachCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			if _, ok := s.Resolved.Agents[args[0]]; !ok {
-				return fmt.Errorf("no agent %q in egzo.yaml (agents: %s)", args[0], strings.Join(agentNames(s.Resolved.Agents), ", "))
-			}
-			target, err := s.service(args[0])
-			if err != nil {
+			// Say what is wrong with the name before saying there is no terminal.
+			if _, err := s.service(args[0]); err != nil {
 				return err
 			}
-			if target.State != "running" {
-				return fmt.Errorf("agent %q is %s: start it with `egzo start %s` or `egzo up`", args[0], target.State, args[0])
+			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+				return fmt.Errorf("attach needs a terminal on both stdin and stdout")
 			}
-			command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys}
-			if readOnly {
-				command = append(command, "--read-only")
-			}
-			err = runIn(ctx, s.engine, target.ID, command)
-			if code, isExit := IsExitError(err); isExit && (code == 126 || code == 127) {
-				return fmt.Errorf("agent %q has no session to attach to: its image does not contain the egzo session holder "+
-					"(egzo harness images do; for a custom image run your program with `egzo agent run -- PROGRAM`)", args[0])
-			}
-			if err != nil && strings.Contains(err.Error(), "executable file not found") {
-				return fmt.Errorf("agent %q has no session to attach to: its image does not contain egzo (the session holder)", args[0])
-			}
-			return err
+			return attachTo(ctx, s, args[0], detachKeys, readOnly)
 		},
 	}
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "watch the session without typing into it")
 	cmd.Flags().StringVar(&detachKeys, "detach-keys", envOr("EGZO_DETACH_KEYS", "ctrl-]"), "the key that detaches (ctrl-<letter>, ctrl-], ctrl-\\, ctrl-^, ctrl-_)")
 	return cmd
+}
+
+// attachTo attaches the terminal to an instance's session.
+func attachTo(ctx context.Context, s *session, name, detachKeys string, readOnly bool) error {
+	target, err := s.service(name)
+	if err != nil {
+		return err
+	}
+	if target.Kind != "agent" {
+		return fmt.Errorf("%s is not an agent: nothing to attach to", name)
+	}
+	if target.State != "running" {
+		return fmt.Errorf("agent %q is %s: start it with `egzo start %s`", name, target.State, name)
+	}
+	command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys}
+	if readOnly {
+		command = append(command, "--read-only")
+	}
+	err = runIn(ctx, s.engine, target.ID, command)
+	if code, isExit := IsExitError(err); isExit && (code == 126 || code == 127) {
+		return fmt.Errorf("agent %q has no session to attach to: its image does not contain the egzo session holder "+
+			"(egzo harness images do; for a custom image run your program with `egzo agent run -- PROGRAM`)", name)
+	}
+	if err != nil && strings.Contains(err.Error(), "executable file not found") {
+		return fmt.Errorf("agent %q has no session to attach to: its image does not contain egzo (the session holder)", name)
+	}
+	return err
 }
 
 func envOr(name, fallback string) string {

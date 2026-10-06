@@ -15,28 +15,46 @@ import (
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
-// BuildPolicy turns the resolved egress profiles into the policy the proxy enforces, one entry per
-// agent. It embeds secret values, so it must only travel through exec stdin, never a label,
-// environment variable or file visible to `inspect`.
-func BuildPolicy(project *config.Resolved, tokens, secrets map[string]string) proxy.Policy {
-	policy := proxy.Policy{Agents: map[string]proxy.AgentPolicy{}}
-	for _, name := range sortedKeys(project.Agents) {
-		profile := project.Egress[project.Agents[name].Egress]
-		agent := proxy.AgentPolicy{Token: tokens[name], Allow: append([]string{}, profile.Allow...)}
+// BuildPolicy turns the egress profiles agents use into the policy the proxy enforces, one entry per
+// profile. It embeds secret values, so it must only travel through exec stdin, never a label,
+// environment variable or file visible to `inspect`. Which agent uses which profile is a matter of
+// bindings (see BindingFor), which carry no secret.
+func BuildPolicy(project *config.Resolved, secrets map[string]string) proxy.Policy {
+	policy := proxy.Policy{Profiles: map[string]proxy.Profile{}}
+	for _, name := range usedProfiles(project) {
+		profile := project.Egress[name]
+		entry := proxy.Profile{Allow: append([]string{}, profile.Allow...)}
 		for _, serviceName := range sortedKeys(profile.Services) {
 			service := profile.Services[serviceName]
-			entry := proxy.Service{Name: serviceName, Hosts: service.Hosts, Secret: secrets[service.Secret], Inspect: service.Inspect}
+			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Secret: secrets[service.Secret], Inspect: service.Inspect}
 			if service.Inject != nil {
-				entry.Header, entry.Value = service.Inject.Header, service.Inject.Value
+				service2.Header, service2.Value = service.Inject.Header, service.Inject.Value
 			}
-			agent.Services = append(agent.Services, entry)
+			entry.Services = append(entry.Services, service2)
 		}
-		policy.Agents[name] = agent
+		policy.Profiles[name] = entry
 	}
 	data, _ := json.Marshal(policy)
 	sum := sha256.Sum256(data)
 	policy.Hash = hex.EncodeToString(sum[:])
 	return policy
+}
+
+// usedProfiles lists, sorted, the egress profiles some agent of the project runs under.
+func usedProfiles(project *config.Resolved) []string {
+	seen := map[string]bool{}
+	for _, agent := range project.Agents {
+		if project.Egress[agent.Egress] != nil {
+			seen[agent.Egress] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
+// BindingFor is what the proxy needs to let an instance through: its credentials and the profile of
+// its template. It holds no secret.
+func BindingFor(token, profile string) proxy.Binding {
+	return proxy.Binding{Token: token, Profile: profile}
 }
 
 // ResolveSecrets reads the value of every secret an agent's profile injects. A secret that cannot

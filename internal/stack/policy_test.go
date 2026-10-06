@@ -31,57 +31,67 @@ func policyProject() *config.Resolved {
 }
 
 func TestBuildPolicy(t *testing.T) {
-	policy := BuildPolicy(policyProject(),
-		map[string]string{"coder": "tok-c", "review": "tok-r"},
-		map[string]string{"main/KEY": "s3cret"})
+	policy := BuildPolicy(policyProject(), map[string]string{"main/KEY": "s3cret"})
 
-	coder := policy.Agents["coder"]
-	if coder.Token != "tok-c" || !reflect.DeepEqual(coder.Allow, []string{"pypi.org"}) {
-		t.Errorf("coder = %+v", coder)
+	coder := policy.Profiles["default"]
+	if !reflect.DeepEqual(coder.Allow, []string{"pypi.org"}) {
+		t.Errorf("default = %+v", coder)
 	}
 	want := []proxy.Service{
 		{Name: "anthropic", Hosts: []string{"api.anthropic.com"}, Header: "x-api-key", Secret: "s3cret"},
 		{Name: "plain", Hosts: []string{"docs.example"}, Inspect: true},
 	}
 	if !reflect.DeepEqual(coder.Services, want) {
-		t.Errorf("coder services = %+v\nwant %+v", coder.Services, want)
+		t.Errorf("default services = %+v\nwant %+v", coder.Services, want)
 	}
 
-	review := policy.Agents["review"]
-	if review.Token != "tok-r" || len(review.Allow) != 0 || len(review.Services) != 0 {
-		t.Errorf("review = %+v, want a token and nothing allowed", review)
+	tight := policy.Profiles["tight"]
+	if len(tight.Allow) != 0 || len(tight.Services) != 0 {
+		t.Errorf("tight = %+v, want nothing allowed", tight)
 	}
-	if review.Allow == nil {
+	if tight.Allow == nil {
 		t.Error("Allow is nil: it would marshal as null instead of []")
+	}
+}
+
+func TestThePolicyHoldsOnlyTheProfilesSomeAgentUses(t *testing.T) {
+	project := policyProject()
+	project.Egress["unused"] = &config.ResolvedProfile{Allow: []string{"never.example"}}
+	policy := BuildPolicy(project, nil)
+	if _, ok := policy.Profiles["unused"]; ok || len(policy.Profiles) != 2 {
+		t.Errorf("profiles = %v", policy.Profiles)
+	}
+}
+
+func TestTheBindingOfAnInstanceHoldsNoSecret(t *testing.T) {
+	binding := BindingFor("tok", "default")
+	if binding.Token != "tok" || binding.Profile != "default" {
+		t.Errorf("binding = %+v", binding)
 	}
 }
 
 func TestBuildPolicyDoesNotAliasTheProfile(t *testing.T) {
 	project := policyProject()
-	policy := BuildPolicy(project, nil, nil)
-	agent := policy.Agents["coder"]
-	agent.Allow[0] = "mutated.example"
+	policy := BuildPolicy(project, nil)
+	profile := policy.Profiles["default"]
+	profile.Allow[0] = "mutated.example"
 	if project.Egress["default"].Allow[0] != "pypi.org" {
 		t.Error("mutating the policy changed the resolved profile")
 	}
 }
 
 func TestBuildPolicyHash(t *testing.T) {
-	tokens := map[string]string{"coder": "t"}
 	secrets := map[string]string{"main/KEY": "one"}
-	base := BuildPolicy(policyProject(), tokens, secrets)
+	base := BuildPolicy(policyProject(), secrets)
 
 	if base.Hash == "" || len(base.Hash) != 64 {
 		t.Fatalf("hash = %q, want a sha256 hex digest", base.Hash)
 	}
-	if again := BuildPolicy(policyProject(), tokens, secrets); again.Hash != base.Hash {
+	if again := BuildPolicy(policyProject(), secrets); again.Hash != base.Hash {
 		t.Error("the hash is not deterministic")
 	}
-	if changed := BuildPolicy(policyProject(), tokens, map[string]string{"main/KEY": "two"}); changed.Hash == base.Hash {
+	if changed := BuildPolicy(policyProject(), map[string]string{"main/KEY": "two"}); changed.Hash == base.Hash {
 		t.Error("a new secret value did not change the hash")
-	}
-	if changed := BuildPolicy(policyProject(), map[string]string{"coder": "other"}, secrets); changed.Hash == base.Hash {
-		t.Error("a new token did not change the hash")
 	}
 }
 

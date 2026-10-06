@@ -10,8 +10,8 @@ from support import agent, spec
 pytestmark = pytest.mark.usefixtures("engine")
 
 
-def container(engine, project, service):
-    return [r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}service") == service][0]
+def container(engine, project, instance):
+    return engine.instance(project.name, instance)
 
 
 def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_configured_registry(
@@ -25,17 +25,17 @@ def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_confi
     registry.forget(remote)
     assert engine.run("image", "inspect", remote).returncode != 0
     live_project.env["EGZO_HARNESS_PREFIX"] = f"{registry.host}/{unique}-"
-    live_project.write(spec(agents={"coder": agent(harness="opencode", env={"FAKE_TUI": "cat"})}))
-    result = live_project.run("up", timeout=600)
-    assert result.returncode == 0, result.stderr
-    assert container(engine, live_project, "coder").raw["Config"]["Image"] == remote
+    live_project.up(spec(agents={"coder": agent(harness="opencode", env={"FAKE_TUI": "cat"})}))
+    live_project.spawn("coder", timeout=600)
+    assert container(engine, live_project, "coder-1").raw["Config"]["Image"] == remote
 
 
-def test_an_unpullable_harness_image_stops_up_naming_the_image_and_the_override(live_project, engine):
+def test_an_unpullable_harness_image_stops_spawn_naming_the_image_and_the_override(live_project, engine):
     live_project.env["EGZO_HARNESS_PREFIX"] = "localhost:5000/does-not-exist-"
-    live_project.write(spec(agents={"coder": agent(harness="opencode")}))
-    result = live_project.run("up", timeout=300)
+    live_project.up(spec(agents={"coder": agent(harness="opencode")}))
+    result = live_project.run("spawn", "coder", timeout=300)
     assert result.returncode != 0
+    assert engine.instances(live_project.name) == []
     assert "localhost:5000/does-not-exist-opencode" in result.stderr and "EGZO_HARNESS_PREFIX" in result.stderr
 
 

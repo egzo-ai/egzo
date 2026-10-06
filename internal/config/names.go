@@ -21,6 +21,28 @@ var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": tru
 // an agent the control volume (which holds the key every token derives from) or the CA the agents trust.
 var reservedWorkspaces = map[string]bool{"control": true, "ca": true, "ca-private": true, "egress": true}
 
+// CheckInstanceName reports why name cannot be the name of an instance, or nil. An instance is addressed
+// by its name alone, so the name must be a plain identifier, must not be one of the project's templates
+// and must not make a container, network or directory that egzo already uses for something else.
+func CheckInstanceName(name string, templates []string) error {
+	switch {
+	case !identifier.MatchString(name):
+		return fmt.Errorf("invalid instance name %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
+	case reservedAgents[name]:
+		return fmt.Errorf("invalid instance name %q: it is reserved for egzo's own use", name)
+	case name == "control-1" || name == "proxy-1":
+		return fmt.Errorf("invalid instance name %q: its container would take the name of a sidecar", name)
+	case strings.HasSuffix(name, "-home"):
+		return fmt.Errorf("invalid instance name %q: names ending in -home are reserved for the volumes of instances", name)
+	}
+	for _, template := range templates {
+		if name == template {
+			return fmt.Errorf("invalid instance name %q: it is the name of a template; an instance needs a name of its own", name)
+		}
+	}
+	return nil
+}
+
 func checkNames(file *File, p *problems) {
 	agents := make([]string, 0, len(file.Agents))
 	for name := range file.Agents {
@@ -49,47 +71,6 @@ func checkNames(file *File, p *problems) {
 		case strings.HasSuffix(name, "-home") && file.Agents[strings.TrimSuffix(name, "-home")].Harness != "":
 			p.addf("workspace %q: %q is reserved for egzo's own use (the home of agent %q)", name, name, strings.TrimSuffix(name, "-home"))
 		}
-	}
-}
-
-// checkDependencies rejects depends_on cycles, which would make `up` wait forever.
-func checkDependencies(file *File, p *problems) {
-	names := make([]string, 0, len(file.Agents))
-	for name := range file.Agents {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	state := map[string]int{} // 1 on the path, 2 finished
-	var path []string
-	reported := false
-	var visit func(string)
-	visit = func(name string) {
-		if reported || state[name] == 2 {
-			return
-		}
-		if state[name] == 1 {
-			start := 0
-			for i, n := range path {
-				if n == name {
-					start = i
-				}
-			}
-			p.addf("depends_on cycle: %s", strings.Join(append(append([]string{}, path[start:]...), name), " -> "))
-			reported = true
-			return
-		}
-		state[name] = 1
-		path = append(path, name)
-		for _, dependency := range file.Agents[name].DependsOn {
-			if _, ok := file.Agents[dependency]; ok {
-				visit(dependency)
-			}
-		}
-		path = path[:len(path)-1]
-		state[name] = 2
-	}
-	for _, name := range names {
-		visit(name)
 	}
 }
 

@@ -171,6 +171,9 @@ func (s *store) index(event Event) {
 			entry.Updated = event.Time
 		}
 		s.latest[event.Agent] = entry
+	case "retired":
+		delete(s.latest, event.Agent)
+		delete(s.pending, event.Agent)
 	case "interrupt":
 		s.pending[event.Agent] = true
 	case "interrupted":
@@ -602,4 +605,23 @@ func (s *server) listFor(agent string) []Message {
 // it asked is waiting for an answer.
 func (s *server) overlay(agent string) (open int, waiting bool) {
 	return s.events.owed(agent)
+}
+
+// retire ends an agent's life in the control sidecar. Every request or question still open for it is
+// closed as failed, so whoever asked (`egzo send --wait`, another agent) is told instead of waiting for
+// an agent that is gone, and its status is forgotten, so a new agent of the same name starts clean.
+func (s *server) retire(agent string) error {
+	address := "agent:" + agent
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	open := s.events.messagesOf(address, func(m Message) bool {
+		return m.To == address && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
+	})
+	for _, m := range open {
+		if _, err := s.resolveMessage("operator", m, "agent "+agent+" was removed before it could answer", "failed"); err != nil {
+			return err
+		}
+	}
+	_, err := s.events.append(Event{Type: "retired", Agent: agent, Actor: "operator"})
+	return err
 }

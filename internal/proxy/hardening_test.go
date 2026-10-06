@@ -119,10 +119,9 @@ func TestAnAgentCannotHoldMoreConnectionsThanTheLimit(t *testing.T) {
 func TestTheLimitOfOneAgentDoesNotStopAnother(t *testing.T) {
 	r := newRig(t, nil)
 	r.proxy.MaxPerAgent = 1
-	r.proxy.SetPolicy(&Policy{Hash: "h", Agents: map[string]AgentPolicy{
-		"coder":    {Token: "tok", Allow: []string{"example.com"}},
-		"reviewer": {Token: "tok2", Allow: []string{"example.com"}},
-	}})
+	r.proxy.SetPolicy(&Policy{Hash: "h", Profiles: map[string]Profile{"p": {Allow: []string{"example.com"}}}})
+	r.proxy.BindAgent("coder", Binding{Token: "tok", Profile: "p"})
+	r.proxy.BindAgent("reviewer", Binding{Token: "tok2", Profile: "p"})
 	connectRequest(t, r, "example.com", "443")
 	conn, err := net.Dial("tcp", strings.TrimPrefix(r.front.URL, "http://"))
 	if err != nil {
@@ -536,9 +535,9 @@ func TestThePolicyEndpointRejectsBadAndOversizedBodies(t *testing.T) {
 	handler, server, _ := operatorFor(t, Config{CADir: t.TempDir(), PubDir: t.TempDir(), SystemBundle: "/nonexistent"})
 	for name, body := range map[string]string{
 		"not json":     "{",
-		"no hash":      `{"agents":{}}`,
-		"oversized":    `{"hash":"x","agents":{"a":{"token":"` + strings.Repeat("a", 9<<20) + `"}}}`,
-		"wrong shapes": `{"hash":"x","agents":[]}`,
+		"no hash":      `{"profiles":{}}`,
+		"oversized":    `{"hash":"x","profiles":{"a":{"allow":["` + strings.Repeat("a", 9<<20) + `"]}}}`,
+		"wrong shapes": `{"hash":"x","profiles":[]}`,
 	} {
 		if response := call(handler, "PUT", "/policy", body); response.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d", name, response.Code)
@@ -547,12 +546,60 @@ func TestThePolicyEndpointRejectsBadAndOversizedBodies(t *testing.T) {
 	if server.PolicyHash() != "" {
 		t.Error("a rejected policy was loaded")
 	}
-	if response := call(handler, "PUT", "/policy", `{"hash":"abc","agents":{}}`); response.Code != http.StatusNoContent {
+	if response := call(handler, "PUT", "/policy", `{"hash":"abc","profiles":{}}`); response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d", response.Code)
 	}
 	var reported map[string]string
 	json.Unmarshal(call(handler, "GET", "/policy", "").Body.Bytes(), &reported)
 	if reported["hash"] != "abc" {
 		t.Errorf("reported = %v", reported)
+	}
+}
+
+func TestTheOperatorBindsAndUnbindsAgentsByName(t *testing.T) {
+	handler, server, _ := operatorFor(t, Config{CADir: t.TempDir(), PubDir: t.TempDir(), SystemBundle: "/nonexistent"})
+	bind := `{"token":"t","profile":"p"}`
+	if response := call(handler, "PUT", "/agents/coder", bind); response.Code != http.StatusConflict {
+		t.Errorf("binding before a policy was loaded: status = %d", response.Code)
+	}
+	if response := call(handler, "PUT", "/policy", `{"hash":"h","profiles":{"p":{"allow":["example.com"]}}}`); response.Code != http.StatusNoContent {
+		t.Fatalf("policy: status = %d", response.Code)
+	}
+	for name, c := range map[string]struct{ path, body string }{
+		"a name with a slash": {"/agents/a%2Fb", bind},
+		"an upper case name":  {"/agents/Coder", bind},
+		"no token":            {"/agents/coder", `{"profile":"p"}`},
+		"not json":            {"/agents/coder", `{`},
+		"an unknown profile":  {"/agents/coder", `{"token":"t","profile":"nope"}`},
+		"an oversized body":   {"/agents/coder", `{"token":"` + strings.Repeat("a", 70<<10) + `","profile":"p"}`},
+	} {
+		if response := call(handler, "PUT", c.path, c.body); response.Code < 400 {
+			t.Errorf("%s: status = %d", name, response.Code)
+		}
+	}
+	if len(server.BoundAgents()) != 0 {
+		t.Fatalf("a rejected binding was kept: %v", server.BoundAgents())
+	}
+	if response := call(handler, "PUT", "/agents/coder", bind); response.Code != http.StatusNoContent {
+		t.Fatalf("bind: status = %d", response.Code)
+	}
+	var listed []string
+	json.Unmarshal(call(handler, "GET", "/agents", "").Body.Bytes(), &listed)
+	if len(listed) != 1 || listed[0] != "coder" {
+		t.Errorf("listed = %v", listed)
+	}
+	// Loading the policy again keeps the binding.
+	call(handler, "PUT", "/policy", `{"hash":"h2","profiles":{"p":{"allow":["other.example"]}}}`)
+	if len(server.BoundAgents()) != 1 {
+		t.Errorf("a new policy dropped the bindings: %v", server.BoundAgents())
+	}
+	if response := call(handler, "DELETE", "/agents/coder", ""); response.Code != http.StatusNoContent {
+		t.Errorf("unbind: status = %d", response.Code)
+	}
+	if response := call(handler, "DELETE", "/agents/coder", ""); response.Code != http.StatusNoContent {
+		t.Errorf("unbinding twice: status = %d", response.Code)
+	}
+	if len(server.BoundAgents()) != 0 {
+		t.Errorf("still bound: %v", server.BoundAgents())
 	}
 }

@@ -65,7 +65,8 @@ func BuildPlan(desired Desired, observed Observed, recreate bool) []Action {
 	}
 
 	for _, r := range observed.Resources {
-		if wanted[r.Type+"/"+r.Name] || r.Type == "volume" {
+		// Instances are spawned, not declared: converging the infrastructure leaves them as they are.
+		if wanted[r.Type+"/"+r.Name] || r.Type == "volume" || r.Kind == kindAgent {
 			continue
 		}
 		if r.Type == "container" {

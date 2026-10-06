@@ -64,6 +64,13 @@ outcome per area (one area per `test_<area>.py`).
   it describes. Specs that need an engine take `live_project`, which cleans up everything it created.
 - Specs assert behaviour at the CLI and engine boundary only, never implementation details.
 
+## Helpers for a spec that needs a running agent
+
+`up` starts no agent: it makes the infrastructure and publishes the templates. The `live_project` fixture has
+`up(document=None)`, `spawn(template, name=None, *flags)` (returns the instance name; `spawn("claude")` is
+`claude-1`, container `<project>-claude-1`), `start(*templates)` (`up`, then one instance of each) and
+`container(instance)`. The `engine` fixture has `instances(project)` and `instance(project, name)`.
+
 ## Output contract assumed by the specs
 
 `egzo config` prints the resolved configuration as YAML and exits non-zero with a message on stderr
@@ -83,6 +90,7 @@ egress:
   <profile>: { allow: [...], services: { <name>: { hosts, inject?, secret? } } }
 ```
 
+`agents:` entries are templates; there is no `depends_on` and no cross-agent workspace reference (`from`).
 Warnings (for example an agent whose profile cannot reach its harness's provider) go to stderr and
 do not change the exit code. Changing this contract means changing these specs first.
 
@@ -93,17 +101,19 @@ do not change the exit code. Changing this contract means changing these specs f
 | `test_meta.py` | the status model itself |
 | `test_schema.py` | validation of `egzo.yaml`, no users in files, no secrets in output |
 | `test_project_name.py` | name resolution and the same-name-other-directory refusal |
-| `test_workspaces.py` | mounts, working directory, git sources, cross-agent references |
+| `test_workspaces.py` | mounts, working directory, git sources, the dropped cross-agent reference |
 | `test_egress.py` | profiles, services, built-ins, extend, reachability warnings |
 | `test_labels.py` | the `ai.egzo.*` label contract |
-| `test_up_down.py` | `up`, `down`, `--dry-run`, idempotency, workspace safety |
-| `test_agents.py` | one container per agent, networks, isolation, who agents run as |
+| `test_up_down.py` | `up` (infrastructure and templates, no agent), `down`, `--dry-run`, idempotency, workspace safety |
+| `test_spawn.py` | templates and `egzo spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
+| `test_instances.py` | `ps` and `ps --json`, `rm`, `prune`, stale instances and the `up` refusal |
+| `test_agents.py` | one container per instance, networks, isolation, who agents run as |
 | `test_proxy.py` | injection, TLS, deny unless allowed, per-agent policy, CA, audit |
 | `test_session.py` | `egzo attach` and the session fidelity matrix, against a stand-in TUI |
 | `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
 | `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
-| `test_git_workspaces.py` | the prep container: clone, shared, worktree, `down --workspaces` safety (clones from github.com) |
-| `test_operations.py` | `secrets`, `doctor`, `diff`, `ca rotate`, `up AGENT`, `depends_on`, `proxy rules`, `handoff` |
+| `test_git_workspaces.py` | the prep container at spawn: clone, shared, worktree, `down --workspaces` and `rm --workspaces` safety (clones from github.com) |
+| `test_operations.py` | `secrets`, `doctor`, `diff`, `ca rotate`, `up` taking no agent, `proxy rules` |
 | `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
 
 ## Not covered

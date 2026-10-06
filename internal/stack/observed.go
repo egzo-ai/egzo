@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -27,6 +28,11 @@ type Resource struct {
 	Kind       string
 	ConfigHash string
 	ProjectDir string
+	// Instance, Actor and TemplateHash come from the labels of what belongs to an instance.
+	Instance     string
+	Actor        string
+	TemplateHash string
+	Created      time.Time // containers only
 }
 
 // Observed is everything that exists on the engine for a project.
@@ -56,6 +62,10 @@ func resourceFrom(kind, id, name string, labels map[string]string) Resource {
 		Kind:       labels[engine.LabelKind],
 		ConfigHash: labels[engine.LabelConfigHash],
 		ProjectDir: labels[engine.LabelProjectDir],
+
+		Instance:     labels[engine.LabelInstance],
+		Actor:        labels[engine.LabelActor],
+		TemplateHash: labels[engine.LabelTemplateHash],
 	}
 }
 
@@ -84,6 +94,7 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 			}
 			resource := resourceFrom("container", item.ID, name, item.Labels)
 			resource.State = item.State
+			resource.Created = time.Unix(item.Created, 0)
 			if inspected, err := c.API.ContainerInspect(ctx, item.ID); err == nil {
 				if inspected.State != nil && inspected.State.Health != nil {
 					resource.Health = inspected.State.Health.Status

@@ -90,8 +90,12 @@ func newRig(t *testing.T, upstreamHandler http.HandlerFunc) *rig {
 	return r
 }
 
+// setPolicy loads a profile of the agent's own name and binds the agent to it.
 func (r *rig) setPolicy(agent, token string, allow []string, services ...Service) {
-	r.proxy.SetPolicy(&Policy{Hash: "h", Agents: map[string]AgentPolicy{agent: {Token: token, Allow: allow, Services: services}}})
+	r.proxy.SetPolicy(&Policy{Hash: "h", Profiles: map[string]Profile{agent: {Allow: allow, Services: services}}})
+	if err := r.proxy.BindAgent(agent, Binding{Token: token, Profile: agent}); err != nil {
+		panic(err)
+	}
 }
 
 // client returns an HTTP client that goes through the proxy as the given agent and trusts trust.

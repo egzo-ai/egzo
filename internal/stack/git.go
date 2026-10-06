@@ -23,9 +23,9 @@ import (
 // goes through the project's proxy under the agent's egress profile and no credential is ever the
 // CLI's or the agent's.
 //
-//	clone     <path>/<agent>      one independent clone per agent
-//	shared    <path>/shared       one checkout used by every agent that lists it
-//	worktree  <path>/<agent>      a worktree of the base clone <path>/.base
+//	clone     <path>/<instance>   one independent clone per instance
+//	shared    <path>/shared       one checkout used by every instance that lists it
+//	worktree  <path>/<instance>   a worktree of the base clone <path>/.base
 //
 // Inside every container the checkout is /workspace/<name> and, for a worktree, the base is
 // /.egzo/base/<name>: prep and agent see the same paths, so the absolute links git writes between a
@@ -89,7 +89,7 @@ func agentsListing(project *config.Resolved, workspace string) []string {
 	var agents []string
 	for name, agent := range project.Agents {
 		for _, mount := range agent.Workspaces {
-			if mount.Name == workspace && mount.From == "" && mount.HostPath == "" {
+			if mount.Name == workspace && mount.HostPath == "" {
 				agents = append(agents, name)
 				break
 			}
@@ -223,28 +223,48 @@ func RunGitPreps(ctx context.Context, c *engine.Client, project *config.Resolved
 	return nil
 }
 
-// Dirs lists the host directories of every git checkout a project's workspaces can have, whether
-// or not they exist: what `down --workspaces` may remove.
+// GitDirs lists the host directories that hold git checkouts of the project's workspaces, whether or not
+// an instance still exists for them: what `down --workspaces` may remove. They are found on disk, so work
+// left by an instance that was removed is found too: a real checkout (it has a .git), a worktree
+// workspace's base, and a symbolic link, which is listed only so that removing it can be refused.
 func GitDirs(project *config.Resolved) []string {
-	seen := map[string]bool{}
 	var dirs []string
-	add := func(dir string) {
-		if !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
 	for _, name := range sortedKeys(project.Workspaces) {
 		ws := project.Workspaces[name]
 		if ws.Git == nil {
 			continue
 		}
-		for _, agent := range agentsListing(project, name) {
-			add(CheckoutDir(ws, agent))
+		entries, err := os.ReadDir(ws.Path)
+		if err != nil {
+			continue
 		}
-		if ws.Mode == "worktree" {
-			add(BaseDir(ws))
+		for _, entry := range entries {
+			path := filepath.Join(ws.Path, entry.Name())
+			if entry.Type()&os.ModeSymlink != 0 || entry.Name() == ".base" || (entry.IsDir() && exists(filepath.Join(path, ".git"))) {
+				dirs = append(dirs, path)
+			}
 		}
+	}
+	return dirs
+}
+
+// InstanceGitDirs lists the checkouts that belong to one instance alone: the clone or worktree of each
+// git workspace it lists. A shared checkout and a worktree base belong to the project.
+func InstanceGitDirs(project *config.Resolved, instance string) []string {
+	var dirs []string
+	agent, ok := project.Agents[instance]
+	if !ok {
+		return nil
+	}
+	for _, mount := range agent.Workspaces {
+		if mount.HostPath != "" {
+			continue
+		}
+		ws, ok := project.Workspaces[mount.Name]
+		if !ok || ws.Git == nil || ws.Mode == "shared" {
+			continue
+		}
+		dirs = append(dirs, CheckoutDir(ws, instance))
 	}
 	return dirs
 }
@@ -305,8 +325,13 @@ func parseInspection(target, stdout string) (Unsaved, error) {
 // network, no credentials, only that checkout mounted read-only): what a checkout's own git
 // configuration can run then sees nothing of any other agent's work.
 func InspectCheckouts(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string) ([]Unsaved, error) {
+	return InspectDirs(ctx, c, project.Name, GitDirs(project), dir, image, user)
+}
+
+// InspectDirs is InspectCheckouts for the given directories; those that are not checkouts are left out.
+func InspectDirs(ctx context.Context, c *engine.Client, projectName string, dirs []string, dir, image, user string) ([]Unsaved, error) {
 	var existing []string
-	for _, d := range GitDirs(project) {
+	for _, d := range dirs {
 		if exists(filepath.Join(d, ".git")) {
 			existing = append(existing, d)
 		}
@@ -332,7 +357,7 @@ func InspectCheckouts(ctx context.Context, c *engine.Client, project *config.Res
 				Image: image, Cmd: []string{"/egzo", "prep", "git", "status", target}, User: user,
 				Mounts:   []MountSpec{{Bind: true, Source: d, Target: target, ReadOnly: true}},
 				Env:      []string{"HOME=/tmp", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*"},
-				Identity: engine.Identity{Project: project.Name, Service: "prep", Kind: "prep", ProjectDir: dir},
+				Identity: engine.Identity{Project: projectName, Service: "prep", Kind: "prep", ProjectDir: dir},
 			})
 			if err == nil {
 				results[i], err = parseInspection(target, stdout)

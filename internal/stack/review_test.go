@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -30,35 +31,54 @@ func TestAContainerThatWasCreatedButNeverStartedIsRecreated(t *testing.T) {
 	}
 }
 
-// --- R-35: agents start after the sidecars are up and attached to their network ----------------------------------
+// --- instances are not converged: up leaves them alone ------------------------------------------------------------
 
-func TestAnAgentIsCreatedOnlyAfterTheSidecarsAreHealthyAndOnItsNetwork(t *testing.T) {
+func TestUpNeverRemovesOrChangesInstances(t *testing.T) {
 	project := desireProject()
-	desired := desire(t, project)
-	plan := BuildPlan(desired, Observed{}, false)
-	deps := dependencies(desired, plan)
-	index := func(text string) int {
-		for i, a := range plan {
-			if a.String() == text {
-				return i
+	desired, err := Desire(project, "/dir", Inputs{Image: "egzo:test", Instances: []string{"coder-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	infra := BuildPlan(desired, Observed{}, false)
+	// Everything the infrastructure needs exists, plus an instance with its network, home and container.
+	var observed Observed
+	for _, action := range infra {
+		if action.Verb == "create" {
+			hash := ""
+			for _, c := range desired.Containers {
+				if c.Name == action.Name {
+					hash = c.Identity.ConfigHash
+				}
+			}
+			for _, n := range desired.Networks {
+				if n.Name == action.Name {
+					hash = n.Identity.ConfigHash
+				}
+			}
+			observed.Resources = append(observed.Resources, Resource{Type: action.Type, Name: action.Name, ID: action.Name, ConfigHash: hash, State: "running", Networks: []string{"proj_coder-1"}})
+		}
+	}
+	observed.Resources = append(observed.Resources,
+		Resource{Type: "container", Name: "proj-coder-1", ID: "c", Kind: kindAgent, Service: "coder", Instance: "coder-1", State: "running", ConfigHash: "anything"},
+		Resource{Type: "network", Name: "proj_coder-1", ID: "n", Kind: kindAgent, Service: "coder", Instance: "coder-1"},
+		Resource{Type: "volume", Name: "proj_coder-1-home", ID: "v", Kind: kindAgent, Service: "coder", Instance: "coder-1"},
+	)
+	for _, action := range BuildPlan(desired, observed, true) {
+		if action.Name == "proj-coder-1" || action.Name == "proj_coder-1" || action.Name == "proj_coder-1-home" {
+			if action.Verb != "connect" {
+				t.Errorf("up touches an instance: %s", action)
 			}
 		}
-		t.Fatalf("no action %q in %v", text, verbs(plan))
-		return -1
 	}
-	for _, agent := range []string{"coder", "review"} {
-		create := index("create container proj-" + agent + "-1")
-		for _, need := range []string{
-			"create container proj-control-1", "create container proj-proxy-1",
-			"connect network proj_" + agent + " to proj-control-1", "connect network proj_" + agent + " to proj-proxy-1",
-		} {
-			if !reaches(deps, create, index(need)) {
-				t.Errorf("agent %s is created without waiting for %q", agent, need)
-			}
+	// A recreated sidecar is attached to the networks of the instances again.
+	var connects []string
+	for _, action := range BuildPlan(desired, observed, true) {
+		if action.Verb == "connect" {
+			connects = append(connects, action.String())
 		}
 	}
-	if reaches(deps, index("connect network proj_coder to proj-proxy-1"), index("create container proj-coder-1")) {
-		t.Error("the connect depends on the agent it serves: a cycle")
+	if len(connects) != 2 {
+		t.Errorf("a recreated sidecar was not attached to the instance's network: %v", connects)
 	}
 }
 
@@ -126,14 +146,14 @@ func TestSidecarsRunUnprivilegedWithLimitsAndBoundedLogs(t *testing.T) {
 
 func TestAgentsGetAProcessLimitUnlessTheFileSetsOne(t *testing.T) {
 	d := desire(t, desireProject())
-	if c := findContainer(t, d, "proj-coder-1"); c.PidsLimit != defaultAgentPids || !c.BoundedLogs {
+	if c := findContainer(t, d, "proj-coder"); c.PidsLimit != defaultAgentPids || !c.BoundedLogs {
 		t.Errorf("pids = %d, bounded logs = %v", c.PidsLimit, c.BoundedLogs)
 	}
 	project := desireProject()
 	coder := project.Agents["coder"]
 	coder.Resources = config.Resources{Pids: 77, Memory: "1g"}
 	project.Agents["coder"] = coder
-	c := findContainer(t, desire(t, project), "proj-coder-1")
+	c := findContainer(t, desire(t, project), "proj-coder")
 	if c.PidsLimit != 77 {
 		t.Errorf("pids = %d", c.PidsLimit)
 	}
@@ -174,11 +194,11 @@ func TestChangingThePromptChangesTheAgentsHash(t *testing.T) {
 	hashOf := func(digest string) string {
 		in := desireInputs
 		in.PromptDigests = map[string]string{"coder": digest}
-		d, err := Desire(project, "/dir", in)
+		d, err := desireErr(project, "/dir", in)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return findContainer(t, d, "proj-coder-1").Identity.ConfigHash
+		return findContainer(t, d, "proj-coder").Identity.ConfigHash
 	}
 	if hashOf("aaa") == hashOf("bbb") {
 		t.Error("editing the prompt file did not change the agent's hash: `up` would leave a stale agent running")
@@ -324,17 +344,38 @@ func TestUnsavedWorkBlocksButIgnoredFilesOnlyInform(t *testing.T) {
 
 func TestPsShowsAnAgentsStatusAsOneHarmlessLine(t *testing.T) {
 	observed := Observed{Resources: []Resource{
-		{Type: "container", Name: "p-coder-1", Service: "coder", Kind: kindAgent, State: "running"},
+		{Type: "container", Name: "p-coder-1", Service: "coder", Instance: "coder-1", Kind: kindAgent, State: "running"},
 		{Type: "container", Name: "p-proxy-1", Service: "proxy", Kind: kindProxy, State: "running"},
 	}}
 	var out bytes.Buffer
-	WriteStatus(observed, map[string]Report{"coder": {Status: "hi\n\x1b]52;c;ZXZpbA==\x07p-fake-1  fake  running\x1b[2J", Activity: "idle"}}, &out)
+	WriteStatus(Rows(observed, map[string]Report{"coder-1": {Status: "hi\n\x1b]52;c;ZXZpbA==\x07p-fake-1  fake  running\x1b[2J", Activity: "idle"}}, nil), time.Now(), &out)
 	if strings.ContainsAny(out.String(), "\x1b\x07\x00") {
 		t.Errorf("control characters reached the terminal: %q", out.String())
 	}
 	if lines := strings.Split(strings.TrimSpace(out.String()), "\n"); len(lines) != 3 {
 		t.Errorf("a status line forged rows: %q", out.String())
 	}
+}
+
+func TestLockWaitWaitsForTheHolderAndGivesUpAfterTheTimeout(t *testing.T) {
+	dir := t.TempDir()
+	release, err := Lock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, err := LockWait(dir, 300*time.Millisecond); err == nil || time.Since(started) < 250*time.Millisecond {
+		t.Fatalf("a held lock was not waited for: err = %v after %s", err, time.Since(started))
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		release()
+	}()
+	got, err := LockWait(dir, 5*time.Second)
+	if err != nil {
+		t.Fatalf("the lock was not taken once released: %v", err)
+	}
+	got()
 }
 
 func TestOnlyOneCommandChangesAProjectAtATime(t *testing.T) {

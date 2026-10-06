@@ -16,7 +16,7 @@ and secure workflows, all while the user keeps the Claude Code experience they k
 
 Rules:
 1. **Minimal fuss to a working Claude Code.** From zero to a sandboxed Claude Code prompt is a
-   tiny explicit `egzo.yaml` (scaffolded by `egzo init`), then `egzo up` and `egzo attach`. There is
+   tiny explicit `egzo.yaml` (scaffolded by `egzo init`), then `egzo up` and `egzo spawn AGENT --attach`. There is
    no implicit project and no implicit mounting of the user's directory: everything an agent can
    see is declared in the file.
 2. **The TUI is untouched.** What the user sees is the real `claude` TUI, not an Egzo
@@ -122,9 +122,11 @@ hard maximum value size far below the engine's ~64 KB ceiling. Labels are for se
 filtering, not for storing config (Compose stores only a hash; Kubernetes' last-applied-config
 annotation is the cautionary tale).
 
-Names: `<project>-<service>-<n>`; networks `<project>_<agent>` (one per agent) ; volumes
-`<project>_<vol>`.
-`egzo up` = list by label -> diff config-hash -> create/recreate/remove. Idempotent. `up` always
+Names: sidecars `<project>-control-1`, `<project>-proxy-1`; agent instances `<project>-<instance>` (see
+"Templates and instances"); networks `<project>_<instance>` (one per instance); volumes `<project>_<vol>`.
+`egzo up` = list by label -> diff config-hash -> create/recreate/remove the **infrastructure** and publish the
+templates (agent instances are not reconciled: they are spawned, and marked stale when their template moves).
+Idempotent. `up` always
 returns once converged: there is no foreground mode and no `-d` (agents are TUIs you `attach` to,
 nothing streams to the `up` terminal). Preview with `--dry-run` (long form only, no short flag).
 Caveat: labels are immutable, so *runtime status* (starting/idle/working/blocked) is NOT stored in labels.
@@ -170,7 +172,7 @@ workspaces:                    # declared like compose volumes; referenced by na
                                #   | worktree (optimization, see Workspaces) | shared (one checkout)
   scratch: {}                  # no source: a shared system volume
 
-agents:
+agents:                        # templates: nothing runs until `egzo spawn <name>`
   coder:
     harness: claude-code       # claude-code | opencode | pi | custom
     image: ghcr.io/egzo-ai/egzo-harness-claude-code
@@ -187,7 +189,6 @@ agents:
   reviewer:
     harness: opencode
     workspaces: [./docs:ro]    # host dir, read-only (a git workspace cannot be :ro)
-    depends_on: [coder]
 
 control: {}                    # orchestrator MCP + status sidecar (always present); no settings yet
 
@@ -199,7 +200,9 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
 
     egzo init [--harness claude-code]      # scaffold egzo.yaml
     egzo config                            # resolved/validated YAML (like compose config)
-    egzo up [svc...]                       # reconcile; --recreate; --dry-run. No -d: always returns
+    egzo up                                # reconcile the infrastructure, publish templates; --recreate; --dry-run. No -d: always returns
+    egzo spawn TEMPLATE [NAME] [-m MSG] [--attach|--wait]   # an agent from a template (see Templates and instances)
+    egzo rm NAME... | prune                # remove instances
     egzo diff                              # file vs running (same algorithm as up --dry-run)
     egzo down [--volumes]
     egzo start|stop|restart <svc>          # operate on existing containers (no reconcile)
@@ -252,14 +255,12 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
   optimization: per-agent worktrees of a shared base repo; the base `.git` is then mounted
   read-write into agents, so shared-`.git` risk is accepted explicitly), `shared` (one checkout used
   by every agent that lists it).
-- `:ro` on a git-defined workspace is a validation error with a helpful message (git needs write
-  access) that points to the cross-agent reference below.
-- Cross-agent reference `<agent>/<workspace>:ro` (e.g. a reviewer lists `coder/repo:ro`): mounts
-  the other agent's own instance of that workspace (its clone or worktree volume) read-only, at
-  `/workspace/<agent>/<workspace>`. This is the supported way to give an agent read access to
-  another agent's git workspace. Validation: the agent and workspace must exist, that agent must
-  list the workspace, no self-reference, and `:ro` is mandatory (read-write access to another
-  agent's clone would defeat per-agent isolation). The engine enforces the read-only mount. Workspaces outlive agents; `down --volumes` removes volumes, never host binds.
+- `:ro` on a git-defined workspace is a validation error: git needs write access. For read access to
+  files use a host path (`./path:ro`) or a `shared` workspace; to see another agent's work, fetch what it pushed.
+- Whose a workspace is follows its mode (see "Templates and instances"): `clone` and `worktree` belong to the
+  instance; `shared`, system volumes and host paths belong to the project. There is no way to mount another
+  agent's checkout: a template cannot name an instance that does not exist yet, and agents share only what a
+  workspace declares shared. Workspaces outlive agents; `down --volumes` removes volumes, never host binds.
 - Git sources are HTTPS only (like Scion): `git: {url, branch}` with an `https://` URL; ssh and
   local paths are validation errors. A local repository on the host is not a git source: it is just
   a directory, mounted with the inline `./path` form (no clone, no git semantics).
@@ -291,6 +292,82 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
   unpushed work using the prep container.
 - Harness integrations map extra workspaces to the harness (e.g. Claude Code additional
   directories) and seed workspace trust for each directory.
+
+## Templates and instances (decided, not built)
+
+**Dropped by this model:** `depends_on` (nothing starts at `up`, so there is nothing to order), `egzo up AGENT...`
+(there are no agents to select) and the cross-agent workspace reference `agent/workspace:ro` (a template cannot name
+an instance). All three are removed from the schema, the CLI and the specs, not rejected.
+
+An entry under `agents:` is a **template**: it says how to run an agent and runs nothing. `egzo up` brings up
+the project's infrastructure (networks, volumes, proxy, control), validates the file and **publishes the
+resolved templates** to the control volume. An **instance** is an agent made from a template with `egzo spawn`.
+Spawn does not read `egzo.yaml`: it uses the templates `up` last published, so an instance is always what `up`
+applied, and only the CLI's `up` changes templates. A spawn from the CLI, the hub or any other tool is the same
+operation (an importable package, not CLI code).
+
+### The experience
+
+    egzo up                                       # infrastructure + publish templates; starts no agent
+    egzo spawn coder                              # instance `coder-1` (auto name), returns
+    egzo spawn coder issue-412 -m "Fix #412"      # named, first message sent
+    egzo spawn coder issue-412 -m "..." --attach  # ...and attach to it
+    egzo spawn reviewer pr-88 -m "Review PR 88" --wait [--timeout D]   # exit codes as `send --wait`
+    egzo ps                                       # instances, with TEMPLATE, ACTOR, AGE, STALE
+    egzo attach issue-412 | send | logs | exec | start | stop | restart   # by instance name
+    egzo rm issue-412 [--workspaces] [--force]
+    egzo prune [--stopped] [--stale] [--older-than D] [--dry-run] [--yes]
+
+There are no parameters: an instance is a template, a name and an optional first message. What differs per task is
+said in the message. Anything else per instance belongs in another template.
+
+### Rules
+- **Names.** An instance name is unique in the project, follows the same name rules as every other name, and is
+  how everything addresses the instance (`agent:<name>`, `attach`, `send`). Omitted, it is `<template>-<n>`
+  with the first free `n`. It cannot equal a template name, `control` or `proxy`, or make a container name that
+  a sidecar has. Container `<project>-<name>`, network `<project>_<name>`.
+- **Spawn refuses a name that exists.** It fails with exit code 17 (`EEXIST`) and says which instance and
+  template the name belongs to; no message is sent and nothing changes. A script that retries an event treats 17
+  as "already there" and decides whether to `send`. The engine's unique container name makes the check atomic
+  when two callers race.
+- **Spawn needs the infrastructure** (`up` was run and proxy and control run): otherwise it fails and says so.
+  It never starts the infrastructure, and never creates an instance outside what a template says.
+- **What spawn does** is the per-agent half of `up`: the instance's network (control and proxy join it), token,
+  home volume, workspace preparation (a clone or worktree of its own, named after the instance), the container,
+  and two registrations: control learns the agent (one verb to add and one to remove an agent, never a whole
+  list) and the proxy binds the instance's token to the template's egress profile. **Spawn never reads a
+  secret**: `up` loads the egress profiles, with their secret values, into the proxy; the binding carries only
+  the token and the profile's name. That is what lets the hub, which never touches secrets, spawn. Spawn with
+  `-m` then sends the message; it waits in the queue until the harness is ready, as every message does.
+  A spawn that fails halfway removes what it created, and never a checkout.
+- **`rm`** removes the instance's container, network and volumes, never the checkouts. With `--workspaces` it
+  also removes them, after the same inspection `down --workspaces` does (unpushed commits, stashes, detached
+  work), and refuses without `--force` when something would be lost. A running instance needs `--force`.
+- **`down`** removes every instance, like every other resource of the project, and leaves workspace
+  directories alone.
+- **Stale.** An instance whose template changed since it was spawned, or whose template no longer exists, is
+  **stale**: its `ai.egzo.template-hash` differs from the hash of the template in `egzo.yaml` (the hash covers
+  everything that went into the instance: the agent, its egress profile, the workspaces it lists, its prompt's
+  content, its image). `up` refuses before it publishes, so the file, not the last published templates, is what
+  an instance is compared with. Nothing restarts a stale instance. `ps` marks it, `prune --stale` clears it, and
+  `up` refuses while one exists, naming them, so the user stops them first. `up --dry-run` prints `stale: NAME`
+  for each and says it would refuse.
+- **Reaping.** egzo has no reaper. `prune` removes stopped, stale or old instances (age is the container's
+  creation time); `ps --json` gives a script or a timer what it needs to decide. `prune` asks first, as
+  `down --workspaces` does, unless `--yes`; `--dry-run` lists and changes nothing.
+- **Labels.** `ai.egzo.service=<template key>` (so `ps` groups by it), `ai.egzo.instance=<name>`,
+  `ai.egzo.actor=<who>` (`operator` from the CLI; `user:<id>` or a service from another tool) and
+  `ai.egzo.template-hash=<hash>` on the instance's container, network and home volume.
+- **Workspaces follow their mode.** `clone` and `worktree` checkouts belong to the instance (a directory
+  named after it); `shared` checkouts, system volumes and host paths belong to the project and are shared by
+  every instance that lists them.
+
+### For other tools (hub, broker, scripts)
+`spawn`, `ps`, `rm` and `prune` take `--json`. The hub calls the same package; a broker can run the CLI against
+the engine. A webhook becomes `spawn` followed by `send` (or `spawn -m`). Retrying a webhook is safe for the
+spawn and not for the message. Spawning, stopping and removing instances of declared templates is **operating**,
+not creating or changing a project: the hub's rule that only YAML and the CLI create projects holds, because the
+templates are declared and published by `up`.
 
 ## Control plane (decided)
 - The control sidecar holds status, event log, message queue and spec snapshots (volume).
@@ -489,6 +566,11 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 
 ## Still open (design)
 - The prep container's uid mapping under rootless Podman (Docker runs it as the invoking user).
+- Self-ending instances (a `deadline`, an `on_done` of stop, remove or keep) enforced by the in-container
+  supervisor. Not decided, so there is no policy and no default: an instance lives until someone removes it.
+- A retried event that repeats its first message (spawn refuses an existing name, `send` is not idempotent).
+- Which is the resolved template that spawn reads: it needs the expanded `env` values, which the redacted
+  display snapshot does not keep (`${VAR}` text), so the published templates are a separate file.
 
 ## Still open (spikes)
 Answered: the session backend is the pty holder (it passes the fidelity matrix; tmux was not built); `egzo-agent`
@@ -530,7 +612,9 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
     test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
     test_harnesses.py    # Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, real TUIs
     test_git_workspaces.py # prep container: clone/shared/worktree, idempotency, down --workspaces safety
-    test_operations.py   # secrets, doctor, diff, ca rotate, up AGENT, depends_on, proxy rules
+    test_operations.py   # secrets, doctor, diff, ca rotate, proxy rules
+    test_spawn.py        # spawn: templates, names, exit code 17, first message, --wait, labels, errors
+    test_instances.py    # ps, rm, prune, stale instances, down, registration in control and proxy
     test_images.py       # harness image names and pulling them from a registry
 
 Security specs are the differentiator: assert secrets never appear in `engine inspect`,
@@ -539,19 +623,39 @@ agent env, agent filesystem, or logs; assert direct egress fails.
 ## Implementation notes (what exists, and where it differs from the drafts above)
 
 Built and covered by specs (Docker is the engine the specs run against now; Podman works through its
-compatible socket but is not exercised by the current suite): `init`, `config`, `up [AGENT...]` (`--dry-run`,
-`--recreate`), `diff`, `down` (`--volumes`, `--workspaces`), `ps`, `logs`, `exec`, `attach`, `start|stop|restart`,
+compatible socket but is not exercised by the current suite): `init`, `config`, `up` (`--dry-run`,
+`--recreate`), `spawn`, `rm`, `prune`, `diff`, `down` (`--volumes`, `--workspaces`), `ps` (`--json`), `logs`, `exec`, `attach`, `start|stop|restart`,
 `send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls|set|rm`, `proxy log|rules`, `ca rotate`,
 `doctor`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
 `egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
 the egzo image with `make images`); `custom` runs any image.
 
 Decisions taken while building (reversible; each is covered by specs):
-- **Two-phase `up`.** The control sidecar comes up first because it hands out per-agent tokens
-  (HMAC of the agent name under a random project key kept on the control volume, so tokens are stable
-  across `up` runs and change only when the control volume is deleted). Secrets are read before
-  anything is created, so a missing secret never leaves half a project behind. When a git workspace has to
-  be cloned, the sidecars, the agent networks and the proxy policy come first, then the clones, then the agents.
+- **`up` makes the infrastructure and spawn makes the agents.** Per-agent tokens are an HMAC of the instance name
+  under a random project key kept on the control volume, so they are stable and change only when the control
+  volume is deleted; the control sidecar hands them out. Secrets are read before anything is created, so a
+  missing secret never leaves half a project behind. `up` leaves the instances alone (it never removes or
+  recreates one), re-attaches a recreated sidecar to the networks of the instances, and refuses while one is stale.
+  Spawn creates the instance's network and home volume, attaches control and proxy to the network, registers
+  the instance with control and binds it in the proxy, makes its git checkouts (through the proxy, as the
+  instance), then creates the container. If any step fails it removes what it made, in reverse, and never a checkout.
+- **Staleness is judged against what `up` would publish from `egzo.yaml`.** `up` refuses before it publishes,
+  so comparing with the last published templates would never find a stale instance. `ps` and `prune --stale`
+  compute the hashes from the file. A caller without the file (the hub) compares with the published templates.
+  Spawn itself always uses the published ones.
+- **Published templates** are JSON (`Published`: project, directory, egzo image, the uid:gid of whoever ran `up`,
+  and one `Template` per agent: the resolved agent, its egress profile, the workspaces it lists, the absolute
+  prompt path and digest, the resolved image and the hash) at `PUT /templates` in the control sidecar. They hold
+  no secret, only references. The redacted snapshot below is for display; the templates are what spawn reads.
+- **The proxy holds profiles and bindings.** `PUT /policy` carries the egress profiles with their secret values
+  (hash-compared, in memory); `PUT /agents/{name}` binds an instance's token to a profile by name and
+  `DELETE /agents/{name}` removes it, so spawn and rm never touch a secret and two spawns never race over a list.
+  Loading a new policy keeps the bindings. `egzo restart proxy` loads the policy again and re-binds the instances.
+- **The control sidecar registers agents one at a time** (`PUT|DELETE /agents/{name}`, a file each under
+  `/state/agents`). Unregistering closes every request still open for the agent as failed (so `send --wait`
+  returns 4) and forgets its status. Messages to an unregistered name are refused.
+- **Runtime errors belong to spawn.** A Podman project that asks for an OCI runtime, an unpullable harness image,
+  a program that exits at once and a git mode conflict fail the spawn, and `up` succeeds.
 - **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy
   hash covers the secret values, so rotating a secret re-pushes the policy without recreating any
   container; a restarted proxy denies everything until the next `egzo up` reloads its policy. The
@@ -621,7 +725,7 @@ Decisions taken while building (reversible; each is covered by specs):
   messages addressed to it (an unknown id and someone else's answer alike: "no such message"), and the agent port
   serves no operator verb. Operator API (unix socket, exec only): `GET /events?after=&agent=&follow=1`,
   `POST /messages` (`interrupt: true` asks for the current turn to be stopped), `GET /messages?agent=&kind=&all=1`,
-  `GET /messages/{id}`, `POST /messages/{id}/resolve`, `GET /agents`, `PUT /project`. Event types: `status`,
+  `GET /messages/{id}`, `POST /messages/{id}/resolve`, `GET /agents`, `PUT|DELETE /agents/{name}`, `PUT|GET /templates`. Event types: `status`,
   `message` (with `data.to`, `kind`, `re`, `hops`), `announced`, `fetched`, `resolved` (with the resolution's text and
   `data.outcome`), `unconfirmed`, `interrupt`, `interrupted`, `activity`, `hook`.
 - **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,
@@ -650,8 +754,8 @@ Open, in the order they matter:
 - **Observe and operate only.** The project YAML + CLI is the one and only way to create or change
   a project (`up`, `down`, recreate, edit). The hub never writes YAML and never applies config.
   - Observe: dashboard, status, event timeline, logs, proxy audit, read-only view of the spec.
-  - Operate: start/stop/restart existing containers, interrupt, attach, send messages, answer
-    questions agents ask of people.
+  - Operate: spawn instances of declared templates, start/stop/restart/remove instances, interrupt,
+    attach, send messages, answer questions agents ask of people.
   - Collaborate: presence, one writer + read-only observers per agent (read-only attach), shared
     timeline with sender on every message, questions routed to users.
 - **Secrets are CLI-only.** The hub never reads or writes secret values; it may list which secrets
@@ -707,7 +811,7 @@ CLI `up` recreating containers while users are attached (hub must handle disconn
 - **Names.** Agents, workspaces: 1 to 63 of `[a-z0-9_-]`, starting with a letter or digit. Reserved: agents
   `control`, `proxy`, `prep`, `shared`; workspaces `control`, `ca`, `ca-private`, `egress` and `<agent>-home`, which
   would otherwise be egzo's own volumes (a workspace named `control` would hand an agent the key every token
-  derives from). `depends_on` cycles are errors. Settings that would do nothing (`proxy.audit`, `control.tools`,
+  derives from). Instance names follow the same rule and may not be a template name, `control-1` or `proxy-1`, or end in `-home`. Settings that would do nothing (`proxy.audit`, `control.tools`,
   `agent.tools`) are not in the schema.
 - **Git sources** carry no credentials in the URL (the proxy injects them) and a real branch name. Git run by egzo
   ignores hooks and file-system monitors of the repository it works in. `down --workspaces` stops the agents, inspects
