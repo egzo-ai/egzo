@@ -50,3 +50,14 @@ func TestFromEnvNeedsAllThreeVariables(t *testing.T) {
 		t.Errorf("client = %+v, %v", client, err)
 	}
 }
+
+func TestDoReportsAReplyThatIsTooLargeInsteadOfTruncatingIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, strings.Repeat("x", 1<<20+10))
+	}))
+	defer server.Close()
+	client := &Client{URL: server.URL, Agent: "a", Token: "t", HTTP: server.Client()}
+	if _, err := client.Do(context.Background(), "GET", "/x", nil); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("err = %v", err)
+	}
+}

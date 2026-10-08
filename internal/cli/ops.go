@@ -204,7 +204,9 @@ func newCACommand(opts *options) *cobra.Command {
 				return fmt.Errorf("rotate the CA: %s", strings.TrimSpace(string(result.Stderr)))
 			}
 			var rotated struct{ CA string }
-			json.Unmarshal(result.Stdout, &rotated)
+			if err := json.Unmarshal(result.Stdout, &rotated); err != nil {
+				return fmt.Errorf("rotate the CA: the proxy's answer is not understood: %w", err)
+			}
 			if len(rotated.CA) >= 12 {
 				fmt.Fprintf(cmd.OutOrStdout(), "new CA %s\n", rotated.CA[:12])
 			}

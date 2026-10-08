@@ -74,9 +74,18 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) ([]byte,
 		return nil, err
 	}
 	defer response.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxReply+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxReply {
+		return nil, fmt.Errorf("control's reply is too large (over %d bytes)", maxReply)
+	}
 	if response.StatusCode/100 != 2 {
 		return data, &StatusError{Code: response.StatusCode, Message: fmt.Sprintf("control answered %s: %s", response.Status, strings.TrimSpace(string(data)))}
 	}
 	return data, nil
 }
+
+// maxReply bounds what is read from control; replies are small by design.
+const maxReply = 1 << 20
