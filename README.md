@@ -128,4 +128,4 @@ anything not allowed is denied by default.
 
 ## License
 
-Copyright (C) Neopeak. egzo is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+Copyright (C) Neopeak Internet Solutions inc. egzo is licensed under the [GNU Affero General Public License v3.0](LICENSE).
