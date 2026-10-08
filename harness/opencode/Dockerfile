@@ -1,13 +1,16 @@
 # OpenCode as an egzo harness: the real `opencode` TUI, started by the egzo session holder.
 # Build: docker build --build-arg EGZO_IMAGE=ghcr.io/egzo-ai/egzo:<version> -t egzo-harness-opencode harness/opencode
 ARG EGZO_IMAGE=ghcr.io/egzo-ai/egzo:latest
+# The pinned version of the harness; bump it deliberately.
+ARG OPENCODE_VERSION=1.18.35
 FROM ${EGZO_IMAGE} AS egzo
 
 FROM docker.io/library/node:22-bookworm-slim
+ARG OPENCODE_VERSION
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git procps ripgrep \
  && rm -rf /var/lib/apt/lists/*
-RUN npm install -g opencode-ai && npm cache clean --force
+RUN npm install -g opencode-ai@${OPENCODE_VERSION} && npm cache clean --force
 
 ENV HOME=/home/agent \
     EGZO_HARNESS=opencode \

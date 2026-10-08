@@ -6,10 +6,10 @@ promises that have not been checked against a real release.
 
 ## Publish
 
-- [ ] A `release.yml` GitHub Actions workflow, written after the repository is public and triggered by a version tag
-      (first tested with a `v0.0.1-rc1` tag). One tag builds everything, so the image tag and `egzo version` agree:
+- [ ] `release.yml` (written, not yet run): triggered by a tag without a `v` (`0.1.0`; first tested with `0.0.1-rc1`). One tag builds everything, so the image tag and `egzo version` agree:
       the binaries and `SHA256SUMS` for the GitHub release, the multi-arch sidecar image, then the harness images
-      (they `COPY --from` the sidecar image). It pushes to ghcr.io with `GITHUB_TOKEN` (`packages: write`), with
+      (they `COPY --from` the sidecar image). The arm64 images are built under QEMU, so expect a slow run; if that hurts,
+      move to native arm runners (`ubuntu-26.04-arm`) and merge the manifests. It pushes to ghcr.io with `GITHUB_TOKEN` (`packages: write`), with
       provenance and, optionally, keyless cosign signing. `ci.yml` should also build the images without pushing.
       Decided: linux/amd64 and linux/arm64 from the start, so the arm64 harness images have to be run and checked
       before claiming support (no spec runs on arm64 yet); pin the harness npm packages (`@anthropic-ai/claude-code`,
