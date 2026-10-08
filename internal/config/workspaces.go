@@ -180,11 +180,6 @@ func resolveMounts(
 	return mounts, workdir(name, agent, mounts, p)
 }
 
-func hasAgent(file *File, name string) bool {
-	_, ok := file.Agents[name]
-	return ok
-}
-
 // workdir applies the rule: an explicit workdir wins, a single workspace is the working
 // directory, otherwise it is /workspace.
 func workdir(name string, agent Agent, mounts []Mount, p *problems) string {

@@ -168,12 +168,6 @@ func attachAfterSpawn(ctx context.Context, s *session, name string) error {
 	return attachTo(ctx, s, name, envOr("EGZO_DETACH_KEYS", "ctrl-]"), false)
 }
 
-// removalPlan is what rm and prune are about to do: the instances, and the checkouts that go with them.
-type removalPlan struct {
-	names []string
-	dirs  []string // checkouts to remove, with --workspaces
-}
-
 // viewOfInstances is the project with the given instances as its agents, from the published templates
 // when they can be read and from the file otherwise: it says which checkouts belong to each instance.
 func viewOfInstances(ctx context.Context, cmd *cobra.Command, s *session, instances []stack.Instance) *config.Resolved {
