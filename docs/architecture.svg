@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 960" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#15803d"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b91c1c"/></marker>
+    <g id="inst-body">
+      <rect x="12" y="40" width="171" height="46" rx="6" fill="#fff" stroke="#94a3b8"/>
+      <text x="97" y="60" text-anchor="middle" font-weight="600">pty holder</text>
+      <text x="97" y="75" text-anchor="middle" fill="#475569">egzo agent run (no tmux)</text>
+      <rect x="12" y="96" width="171" height="46" rx="6" fill="#fff" stroke="#94a3b8"/>
+      <text x="97" y="116" text-anchor="middle" font-weight="600">real harness TUI</text>
+      <text x="97" y="131" text-anchor="middle" fill="#475569">bypass permission mode</text>
+      <rect x="12" y="152" width="171" height="42" rx="6" fill="#fff" stroke="#94a3b8"/>
+      <text x="97" y="170" text-anchor="middle" font-weight="600">/workspace/repo</text>
+      <text x="97" y="185" text-anchor="middle" fill="#475569">own git worktree, pushes itself</text>
+      <rect x="12" y="204" width="171" height="40" rx="6" fill="#fff" stroke="#94a3b8"/>
+      <text x="97" y="221" text-anchor="middle" font-weight="600">own home + CA bundle</text>
+      <text x="97" y="236" text-anchor="middle" fill="#475569">own network</text>
+      <text x="97" y="266" text-anchor="middle" fill="#475569">runs as your uid:gid</text>
+      <text x="97" y="282" text-anchor="middle" fill="#475569">optional gVisor (runsc)</text>
+      <text x="97" y="302" text-anchor="middle" fill="#b91c1c" font-weight="600">holds no secrets</text>
+    </g>
+  </defs>
+  <rect width="1260" height="960" fill="#fff"/>
+  <text x="20" y="32" font-size="20" font-weight="700" fill="#0f172a">egzo architecture</text>
+  <text x="20" y="50" fill="#475569">Docker Compose for AI coding agents: a stateless CLI, plus sidecar containers on your own Docker or Podman engine</text>
+
+  <!-- Operator host -->
+  <rect x="20" y="62" width="260" height="790" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="34" y="80" font-weight="700" fill="#334155">Operator host</text>
+
+  <rect x="40" y="90" width="220" height="110" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="150" y="110" text-anchor="middle" font-weight="700">egzo.yaml</text>
+  <text x="150" y="130" text-anchor="middle" fill="#475569">vaults: where secrets come from</text>
+  <text x="150" y="146" text-anchor="middle" fill="#475569">egress: profiles (allow, services)</text>
+  <text x="150" y="162" text-anchor="middle" fill="#475569">workspaces: git / shared / worktree</text>
+  <text x="150" y="178" text-anchor="middle" fill="#475569">agents: templates (harness, prompt)</text>
+
+  <rect x="40" y="225" width="220" height="75" rx="8" fill="#ecfdf5" stroke="#059669"/>
+  <text x="150" y="246" text-anchor="middle" font-weight="700">Your terminal</text>
+  <text x="150" y="264" text-anchor="middle" fill="#475569">egzo attach &lt;agent&gt;</text>
+  <text x="150" y="280" text-anchor="middle" fill="#475569">native scrollback, Ctrl-] detaches</text>
+
+  <rect x="40" y="330" width="220" height="140" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="150" y="351" text-anchor="middle" font-weight="700">egzo CLI</text>
+  <text x="150" y="368" text-anchor="middle" fill="#475569">stateless, no daemon</text>
+  <text x="150" y="388" text-anchor="middle" fill="#475569">up · spawn · rm · down · ps</text>
+  <text x="150" y="404" text-anchor="middle" fill="#475569">attach · secrets · doctor · diff</text>
+  <text x="150" y="420" text-anchor="middle" fill="#475569">ca rotate · proxy rules / log</text>
+  <text x="150" y="444" text-anchor="middle" fill="#475569">talks to the engine API</text>
+  <text x="150" y="459" text-anchor="middle" fill="#475569">(DOCKER_HOST), socket never in agents</text>
+
+  <rect x="40" y="510" width="220" height="80" rx="8" fill="#fffbeb" stroke="#d97706"/>
+  <text x="150" y="531" text-anchor="middle" font-weight="700">Vaults</text>
+  <text x="150" y="549" text-anchor="middle" fill="#475569">env / file backends</text>
+  <text x="150" y="565" text-anchor="middle" fill="#475569">API key, GitHub token</text>
+  <text x="150" y="581" text-anchor="middle" fill="#b45309">values never leave toward agents</text>
+
+  <!-- Engine -->
+  <rect x="300" y="62" width="680" height="798" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="314" y="80" font-weight="700" fill="#334155">Docker / Podman engine (source of truth: containers + ai.egzo.* labels)</text>
+
+  <!-- Templates -->
+  <text x="345" y="98" fill="#475569" font-weight="600">Templates: no container, just the published spec</text>
+  <g stroke="#7c3aed" stroke-dasharray="5 3" fill="#f5f3ff">
+    <rect x="345" y="104" width="195" height="52" rx="8"/>
+    <rect x="552" y="104" width="195" height="52" rx="8"/>
+    <rect x="759" y="104" width="195" height="52" rx="8"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="442" y="126" font-weight="700">coder</text><text x="442" y="144" fill="#475569">claude-code · prompt · repo</text>
+    <text x="650" y="126" font-weight="700">reviewer</text><text x="650" y="144" fill="#475569">opencode · prompt · repo</text>
+    <text x="856" y="126" font-weight="700">architect</text><text x="856" y="144" fill="#475569">claude-code · prompt · repo</text>
+  </g>
+  <g stroke="#475569" fill="none" marker-end="url(#a)">
+    <path d="M442 156V200"/><path d="M650 156V200"/><path d="M856 156V200"/>
+  </g>
+  <text x="450" y="182" fill="#6d28d9" font-weight="600">egzo spawn (as many as you like)</text>
+
+  <!-- Instances -->
+  <g>
+    <rect x="345" y="200" width="195" height="320" rx="10" fill="#eff6ff" stroke="#0f766e" stroke-width="2" stroke-dasharray="7 4"/>
+    <g transform="translate(345 200)"><text x="97" y="24" text-anchor="middle" font-weight="700">issue-412 · coder</text><use href="#inst-body"/></g>
+    <rect x="552" y="200" width="195" height="320" rx="10" fill="#eff6ff" stroke="#0f766e" stroke-width="2" stroke-dasharray="7 4"/>
+    <g transform="translate(552 200)"><text x="97" y="24" text-anchor="middle" font-weight="700">pr-88 · reviewer</text><use href="#inst-body"/></g>
+    <rect x="759" y="200" width="195" height="320" rx="10" fill="#eff6ff" stroke="#0f766e" stroke-width="2" stroke-dasharray="7 4"/>
+    <g transform="translate(759 200)"><text x="97" y="24" text-anchor="middle" font-weight="700">architect-1 · architect</text><use href="#inst-body"/></g>
+  </g>
+  <text x="345" y="534" fill="#0f766e" font-weight="600">Instances: each a sandboxed container on its own network</text>
+
+  <!-- bus -->
+  <g stroke="#475569" fill="none" stroke-width="1.5">
+    <path d="M442 520V562M650 520V562M856 520V562M442 562H856"/>
+  </g>
+  <g stroke="#475569" fill="none" stroke-width="1.5" marker-end="url(#a)">
+    <path d="M495 562V620"/><path d="M810 562V620"/>
+  </g>
+  <text x="652" y="590" text-anchor="middle" fill="#b91c1c" font-size="10" font-weight="600">no agent-to-agent path, no LAN: only these two exits</text>
+
+  <!-- Control -->
+  <rect x="345" y="620" width="300" height="210" rx="10" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="360" y="642" font-weight="700" font-size="13">control sidecar: status + messaging</text>
+  <g fill="#334155">
+    <text x="360" y="668">Status from harness hooks:</text>
+    <text x="372" y="684" fill="#475569">idle · working · waiting (egzo ps)</text>
+    <text x="360" y="708">Message queue (operator or agent to agent):</text>
+    <text x="372" y="724" fill="#475569">pasted into the TUI when human-quiet,</text>
+    <text x="372" y="740" fill="#475569">delivery states + acks, --wait for answer</text>
+    <text x="360" y="764">MCP tools: send / reply to other agents</text>
+    <text x="360" y="788">HTTP API, per-agent token on its own network</text>
+    <text x="360" y="812">Operator unix socket (via exec); spec snapshot</text>
+  </g>
+
+  <!-- Proxy -->
+  <rect x="665" y="620" width="289" height="210" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="680" y="642" font-weight="700" font-size="13">proxy sidecar: egress + secrets</text>
+  <g fill="#334155">
+    <text x="680" y="668">HTTPS_PROXY with per-agent credentials</text>
+    <text x="680" y="692">Egress profile per agent:</text>
+    <text x="692" y="708" fill="#475569">allow-list, anything else is denied</text>
+    <text x="680" y="732">Injects API key / GitHub token into</text>
+    <text x="692" y="748" fill="#475569">requests (MITM only where a rule injects)</text>
+    <text x="680" y="772">Per-project CA, bundle mounted read-only</text>
+    <text x="680" y="796">Public addresses only, connection limits</text>
+    <text x="680" y="812">Audit log (egzo proxy log --agent)</text>
+  </g>
+
+  <!-- Operator arrows -->
+  <g stroke="#475569" fill="none" stroke-width="1.5">
+    <path d="M260 130H345" marker-end="url(#a)"/>
+    <path d="M260 263H345" marker-start="url(#a)" marker-end="url(#a)" stroke="#059669"/>
+    <path d="M260 400H290V725H345" marker-end="url(#a)"/>
+    <path d="M150 590V846H809V830" marker-end="url(#a)" stroke="#d97706"/>
+  </g>
+  <g font-weight="700" text-anchor="middle" fill="#fff">
+    <circle cx="302" cy="130" r="9" fill="#475569"/><text x="302" y="134">1</text>
+    <circle cx="302" cy="263" r="9" fill="#059669"/><text x="302" y="267">2</text>
+    <circle cx="290" cy="560" r="9" fill="#475569"/><text x="290" y="564">3</text>
+    <circle cx="495" cy="590" r="9" fill="#7c3aed"/><text x="495" y="594">4</text>
+    <circle cx="810" cy="590" r="9" fill="#ea580c"/><text x="810" y="594">5</text>
+    <circle cx="500" cy="846" r="9" fill="#d97706"/><text x="500" y="850">6</text>
+  </g>
+
+  <!-- Internet -->
+  <rect x="1000" y="560" width="250" height="292" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="1014" y="580" font-weight="700" fill="#334155">Internet</text>
+  <g stroke-width="1.5" fill="none">
+    <path d="M954 662H1020" stroke="#15803d" marker-end="url(#g)"/>
+    <path d="M954 714H1020" stroke="#15803d" marker-end="url(#g)"/>
+    <path d="M954 766H1020" stroke="#15803d" marker-end="url(#g)"/>
+    <path d="M954 818H1020" stroke="#b91c1c" marker-end="url(#r)"/>
+  </g>
+  <g stroke-width="1" >
+    <rect x="1020" y="640" width="215" height="44" rx="6" fill="#f0fdf4" stroke="#15803d"/>
+    <rect x="1020" y="692" width="215" height="44" rx="6" fill="#f0fdf4" stroke="#15803d"/>
+    <rect x="1020" y="744" width="215" height="44" rx="6" fill="#f0fdf4" stroke="#15803d"/>
+    <rect x="1020" y="796" width="215" height="44" rx="6" fill="#fef2f2" stroke="#b91c1c"/>
+  </g>
+  <g fill="#334155">
+    <text x="1032" y="659" font-weight="600">api.anthropic.com</text><text x="1032" y="675" fill="#15803d">allowed, API key injected</text>
+    <text x="1032" y="711" font-weight="600">github.com</text><text x="1032" y="727" fill="#15803d">allowed, token injected</text>
+    <text x="1032" y="763" font-weight="600">platform.claude.com</text><text x="1032" y="779" fill="#15803d">allowed, plain pass-through</text>
+    <text x="1032" y="815" font-weight="600">everything else, LAN</text><text x="1032" y="831" fill="#b91c1c">denied and audited</text>
+  </g>
+  <circle cx="987" cy="620" r="0" />
+
+  <!-- Features panel -->
+  <rect x="1000" y="62" width="250" height="470" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="1014" y="82" font-weight="700" fill="#334155">Also built</text>
+  <g fill="#334155">
+    <text x="1014" y="106" font-weight="600">Workspaces</text>
+    <text x="1014" y="122" fill="#475569">git clone / shared / worktree, made by a</text>
+    <text x="1014" y="138" fill="#475569">short-lived prep container through the</text>
+    <text x="1014" y="154" fill="#475569">proxy; ./path binds; :ro; cross-agent ro</text>
+    <text x="1014" y="182" font-weight="600">Harnesses</text>
+    <text x="1014" y="198" fill="#475569">Claude Code, OpenCode (images</text>
+    <text x="1014" y="214" fill="#475569">egzo-harness-&lt;name&gt;); pi not yet</text>
+    <text x="1014" y="242" font-weight="600">Autonomous by default</text>
+    <text x="1014" y="258" fill="#475569">bypass mode; the sandbox is the boundary</text>
+    <text x="1014" y="286" font-weight="600">Isolation</text>
+    <text x="1014" y="302" fill="#475569">per-agent network, token and home;</text>
+    <text x="1014" y="318" fill="#475569">optional gVisor runtime (runsc)</text>
+    <text x="1014" y="346" font-weight="600">Lifecycle</text>
+    <text x="1014" y="362" fill="#475569">up / spawn / rm / prune / down;</text>
+    <text x="1014" y="378" fill="#475569">depends_on; handoff; diff; doctor</text>
+    <text x="1014" y="406" font-weight="600">Executable spec</text>
+    <text x="1014" y="422" fill="#475569">pytest in specs/ is the status report:</text>
+    <text x="1014" y="438" fill="#475569">red = not built yet</text>
+    <text x="1014" y="466" font-weight="600">Later: egzo-hub</text>
+    <text x="1014" y="482" fill="#475569">web UI to observe and operate many</text>
+    <text x="1014" y="498" fill="#475569">projects; YAML + CLI stay the only way</text>
+    <text x="1014" y="514" fill="#475569">to change a project</text>
+  </g>
+
+  <!-- Legend -->
+  <line x1="20" y1="876" x2="1240" y2="876" stroke="#e2e8f0"/>
+  <g fill="#334155" font-size="11">
+    <text x="20" y="896"><tspan font-weight="700">1</tspan>  egzo up publishes templates; egzo spawn makes instances (no YAML edit)</text>
+    <text x="20" y="916"><tspan font-weight="700">2</tspan>  egzo attach: your terminal ↔ pty holder, the real TUI (detach, reattach)</text>
+    <text x="20" y="936"><tspan font-weight="700">3</tspan>  Operator commands (spawn -m, ps, status) reach control over a unix socket</text>
+    <text x="640" y="896"><tspan font-weight="700">4</tspan>  Agent → control: hook status, MCP tools, inbound messages</text>
+    <text x="640" y="916"><tspan font-weight="700">5</tspan>  Agent → proxy: the only route out; credentials injected here</text>
+    <text x="640" y="936"><tspan font-weight="700">6</tspan>  Secret values go from the CLI to the proxy only, never to agents</text>
+  </g>
+</svg>
