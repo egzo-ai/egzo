@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Agents: one container each, on their own internal network, joined only by the control sidecar."""
 
 import json

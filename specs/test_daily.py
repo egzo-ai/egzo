@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Day-to-day commands: logs, exec (with and without a terminal), start, stop, restart, proxy log."""
 
 import json

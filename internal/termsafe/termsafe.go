@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package termsafe makes text that an agent wrote safe to print on a person's terminal. An agent
 // chooses its status line, its messages and its answers; printed raw, an escape sequence in them could
 // move the cursor, retitle the window, or write the clipboard (OSC 52), and a newline could forge rows

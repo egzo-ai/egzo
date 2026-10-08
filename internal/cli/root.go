@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package cli implements the egzo command line.
 package cli
 

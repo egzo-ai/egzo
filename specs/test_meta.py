@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Specs for the spec suite itself: done / broken / unsupported / skipped, and no way to hide a todo."""
 
 import pytest

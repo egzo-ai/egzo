@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package config loads, validates and resolves egzo.yaml.
 //
 // The raw types mirror the file. Resolve turns them into the fully resolved view that

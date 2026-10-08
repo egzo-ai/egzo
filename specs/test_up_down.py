@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """`egzo up` / `egzo down`: reconciliation of the project file with the engine."""
 
 import pytest

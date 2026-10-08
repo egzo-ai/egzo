@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Git workspaces: at spawn, the prep container clones into the host before the instance starts.
 
 The specs clone a small public repository through the project's proxy. Nothing runs git on the host

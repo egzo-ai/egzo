@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package control is the control sidecar: it holds the agents' tokens, the typed event stream, the
 // message queue, questions and spec snapshots. It has two listeners: the operator API on a unix
 // socket inside the container, reached only through `engine exec`, and the agent API on the

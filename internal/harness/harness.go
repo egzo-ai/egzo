@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package harness holds the integrations of the supported harnesses: what each one needs inside the
 // agent container to run in its native TUI with permissions bypassed, no first-run question, its
 // life cycle reported to the control sidecar, and the control tools in reach.

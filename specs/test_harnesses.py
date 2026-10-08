@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """The harness integrations: Claude Code and OpenCode as images egzo runs, in their native TUI.
 
 Every integration must (design: bypass mode is a requirement): pre-configure the harness's own

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Fixtures for the egzo spec suite.
 
 The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it on PATH).

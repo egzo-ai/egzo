@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Templates and spawn: `agents:` entries are templates, `egzo spawn` makes an instance of one.
 
 `egzo up` makes the infrastructure and publishes the templates; it starts no agent. `egzo spawn TEMPLATE [NAME]`

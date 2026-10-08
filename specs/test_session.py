@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """`egzo attach` and the session backend: the terminal of a harness, untouched.
 
 The session backend is egzo's pty holder (`egzo agent run`): it runs the harness TUI on a terminal

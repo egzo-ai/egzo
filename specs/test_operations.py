@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """The remaining operator commands: secrets, doctor, diff, ca rotate, proxy rules."""
 
 import json

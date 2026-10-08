@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package proxy is the egress proxy sidecar: the only way out for agents. It enforces the egress
 // profiles, injects credentials into requests so agents never hold them, and audits every connection.
 package proxy

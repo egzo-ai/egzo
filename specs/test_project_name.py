@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Project name resolution, like docker-compose: flag > env > `name:` > directory name."""
 
 import pytest

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """The life of an instance after spawn: ps, rm, prune and stale instances.
 
 An instance whose template changed since it was spawned is stale: `ps` marks it, `up` refuses while one exists,

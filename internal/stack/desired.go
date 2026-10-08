@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package stack reconciles a resolved project with what runs on the engine: it computes the
 // desired resources, compares them with the labelled resources that exist, and applies the
 // difference. It keeps no state: the engine is the source of truth.

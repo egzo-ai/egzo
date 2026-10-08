@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Messages between people and agents: the model, the agent's tools (HTTP and MCP) and the CLI.
 
 Everything said to or by an agent is a message. A message goes queued -> announced -> fetched -> resolved

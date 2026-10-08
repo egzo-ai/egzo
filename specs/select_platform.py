@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Choose the reference platform to run the specs on, from what this machine has.
 
     python select_platform.py          # print the report and the chosen platform

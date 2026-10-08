@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package agentclient is the agent's side of the control sidecar's agent API: what runs inside an
 // agent container (the session holder, the hook command) uses it with the agent's own credentials.
 package agentclient

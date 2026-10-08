@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """The spec snapshot: the resolved project, kept on the control volume so any tool can read it."""
 
 import json

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Announcing messages in an agent's terminal: states, the human-quiet rule, the typed lines, fetch as the ack.
 
 A message is never typed into the terminal. The session holder asks the control sidecar when the agent is

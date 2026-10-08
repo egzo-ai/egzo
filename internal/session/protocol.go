@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package session is egzo's session backend: a pty holder that runs a harness TUI on a terminal
 // inside the agent container, and the clients that attach to it.
 //

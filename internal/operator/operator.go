@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package operator is the plumbing of the sidecars' operator APIs: an HTTP server on a unix socket
 // inside the container, reached only through `engine exec`, and the tiny client that runs there.
 package operator

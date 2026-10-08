@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """Where images come from: the default name of a harness image, and pulling it from a registry."""
 
 import secrets

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package gitprep is what the prep container runs: the git work behind git workspaces. The CLI
 // decides where checkouts go and which agent needs which; this package only does the git.
 package gitprep

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """pytest plugin implementing the spec status model.
 
 The suite is the specification, so running it must answer "what is done, what is not, what does not

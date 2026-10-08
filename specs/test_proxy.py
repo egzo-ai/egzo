@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
 """The egress proxy: the only way out for agents, with credentials injected so agents never hold them."""
 
 import json

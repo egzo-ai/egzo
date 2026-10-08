@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Package engine talks to Docker or Podman through the Docker Engine API. The engine is the
 // source of truth: egzo keeps no state of its own, only labels on what it creates.
 package engine

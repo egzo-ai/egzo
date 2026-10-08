@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
 // Command egzo orchestrates sandboxed AI coding agents on Docker or Podman.
 package main
 
