@@ -19,6 +19,11 @@ promises that have not been checked against a real release.
       only run on one machine, and "supported on Podman" or "gVisor works" are not claims to make.
 - [ ] Decide whether Podman is supported in the first release, given
       `known-issues/rootful-podman-intermittent-egress.md` and `known-issues/podman-gvisor-unsupported.md`.
+- [ ] Once the GitHub project is live, retire [`review-leftovers.md`](review-leftovers.md): file the four concrete items
+      as GitHub issues (the `errcheck` sweep, a fake `client.APIClient` for `Up`/`Apply`/`Down`/`RunPrep` unit tests,
+      audit-log sampling of repeated denials, and a `known-issues/` entry for the `govulncheck` finding GO-2026-4887),
+      fold the Podman uid mapping and per-request cost notes into `DESIGN.md` or drop them, then delete the file and
+      this link. Its R-nn and T-nn ids refer to the deleted `TODO.md` and mean nothing to outsiders.
 
 ## Documentation review once images are published
 
