@@ -6,6 +6,16 @@ promises that have not been checked against a real release.
 
 ## Publish
 
+- [ ] A `release.yml` GitHub Actions workflow, written after the repository is public and triggered by a version tag
+      (first tested with a `v0.0.1-rc1` tag). One tag builds everything, so the image tag and `egzo version` agree:
+      the binaries and `SHA256SUMS` for the GitHub release, the multi-arch sidecar image, then the harness images
+      (they `COPY --from` the sidecar image). It pushes to ghcr.io with `GITHUB_TOKEN` (`packages: write`), with
+      provenance and, optionally, keyless cosign signing. `ci.yml` should also build the images without pushing.
+      Decided: linux/amd64 and linux/arm64 from the start, so the arm64 harness images have to be run and checked
+      before claiming support (no spec runs on arm64 yet); pin the harness npm packages (`@anthropic-ai/claude-code`,
+      `opencode-ai`) with build args instead of installing whatever is latest.
+- [ ] After the first push, set the three ghcr packages (`egzo`, `egzo-harness-claude-code`, `egzo-harness-opencode`)
+      to public and link them to the repository; they start private, and nobody else can pull them until then.
 - [ ] Prebuilt images on `ghcr.io/egzo-ai/`: `egzo` (the sidecar image) and `egzo-harness-claude-code`,
       `egzo-harness-opencode`, tagged with the CLI version (`make images` builds the same set).
 - [ ] A released `egzo` binary per platform (Linux amd64 and arm64 to start), attached to a GitHub release with
