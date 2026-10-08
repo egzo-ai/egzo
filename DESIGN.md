@@ -237,7 +237,7 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
   - Attach (CLI and web UI) = `engine exec -it` into the Session backend.
 - Specs: pytest in `specs/`. A spec for an unbuilt feature fails (the failing specs are the todo list); strict
   xfail is only for platforms that lack a feature.
-- Reuse from v1 (/home/cedric/egzo): harness adapter Render logic (pure, golden-tested), proxy/gate
+- Reuse from v1 (the abandoned first attempt): harness adapter Render logic (pure, golden-tested), proxy/gate
   lessons (todos/0002), Claude onboarding/trust seeding in ~/.claude.json.
 
 ## Workspaces (decided)

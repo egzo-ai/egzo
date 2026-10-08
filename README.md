@@ -125,3 +125,7 @@ anything not allowed is denied by default.
 - Messages and status flow through harness hooks and a small MCP tool set, not screen scraping.
 - Projects are plain containers with labels, like Compose projects. `egzo up` converges the infrastructure to the file
   and publishes the templates; `egzo spawn` makes agents from them, so day-to-day work needs no file edits.
+
+## License
+
+Copyright (C) Neopeak. egzo is licensed under the [GNU Affero General Public License v3.0](LICENSE).
