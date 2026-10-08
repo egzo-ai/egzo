@@ -41,3 +41,5 @@ provides what its scenario names, and nothing else. The gVisor-dependent specs a
 
 Do not read a green local run as "supported on Podman" or "gVisor works". It means "works on this
 machine, for the scenario that was selected".
+
+The plan for it is in `roadmap/ci-test-matrix.md`.

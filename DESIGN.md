@@ -3,7 +3,8 @@
 ## Principles
 1. No daemon. The CLI is stateless; the container engine (docker/podman) is the source of truth.
 2. Everything is a container: agents, proxy, vault, control plane.
-3. Secrets live only in sidecars. Agent containers never hold real credentials.
+3. Secrets live only in sidecars. Agent containers are never given real credentials, so a compromised agent cannot leak
+   what it does not have (it can still use them through the proxy for the hosts its profile allows).
 4. Each agent sits on its own internal network with no default route; the proxy is its only egress
    and the control sidecar its only peer. Agents cannot reach each other directly.
 5. `specs/` (pytest, black-box, drives the real binary) is the specification.
@@ -27,7 +28,7 @@ Rules:
 3. **No first-run friction.** No theme/login/trust/bypass-permission prompts inside the sandbox
    (v1 learned this: seed `~/.claude.json` onboarding + workspace trust, pre-allow the proxy-needed
    hosts). Authentication is a one-time `egzo secrets set` or reuse of the host's login; the
-   agent never holds the real credential (proxy injects it).
+   agent is never given the real credential (the proxy injects it).
 4. **Familiar config carries over.** Optionally mount/copy the user's `~/.claude` settings,
    CLAUDE.md, skills and MCP servers into the agent (read-only, explicit opt-in in YAML) so it
    feels like their own Claude Code.
@@ -48,8 +49,8 @@ Rules:
      prompt reaching the TUI.
    - Harness-specific gotchas live in the integration, e.g. Claude Code refuses bypass as root
      unless `IS_SANDBOX=1` (v1), so run as uid 1000 and/or set it, and seed its bypass-accepted flag.
-   - Containment specs must not depend on the harness: they assert the sandbox holds even if the
-     agent is fully compromised (no egress except via proxy, no secrets, no host access).
+   - Containment specs must not depend on the harness: they assume a hostile agent and assert the
+     intended limits (no egress except via proxy, no secrets in the agent, no host access beyond what the file mounts).
    - Prompts that remain are real questions to a human (e.g. Claude's AskUserQuestion), surfaced
      via the `ask` path (a message to a person), never permission gates.
    - Opt-out (`permissions: default`) exists per agent for users who want prompts.
@@ -193,7 +194,7 @@ agents:                        # templates: nothing runs until `egzo spawn <name
 control: {}                    # orchestrator MCP + status sidecar (always present); no settings yet
 
 # No bridges and no users here. Chat integrations (Discord, ...) are hub features, and who may
-# talk to agents is never declared in project YAML (see Future: egzo-hub).
+# talk to agents is never declared in project YAML (see Not in core).
 ```
 
 ## CLI UX
@@ -756,71 +757,15 @@ Open, in the order they matter:
 4. A real model call is never made by the specs; the end-to-end behaviour of a harness with a model (that a
    reply comes back, that the Stop text reaches `say`) is unverified.
 
-## Future: egzo-hub + web UI (planning; shapes the foundation, not built yet)
+## Not in core: hub, web UI, chat clients
 
-### Model
-- The hub + web UI is a **separate deliverable** (`egzo-hub`, own binary and image), distributed as a
-  docker-compose stack and allowed its own database. It lives in the same git repository as core
-  and shares code through `internal/` (one Go module); it is not part of the `egzo` CLI.
-- The hub connects to **engines** (docker/podman: unix socket, tcp+TLS, ssh; local or remote) and
-  manages egzo projects and agents running on them. Quick start: mount the local docker socket
-  (root-equivalent; docs must say so and point to rootless engine / ssh context as safer).
-- Multi-project (like a docker UI shows all compose projects) and multi-user. **Users are global
-  to the hub instance** and live only in the hub database.
-- **Observe and operate only.** The project YAML + CLI is the one and only way to create or change
-  a project (`up`, `down`, recreate, edit). The hub never writes YAML and never applies config.
-  - Observe: dashboard, status, event timeline, logs, proxy audit, read-only view of the spec.
-  - Operate: spawn instances of declared templates, start/stop/restart/remove instances, interrupt,
-    attach, send messages, answer questions agents ask of people.
-  - Collaborate: presence, one writer + read-only observers per agent (read-only attach), shared
-    timeline with sender on every message, questions routed to users.
-- **Secrets are CLI-only.** The hub never reads or writes secret values; it may list which secrets
-  exist and which agents use them. A hub compromise must not leak credentials.
-- **No users in YAML files, ever.** User identities, roles and per-project grants live in the hub
-  database. YAML may only define which *permissions/roles exist* and what each allows, never who
-  holds them.
-- Trust: whoever holds the engine access is trusted. The hub is the policy enforcement point for
-  its users; it passes the acting user as an asserted `actor` field. No token signing/verification
-  in projects. The CLI stays "OS user = operator".
-
-### Messaging clients are hub features
-Discord (later Slack, Telegram, Teams) is implemented in the hub, not in core projects. The hub
-holds one bot per instance, maps chat identities to hub users (a field on the user record),
-enforces the same permissions as the web UI, lays out channels across projects, and routes
-questions agents ask (`ask`) to the right person. Core only provides the contract below; a messaging
-client is just another client of it, tested in core with a fake client. Consequence: no Discord
-without a hub (accepted). A hub-less bridge could later be a separate tool on the same contract.
-
-### Core <-> hub contract (public API; version it)
-1. Label schema (`ai.egzo.project|service|kind|config-hash|spec-version|project-dir|created-by` plus
-   `ai.egzo.agent.*`).
-2. Control sidecar operator API (status, event stream, message queue, spec snapshot read),
-   versioned, reached via `engine exec` only (unix socket inside the container): no published
-   ports, identical over socket/TLS/ssh. The agent-facing TCP API is separate and not for the hub.
-3. Terminal attach = engine exec attach (hub bridges it to xterm.js).
-4. Self-describing projects: flat labels + `inspect` give the agent/project card (observed state,
-   harness, workspace) with no exec; the redacted resolved-spec snapshot on the control volume
-   (read via exec) gives the detailed view while control is running.
-5. Shared Go packages (list, inspect, read-spec, start/stop, attach, send) reused by the hub.
-6. Messaging contract for any client (CLI, web, chat): `send` + queue API (to an agent); typed
-   event stream (message sent, announced, fetched, resolved; status change; question asked and answered); questions (`ask`) with a
-   stable message id so they can be answered later from anywhere; actor on every message/answer.
-
-### Foundation requirements for core
-- Stable, versioned labels and control API (above).
-- Principal/address format `user:<id>`, `agent:<project>/<name>` in message envelopes, audit
-  entries and permissions from day one; actor field everywhere (default `operator`).
-- Permission vocabulary per project (e.g. observe, attach-rw, send, answer, lifecycle), defined in
-  YAML as roles->permissions, with no user bindings.
-- Schema distinguishes host-bound workspaces (bind) from portable ones (git/volume) so a project
-  that is operated on a remote engine cannot silently depend on host paths.
-- Core logic lives in importable Go packages, not inside CLI command code.
-
-### Hub risks to track
-Privileged socket access (rootless + later label-scoped proxy); engine credentials for remote
-engines (ssh/TLS) stored by the hub; many exec streams (engine events + on-demand sidecar streams);
-CLI `up` recreating containers while users are attached (hub must handle disconnects cleanly).
-
+Egzo core does not implement a hub, a web UI or chat integrations (Discord and the like); they are planned as a
+separate `egzo-hub` deliverable (see `roadmap/hub-and-web-ui.md`). What that means for core:
+- The project YAML and the CLI are the only way to create or change a project. Nothing else writes config.
+- Secrets are CLI-only. No user identities live in YAML, ever; who may talk to agents is not declared there.
+- Core exposes what another client needs: the `ai.egzo.*` label schema, the control sidecar's operator API
+  (reached by `engine exec` only), attach as `engine exec`, the message and event contract, and importable Go
+  packages (list, inspect, read-spec, start/stop, attach, send) rather than logic inside CLI commands.
 
 ## Hardening decisions (code review of the first implementation)
 

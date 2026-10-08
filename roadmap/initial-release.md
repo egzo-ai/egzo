@@ -1,0 +1,50 @@
+# Roadmap: initial release
+
+What has to be true before egzo is published, and what to re-check in the documentation when it is. The docs in
+`docs/` were written against a source build, before any image or binary was published, so parts of them are
+promises that have not been checked against a real release.
+
+## Publish
+
+- [ ] Prebuilt images on `ghcr.io/egzo-ai/`: `egzo` (the sidecar image) and `egzo-harness-claude-code`,
+      `egzo-harness-opencode`, tagged with the CLI version (`make images` builds the same set).
+- [ ] A released `egzo` binary per platform (Linux amd64 and arm64 to start), attached to a GitHub release with
+      checksums, so users download it and put it on their `PATH` and do not need Go 1.27 to try it.
+- [ ] An install wrapper (later, after the plain download works): a script that detects the platform, downloads the
+      right binary, verifies its checksum and installs it, for a `curl ... | sh` style install and perhaps a package
+      (Homebrew tap, `.deb`). Then update `docs/install.md` to lead with it and keep the manual download as the fallback.
+- [ ] Check the name, domain, org and registry (DESIGN.md, "Naming": availability was never really checked).
+- [ ] A CI matrix of reference platforms ([`ci-test-matrix.md`](ci-test-matrix.md),
+      `known-issues/reference-platform-ci-matrix.md`): until then the specs have
+      only run on one machine, and "supported on Podman" or "gVisor works" are not claims to make.
+- [ ] Decide whether Podman is supported in the first release, given
+      `known-issues/rootful-podman-intermittent-egress.md` and `known-issues/podman-gvisor-unsupported.md`.
+
+## Documentation review once images are published
+
+The docs need a pass by someone who installs egzo from the published artifacts on a clean machine and follows
+them. Known places to fix:
+
+- [ ] `docs/install.md`: the download instructions name a releases page and a binary that do not exist yet. Check the
+      real asset names, `chmod`/`PATH` steps and checksum instructions, remove the "not released yet" note, and state
+      which image tags exist (a version, `latest`?). Update it again when the install wrapper lands.
+- [ ] `docs/intro.md`: the first run (`egzo init`, `up`, `spawn --attach`) should be run end to end from the
+      published binary and images, and its `Requirements` and `Status` sections updated.
+- [ ] `docs/images.md`: the `FROM ghcr.io/egzo-ai/egzo-harness-claude-code:latest` example must name a tag that
+      exists; check the advice to match the tag to `egzo version`, and the derived-image rules (entrypoint, uid, no
+      `CMD`) against a real build and `spawn`.
+- [ ] `docs/harnesses.md`: the "Images" section (default name, `EGZO_HARNESS_PREFIX`, the error for an image that
+      cannot be pulled) should be checked against the registry as published.
+- [ ] `docs/troubleshooting.md`: the pull-failure row, and the "Known problems" list, against what is still true.
+- [ ] Every command and flag in the docs against `egzo --help` of the released build, and every YAML example run
+      through `egzo config`. The examples were written from the design and the code, and were not all executed.
+- [ ] Unverified claims to confirm or remove: that `attach` works for a `custom` harness image; that sidecars run
+      as a non-root uid (`docs/security.md`); the exact placeholder credentials each harness receives.
+- [ ] Dead links: `docs/` links to `../README.md`, `roadmap/` and `known-issues/` by path.
+- [ ] The top-level `README.md` status paragraph and "Requirements" section, which says images come from
+      `ghcr.io/egzo-ai/egzo-harness-<name>` or from `make images`.
+
+## Later
+
+The other roadmap items are separate: [hub and web UI](hub-and-web-ui.md), [ssh access for
+agents](ssh-access.md), [review leftovers](review-leftovers.md), [CI test matrix](ci-test-matrix.md), [macOS and Windows (WSL2) hosts](windows-and-macos.md).
