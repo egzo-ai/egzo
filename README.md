@@ -1,36 +1,56 @@
-# egzo
+# egzo: simple agent sandboxing and orchestration
 
-**Docker Compose for AI coding agents.** Describe your agents as templates in one YAML file, start as many as you need in
-sandboxes, and attach to any of them with the real TUI you already know, Claude Code included.
+Egzo is a simple CLI tool to sandbox coding agents and keep your projects organized.
 
-> Status: working on Docker, early everywhere else. Config validation, `up` / `spawn` / `rm` / `down`, agent templates and instances, isolated agents
-> running as you, the egress proxy with credential injection, git workspaces (clone, shared, worktree),
-> Claude Code and OpenCode in their native TUI (`egzo attach`), message delivery into the terminal, and the
-> operator commands (`secrets`, `doctor`, `diff`, `ca rotate`, `proxy rules`) are built. Not yet: pi, and the
-> Podman and gVisor spec runs. The executable spec in `specs/` is the status report:
-> a passing test is done and a failing test is not done yet or broken (the failing specs are the todo list). Run it with
-> `make specs` (it picks the platform from your machine; `ENGINE=docker` names one).
+Define your project in a simple YAML document, spin up the project with `egzo up`, then spawn isolated Claude Code instances using
+`egzo spawn [template]`. Monitor with `egzo ps`, and destroy them once done with `egzo rm`.
 
-## Why
+As a bonus, since it just spins up normal containers, any docker/podman tools or commands you use to manage containers just work.
+Destroy the containers or use `egzo down` and nothing remains on your system.
 
-Coding agents are most useful when they can work unattended, and least safe when they do. Egzo
-gives each agent a sandbox you can trust, without changing the tool you use.
+If you have not guessed it by now: yes, the design is largely inspired by docker-compose. Unlike compose's `services`, agents are defined
+as templates, and you spawn throwaway instances using `egzo spawn my-template` whenever you need to work on a task. You get a Claude Code (or
+any other supported agent).
 
-- **Your harness, untouched.** Agents run the real `claude`, `opencode` and friends in a terminal.
-  Attach with `egzo attach`, detach, reattach. Scrollback, keys, slash commands all behave as usual.
-- **Structure for many agents.** Several agents, several harnesses side by side, each with its own
-  workspace, permissions and credentials.
-- **Autonomous by default.** The sandbox is the security boundary, so agents run in their harness's
-  bypass mode and never stop to ask permission.
-- **Secrets never reach the agent.** Credentials live in a proxy sidecar that injects them into
-  outgoing requests. An agent that is fully compromised still has nothing to steal.
-- **No daemon, nothing new to trust.** Egzo is a stateless CLI. Everything else is containers on your
-  own Docker or Podman (whatever `DOCKER_HOST` points at). The engine is the source of truth.
+## Supported platforms
 
-## Example: a coder, a reviewer and an architect
+- Linux with Docker or Podman as the container engine.
+- Docker with gVisor (runsc) and rootless podman are also supported for additional security.
+- macOS and Windows (through WSL2) are planned but not supported yet: [`roadmap/windows-and-macos.md`](roadmap/windows-and-macos.md).
 
-A GitHub repo and three agents. The coder writes code, the reviewer reviews it, and the architect
-reads the code to advise on design. Each agent works in its own git worktree of the same repo.
+egzo uses the engine `DOCKER_HOST` points at, like the docker CLI (default `/var/run/docker.sock`). Harness images come
+from `ghcr.io/egzo-ai/egzo-harness-<name>`, or are built with `make images` (`EGZO_HARNESS_PREFIX` points egzo at
+another registry). For rootless Podman:
+
+    systemctl --user enable --now podman.socket
+    export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+
+For gVisor, register `runsc` with Docker and set `runtime: runsc` on an agent, as in Compose.
+Podman's Docker-compatible API cannot select a runtime, so egzo refuses to start an agent that asks for one on Podman
+rather than start it without.
+
+## Documentation
+
+See [`docs/`](docs/README.md).
+
+## Features
+
+- **Claude Code and OpenCode.** More harnesses planned.
+- **Real TUIs, in sandboxes.** The standard coding agent interface you are used to. `egzo attach` connects, `Ctrl-]` detaches.
+- **Templates and instances.** Declare agents once in `egzo.yaml`, then `egzo spawn` as many instances as you need,
+  each with its own container, network, home and checkout. `rm`, `prune`, `diff` and `down` clean up.
+- **Isolation by default.** Restricted internet and file access, all capabilities are dropped, memory and process limits.
+- **gVisor and rootless podman.** Fully tested with hardened container runtimes for additional security.
+- **Egress policy.** Allow internet access using a whitelist, or start simple by allowing all domains. Everything remains audited.
+- **Credential injection.** API keys and tokens can be injected live by the built-in proxy, so your agents never need to see any secrets,
+  greatly reducing consequences of prompt injections and risks of secrets leaking.
+- **Git worktrees.** Clone, worktree or shared checkouts made through the proxy, so agents hold no git credentials.
+- **Messaging.** Send messages or tasks to agents without opening their full UI, opening the door for quick work or automated jobs.
+- **Your own tools.** Extend a harness image with extra software, or run any image with the `custom` harness.
+
+## Example: architect with Claude, code with OpenCode
+
+A GitHub repo and 2 agents.
 
 ```yaml
 # egzo.yaml
@@ -50,52 +70,47 @@ egress:
 
 workspaces:
   repo:
-    git: { url: https://github.com/acme/shop.git, branch: main }
-    mode: worktree                   # every agent that lists `repo` gets its own worktree
+    git: { url: https://github.com/egzo-ai/egzo.git, branch: main }
+    mode: worktree                   # git worktree support to save disk space
 
 agents:
-  coder:
-    harness: claude-code
-    workspaces: [repo]               # its own worktree; pushes its own work
-    prompt: ./prompts/coder.md       # implement tasks on branches, open PRs
-
-  reviewer:
-    harness: claude-code             # try `opencode` here to compare frameworks
-    workspaces: [repo]
-    prompt: ./prompts/reviewer.md    # review PRs, comment, approve or request changes
-
   architect:
     harness: claude-code
     workspaces: [repo]
-    prompt: ./prompts/architect.md   # answer design questions, review the approach
+    prompt: ./prompts/architect.md   # "You are a senior software architect..."
+
+  coder:
+    harness: opencode
+    workspaces: [repo]
+    prompt: ./prompts/coder.md       # "Make no mistake"
 ```
 
-No `egress:` on the agents: with no profile named, each gets `default`.
+Bring the project up, then start the agents you need from their templates.
 
-Bring the project up, then start the agents you need from their templates. Each `agents:` entry is a
-template: `egzo up` starts the proxy and the control sidecar and starts no agent.
+Each `agents:` entry is a template: `egzo up` starts the infra, `egzo spawn` starts a throwaway agent.
 
 ```console
 $ export ANTHROPIC_API_KEY=... GITHUB_TOKEN=...
 $ egzo up                                     # the proxy, the control sidecar, the templates
-$ egzo spawn architect -m "How should we add rate limiting to the checkout API?"
-$ egzo spawn coder issue-412 -m "Add rate limiting to the checkout API, then open a PR" --attach
+$ egzo spawn architect -m "I want to build my own agent orchestration system"
+$ egzo spawn coder issue-123 -m "Start work on the oldest backlog item" --attach
 $ egzo ps
 NAME        SERVICE    STATE    HEALTH   ACTIVITY  OPEN  WAITING  ACTOR     AGE  STALE  STATUS
 architect-1 architect  running           working   1              operator  2m
-issue-412   coder      running           working   1              operator  1m
-shop-control-1  control  running  healthy
-shop-proxy-1    proxy    running  healthy
+issue-123   coder      running           working   1              operator  1m
+foo-control-1  control  running  healthy
+foo-proxy-1    proxy    running  healthy
 
 $ egzo attach architect-1  # the real Claude Code TUI; detach with Ctrl-]
-$ egzo spawn reviewer pr-88 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
-$ egzo rm issue-412        # when the work is pushed
+$ egzo spawn coder review-123 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
+$ egzo rm review-123
 ```
 
-An instance is named by you (`issue-412`) or by egzo (`architect-1`). The same template can be spawned as
+An instance is named by you (`issue-123`) or by egzo (`architect-1`). The same template can be spawned as
 often as you like, each with its own worktree, network and home. Spawning needs no edit of `egzo.yaml`.
-The agents never hold the API key or the GitHub token: the proxy injects them into outgoing requests, and
-everything else is denied.
+
+The agents are never given the API key or the GitHub token: the proxy injects them into outgoing requests, and
+anything not allowed is denied by default.
 
 ## How it works
 
@@ -110,20 +125,3 @@ everything else is denied.
 - Messages and status flow through harness hooks and a small MCP tool set, not screen scraping.
 - Projects are plain containers with labels, like Compose projects. `egzo up` converges the infrastructure to the file
   and publishes the templates; `egzo spawn` makes agents from them, so day-to-day work needs no file edits.
-
-## Requirements
-
-Linux with Docker or Podman. Harness images come from `ghcr.io/egzo-ai/egzo-harness-<name>`, or are built
-with `make images` (`EGZO_HARNESS_PREFIX` points egzo at another registry). egzo uses the engine `DOCKER_HOST` points at, like the docker CLI
-(default `/var/run/docker.sock`). For rootless Podman:
-
-    systemctl --user enable --now podman.socket
-    export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
-
-For gVisor, register `runsc` with Docker and set `runtime: runsc` on an agent, as in Compose.
-Podman's Docker-compatible API cannot select a runtime, so egzo refuses to start an agent that asks for one on Podman rather than start it without.
-
-## Later
-
-A separate hub with a web UI for multi-project, multi-user day-to-day operation and chat
-integrations such as Discord. The YAML file stays the only way to create or change a project.
