@@ -25,7 +25,7 @@ test:
 
 lint:
 	staticcheck ./...
-	govulncheck ./...
+	scripts/govulncheck.sh
 
 # ENGINE is one of: docker, docker-gvisor, podman, podman-rootless; empty chooses from this machine
 ENGINE ?=
