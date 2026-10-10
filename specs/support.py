@@ -4,17 +4,10 @@
 """Small builders so specs read as the YAML they describe."""
 
 import copy
+import os
+import stat
 
-VAULT = {
-    "main": {
-        "backend": "env",
-        "secrets": {
-            "ANTHROPIC_API_KEY": {"from": "env:ANTHROPIC_API_KEY"},
-            "GITHUB_TOKEN": {"from": "env:GITHUB_TOKEN"},
-            "DEPLOY_TOKEN": {"from": "env:DEPLOY_TOKEN"},
-        },
-    }
-}
+VAULT = {"main": {"backend": "env", "secrets": ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DEPLOY_TOKEN"]}}
 
 GIT_WORKSPACE = {"repo": {"git": {"url": "https://github.com/acme/shop.git"}}}
 
@@ -66,3 +59,55 @@ def table(output):
         cells = [line[a:b].strip() for a, b in zip(starts, starts[1:] + [None])]
         rows.append(dict(zip(names, cells)))
     return rows
+
+
+PASS_STUB = """#!/bin/sh
+# A stand-in for `pass`: serves entries from $PASS_STUB_STORE and records every call.
+printf '%s\\t%s\\n' "$*" "${PASSWORD_STORE_DIR-unset}" >> "$PASS_STUB_LOG"
+command=$1
+shift
+name=
+for argument; do case $argument in -*) ;; *) name=$argument ;; esac; done
+file="$PASS_STUB_STORE/$name"
+case $command in
+  show) if [ -f "$file" ]; then cat "$file"; else echo "Error: $name is not in the password store." >&2; exit 1; fi ;;
+  *) echo "pass stub: unsupported command $command" >&2; exit 2 ;;
+esac
+"""
+
+
+class FakePass:
+    """A `pass` on PATH that keeps its entries in a directory, so specs need no gpg key. egzo runs `pass`
+    directly, so what the specs check is the call: which command, which entry name, which environment."""
+
+    def __init__(self, root, **entries):
+        self.store = root / "store"
+        self.log = root / "calls.log"
+        self.bin = root / "bin"
+        self.bin.mkdir(parents=True)
+        self.store.mkdir()
+        self.log.touch()
+        executable = self.bin / "pass"
+        executable.write_text(PASS_STUB)
+        executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+        for name, value in entries.items():
+            self.put(name, value)
+
+    @property
+    def env(self):
+        """The environment that puts the stand-in first on PATH."""
+        return {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "PASS_STUB_STORE": str(self.store), "PASS_STUB_LOG": str(self.log)}
+
+    def put(self, name, value):
+        entry = self.store / name
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text(value)
+
+    def get(self, name):
+        entry = self.store / name
+        return entry.read_text() if entry.exists() else None
+
+    def calls(self):
+        """Every call so far, as (arguments, PASSWORD_STORE_DIR as pass saw it)."""
+        rows = [line.split("\t") for line in self.log.read_text().splitlines()]
+        return [(arguments.split(), store_dir) for arguments, store_dir in rows]

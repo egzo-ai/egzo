@@ -72,14 +72,6 @@ def test_a_plain_env_value_is_accepted(project):
     assert result.returncode == 0, result.stderr
 
 
-def test_a_vault_secret_needs_a_known_source_scheme(project):
-    document = spec()
-    document["vaults"]["main"]["secrets"]["BAD"] = {"from": "ftp:somewhere"}
-    result = project.config(document)
-    assert result.returncode != 0
-    assert "ftp" in result.stderr
-
-
 def test_config_never_prints_secret_values(project):
     secret = "spec-secret-value-0123456789"
     result = project.config(

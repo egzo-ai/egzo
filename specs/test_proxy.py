@@ -4,13 +4,14 @@
 """The egress proxy: the only way out for agents, with credentials injected so agents never hold them."""
 
 import json
+import re
 import socket
 import urllib.request
 
 import pytest
 
 from conftest import LABEL_PREFIX
-from support import agent, anthropic_profile, spec
+from support import FakePass, agent, anthropic_profile, spec
 
 SECRET = "sk-spec-injected-0123456789abcdef"
 
@@ -425,3 +426,164 @@ def test_spawn_needs_no_secret_because_the_profiles_were_loaded_by_up(live_proje
     echoed = curl(engine, live_project, "coder-1", "https://httpbin.org/headers")
     assert json.loads(echoed.stdout)["headers"]["X-Egzo-Secret"] == SECRET
     assert SECRET not in spawned.stdout + spawned.stderr
+
+
+# --- placeholders: the agent types a placeholder, the proxy sends the secret ---------------------------------------------
+
+# Characters that break a form or a JSON body unless the value is encoded for the place it lands in.
+PASSWORD = 's3cr"t p&ss=w0rd+/%'
+PLACEHOLDER = re.compile(r"egzo-ph-[0-9a-f]{32}")
+
+
+def logging_in(image, **extra_agents):
+    """One service whose secret the agent types: it gets $SITE_PASSWORD, and httpbin.org gets the real one."""
+    return spec(
+        egress={
+            "default": {
+                "allow": ["httpbingo.org"],
+                "services": {"login": {"hosts": ["httpbin.org"], "secret": "main/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD"}},
+            },
+            "plain": {"allow": ["httpbin.org"]},
+        },
+        agents={"coder": custom(image), **extra_agents},
+    )
+
+
+def sh(engine, project, script, agent_name="coder-1"):
+    """A shell command inside an agent, so that $SITE_PASSWORD is expanded there, the way an agent would use it."""
+    return engine.exec(container(engine, project, agent_name).name, "sh", "-c", f"curl -sS -m 25 {script}")
+
+
+def placeholder_of(engine, project, agent_name="coder-1"):
+    return engine.exec(container(engine, project, agent_name).name, "printenv", "SITE_PASSWORD").stdout.strip()
+
+
+def test_the_agent_gets_a_placeholder_for_the_secret_and_never_the_secret(live_project, engine, agent_image):
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    assert PLACEHOLDER.fullmatch(placeholder_of(engine, live_project))
+    agent_resource = container(engine, live_project, "coder-1")
+    assert PASSWORD not in engine.exec(agent_resource.name, "env").stdout
+    for resource in engine.resources(live_project.name):
+        assert PASSWORD not in json.dumps(resource.raw), f"{resource.kind} {resource.name}"
+    proxy_logs = engine.run("logs", container(engine, live_project, "proxy").name)
+    assert PASSWORD not in proxy_logs.stdout + proxy_logs.stderr
+
+
+@needs_httpbin
+def test_the_proxy_swaps_the_placeholder_in_a_header(live_project, engine, agent_image):
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    echoed = sh(engine, live_project, '-H "X-Site-Key: $SITE_PASSWORD" https://httpbin.org/headers')
+    assert json.loads(echoed.stdout)["headers"]["X-Site-Key"] == PASSWORD
+
+
+@needs_httpbin
+def test_the_proxy_swaps_the_placeholder_in_a_login_form(live_project, engine, agent_image):
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    echoed = sh(engine, live_project, '-d "user=alice&password=$SITE_PASSWORD" https://httpbin.org/post')
+    assert json.loads(echoed.stdout)["form"] == {"user": "alice", "password": PASSWORD}
+
+
+@needs_httpbin
+def test_the_proxy_swaps_the_placeholder_in_a_json_body(live_project, engine, agent_image):
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    echoed = sh(engine, live_project, '-H "Content-Type: application/json" -d "{\\"password\\": \\"$SITE_PASSWORD\\"}" https://httpbin.org/post')
+    assert json.loads(echoed.stdout)["json"] == {"password": PASSWORD}
+
+
+@needs_httpbin
+def test_the_proxy_swaps_the_placeholder_in_a_query_string(live_project, engine, agent_image):
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    echoed = sh(engine, live_project, '"https://httpbin.org/get?password=$SITE_PASSWORD"')
+    assert json.loads(echoed.stdout)["args"] == {"password": PASSWORD}
+
+
+@needs_httpbin
+def test_the_placeholder_is_not_swapped_on_any_other_host(live_project, engine, agent_image):
+    require_reachable("httpbingo.org")
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    echoed = sh(engine, live_project, '-H "X-Site-Key: $SITE_PASSWORD" https://httpbingo.org/headers')
+    sent = json.loads(echoed.stdout)["headers"]["X-Site-Key"]
+    assert PLACEHOLDER.fullmatch(sent if isinstance(sent, str) else sent[0])
+    assert PASSWORD not in echoed.stdout
+
+
+@needs_httpbin
+def test_the_placeholder_is_not_swapped_for_an_agent_whose_profile_lacks_the_service(live_project, engine, agent_image):
+    up(live_project, logging_in(agent_image, reviewer=custom(agent_image, egress="plain")), DEPLOY_TOKEN=PASSWORD)
+    placeholder = placeholder_of(engine, live_project)
+    echoed = sh(engine, live_project, f'-H "X-Site-Key: {placeholder}" https://httpbin.org/headers', "reviewer-1")
+    assert json.loads(echoed.stdout)["headers"]["X-Site-Key"] == placeholder
+
+
+@needs_httpbin
+def test_rotating_the_secret_keeps_the_placeholder_and_a_running_agent_gets_the_new_value(live_project, engine, agent_image):
+    document = logging_in(agent_image)
+    up(live_project, document, DEPLOY_TOKEN="first-value-0123456789")
+    placeholder = placeholder_of(engine, live_project)
+
+    reup(live_project, document, DEPLOY_TOKEN="second-value-0123456789")
+    live_project.spawn("coder")
+    assert placeholder_of(engine, live_project, "coder-2") == placeholder
+    echoed = sh(engine, live_project, '-H "X-Site-Key: $SITE_PASSWORD" https://httpbin.org/headers')
+    assert json.loads(echoed.stdout)["headers"]["X-Site-Key"] == "second-value-0123456789"
+
+
+@needs_httpbin
+def test_a_request_body_that_cannot_be_scanned_is_refused_with_the_reason(live_project, engine, agent_image):
+    """Never forwarded half-handled: a request to a placeholder host is either swapped or refused, the same way every time."""
+    up(live_project, logging_in(agent_image), DEPLOY_TOKEN=PASSWORD)
+    name = container(engine, live_project, "coder-1").name
+    post = 'curl -sS -m 25 -o /dev/null -w "%{http_code}" https://httpbin.org/post'
+    big = engine.exec(name, "sh", "-c", f"head -c 2097152 /dev/zero | {post} --data-binary @-")
+    assert big.stdout.strip() == "413"
+    packed = engine.exec(name, "sh", "-c", f'{post} -H "Content-Encoding: gzip" -d x')
+    assert packed.stdout.strip() == "415"
+    reasons = [e["reason"] for e in audit_events(live_project) if e.get("host") == "httpbin.org" and e["action"] == "deny"]
+    assert len(reasons) == 2 and any("1 MiB" in r for r in reasons) and any("compressed" in r for r in reasons)
+
+
+@needs_httpbin
+def test_a_secret_from_pass_is_injected_as_its_first_line(live_project, engine, agent_image, tmp_path):
+    """The pass backend end to end: the entry is read with `pass show`, and only its first line is the secret."""
+    fake_pass = FakePass(tmp_path / "pass", **{"deploy/token": "first-line-secret-0123456789\nurl: https://example.com\n"})
+    document = spec(
+        vaults={"main": {"backend": "pass", "secrets": ["deploy/token"]}},
+        egress={"default": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "secret": "main/deploy/token"}}}},
+        agents={"coder": custom(agent_image)},
+    )
+    up(live_project, document, **fake_pass.env)
+    echoed = curl(engine, live_project, "coder-1", "https://httpbin.org/headers")
+    assert json.loads(echoed.stdout)["headers"]["X-Egzo-Secret"] == "first-line-secret-0123456789"
+
+
+# --- inspect: audit the paths of an allowed host that gets no secret ---------------------------------------------------
+
+
+def audit_events(project, *args):
+    return [json.loads(line) for line in project.run("proxy", "log", *args).stdout.splitlines() if line.startswith("{")]
+
+
+def requests_to(project, host):
+    return [e for e in audit_events(project) if e.get("host") == host and e["action"] == "request"]
+
+
+def documentation(image, **service):
+    return spec(egress={"default": {"services": {"docs": {"hosts": ["example.com"], **service}}}}, agents={"coder": custom(image)})
+
+
+@needs_internet
+def test_inspect_logs_the_method_path_and_status_of_each_request(live_project, engine, agent_image):
+    up(live_project, documentation(agent_image, inspect=True))
+    curl(engine, live_project, "coder-1", "-o", "/dev/null", "https://example.com/some/page?q=zq9query")
+    (request,) = requests_to(live_project, "example.com")
+    assert request["agent"] == "coder-1" and request["method"] == "GET" and request["path"] == "/some/page"
+    assert request["status"] >= 200
+    assert "zq9query" not in json.dumps(audit_events(live_project))
+
+
+@needs_internet
+def test_without_inspect_an_allowed_host_is_a_tunnel_and_no_path_is_logged(live_project, engine, agent_image):
+    up(live_project, documentation(agent_image))
+    curl(engine, live_project, "coder-1", "-o", "/dev/null", "https://example.com/some/page")
+    assert requests_to(live_project, "example.com") == []
+    assert [e for e in audit_events(live_project) if e.get("host") == "example.com" and e["action"] == "allow"]

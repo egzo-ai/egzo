@@ -378,7 +378,7 @@ OAUTH_TOKEN = "sk-ant-oat01-egzo-spec-not-a-real-token-" + "0" * 40
 @pytest.fixture
 def subscription(environment_secrets, harness_image):
     environment_secrets.env["CLAUDE_CODE_OAUTH_TOKEN"] = OAUTH_TOKEN
-    vaults = {"main": {"backend": "env", "secrets": {"CLAUDE_CODE_OAUTH_TOKEN": {"from": "env:CLAUDE_CODE_OAUTH_TOKEN"}}}}
+    vaults = {"main": {"backend": "env", "secrets": ["CLAUDE_CODE_OAUTH_TOKEN"]}}
     egress = {"default": {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/CLAUDE_CODE_OAUTH_TOKEN"}}}
     return bring_up(environment_secrets, spec(vaults=vaults, egress=egress, agents={"coder": agent(harness="claude-code", image=harness_image("claude-code"))}))
 

@@ -317,7 +317,7 @@ def test_a_secret_bound_to_a_service_that_injects_nothing_is_an_error(project):
     )
     result = project.config(document)
     assert result.returncode != 0
-    assert "plain" in result.stderr and "inject" in result.stderr
+    assert "plain" in result.stderr and "inject" in result.stderr and "placeholder" in result.stderr
 
 
 def test_opencode_with_a_subscription_token_is_warned_about(project):
@@ -329,3 +329,78 @@ def test_opencode_with_a_subscription_token_is_warned_about(project):
     result = project.config(document)
     assert result.returncode == 0, result.stderr
     assert "opencode" in result.stderr and "bearer" in result.stderr
+
+
+# --- placeholders: a secret the agent types, swapped for the real one by the proxy ------------------------------
+
+
+def login(**fields):
+    """The smallest service with a placeholder: the agent gets $SITE_PASSWORD, the proxy swaps it on app.example.com."""
+    return {"hosts": ["app.example.com"], "secret": "main/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD", **fields}
+
+
+def test_a_service_can_give_agents_a_placeholder_for_its_secret(project):
+    resolved = project.resolved(spec(egress={"default": {"services": {"login": login()}}}))
+    service = profile(resolved, "default")["services"]["login"]
+    assert service["secret"] == "main/DEPLOY_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
+    assert "inject" not in service
+
+
+def test_a_placeholder_needs_a_secret(project):
+    document = {"hosts": ["app.example.com"], "placeholder": "SITE_PASSWORD"}
+    result = project.config(spec(egress={"default": {"services": {"login": document}}}))
+    assert result.returncode != 0
+    assert "login" in result.stderr and "secret" in result.stderr
+
+
+def test_a_service_injects_or_has_a_placeholder_never_both(project):
+    result = project.config(spec(egress={"default": {"services": {"login": login(inject={"header": "X-Key"})}}}))
+    assert result.returncode != 0
+    assert "inject" in result.stderr and "placeholder" in result.stderr
+
+
+@pytest.mark.parametrize("name", ["1PASSWORD", "MY-PASSWORD", "my password", "HTTPS_PROXY"])
+def test_a_placeholder_is_a_usable_environment_variable_name_that_egzo_does_not_set(project, name):
+    result = project.config(spec(egress={"default": {"services": {"login": login(placeholder=name)}}}))
+    assert result.returncode != 0
+    assert name in result.stderr
+
+
+def test_two_services_of_a_profile_cannot_share_a_placeholder_variable(project):
+    other = login(hosts=["other.example.com"], secret="main/GITHUB_TOKEN")
+    result = project.config(spec(egress={"default": {"services": {"login": login(), "other": other}}}))
+    assert result.returncode != 0
+    assert "SITE_PASSWORD" in result.stderr
+
+
+def test_an_agent_cannot_also_set_a_placeholder_variable_in_its_env(project):
+    document = spec(
+        egress={"default": {"services": {"login": login()}}},
+        agents={"coder": agent(harness="custom", image="alpine", env={"SITE_PASSWORD": "hunter2"})},
+    )
+    result = project.config(document)
+    assert result.returncode != 0
+    assert "SITE_PASSWORD" in result.stderr
+
+
+def test_a_string_can_bind_another_secret_to_an_inherited_placeholder_service(project):
+    resolved = project.resolved(
+        spec(
+            egress={
+                "base": {"services": {"login": login()}},
+                "operator": {"extend": "base", "services": {"login": "main/GITHUB_TOKEN"}},
+            }
+        )
+    )
+    service = profile(resolved, "operator")["services"]["login"]
+    assert service["secret"] == "main/GITHUB_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
+
+
+# --- rules are by host only -------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", ["path", "paths", "method", "methods"])
+def test_a_service_cannot_be_limited_to_a_path_or_a_method(project, key):
+    result = project.config(spec(egress={"default": {"services": {"login": login(**{key: ["/login"]})}}}))
+    assert result.returncode != 0
+    assert key in result.stderr

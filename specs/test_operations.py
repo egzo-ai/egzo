@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""The remaining operator commands: secrets, doctor, diff, ca rotate, proxy rules."""
+"""The operator commands: doctor, diff, ca rotate, proxy rules. (`egzo secrets` is in test_secrets.py.)"""
 
 import json
-import os
 import re
 import subprocess
 
@@ -38,75 +37,6 @@ def container(engine, project, name):
         or (r.labels.get(f"{LABEL_PREFIX}kind") != "agent" and r.labels.get(f"{LABEL_PREFIX}service") == name)
     ]
     return found[0] if found else None
-
-
-def file_vault(path, **names):
-    return {"main": {"backend": "file", "secrets": {name: {"from": f"file:{path}/{name}"} for name in names}}}
-
-
-# --- secrets ----------------------------------------------------------------------------------------------
-
-
-def test_secrets_ls_shows_which_secrets_are_set_and_never_their_values(project, tmp_path):
-    (tmp_path / "TOKEN_A").write_text("super-secret-value\n")
-    vaults = {"main": {"backend": "env", "secrets": {
-        "FROM_FILE": {"from": f"file:{tmp_path}/TOKEN_A"},
-        "FROM_ENV": {"from": "env:SPEC_SET_VAR"},
-        "MISSING": {"from": "env:SPEC_UNSET_VAR"},
-    }}}
-    project.write({"vaults": vaults})
-    result = project.run("secrets", "ls", env={"SPEC_SET_VAR": "another-secret-value"})
-    assert result.returncode == 0, result.stderr
-    rows = {line.split()[0]: line for line in result.stdout.splitlines()[1:]}
-    assert "set" in rows["main/FROM_FILE"] and "set" in rows["main/FROM_ENV"] and "missing" in rows["main/MISSING"]
-    assert "super-secret-value" not in result.stdout + result.stderr
-    assert "another-secret-value" not in result.stdout + result.stderr
-
-
-def test_secrets_set_writes_a_file_source_from_stdin_with_private_permissions(project, tmp_path):
-    target = tmp_path / "vault" / "API_KEY"
-    project.write({"vaults": file_vault(tmp_path / "vault", API_KEY=None)})
-    result = project.run("secrets", "set", "main/API_KEY", input="s3cr3t-value\n")
-    assert result.returncode == 0, result.stderr
-    assert target.read_text().strip() == "s3cr3t-value"
-    assert (target.stat().st_mode & 0o777) == 0o600
-    assert "s3cr3t-value" not in result.stdout + result.stderr
-
-
-def test_secrets_set_refuses_an_env_source_and_says_why(project):
-    project.write({"vaults": {"main": {"backend": "env", "secrets": {"TOKEN": {"from": "env:SOME_VAR"}}}}})
-    result = project.run("secrets", "set", "main/TOKEN", input="value\n")
-    assert result.returncode != 0
-    assert "env" in result.stderr and "SOME_VAR" in result.stderr
-
-
-def test_secrets_set_of_an_unknown_secret_names_the_known_ones(project, tmp_path):
-    project.write({"vaults": file_vault(tmp_path, API_KEY=None)})
-    result = project.run("secrets", "set", "main/NOPE", input="x\n")
-    assert result.returncode != 0
-    assert "main/API_KEY" in result.stderr
-
-
-def test_secrets_rm_deletes_a_file_source(project, tmp_path):
-    (tmp_path / "API_KEY").write_text("value\n")
-    project.write({"vaults": file_vault(tmp_path, API_KEY=None)})
-    assert project.run("secrets", "rm", "main/API_KEY").returncode == 0
-    assert not (tmp_path / "API_KEY").exists()
-    assert "missing" in project.run("secrets", "ls").stdout
-
-
-def test_a_secret_set_by_the_command_reaches_the_proxy_on_the_next_up(live_project, engine, agent_image, tmp_path):
-    document = spec(
-        vaults=file_vault(tmp_path, API_KEY=None),
-        egress={"default": {"services": {"svc": {"hosts": ["api.test"], "inject": {"header": "x-key"}, "secret": "main/API_KEY"}}}},
-        agents={"coder": custom(agent_image)},
-    )
-    live_project.write(document)
-    assert live_project.run("secrets", "set", "main/API_KEY", input="one\n").returncode == 0
-    assert live_project.run("up", timeout=300).returncode == 0
-    assert live_project.run("secrets", "set", "main/API_KEY", input="two\n").returncode == 0
-    second = live_project.run("up", timeout=300)
-    assert "load egress policy" in second.stdout
 
 
 # --- doctor -----------------------------------------------------------------------------------------------
@@ -230,7 +160,7 @@ def test_proxy_log_can_be_filtered_by_agent(live_project, engine, agent_image):
 def test_proxy_rules_show_what_each_agent_may_reach_without_any_secret(live_project, engine, agent_image):
     live_project.env["API_SECRET"] = "very-secret-value-1234567890"
     document = spec(
-        vaults={"main": {"backend": "env", "secrets": {"API_SECRET": {"from": "env:API_SECRET"}}}},
+        vaults={"main": {"backend": "env", "secrets": ["API_SECRET"]}},
         egress={
             "default": {"allow": ["docs.example.org"]},
             "wide": {"extend": "default", "services": {"svc": {"hosts": ["api.test"], "inject": {"header": "x-key"}, "secret": "main/API_SECRET"}}},
@@ -244,57 +174,6 @@ def test_proxy_rules_show_what_each_agent_may_reach_without_any_secret(live_proj
     assert "very-secret-value" not in rules.stdout + rules.stderr
     only = live_project.run("proxy", "rules", "--agent", "coder-1").stdout
     assert "docs.example.org" in only and "api.test" not in only
-
-
-# --- secrets: private files, whole values, honest states ------------------------------------------------------------
-
-
-def test_secrets_set_never_leaves_an_existing_open_file_readable(project, tmp_path):
-    path = tmp_path / "TOKEN_A"
-    path.write_text("old\n")
-    path.chmod(0o644)
-    project.write({"vaults": file_vault(tmp_path, TOKEN_A=None)})
-    assert project.run("secrets", "set", "main/TOKEN_A", input="new-value\n").returncode == 0
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert path.read_text() == "new-value\n"
-
-
-def test_secrets_set_refuses_to_write_through_a_symlink(project, tmp_path):
-    target = tmp_path / "target"
-    target.write_text("precious")
-    (tmp_path / "TOKEN_A").symlink_to(target)
-    project.write({"vaults": file_vault(tmp_path, TOKEN_A=None)})
-    assert project.run("secrets", "set", "main/TOKEN_A", input="x\n").returncode != 0
-    assert target.read_text() == "precious"
-
-
-def test_secrets_set_keeps_a_multi_line_value_whole(project, tmp_path):
-    project.write({"vaults": file_vault(tmp_path, KEY=None)})
-    pem = "-----BEGIN KEY-----\nabc\ndef\n-----END KEY-----\n"
-    assert project.run("secrets", "set", "main/KEY", input=pem).returncode == 0
-    assert (tmp_path / "KEY").read_text() == pem
-
-
-def test_secrets_ls_says_why_a_secret_is_not_usable(project, tmp_path):
-    (tmp_path / "EMPTY").write_text("\n")
-    locked = tmp_path / "LOCKED"
-    locked.write_text("v")
-    locked.chmod(0)
-    project.write({"vaults": file_vault(tmp_path, EMPTY=None, LOCKED=None, GONE=None)})
-    rows = {line.split()[0]: line for line in project.run("secrets", "ls").stdout.splitlines()[1:]}
-    assert "empty" in rows["main/EMPTY"]
-    assert "missing" in rows["main/GONE"]
-    if os.getuid() != 0:
-        assert "permission denied" in rows["main/LOCKED"]
-
-
-def test_doctor_warns_about_a_secret_file_other_users_can_read(project, tmp_path, engine):
-    open_file = tmp_path / "OPEN"
-    open_file.write_text("v")
-    open_file.chmod(0o644)
-    project.write({"vaults": file_vault(tmp_path, OPEN=None)})
-    result = project.run("doctor", env=engine.env)
-    assert "main/OPEN" in result.stdout and "chmod 600" in result.stdout
 
 
 # --- diff sees what up would do: secrets and prompts too -------------------------------------------------------------

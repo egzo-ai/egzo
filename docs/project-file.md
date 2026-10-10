@@ -14,8 +14,7 @@ renaming a project creates a new one.
 vaults:
   main:
     backend: env
-    secrets:
-      ANTHROPIC_API_KEY: { from: env:ANTHROPIC_API_KEY }
+    secrets: [ANTHROPIC_API_KEY]
 
 egress:
   default:
@@ -37,19 +36,40 @@ agents:
 
 ## Vaults and secrets
 
-A vault names secrets and where each is read from, at `up` time, by the CLI. Two sources work today:
+A vault is one secret store: a `backend` and the names of the secrets to read from it. The CLI reads them on your
+machine at `up` time. There are two backends.
+
+**`pass`** ([the standard unix password manager](https://www.passwordstore.org/)) is the one to use. egzo runs `pass show <name>`, so
+unlocking is whatever your `pass` and gpg-agent already do, and the first line of the entry is the secret. Names
+are the entry names, slashes included:
+
+```yaml
+vaults:
+  main:
+    backend: pass
+    secrets:
+      - anthropic/api-key
+      - company/project/deploy-token
+```
+
+A secret is referred to as `<vault>/<name>`: `main/anthropic/api-key`, `main/company/project/deploy-token`. The
+project file cannot configure pass. To use another store, set `PASSWORD_STORE_DIR` (or `GNUPGHOME`, ...) in your shell,
+as you would for pass itself. egzo only reads secrets: create and change them with `pass insert` (or whatever manages
+your store).
+
+**`env`** reads the environment variable of the same name from your shell. It works, and egzo warns each time
+(`Using ENV var based secret backend is not recommended.`): any process of yours can read an environment
+variable, and it tends to end up in shell history and dotfiles. It is fine for a quick try.
 
 ```yaml
 vaults:
   main:
     backend: env
-    secrets:
-      ANTHROPIC_API_KEY: { from: env:ANTHROPIC_API_KEY }   # read from your shell
-      GITHUB_TOKEN:      { from: file:~/.secrets/gh }      # read from a file
+    secrets: [ANTHROPIC_API_KEY, GITHUB_TOKEN]
 ```
 
-`egzo secrets ls` shows which are set (never the values); `egzo secrets set vault/NAME` stores a file-backed one.
-Secrets reach the proxy only ([security model](security.md)). They are never in an agent's environment, in labels or in `docker inspect`.
+`egzo secrets ls` shows which are set (never the values). Secrets reach the proxy only ([security
+model](security.md)). They are never in an agent's environment, in labels or in `docker inspect`.
 
 ## Egress profiles
 

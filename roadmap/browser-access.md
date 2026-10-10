@@ -15,6 +15,11 @@ Not decided. The README should show the "extend the image" recipe either way, on
 browser then goes through the agent's proxy and egress profile like everything else, so the allowlist and
 secret injection apply to it too.
 
+Logging in to a site is what `placeholder` is for (`DESIGN.md`, "Placeholders"): the service for the site holds the
+password, the agent types `$SITE_PASSWORD` into the form, and the proxy swaps it on the way to that host. It does not
+work for a page that hashes the password in the browser, and Chromium needs the proxy CA in its own database (the
+entrypoint below); see `known-issues/secret-injection-limits.md`.
+
 Sketch (untested):
 
 ```dockerfile

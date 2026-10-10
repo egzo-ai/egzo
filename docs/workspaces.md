@@ -6,7 +6,7 @@ this page is how the pieces behave.
 
 ```yaml
 vaults:
-  main: { backend: env, secrets: { GITHUB_TOKEN: { from: env:GITHUB_TOKEN } } }
+  main: { backend: env, secrets: [GITHUB_TOKEN] }
 egress:
   default: { services: { github: main/GITHUB_TOKEN } }
 workspaces:

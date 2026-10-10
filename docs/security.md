@@ -42,6 +42,22 @@ Be clear about these before running agents on something you care about.
 - **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.
 - **Podman cannot apply a runtime**, so there is no gVisor there, and egzo refuses to pretend.
 
+## How secret injection works
+
+A secret is read by the CLI on your machine, handed to the proxy, and kept in the proxy's memory. The agent gets
+either nothing (`inject`: the proxy sets a header on requests to a service's hosts, replacing whatever the agent
+sent) or a placeholder (`placeholder`: a random string the proxy swaps for the secret in requests to the service's
+hosts). Both apply to the hosts of the service and no others.
+
+What this gives you is that **the agent cannot read the secret**. A prompt-injected agent cannot print it, write it
+into a file, or send it to a host you did not allow, because it never has it.
+
+What it does not give you is that the agent **cannot use** the secret. While it runs, it can make any request that
+the service's hosts accept, and the proxy adds the credential. The secret is hidden, the permission is not: a token
+that may delete repositories lets the agent delete repositories. Limit what a secret can do at its source (a
+fine-grained token, a dedicated account, the least privilege the work needs); egzo limits where it can be sent and who
+can see it.
+
 ## The proxy and TLS
 
 For hosts with an injected credential, the proxy terminates TLS with a CA that egzo generates per project (ECDSA

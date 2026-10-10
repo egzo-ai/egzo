@@ -27,7 +27,7 @@ Rules:
    A fidelity spec (pexpect) guards this; a regression there is a release blocker.
 3. **No first-run friction.** No theme/login/trust/bypass-permission prompts inside the sandbox
    (v1 learned this: seed `~/.claude.json` onboarding + workspace trust, pre-allow the proxy-needed
-   hosts). Authentication is a one-time `egzo secrets set` or reuse of the host's login; the
+   hosts). Authentication is a secret in a vault or reuse of the host's login; the
    agent is never given the real credential (the proxy injects it).
 4. **Familiar config carries over.** Optionally mount/copy the user's `~/.claude` settings,
    CLAUDE.md, skills and MCP servers into the agent (read-only, explicit opt-in in YAML) so it
@@ -61,8 +61,7 @@ Level 1 example:
 vaults:
   main:
     backend: env
-    secrets:
-      ANTHROPIC_API_KEY: { from: env:ANTHROPIC_API_KEY }
+    secrets: [ANTHROPIC_API_KEY]
 egress:
   default:                    # the profile agents get when they name none
     allow: [platform.claude.com]
@@ -142,10 +141,12 @@ name: myproj
 
 vaults:
   main:
-    backend: env               # env | file | sops | pass | 1password (pluggable)
-    secrets:
-      ANTHROPIC_API_KEY: { from: env:ANTHROPIC_API_KEY }
-      GITHUB_TOKEN:      { from: file:~/.secrets/gh }
+    backend: pass              # env | pass (see Secrets and vaults)
+    secrets:                   # names in that store; pass names are hierarchical
+      - anthropic/api-key
+      - github/token
+      - deploy/token
+      - sites/example/password
 
 proxy:                         # infrastructure of the egress sidecar
   image: ghcr.io/egzo-ai/egzo  # optional override; default is the all-in-one egzo image (`egzo proxy`)
@@ -155,15 +156,19 @@ egress:                        # named profiles; an agent links to one (omitted 
     allow: [platform.claude.com, "*.pypi.org"]   # hosts/globs reachable, no credential
                                # allow: ["*"] grants full internet access (still via the proxy)
     services:                  # built-in services (anthropic, github, ...) need only a secret
-      anthropic: main/ANTHROPIC_API_KEY
-      github: main/GITHUB_TOKEN
+      anthropic: main/anthropic/api-key
+      github: main/github/token
   operator:
     extend: default            # builds on another profile
     services:
       deploy-api:              # an object defines a custom service
         hosts: [api.deploy.example.com]
         inject: { header: Authorization, value: "Bearer {secret}" }
-        secret: main/DEPLOY_TOKEN
+        secret: main/deploy/token
+      example-login:           # a secret the agent types: it gets a placeholder (see Placeholders)
+        hosts: [app.example.com]
+        secret: main/sites/example/password
+        placeholder: EXAMPLE_PASSWORD
 
 workspaces:                    # declared like compose volumes; referenced by name from agents
   repo:
@@ -213,7 +218,7 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
     egzo send <agent> "message" [--wait]   # a request from the operator; --wait prints the resolution
     egzo messages | answer <id> <text>     # open messages; answer or close one addressed to a person
     egzo exec <svc> -- cmd
-    egzo secrets ls|set|rm                 # vault management, never prints values
+    egzo secrets ls                        # which secrets are set, never their values
     egzo proxy log|rules                   # audit trail
     egzo ca rotate                         # new project CA; restarts agents
     egzo doctor                            # engine, rootless, gVisor, network checks
@@ -386,6 +391,89 @@ templates are declared and published by `up`.
 - To verify in a spike: per-agent `internal` networks on rootless podman; why not unix sockets:
   gVisor probably blocks connecting to host-created unix sockets via bind mounts.
 
+## Secrets and vaults (decided)
+
+- A **vault** is one secret store: a name, a `backend`, and `secrets`, a list of the names to read from that
+  store. There is no per-secret source (no `from:`): the backend knows where its secrets live, so a vault is
+  the only concept and nothing in a secret entry repeats the backend. A secret is referred to as
+  `<vault>/<secret>`, split at the first `/`: vault names cannot contain `/`, secret names can when the
+  backend has hierarchical names (`main/company/project/test` is the secret `company/project/test` of
+  `main`).
+- **Two backends exist: `env` and `pass`.** Any other name, whatever it is, is the same validation error
+  (`unknown backend "x"`, naming the two that exist). The schema, the errors, the docs and the specs mention
+  nothing that does not exist: no removed or planned backends, no reserved names. A backend is added when it
+  works, together with its specs.
+- **`env`** reads the environment variable of the same name from the shell that runs the CLI. A secret name
+  must be a valid variable name. It is accepted but discouraged (every process of the user can read it, and
+  it ends up in shell history and dotfiles): every command that loads a project with an `env` vault prints
+  `Using ENV var based secret backend is not recommended.` on stderr, once, and goes on.
+- **`pass`** runs the `pass` program (https://www.passwordstore.org/) directly, `pass show <name>`, with the
+  secret name as the entry name, slashes included. The secret is the first line of the entry (pass's own
+  convention; the other lines are notes). egzo gives pass the environment and terminal of the CLI untouched,
+  so unlocking is whatever the user's pass and gpg-agent already do (a pinentry prompt, or none when the
+  agent has the key). **The project file cannot configure pass**: no store path, no gpg home, nothing. Someone
+  with another store sets `PASSWORD_STORE_DIR`, `GNUPGHOME` and the like in their shell, as for any use of
+  pass. If `pass` is not on `PATH`, a command that needs a secret fails and names it.
+- **egzo never writes a secret.** There is no `secrets set` or `secrets rm`: secrets are created, changed and
+  removed with the user's own password manager (`pass insert`, an export in the shell). egzo only reads them,
+  and `egzo secrets ls` says which ones it can.
+- **There is no file backend, and no plain-text source of any kind**: a secret in a file is protected by
+  nothing but permissions, which is not a store egzo supports. `env` stays only because a throwaway shell
+  export is how people try things; it warns for that reason.
+- **When secrets are read.** On the host, by the CLI, in the user's session, once per command, and only by the
+  commands that need the values (`up` and `diff`; `spawn` and `rm` never read one). They go to the
+  proxy as described under Hardening ("Secrets reach the proxy only through `engine exec` stdin"). A command
+  that cannot read a secret fails before it creates anything. `secrets ls` reads nothing it does not have
+  to show: it reports `set`, `empty` or `missing` (with the reason pass gave) and never a value.
+
+### Two ways to use a secret
+
+Both keep the value out of the agent: it lives in the proxy and is applied to requests for the hosts of a
+service of the agent's profile, and only those.
+
+- **`inject`**: the proxy sets a header on every request to the service's hosts, replacing whatever the
+  agent sent. The agent does nothing and never sees anything (API keys, bearer tokens).
+- **`placeholder`**: for a secret the agent has to put somewhere itself, such as a password it types into a
+  login form or a token it writes into a request body. The agent gets an environment variable holding a
+  placeholder, uses it as if it were the secret, and the proxy replaces the placeholder with the secret in
+  requests to the service's hosts.
+
+Neither stops the agent from *using* the secret while it runs (see `docs/security.md`), and both have limits
+(`known-issues/secret-injection-limits.md`).
+
+### Placeholders
+
+```yaml
+egress:
+  default:
+    services:
+      example-login:
+        hosts: [app.example.com]
+        secret: main/sites/example/password
+        placeholder: EXAMPLE_PASSWORD
+```
+
+- Every agent whose profile has the service (after `extend`) gets `EXAMPLE_PASSWORD=egzo-ph-<32 hex>` in its
+  environment. The name must be a valid variable name that egzo does not set itself, and cannot also be in
+  the agent's `env`. A service has `inject` or `placeholder`, not both.
+- The placeholder is random, made once per secret reference by `up` and kept with the project state on the
+  control volume. It never changes while the project exists (a running agent keeps a working one, and
+  rotating the secret does not change it), it is not derived from the value, and it is not a secret: it may
+  appear in templates, labels and logs.
+- The proxy replaces the placeholder with the secret **only in requests to the hosts of that service, for the
+  agents whose profile has it**: in the URL path and query, in header values and in the request body. The
+  same text sent to any other host, or by an agent of another profile, goes through unchanged. Replacing is a
+  plain text match on the placeholder; it never looks at responses.
+- The value is written the way the place needs it: percent-encoded in an `application/x-www-form-urlencoded`
+  body or a query string, JSON-escaped in a JSON body, as is elsewhere. `Content-Length` is recomputed.
+- Bodies are scanned when they are uncompressed and at most 1 MiB. **A request to a placeholder host with a
+  body that cannot be scanned (compressed, or over 1 MiB) is refused**, never forwarded half-handled: the proxy
+  answers `413` (too large) or `415` (compressed) with a message that names the reason, and logs a `deny`
+  with the same reason. The rule depends only on the request, so a given request always succeeds or always
+  fails, and the failure says why. Hosts of a placeholder service are meant for logins and API calls, not
+  uploads; see `known-issues/secret-injection-limits.md`.
+- Hosts of a placeholder service are TLS-intercepted, like those of `inject`, and are audited the same way.
+
 ## Egress policy (decided)
 - Two top-level concerns: `proxy:` is infrastructure (image, audit); `egress:` is policy.
 - `egress:` is a map of named **profiles**. A profile defines all rules and credential injections.
@@ -396,14 +484,18 @@ templates are declared and published by `up`.
   `services` (map).
 - `allow: ["*"]` is how full internet access is granted; it is still proxied and audited, and
   credentials are still injected only for hosts of services in the profile.
-- A **service** defines *how* to talk to something: `hosts` (required), optional `inject`
-  (`header`, `value` containing `{secret}`; without `value` the raw secret is the header value),
-  optional `secret`. A service without `inject` is a pure allowlist.
+- A **service** defines *how* to talk to something: `hosts` (required), optional `secret`, and at most
+  one way to use the secret: `inject` (`header`, `value` containing `{secret}`; without `value` the raw
+  secret is the header value) or `placeholder` (an environment variable name, see Placeholders). A service
+  with neither is a pure allowlist and cannot have a secret. Optional `inspect: true` audits request paths.
+  Rules are by host only: a service has no path or method scope, and keys for them are rejected like any
+  other unknown key. They can be added if a real use-case turns up.
 - `services` entries have two forms: a **string** `<vault>/<secret>` gives the secret for a service
   that already resolves (inherited via `extend`, or built-in); an **object** defines the service
   (hosts, optional inject, optional secret). There is no null form.
 - Name resolution for a service: the profile's own definition, then the `extend` chain, then the
-  built-ins. Binding a service that has `inject` with no secret is a validation error.
+  built-ins. Binding a service that has `inject` or `placeholder` with no secret is a validation error, and
+  so is a secret on a service that has neither.
 - `extend` merge: `allow` lists are unioned; `services` are merged by name with the child winning:
   a string overrides only the secret of the inherited definition (hosts and inject kept), an
   object replaces the definition entirely. A child cannot remove anything it inherits. One parent
@@ -421,12 +513,15 @@ templates are declared and published by `up`.
 - Harness integrations may need credential-free hosts (Claude Code: `platform.claude.com`). For now
   these are declared explicitly in `allow`; whether integrations declare them is open.
 - Unverified: that GitHub accepts `Authorization: Bearer` for git over HTTPS (spike).
-- Later: scope a service by path or method (e.g. token only for `/repos/acme/*`).
 
 ## Egress proxy and TLS (decided)
 - MITM only for hosts of services with credential injection in the agent's profile. Everything else allowed
-  is a CONNECT tunnel with host/SNI match (domain-fronting protection). Optional `inspect: true` on a
-  service intercepts it to audit paths (off by default).
+  is a CONNECT tunnel with host/SNI match (domain-fronting protection). Hosts of services with a
+  `placeholder` are intercepted too. `inspect: true` on a service intercepts its hosts only to audit them
+  (off by default): the audit then has a `request` line (method, path, status; never the query string or a
+  body) for every request, which is exactly what an intercepted host with `inject` or `placeholder` already
+  gets, so `inspect` matters for the hosts of a service with neither. The price is the interception: a client
+  that pins its certificate stops working on an inspected host.
 - One CA per project, generated by the proxy on first start (ECDSA P-256), private key only in a
   volume mounted into the proxy; never in an agent, the CLI or the hub. Persistent across proxy
   recreation (regenerating would force agent restarts); `egzo ca rotate` is explicit. Leaf certs are
@@ -599,7 +694,8 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
       test_schema.py       # egzo.yaml validation, no users in files, no secrets in output
       test_project_name.py # name resolution, same-name-other-directory refusal
       test_workspaces.py   # mounts, workdir rule, https git, modes, paths, cross-agent refs
-      test_egress.py       # profiles, services, built-ins, extend, reachability warnings
+      test_egress.py       # profiles, services, built-ins, extend, placeholders, reachability warnings
+      test_secrets.py      # vaults, the env and pass backends, `egzo secrets`
       test_init.py         # egzo init
       test_labels.py       # ai.egzo.* contract, label size/format, no secrets in resources
       test_up_down.py      # up/down, --dry-run, no -d, idempotency, workspace dirs survive down
@@ -613,7 +709,7 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
     test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
     test_harnesses.py    # Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, real TUIs
     test_git_workspaces.py # prep container: clone/shared/worktree, idempotency, down --workspaces safety
-    test_operations.py   # secrets, doctor, diff, ca rotate, proxy rules
+    test_operations.py   # doctor, diff, ca rotate, proxy rules
     test_spawn.py        # spawn: templates, names, exit code 17, first message, --wait, labels, errors
     test_instances.py    # ps, rm, prune, stale instances, down, registration in control and proxy
     test_images.py       # harness image names and pulling them from a registry
@@ -626,7 +722,7 @@ agent env, agent filesystem, or logs; assert direct egress fails.
 Built and covered by specs (Docker is the engine the specs run against now; Podman works through its
 compatible socket but is not exercised by the current suite): `init`, `config`, `up` (`--dry-run`,
 `--recreate`), `spawn`, `rm`, `prune`, `diff`, `down` (`--volumes`, `--workspaces`), `ps` (`--json`), `logs`, `exec`, `attach`, `start|stop|restart`,
-`send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls|set|rm`, `proxy log|rules`, `ca rotate`,
+`send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls`, `proxy log|rules`, `ca rotate`,
 `doctor`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
 `egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
 the egzo image with `make images`); `custom` runs any image.
@@ -676,7 +772,8 @@ Decisions taken while building (reversible; each is covered by specs):
 - **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy
   hash covers the secret values, so rotating a secret re-pushes the policy without recreating any
   container; a restarted proxy denies everything until the next `egzo up` reloads its policy. The
-  proxy container's `inspect` never holds a secret.
+  proxy container's `inspect` never holds a secret. Placeholders travel in the same policy, next to the
+  secret each one stands for; the agent environments get only the placeholder.
 - **Operator APIs** are unix sockets inside the sidecar, called through `egzo <role> request METHOD
   PATH` run by exec (scratch images have no curl). Control: tokens, spec snapshots, the queue. Proxy: policy, CA rotation.
 - **CA distribution is a read-only directory mount** (`/etc/egzo/ca` holding `ca.crt` and
@@ -753,7 +850,7 @@ Open, in the order they matter:
 2. The engine matrix beyond Docker (rootless and rootful Podman, gVisor) is not part of the current spec run;
    the specs were written for it and need a pass on those hosts. Rootful Podman loses outbound connectivity
    intermittently (`known-issues/rootful-podman-intermittent-egress.md`).
-3. `request_secret_access`, the optional mount of the user's own `~/.claude` settings, per-service path scoping.
+3. `request_secret_access`, the optional mount of the user's own `~/.claude` settings.
 4. A real model call is never made by the specs; the end-to-end behaviour of a harness with a model (that a
    reply comes back, that the Stop text reaches `say`) is unverified.
 

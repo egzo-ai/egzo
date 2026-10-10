@@ -52,7 +52,7 @@
 
   <rect x="40" y="510" width="220" height="80" rx="8" fill="#fffbeb" stroke="#d97706"/>
   <text x="150" y="531" text-anchor="middle" font-weight="700">Vaults</text>
-  <text x="150" y="549" text-anchor="middle" fill="#475569">env / file backends</text>
+  <text x="150" y="549" text-anchor="middle" fill="#475569">env / pass backends</text>
   <text x="150" y="565" text-anchor="middle" fill="#475569">API key, GitHub token</text>
   <text x="150" y="581" text-anchor="middle" fill="#b45309">values never leave toward agents</text>
 

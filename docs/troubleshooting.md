@@ -6,7 +6,7 @@ Start with `egzo doctor` ([installing](install.md)), then `egzo ps`, then `egzo 
 
 | message or symptom | what to do |
 |---|---|
-| a secret is missing | `egzo secrets ls`; export the environment variable, or `egzo secrets set vault/NAME`. Secrets are read before anything is created, so nothing is half-made. |
+| a secret is missing | `egzo secrets ls`; with `pass`, check that `pass show NAME` works in your shell; with `env`, export the variable. Secrets are read before anything is created, so nothing is half-made. |
 | "stale" instances block `up` | their template changed. `egzo prune --stale` (or `egzo rm NAME`), `egzo up`, spawn again. `egzo diff` shows the change. |
 | the name is taken (exit 17) | `egzo rm NAME`, or pick another. A leftover network or home volume counts as an instance; `rm` clears it. |
 | a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo down` the other. |

@@ -20,8 +20,9 @@ egress:
 ```
 
 - `allow`: host names or `*.domain` globs the agent may reach with **no** credential.
-- `services`: hosts that get a credential injected. A built-in service (`anthropic`, `github`, `anthropic-oauth`)
-  needs only the secret: `vault/SECRET`.
+- `services`: hosts that get a secret applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`)
+  needs only the secret: `vault/SECRET` (for a secret named `company/project/token` in a `pass` vault `main`:
+  `main/company/project/token`).
 - The agent's reach is `allow` plus the hosts of its services. Without a `default` profile, an agent that names none
   can reach nothing.
 
@@ -52,8 +53,49 @@ egress:
         secret: main/DEPLOY_TOKEN
 ```
 
-A service without `inject` is a plain allowlist entry. Add `inspect: true` to also log the request paths of a host
-(off by default; it makes the proxy terminate TLS for that host).
+A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.
+Rules are by host: a service cannot be limited to a path or a method.
+
+`inspect: true` logs the method, path and status of every request to the service's hosts (never the query string or a
+body); `egzo proxy log` shows them. It is off by default because it makes the proxy terminate TLS for the host, which
+a client that pins its certificate cannot accept. A host with `inject` or a `placeholder` is already logged this way.
+
+```yaml
+      docs-site: { hosts: [docs.example.com], inspect: true }
+```
+
+## Secrets the agent has to type: placeholders
+
+`inject` suits a header the agent never touches. Some secrets the agent has to put somewhere itself, such as the
+password of a login form in a browser. Give the service a `placeholder` instead of an `inject`:
+
+```yaml
+vaults:
+  main:
+    backend: pass
+    secrets: [sites/example/password]
+
+egress:
+  default:
+    services:
+      example-login:
+        hosts: [app.example.com]
+        secret: main/sites/example/password
+        placeholder: EXAMPLE_PASSWORD
+```
+
+Agents with this profile get `EXAMPLE_PASSWORD=egzo-ph-<random>` in their environment. They use it as the password
+(`curl -d "password=$EXAMPLE_PASSWORD" https://app.example.com/login`, or typed into a form), and the proxy replaces it
+with the real password on its way to `app.example.com`: in the URL, in headers and in the body, encoded the way the
+place needs (form, JSON). Sent anywhere else, the placeholder stays a meaningless string. It never changes, even if you
+rotate the secret.
+
+The proxy has to read a request to find the placeholder, so a request to a placeholder host whose body is compressed
+or larger than 1 MiB is refused with a message saying so (`413` or `415`), always, not sometimes. Use `inject` for a
+host that takes uploads, or send the upload to a host that has no placeholder.
+
+Some clients cannot be served this way: see [known issues](../known-issues/secret-injection-limits.md). HTTP Basic
+authentication, for example, is built by the client from the placeholder, which hides it; use `inject` for that.
 
 ## Several profiles
 

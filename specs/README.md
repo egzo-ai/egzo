@@ -87,7 +87,7 @@ agents:
     workspaces:
       - { name, mount, mode: rw|ro, host_path?, from? }
 egress:
-  <profile>: { allow: [...], services: { <name>: { hosts, inject?, secret? } } }
+  <profile>: { allow: [...], services: { <name>: { hosts, inject?, secret?, placeholder?, inspect? } } }
 ```
 
 `agents:` entries are templates; there is no `depends_on` and no cross-agent workspace reference (`from`).
@@ -102,23 +102,25 @@ do not change the exit code. Changing this contract means changing these specs f
 | `test_schema.py` | validation of `egzo.yaml`, no users in files, no secrets in output |
 | `test_project_name.py` | name resolution and the same-name-other-directory refusal |
 | `test_workspaces.py` | mounts, working directory, git sources, the dropped cross-agent reference |
-| `test_egress.py` | profiles, services, built-ins, extend, reachability warnings |
+| `test_egress.py` | profiles, services, built-ins, extend, placeholders, by-host rules, reachability warnings |
+| `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`), `egzo secrets` |
 | `test_labels.py` | the `ai.egzo.*` label contract |
 | `test_up_down.py` | `up` (infrastructure and templates, no agent), `down`, `--dry-run`, idempotency, workspace safety |
 | `test_spawn.py` | templates and `egzo spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
 | `test_instances.py` | `ps` and `ps --json`, `rm`, `prune`, stale instances and the `up` refusal |
 | `test_agents.py` | one container per instance, networks, isolation, who agents run as |
-| `test_proxy.py` | injection, TLS, deny unless allowed, per-agent policy, CA, audit |
+| `test_proxy.py` | injection, placeholders, `inspect`, TLS, deny unless allowed, per-agent policy, CA, audit |
 | `test_session.py` | `egzo attach` and the session fidelity matrix, against a stand-in TUI |
 | `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
 | `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
 | `test_git_workspaces.py` | the prep container at spawn: clone, shared, worktree, `down --workspaces` and `rm --workspaces` safety (clones from github.com) |
-| `test_operations.py` | `secrets`, `doctor`, `diff`, `ca rotate`, `up` taking no agent, `proxy rules` |
+| `test_operations.py` | `doctor`, `diff`, `ca rotate`, `up` taking no agent, `proxy rules` |
 | `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
 
 ## Not covered
 
 A model is never called: the harness specs stop at what egzo configures, what the TUI shows and what the
 harness reports through hooks (prompt submitted, session idle), which needs no credential. The specs that need
-the outside world (github.com, httpbin.org, example.com, the registry) fail when it is unreachable.
+the outside world (github.com, httpbin.org, example.com, the registry) fail when it is unreachable (a known weakness:
+`known-issues/specs-depend-on-online-services.md`).
 The harness specs build the real images from `harness/` (a few minutes the first time, cached by content).
