@@ -24,6 +24,21 @@ import (
 	"time"
 )
 
+// waitForASlot waits until the agent may open a connection again. Trying one takes a slot until it is
+// released, so the probe runs until it succeeds once and is never repeated after that.
+func waitForASlot(t *testing.T, r *rig) {
+	t.Helper()
+	opened := false
+	waitFor(t, func() bool {
+		if !opened {
+			response, conn := connectRequest(t, r, "example.com", "443")
+			conn.Close()
+			opened = response.StatusCode == http.StatusOK
+		}
+		return opened
+	})
+}
+
 func connectRequest(t *testing.T, r *rig, host, port string) (*http.Response, net.Conn) {
 	t.Helper()
 	conn, err := net.Dial("tcp", strings.TrimPrefix(r.front.URL, "http://"))
@@ -113,11 +128,7 @@ func TestAnAgentCannotHoldMoreConnectionsThanTheLimit(t *testing.T) {
 	}
 	first.Close()
 	second.Close()
-	waitFor(t, func() bool {
-		response, conn := connectRequest(t, r, "example.com", "443")
-		conn.Close()
-		return response.StatusCode == http.StatusOK
-	})
+	waitForASlot(t, r)
 }
 
 func TestTheLimitOfOneAgentDoesNotStopAnother(t *testing.T) {
@@ -298,7 +309,7 @@ func TestParseServerNameFindsTheNameAmongOtherExtensions(t *testing.T) {
 }
 
 func TestParseServerNameReportsEncryptedClientHelloAndStillReturnsTheOuterName(t *testing.T) {
-	for _, kind := range []uint16{0xfe0d, 0xff03} {
+	for _, kind := range []uint16{0xfe08, 0xfe09, 0xfe0a, 0xfe0b, 0xfe0c, 0xfe0d, 0xff03, 0xffce} {
 		// the name may come before or after the extension
 		for _, hello := range [][]byte{
 			buildHello(serverNameExtension("example.com"), extension(kind, []byte{0, 1, 2, 3})),
@@ -486,7 +497,7 @@ func terminated(t *testing.T, r *rig, host string) (client net.Conn, done chan s
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
-		r.proxy.terminate(server, "coder", host, Decision{}, time.Now(), true)
+		r.proxy.terminate(server, "coder", host, Decision{}, true)
 	}()
 	t.Cleanup(func() { client.Close() })
 	return client, done
@@ -619,11 +630,7 @@ func TestATerminatedECHConnectionHoldsItsConnectionSlotUntilItEnds(t *testing.T)
 	}
 	// the client goes quiet: the idle timeout ends the connection, which frees the slot
 	waitFor(t, func() bool { return r.hasAction("example.com", "close") })
-	waitFor(t, func() bool {
-		response, c := connectRequest(t, r, "example.com", "443")
-		c.Close()
-		return response.StatusCode == http.StatusOK
-	})
+	waitForASlot(t, r)
 }
 
 func TestParseServerNameHandlesFragmentsAndLongNamesWithoutPanicking(t *testing.T) {
