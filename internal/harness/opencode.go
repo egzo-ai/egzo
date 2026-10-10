@@ -86,14 +86,21 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 				"headers": map[string]any{"Authorization": opts.Authorization},
 				"enabled": true,
 			},
-			// null deletes it when merging: an image that lost its browser leaves no stale server in the home.
-			"playwright": nil,
 		},
 		"instructions": []any{opts.InstructionsFile},
 	}
-	if opts.hasBrowser() {
-		config["mcp"].(map[string]any)["playwright"] = map[string]any{
-			"type": "local", "command": browserCommand, "enabled": true,
+	// The browser's server is egzo's to refresh or delete only when egzo wrote it (a command starting with "egzo").
+	configPath := filepath.Join(opts.Home, ".config", "opencode", "opencode.json")
+	var replace [][]string
+	entry := map[string]any{"type": "local", "command": toAny(browserCommand), "enabled": true}
+	if value, present, wholesale := opts.browserServer(configPath, []string{"mcp"}, entry, func(existing any) bool {
+		server, _ := existing.(map[string]any)
+		command, _ := server["command"].([]any)
+		return len(command) > 0 && command[0] == "egzo"
+	}); present {
+		config["mcp"].(map[string]any)["playwright"] = value
+		if wholesale {
+			replace = [][]string{{"mcp", "playwright"}}
 		}
 	}
 	if opts.Bypass {
@@ -112,7 +119,7 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 	instructions := Instructions(opts.Prompt)
 	return Plan{
 		Files: map[string]File{
-			filepath.Join(opts.Home, ".config", "opencode", "opencode.json"):     {Content: encoded, Merge: true, Mode: 0o600},
+			configPath: {Content: encoded, Merge: true, Mode: 0o600, Replace: replace},
 			filepath.Join(opts.Home, ".config", "opencode", "plugin", "egzo.js"): {Content: []byte(openCodePlugin)},
 			opts.InstructionsFile: {Content: instructions},
 		},

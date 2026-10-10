@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ProjectCA is where the agent container has the project CA (internal/stack mounts it; duplicated here so
@@ -43,22 +44,47 @@ func TrustProjectCA(home, caFile string, lookPath func(string) (string, error), 
 	}
 	directory := filepath.Join(home, ".pki", "nssdb")
 	database := "sql:" + directory
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return err
-	}
 	step := func(args ...string) error {
 		if output, err := run(certutil, append([]string{"-d", database}, args...)...); err != nil {
 			return fmt.Errorf("certutil %s: %w: %s", args[0], err, strings.TrimSpace(string(output)))
 		}
 		return nil
 	}
-	if _, err := os.Stat(filepath.Join(directory, "cert9.db")); err != nil {
-		if err := step("-N", "--empty-password"); err != nil {
+	var importing bool // the failure was the import: the database is what is wrong
+	add := func() error {
+		importing = false
+		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return err
 		}
+		if _, err := os.Stat(filepath.Join(directory, "cert9.db")); err != nil {
+			if err := step("-N", "--empty-password"); err != nil {
+				return err
+			}
+		}
+		// The nickname is unique in a database: remove the old certificate (there is none the first time) so a
+		// rotated CA replaces it instead of failing to be added.
+		_ = step("-D", "-n", caNickname)
+		importing = true
+		return step("-A", "-t", "C,,", "-n", caNickname, "-i", caFile)
 	}
-	// The nickname is unique in a database: remove the old certificate (there is none the first time) so a
-	// rotated CA replaces it instead of failing to be added.
-	_ = step("-D", "-n", caNickname)
-	return step("-A", "-t", "C,,", "-n", caNickname, "-i", caFile)
+	first := add()
+	if first == nil || !importing {
+		return first
+	}
+	// A database certutil cannot add to (a damaged cert9.db) would leave the browser trusting nothing at every
+	// start: set it aside, keeping one old copy to look at, and start a new one.
+	if _, err := os.Stat(directory); err != nil {
+		return first
+	}
+	old, _ := filepath.Glob(directory + ".broken-*")
+	for _, path := range old {
+		os.RemoveAll(path)
+	}
+	if err := os.Rename(directory, fmt.Sprintf("%s.broken-%d", directory, time.Now().Unix())); err != nil {
+		return first
+	}
+	if err := add(); err != nil {
+		return fmt.Errorf("%w (after setting the broken database aside; the first attempt: %v)", err, first)
+	}
+	return nil
 }

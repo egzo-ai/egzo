@@ -137,7 +137,7 @@ func run(program string, environ []string, stdin, stdout, stderr *os.File) (int,
 	}
 
 	cmd := exec.Command(program, "--config", path)
-	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = environ, stdin, stdout, stderr
+	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = childEnvironment(environ), stdin, stdout, stderr
 	// Signals are caught before the server starts, so none is lost between starting it and forwarding.
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -166,6 +166,22 @@ func run(program string, environ []string, stdin, stdout, stderr *os.File) (int,
 		return exit.ExitCode(), nil
 	}
 	return 0, err
+}
+
+// browsersPath is where the images install Chromium (PLAYWRIGHT_BROWSERS_PATH in their Dockerfiles).
+var browsersPath = "/opt/ms-playwright"
+
+// childEnvironment is the server's environment: the one it was given, with the browsers' location added when the
+// harness did not pass it on (a harness may hand an MCP server a reduced environment). The proxy is read from
+// the environment egzo itself was started with; nothing about it is added here.
+func childEnvironment(environ []string) []string {
+	out := append([]string{}, environ...)
+	if lookup(out, "PLAYWRIGHT_BROWSERS_PATH") == "" {
+		if info, err := os.Stat(browsersPath); err == nil && info.IsDir() {
+			out = append(out, "PLAYWRIGHT_BROWSERS_PATH="+browsersPath)
+		}
+	}
+	return out
 }
 
 // lookup finds a variable in an environment list (the last one wins, as in a process's environment).

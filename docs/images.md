@@ -34,7 +34,9 @@ binary matches the CLI (`egzo version`; the stock images are tagged with it).
 The stock images already carry a browser ([browsing](browser.md)): Chromium, the Playwright MCP server (`playwright-mcp` on the
 `PATH`) and `certutil`. The harness registers the browser only when `playwright-mcp` is on the `PATH`, and `egzo agent run`
 adds the project CA to Chromium's store when `certutil` is, so an image built `FROM` a stock one has both. An image that
-removes them has no browser server rather than one that cannot start.
+removes them has no browser server rather than one that cannot start. The browser adds about 710 MB to the image
+uncompressed (about 220 MB to what is pulled) on top of the bare harness. The images are built for linux/amd64 and
+linux/arm64 from the same Dockerfile, but the browser has only been tried on amd64.
 
 Rules for a derived image:
 
