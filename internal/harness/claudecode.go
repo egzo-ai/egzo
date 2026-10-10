@@ -67,13 +67,19 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 				"url":     strings.TrimRight(o.ControlURL, "/") + "/mcp",
 				"headers": map[string]any{"Authorization": o.Authorization},
 			},
-			// null deletes it when merging: an image that lost its browser leaves no stale server in the home.
-			"playwright": nil,
 		},
 	}
-	if o.hasBrowser() {
-		state["mcpServers"].(map[string]any)["playwright"] = map[string]any{
-			"type": "stdio", "command": browserCommand[0], "args": browserCommand[1:], "env": map[string]any{},
+	// The browser's server is egzo's to refresh or delete only when egzo wrote it (command "egzo").
+	statePath := filepath.Join(home, ".claude.json")
+	var replace [][]string
+	entry := map[string]any{"type": "stdio", "command": browserCommand[0], "args": toAny(browserCommand[1:]), "env": map[string]any{}}
+	if value, present, wholesale := o.browserServer(statePath, []string{"mcpServers"}, entry, func(existing any) bool {
+		server, _ := existing.(map[string]any)
+		return server["command"] == "egzo"
+	}); present {
+		state["mcpServers"].(map[string]any)["playwright"] = value
+		if wholesale {
+			replace = [][]string{{"mcpServers", "playwright"}}
 		}
 	}
 
@@ -121,9 +127,9 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	encode := func(value any) []byte { out, _ := json.MarshalIndent(value, "", "  "); return out }
 	return Plan{
 		Files: map[string]File{
-			filepath.Join(home, ".claude.json"):             {Content: encode(state), Mode: 0o600, Merge: true},
+			statePath: {Content: encode(state), Mode: 0o600, Merge: true, Replace: replace},
 			filepath.Join(home, ".claude", "settings.json"): {Content: encode(settings), Mode: 0o644, Merge: true},
-			o.InstructionsFile:                              {Content: instructions},
+			o.InstructionsFile: {Content: instructions},
 		},
 		Command:      command,
 		InterruptKey: "\x1b",

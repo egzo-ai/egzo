@@ -12,7 +12,7 @@ import (
 )
 
 // mergeFile merges a JSON object into the file at path (which may not exist).
-func mergeFile(path string, ours []byte) ([]byte, error) {
+func mergeFile(path string, ours []byte, replace [][]string) ([]byte, error) {
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) || len(bytes.TrimSpace(existing)) == 0 {
 		existing = []byte("{}")
@@ -29,7 +29,27 @@ func mergeFile(path string, ours []byte) ([]byte, error) {
 		fmt.Fprintf(os.Stderr, "egzo: %s was not valid JSON; it is kept as %s.corrupt and a new one is written\n", path, path)
 		existing = []byte("{}")
 	}
+	if len(replace) > 0 {
+		var base map[string]any
+		if decodeExact(existing, &base) == nil && base != nil {
+			for _, keys := range replace {
+				deletePath(base, keys)
+			}
+			existing, _ = json.Marshal(base)
+		}
+	}
 	return MergeJSON(existing, ours)
+}
+
+// deletePath removes the key at path from nested objects, when it is there.
+func deletePath(object map[string]any, path []string) {
+	if len(path) == 1 {
+		delete(object, path[0])
+		return
+	}
+	if inner, ok := object[path[0]].(map[string]any); ok {
+		deletePath(inner, path[1:])
+	}
 }
 
 // MergeJSON merges the JSON object ours into the JSON object theirs: objects merge key by key,

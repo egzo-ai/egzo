@@ -61,7 +61,8 @@ A browser also opens every proxy connection without credentials and sends them w
 - A site that pins its certificate does not load: the proxy is the TLS server for it.
 - The proxy speaks HTTP/1.1 to the browser. WebSocket messages pass but are not rewritten.
 - Playwright keeps its output (snapshots, screenshots) in a temporary directory, not in the workspace.
-- The images are larger by roughly half a gigabyte.
+- The images are larger by about 710 MB uncompressed (about 220 MB compressed) than without the browser. The arm64
+  images are built from the same Dockerfile, but the browser has not been tried on arm64.
 - A browser in your own image: keep `playwright-mcp` on the `PATH` and the `egzo agent run` entrypoint, and the harness
   registers it; without `playwright-mcp` no browser server is registered ([images](images.md)).
 

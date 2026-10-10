@@ -53,6 +53,60 @@ func (o Options) hasBrowser() bool {
 	return err == nil
 }
 
+// browserServer decides what a plan does about the `playwright` entry of the MCP servers object at path in the
+// JSON file. The entry is registered or refreshed wholesale when it is absent or egzo wrote it (owned says so),
+// and then wholesale is true: the plan names it in File.Replace so the merge does not unite its lists with a
+// stale one. An entry egzo did not write is a user's own: it is left exactly as it is, egzo registers nothing and
+// present is false. Without a browser, only an entry egzo wrote is deleted (present, with a nil value: the null
+// that deletes when merging).
+func (o Options) browserServer(file string, path []string, entry any, owned func(any) bool) (value any, present, wholesale bool) {
+	existing, exists := existingServer(file, path)
+	if exists && !owned(existing) {
+		if o.hasBrowser() {
+			fmt.Fprintf(os.Stderr, "egzo: %s has its own playwright server; egzo does not register its browser\n", file)
+		}
+		return nil, false, false
+	}
+	if !o.hasBrowser() {
+		return nil, exists, false
+	}
+	return entry, true, exists
+}
+
+// existingServer reads servers["playwright"] from the JSON object at path in the file (not there, unreadable or
+// not JSON: no entry; the merge deals with a damaged file).
+func existingServer(file string, path []string) (any, bool) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, false
+	}
+	var value any
+	if decodeExact(data, &value) != nil {
+		return nil, false
+	}
+	for _, key := range path {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		value = object[key]
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := object["playwright"]
+	return entry, ok && entry != nil
+}
+
+func toAny(list []string) []any {
+	out := make([]any, len(list))
+	for i, item := range list {
+		out[i] = item
+	}
+	return out
+}
+
 // Plan is what an integration produces.
 type Plan struct {
 	// Files maps a path (absolute) to its contents. Existing files are replaced, or merged for JSON
@@ -77,6 +131,9 @@ type File struct {
 	// the agent): objects merge key by key, lists of strings are united, null deletes a key, and
 	// anything else is replaced by the new value.
 	Merge bool
+	// Replace lists key paths (in the merged object) removed from the existing file before merging, so the
+	// new value there replaces what was written instead of being merged into it.
+	Replace [][]string
 }
 
 // Integration is one harness.
@@ -137,7 +194,7 @@ func (p Plan) Write() error {
 		}
 		content := file.Content
 		if file.Merge {
-			merged, err := mergeFile(path, content)
+			merged, err := mergeFile(path, content, file.Replace)
 			if err != nil {
 				return fmt.Errorf("merge %s: %w", path, err)
 			}
