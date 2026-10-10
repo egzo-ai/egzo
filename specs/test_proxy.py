@@ -5,13 +5,12 @@
 
 import json
 import re
-import socket
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-from conftest import LABEL_PREFIX
+from conftest import LABEL_PREFIX, require_reachable
 from support import FakePass, agent, anthropic_profile, spec
 
 SECRET = "sk-spec-injected-0123456789abcdef"
@@ -56,30 +55,6 @@ def curl(engine, project, agent_name, *args, timeout=25):
 
 def status(engine, project, host, agent_name="coder-1", *extra):
     return curl(engine, project, agent_name, "-o", "/dev/null", "-w", "%{http_code}", f"https://{host}/", *extra)
-
-
-def reachable(host):
-    try:
-        socket.create_connection((host, 443), timeout=5).close()
-        return True
-    except OSError:
-        return False
-
-
-def require_reachable(host):
-    """The specs that go through the proxy need the real internet: without it they fail, never skip."""
-    if not reachable(host):
-        pytest.fail(f"these specs need to reach {host}:443 from this host, and cannot", pytrace=False)
-
-
-@pytest.fixture
-def internet():
-    require_reachable("example.com")
-
-
-@pytest.fixture
-def httpbin():
-    require_reachable("httpbin.org")
 
 
 needs_internet = pytest.mark.usefixtures("internet")
@@ -620,7 +595,7 @@ def test_an_encrypted_client_hello_for_the_approved_host_is_terminated_never_tun
     events = events_for(live_project, ECH_HOST)
     assert len([e for e in events if e["action"] == "intercept"]) == 2
     assert "Encrypted Client Hello" in next(e for e in events if e["action"] == "intercept")["reason"]
-    assert [e for e in events if e["action"] == "close" and e.get("bytes_up", 0) > 0], "a terminated connection is logged like a tunnel"
+    assert [e for e in events if e["action"] == "close" and e.get("bytes_up", 0) > 0 and e.get("bytes_down", 0) > 0], "a terminated connection is logged like a tunnel"
     assert not [e for e in events if e["action"] in ("deny", "request")]
 
 

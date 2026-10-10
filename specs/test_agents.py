@@ -108,6 +108,13 @@ def test_a_read_only_host_directory_cannot_be_written(live_project, engine, agen
     assert engine.exec(name, "touch", "/workspace/docs/new-file").returncode != 0
 
 
+def test_a_single_workspace_is_the_working_directory(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
+    name = container(engine, live_project, "coder-1").name
+    assert engine.exec(name, "pwd").stdout.strip() == "/workspace/scratch"
+    assert container(engine, live_project, "coder-1").labels[f"{LABEL_PREFIX}agent.workspaces"] == "scratch"
+
+
 def test_resources_limit_the_agent_container(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image, resources={"cpus": 1, "memory": "256m"})}))
     host = container(engine, live_project, "coder-1").raw["HostConfig"]

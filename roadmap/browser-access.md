@@ -1,4 +1,4 @@
-# Roadmap: browser access for agents (decided, in progress)
+# Roadmap: browser access for agents (decided, built; the specs are the status)
 
 Need: many projects want an agent to drive a browser (test a dev server, read a site, take screenshots). A browser is
 a basic tool, so egzo ships one: Chromium and the Playwright MCP server are in **the stock `claude-code` and `opencode`

@@ -423,6 +423,22 @@ def _reachable(host):
         return False
 
 
+def require_reachable(host):
+    """The specs that go through the proxy need the real internet: without it they fail, never skip."""
+    if not _reachable(host):
+        pytest.fail(f"these specs need to reach {host}:443 from this host, and cannot", pytrace=False)
+
+
+@pytest.fixture
+def internet():
+    require_reachable("example.com")
+
+
+@pytest.fixture
+def httpbin():
+    require_reachable("httpbin.org")
+
+
 @pytest.fixture
 def github():
     """The git specs clone a public repository: without the internet they fail, never skip."""

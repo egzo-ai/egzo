@@ -35,7 +35,7 @@ A TLS error on an injected host usually means the tool pins certificates or igno
 ## A browser page does not load
 
 ```console
-$ egzo proxy log --agent NAME        # the host, and `deny` with its reason
+$ egzo proxy log                     # the host, and `deny` with its reason (`--agent NAME` for one agent)
 ```
 
 - `deny` ... `not allowed by the agent's egress profile`: the page pulls from a host the profile does not list. Add it, or
@@ -44,7 +44,8 @@ $ egzo proxy log --agent NAME        # the host, and `deny` with its reason
   import it into Chromium's store; an image of your own needs `certutil` (the `libnss3-tools` package) and the `egzo
   agent run` entrypoint. Chromium ignores `SSL_CERT_FILE`.
 - A site that loads for curl but not for the browser, with `intercept` in the log: it pins its certificate.
-- `challenge` lines are not failures: a browser asks for the proxy credentials before it sends them.
+- `challenge` lines are not failures: a browser asks for the proxy credentials before it sends them. They name no agent,
+  so `--agent` does not show them.
 - `Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED`: the proxy refused the host (see its `deny`).
 
 ## An agent is not doing what you sent

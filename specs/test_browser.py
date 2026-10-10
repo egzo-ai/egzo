@@ -19,7 +19,7 @@ import pytest
 
 from support import agent, spec
 
-pytestmark = pytest.mark.usefixtures("engine")
+pytestmark = pytest.mark.usefixtures("engine", "internet", "httpbin")
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HARNESSES = ["claude-code", "opencode"]
@@ -153,9 +153,10 @@ def test_the_browser_loads_what_the_profile_allows_and_nothing_else(browser, eng
     assert not [e for e in events if "Encrypted Client Hello" in e.get("reason", "") and e["action"] == "deny"]
     assert events_for(project, "localhost") == []
 
-    # the browser leaves nothing in the workspace the agent is working in
-    listing = engine.exec(name, "sh", "-c", "ls -A /workspace").stdout
-    assert ".playwright-mcp" not in listing and ".playwright-mcp" not in json.dumps([allowed, refused, local])
+    # the browser leaves nothing behind where the agent works: Playwright's own default is a `.playwright-mcp`
+    # directory in the working directory of the server
+    found = engine.exec(name, "sh", "-c", "find / \\( -path /proc -o -path /sys \\) -prune -o -name .playwright-mcp -print 2>/dev/null")
+    assert found.stdout.strip() == "" and ".playwright-mcp" not in json.dumps([allowed, refused, local])
 
 
 def test_with_everything_allowed_a_wildcard_service_audits_the_pages_the_browser_loads(browser, engine):
@@ -181,7 +182,7 @@ def test_a_password_typed_in_a_browser_form_is_the_placeholder_and_the_site_gets
         [
             navigate("https://httpbin.org/forms/post"),
             evaluate(fill),
-            {"name": "browser_wait_for", "arguments": {"time": 3}},
+            {"name": "browser_wait_for", "arguments": {"text": "custname"}},  # the echoed form, once the POST has come back
             evaluate("() => JSON.parse(document.body.innerText).form.custname"),
         ],
     )

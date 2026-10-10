@@ -158,9 +158,21 @@ injected only for the hosts of declared services. Use it for a trusted template,
 
 ```console
 $ egzo proxy rules       # what each agent may reach, and which credentials go where
-$ egzo proxy log         # the audit trail, one JSON event per line (allow, deny, reason)
+$ egzo proxy log         # the audit trail, one JSON event per line
 $ egzo config            # every profile fully resolved
 ```
+
+Each event has a `host`, an `action` and, where it applies, the `agent` and a `reason`:
+
+| action | meaning |
+|---|---|
+| `allow`, then `close` | a tunnel was opened to the host; `close` carries `bytes_up`, `bytes_down` and `duration_ms` |
+| `deny` | refused, with the `reason` (not in the profile, not port 443, a private address, a TLS server name that differs from the host, wrong proxy credentials) |
+| `challenge` | a connection arrived without proxy credentials; browsers start that way and send them once asked, so it is not a refusal and it names no agent |
+| `inject`, `inspect` | the host's TLS was terminated because a service injects a credential there, swaps a placeholder, or has `inspect: true` |
+| `request` | one request to such a host: method, path (never the query) and status |
+| `intercept`, then `close` | a client that sent Encrypted Client Hello was terminated instead of tunneled ([browsing](browser.md)) |
+| `error`, `aborted` | the connection failed (the `reason` says where) or the client left before the handshake |
 
 Changing a profile and running `egzo up` reloads the proxy with the new policy; running instances keep their
 binding by profile name. After a proxy restart, `egzo restart proxy` (or `egzo up`) loads the policy again; until

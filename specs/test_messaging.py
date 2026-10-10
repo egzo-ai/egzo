@@ -373,6 +373,13 @@ def test_agents_cannot_reach_operator_verbs(live_project, engine, agent_image):
         assert code in (404, 405), f"{path} answered {code} on the agent port"
 
 
+def test_the_retired_routes_are_gone(live_project, engine, agent_image):
+    two_agents(live_project, agent_image)
+    for verb, path in (("POST", "/v1/say"), ("GET", "/v1/inbox"), ("POST", "/v1/ask"), ("GET", "/v1/questions/q1"), ("POST", "/v1/ack")):
+        code, _ = as_agent(engine, live_project, "coder", verb, path, {"text": "x"} if verb == "POST" else None)
+        assert code in (404, 405), f"{verb} {path} answered {code}"
+
+
 def test_hooks_arrive_as_events(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
     code, _ = as_agent(engine, live_project, "coder", "POST", "/v1/hooks/Stop", {"last_assistant_message": "all done"})
