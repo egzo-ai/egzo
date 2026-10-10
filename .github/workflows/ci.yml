@@ -19,6 +19,7 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
+          # a pre-release commit: see known-issues/staticcheck-pre-release.md
+          go install honnef.co/go/tools/cmd/staticcheck@f1838cc308e5cfbb38d91cfc973355611845997e
           go install golang.org/x/vuln/cmd/govulncheck@latest
           make lint
