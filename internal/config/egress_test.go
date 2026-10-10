@@ -113,7 +113,11 @@ egress:
 
 	cases := []struct{ name, body, want string }{
 		{"no hosts", "{ inspect: true }", "needs hosts"},
-		{"wildcard host", "{ hosts: ['*.example.com'] }", "invalid host"},
+		{"mid-host wildcard", "{ hosts: ['a.*.example.com'] }", "invalid host"},
+		{"wildcard without a domain", "{ hosts: ['*..'] }", "invalid host"},
+		{"wildcard host with inject", "{ hosts: ['*.example.com'], inject: { header: H }, secret: main/KEY }", `a secret binds to exact hosts, "*.example.com" is a wildcard`},
+		{"star host with inject", "{ hosts: [a.com, '*'], inject: { header: H }, secret: main/KEY }", `"*" is a wildcard`},
+		{"wildcard host with placeholder", "{ hosts: ['*.Example.COM.'], placeholder: PW, secret: main/KEY }", `"*.example.com" is a wildcard`},
 		{"host with scheme", "{ hosts: ['https://example.com'] }", "invalid host"},
 		{"inject without header", "{ hosts: [a.com], inject: {}, secret: main/KEY }", "inject needs a header"},
 		{"secret without inject", "{ hosts: [a.com], secret: main/KEY }", "neither inject nor placeholder"},

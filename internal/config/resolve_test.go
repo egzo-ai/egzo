@@ -154,6 +154,17 @@ agents:
 	if len(warnings) != 0 {
 		t.Errorf("wildcard allow still warned: %q", warnings)
 	}
+
+	for _, hosts := range []string{"['*']", "['*.anthropic.com']"} {
+		_, warnings = mustResolve(t, t.TempDir(), "egress:\n  default:\n    services:\n      web: { hosts: "+hosts+" }\nagents:\n  coder: { harness: claude-code }\n")
+		if len(warnings) != 0 {
+			t.Errorf("wildcard service %s still warned: %q", hosts, warnings)
+		}
+	}
+	_, warnings = mustResolve(t, t.TempDir(), "egress:\n  default:\n    services:\n      web: { hosts: ['*.example.com'] }\nagents:\n  coder: { harness: claude-code }\n")
+	if len(warnings) != 1 {
+		t.Errorf("an unrelated wildcard service silenced the warning: %q", warnings)
+	}
 }
 
 func TestResolveVaults(t *testing.T) {

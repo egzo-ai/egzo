@@ -150,9 +150,19 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 		valid = false
 	}
 	for _, host := range def.Hosts {
-		if !validHost(host) {
+		if !validAllow(host) {
 			r.problems.addf("egress profile %q: service %q has an invalid host %q", profile, name, host)
 			valid = false
+		}
+	}
+	// A secret binds to exact hosts: "*.example.com" would hand it to every subdomain, including
+	// ones somebody else controls. A wildcard service without a secret is an allow entry.
+	if def.Inject != nil || def.Placeholder != "" {
+		for _, host := range def.Hosts {
+			if strings.HasPrefix(host, "*") {
+				r.problems.addf("egress profile %q: service %q: a secret binds to exact hosts, %q is a wildcard", profile, name, host)
+				valid = false
+			}
 		}
 	}
 	if def.Inject != nil && def.Inject.Header == "" {
@@ -301,8 +311,10 @@ func (p *ResolvedProfile) reaches(host string) bool {
 		}
 	}
 	for _, service := range p.Services {
-		if slices.Contains(service.Hosts, host) {
-			return true
+		for _, pattern := range service.Hosts {
+			if MatchHost(pattern, host) {
+				return true
+			}
 		}
 	}
 	return false

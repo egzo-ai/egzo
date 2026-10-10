@@ -74,21 +74,27 @@ type Decision struct {
 func (a *Profile) Decide(host string) Decision {
 	host = strings.ToLower(host)
 	var decision Decision
+	named := false // the decision's service lists the host exactly
 	for _, service := range a.Services {
-		covers := false
+		covers, exact := false, false
 		for _, pattern := range service.Hosts {
-			if config.MatchHost(strings.ToLower(pattern), host) {
+			pattern = strings.ToLower(pattern)
+			if config.MatchHost(pattern, host) {
 				covers = true
-				break
+				exact = exact || pattern == host
 			}
 		}
 		if !covers {
 			continue
 		}
-		// The first service covering the host names it and injects; every covering service may add
-		// its placeholder.
+		// The first service covering the host names it, unless a later one lists the host exactly
+		// (the audit names the most specific service); every covering service may add its placeholder.
 		if !decision.Allowed {
 			decision = Decision{Allowed: true, Service: service.Name}
+			named = exact
+		} else if exact && !named {
+			decision.Service = service.Name
+			named = true
 		}
 		decision.Inspect = decision.Inspect || service.Inspect
 		if service.Header != "" && decision.Inject == nil {
