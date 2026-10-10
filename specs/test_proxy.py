@@ -3,6 +3,7 @@
 
 """The egress proxy: the only way out for agents, with credentials injected so agents never hold them."""
 
+import base64
 import json
 import re
 import urllib.request
@@ -170,6 +171,30 @@ def test_the_proxy_injects_the_credential_and_the_agent_never_sees_it(live_proje
     agent_resource = container(engine, live_project, "coder-1")
     assert SECRET not in engine.exec(agent_resource.name, "env").stdout
     assert SECRET not in json.dumps(agent_resource.raw)
+
+
+@needs_httpbin
+def test_the_proxy_can_inject_the_secret_as_basic_authentication(live_project, engine, agent_image):
+    """What git over HTTPS needs: base64(user:secret) after `Basic`, built by the proxy so the agent never holds it."""
+    document = spec(
+        egress={
+            "default": {
+                "services": {
+                    "echo": {
+                        "hosts": ["httpbin.org"],
+                        "inject": {"header": "Authorization", "basic_user": "x-access-token"},
+                        "secret": "main/DEPLOY_TOKEN",
+                    }
+                }
+            }
+        },
+        agents={"coder": custom(agent_image)},
+    )
+    up(live_project, document, DEPLOY_TOKEN=SECRET)
+    echoed = curl(engine, live_project, "coder-1", "https://httpbin.org/headers")
+    expected = "Basic " + base64.b64encode(f"x-access-token:{SECRET}".encode()).decode()
+    assert json.loads(echoed.stdout)["headers"]["Authorization"] == expected
+    assert SECRET not in engine.exec(container(engine, live_project, "coder-1").name, "env").stdout
 
 
 @needs_httpbin

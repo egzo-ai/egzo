@@ -28,7 +28,7 @@ func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]stri
 			service := profile.Services[serviceName]
 			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Secret: secrets[service.Secret], Inspect: service.Inspect}
 			if service.Inject != nil {
-				service2.Header, service2.Value = service.Inject.Header, service.Inject.Value
+				service2.Header, service2.Value, service2.BasicUser = service.Inject.Header, service.Inject.Value, service.Inject.BasicUser
 			}
 			if service.Placeholder != "" {
 				service2.Placeholder = placeholders[service.Secret]

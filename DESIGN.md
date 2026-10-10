@@ -489,8 +489,8 @@ egress:
 - `allow: ["*"]` is how full internet access is granted; it is still proxied and audited, and
   credentials are still injected only for hosts of services in the profile.
 - A **service** defines *how* to talk to something: `hosts` (required), optional `secret`, and at most
-  one way to use the secret: `inject` (`header`, `value` containing `{secret}`; without `value` the raw
-  secret is the header value) or `placeholder` (an environment variable name, see Placeholders). A service
+  one way to use the secret: `inject` (`header`, then `value` containing `{secret}`, or `basic_user` for HTTP Basic
+  authentication with the secret as the password; with neither the raw secret is the header value) or `placeholder` (an environment variable name, see Placeholders). A service
   with neither is a pure allowlist and cannot have a secret. Optional `inspect: true` audits request paths.
   Rules are by host only: a service has no path or method scope, and keys for them are rejected like any
   other unknown key. They can be added if a real use-case turns up.
@@ -513,7 +513,7 @@ egress:
   object replaces the definition entirely. A child cannot remove anything it inherits. One parent
   only; cycles and unknown parents are errors.
 - **Built-in services** ship with egzo as data. `anthropic-oauth` is for a Claude subscription token (`claude setup-token`, `sk-ant-oat…`), sent as `Authorization: Bearer`; the agent then gets `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. A token bound to `anthropic`, or an API key to `anthropic-oauth`, is refused at `up`. Initially `anthropic`: `api.anthropic.com` +
-  `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Bearer`), more later
+  `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Basic` with the token as password, which git over HTTPS needs), more later
   (openai, google-ai, package registries). An object with a built-in's name replaces it.
   `egzo config` prints each profile fully resolved.
 - Reachability for an agent = its profile's `allow` plus the hosts of its services (after extend).

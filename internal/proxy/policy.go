@@ -4,6 +4,7 @@
 package proxy
 
 import (
+	"encoding/base64"
 	"strings"
 
 	"github.com/egzo-ai/egzo/internal/config"
@@ -34,12 +35,14 @@ type Binding struct {
 
 // Service is a set of hosts and, when the service injects a credential, how.
 type Service struct {
-	Name    string   `json:"name"`
-	Hosts   []string `json:"hosts"`
-	Header  string   `json:"header,omitempty"`
-	Value   string   `json:"value,omitempty"` // contains {secret}; empty means the raw secret
-	Secret  string   `json:"secret,omitempty"`
-	Inspect bool     `json:"inspect,omitempty"`
+	Name   string   `json:"name"`
+	Hosts  []string `json:"hosts"`
+	Header string   `json:"header,omitempty"`
+	Value  string   `json:"value,omitempty"` // contains {secret}; empty means the raw secret
+	// BasicUser, when set, makes the header HTTP Basic authentication: the user, and Secret as the password.
+	BasicUser string `json:"basic_user,omitempty"`
+	Secret    string `json:"secret,omitempty"`
+	Inspect   bool   `json:"inspect,omitempty"`
 	// Placeholder is the text the agent types instead of the secret (not the name of the variable that
 	// holds it). The proxy swaps it for Secret on requests to Hosts. A placeholder service has no Header.
 	Placeholder string `json:"placeholder,omitempty"`
@@ -99,7 +102,10 @@ func (a *Profile) Decide(host string) Decision {
 		decision.Inspect = decision.Inspect || service.Inspect
 		if service.Header != "" && decision.Inject == nil {
 			value := service.Secret
-			if service.Value != "" {
+			switch {
+			case service.BasicUser != "":
+				value = "Basic " + base64.StdEncoding.EncodeToString([]byte(service.BasicUser+":"+service.Secret))
+			case service.Value != "":
 				value = strings.ReplaceAll(service.Value, "{secret}", service.Secret)
 			}
 			decision.Inject = &Injection{Header: service.Header, Value: value}

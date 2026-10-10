@@ -24,7 +24,7 @@ The proxy matches the placeholder text, so it must reach the wire unchanged. A c
 hides it:
 
 - **HTTP Basic authentication** is `base64(user:password)`. A client that builds it from the placeholder sends the
-  base64 of the placeholder. Use `inject` with a `value` for the whole header instead.
+  base64 of the placeholder. Use `inject` with `basic_user` for the whole header instead.
 - A login page whose JavaScript hashes or encrypts the password in the browser (a client-side `sha256`, SRP,
   password-manager style derivation) sends the hash of the placeholder.
 - Any format that transforms the text: URL-safe base64, gzip of the body (`Content-Encoding` is not scanned),

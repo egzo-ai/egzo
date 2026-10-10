@@ -169,6 +169,10 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 		r.problems.addf("egress profile %q: service %q: inject needs a header", profile, name)
 		valid = false
 	}
+	if def.Inject != nil && def.Inject.BasicUser != "" && def.Inject.Value != "" {
+		r.problems.addf("egress profile %q: service %q: inject has both basic_user and value; basic_user builds the whole header", profile, name)
+		valid = false
+	}
 	switch {
 	case def.Inject != nil && def.Placeholder != "":
 		r.problems.addf("egress profile %q: service %q has both inject and placeholder; a service has one or the other", profile, name)

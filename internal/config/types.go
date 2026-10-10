@@ -64,9 +64,13 @@ type ServiceDef struct {
 	Inspect     bool   `yaml:"inspect,omitempty"`
 }
 
+// Inject says how a service's secret is put into a request header. With neither Value nor BasicUser the
+// header is the raw secret; Value is a template around {secret}; BasicUser sends HTTP Basic authentication
+// (the user, and the secret as its password).
 type Inject struct {
-	Header string `yaml:"header"`
-	Value  string `yaml:"value,omitempty"`
+	Header    string `yaml:"header"`
+	Value     string `yaml:"value,omitempty"`
+	BasicUser string `yaml:"basic_user,omitempty"`
 }
 
 var serviceDefKeys = map[string]bool{"hosts": true, "inject": true, "secret": true, "placeholder": true, "inspect": true}

@@ -34,7 +34,7 @@ egress:
 		t.Errorf("anthropic inject = %+v", anthropic.Inject)
 	}
 	github := services["github"]
-	if github.Inject.Value != "Bearer {secret}" || github.Secret != "main/OTHER" {
+	if *github.Inject != (Inject{Header: "Authorization", BasicUser: "x-access-token"}) || github.Secret != "main/OTHER" {
 		t.Errorf("github = %+v", github)
 	}
 }

@@ -118,6 +118,10 @@ func TestPolicyDecisions(t *testing.T) {
 	if d := agent.Decide("API.GitHub.com"); !d.Allowed || d.Inject == nil || d.Inject.Value != "Bearer TOK" {
 		t.Errorf("github decision = %+v", d)
 	}
+	basic := Profile{Services: []Service{{Name: "git", Hosts: []string{"github.com"}, Header: "Authorization", BasicUser: "x-access-token", Secret: "TOK"}}}
+	if d := basic.Decide("github.com"); d.Inject == nil || d.Inject.Value != "Basic eC1hY2Nlc3MtdG9rZW46VE9L" { // base64("x-access-token:TOK")
+		t.Errorf("basic decision = %+v", d)
+	}
 	if d := agent.Decide("pypi.org"); !d.Allowed || d.Inject != nil {
 		t.Errorf("pure allowlist service must not inject: %+v", d)
 	}

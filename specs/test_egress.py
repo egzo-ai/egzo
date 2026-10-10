@@ -100,6 +100,29 @@ def test_the_github_service_is_built_in(project):
     assert service["secret"] == "main/GITHUB_TOKEN"
 
 
+def test_the_github_service_sends_the_token_as_basic_authentication(project):
+    """git over HTTPS refuses `Authorization: Bearer`; GitHub takes the token as the password of a Basic credential."""
+    resolved = project.resolved(spec(egress={"default": {"services": {"github": "main/GITHUB_TOKEN"}}}))
+    service = profile(resolved, "default")["services"]["github"]
+    assert service["inject"] == {"header": "Authorization", "basic_user": "x-access-token"}
+
+
+def test_a_custom_service_can_send_its_secret_as_basic_authentication(project):
+    """The built-in github service is nothing but this: a custom service can say the same."""
+    basic = {"header": "Authorization", "basic_user": "x-access-token"}
+    resolved = project.resolved(
+        spec(egress={"default": {"services": {"git-host": deploy_api(inject=basic, secret="main/DEPLOY_TOKEN")}}})
+    )
+    assert profile(resolved, "default")["services"]["git-host"]["inject"] == basic
+
+
+def test_basic_authentication_and_a_value_template_are_exclusive(project):
+    inject = {"header": "Authorization", "value": "Bearer {secret}", "basic_user": "x-access-token"}
+    result = project.config(spec(egress={"default": {"services": {"git-host": deploy_api(inject=inject, secret="main/DEPLOY_TOKEN")}}}))
+    assert result.returncode != 0
+    assert "basic_user" in result.stderr and "value" in result.stderr
+
+
 def test_an_object_defines_a_custom_service(project):
     resolved = project.resolved(
         spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}}})

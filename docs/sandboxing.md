@@ -37,7 +37,7 @@ egress:
 |---|---|---|
 | `anthropic` | `api.anthropic.com` | `x-api-key: <secret>` |
 | `anthropic-oauth` | `api.anthropic.com` | `Authorization: Bearer <token>` (a Claude subscription token from `claude setup-token`) |
-| `github` | `github.com`, `api.github.com` | `Authorization: Bearer <secret>` |
+| `github` | `github.com`, `api.github.com` | `Authorization: Basic base64(x-access-token:<secret>)` (git over HTTPS refuses a bearer token) |
 
 Binding a token to the wrong one of the two Anthropic services is refused at `up`. Claude Code also needs
 `platform.claude.com` in `allow`; it needs no credential.
@@ -54,6 +54,17 @@ egress:
         hosts: [api.deploy.example.com]
         inject: { header: Authorization, value: "Bearer {secret}" }   # without value, the raw secret is the header
         secret: main/DEPLOY_TOKEN
+```
+
+`inject` has three forms: the raw secret (no `value`), a `value` template around `{secret}`, or HTTP Basic authentication
+with `basic_user`, which sends `Basic base64(<user>:<secret>)`; use it for what builds the header from the secret itself,
+such as git over HTTPS. `basic_user` and `value` cannot be combined. The built-in `github` service is only this:
+
+```yaml
+      git-host:
+        hosts: [git.example.com]
+        inject: { header: Authorization, basic_user: x-access-token }
+        secret: main/GIT_TOKEN
 ```
 
 A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.

@@ -18,9 +18,11 @@ var builtinServices = map[string]ResolvedService{
 		Hosts:  []string{"api.anthropic.com"},
 		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
 	},
+	// git over HTTPS refuses a bearer token; GitHub takes the token as the password of a Basic credential,
+	// which its API accepts too. This is only what a custom service can say.
 	"github": {
 		Hosts:  []string{"github.com", "api.github.com"},
-		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
+		Inject: &Inject{Header: "Authorization", BasicUser: "x-access-token"},
 	},
 }
 
