@@ -44,9 +44,10 @@ See [`docs/`](docs/README.md).
 - **Egress policy.** Allow internet access using a whitelist, or start simple by allowing all domains. Everything remains audited.
 - **Credential injection.** API keys and tokens can be injected live by the built-in proxy, so your agents never need to see any secrets,
   greatly reducing consequences of prompt injections and risks of secrets leaking.
+- **Password manager integration.** Fetch api keys and secrets directly from your password manager.
 - **Git worktrees.** Clone, worktree or shared checkouts made through the proxy, so agents hold no git credentials.
 - **Messaging.** Send messages or tasks to agents without opening their full UI, opening the door for quick work or automated jobs.
-- **A browser.** Chromium and the Playwright MCP server are in the harness images; they reach what the egress profile allows ([docs/browser.md](docs/browser.md)).
+- **Built-in browser.** Chromium and the Playwright MCP just works out of the box; ([docs/browser.md](docs/browser.md)).
 - **Your own tools.** Extend a harness image with extra software, or run any image with the `custom` harness.
 
 ## Example: architect with Claude, code with OpenCode
