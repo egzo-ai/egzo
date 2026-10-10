@@ -123,6 +123,52 @@ def test_an_image_without_a_browser_is_not_given_a_server_that_cannot_start(brow
     assert "egzo" in servers and "playwright" not in servers
 
 
+CONFIG_FILE = {"claude-code": "$HOME/.claude.json", "opencode": "$HOME/.config/opencode/opencode.json"}
+USERS_OWN = {
+    "claude-code": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest", "--headless"], "env": {"A": "1"}},
+    "opencode": {"type": "local", "command": ["npx", "@playwright/mcp"], "enabled": False},
+}
+
+
+def set_server(engine, project, harness, name, entry):
+    key = "mcpServers" if harness == "claude-code" else "mcp"
+    script = (
+        "const fs=require('fs');const p=process.argv[1].replace('$HOME',process.env.HOME);const c=JSON.parse(fs.readFileSync(p));"
+        f"c.{key}[process.argv[2]]=JSON.parse(process.argv[3]);fs.writeFileSync(p,JSON.stringify(c))"
+    )
+    done = engine.exec(instance(engine, project), "node", "-e", script, CONFIG_FILE[harness], name, json.dumps(entry))
+    assert done.returncode == 0, done.stderr
+
+
+def restarted(engine, project, harness):
+    """Restart the instance and wait until its harness is running again, so its configuration has been written."""
+    assert project.run("restart", "coder").returncode == 0
+    for _ in range(60):
+        if engine.exec(instance(engine, project), "sh", "-c", "pgrep -x claude || pgrep -x opencode").returncode == 0:
+            return
+        time.sleep(0.5)
+    pytest.fail("the harness did not come back")
+
+
+def test_a_browser_server_of_the_user_is_left_alone_and_one_that_egzo_wrote_is_refreshed(browser, engine, harness):
+    project = browser(harness)
+    registered = configured_servers(engine, project, harness)["playwright"]
+
+    # an entry egzo wrote earlier, with arguments that no longer are right: replaced as a whole, not merged into
+    stale = json.loads(json.dumps(registered))
+    stale["args" if harness == "claude-code" else "command"] += ["--stale"]
+    set_server(engine, project, harness, "playwright", stale)
+    restarted(engine, project, harness)
+    assert configured_servers(engine, project, harness)["playwright"] == registered
+
+    # a server of the user's with that name is not egzo's to change, and it stays whatever the image carries
+    set_server(engine, project, harness, "playwright", USERS_OWN[harness])
+    restarted(engine, project, harness)
+    servers = configured_servers(engine, project, harness)
+    assert servers["playwright"] == USERS_OWN[harness]
+    assert "egzo" in servers
+
+
 # --- browsing through the proxy -------------------------------------------------------------------------------------
 
 
