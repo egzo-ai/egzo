@@ -79,13 +79,22 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		"$schema":    "https://opencode.ai/config.json",
 		"autoupdate": false,
 		"share":      "disabled",
-		"mcp": map[string]any{"egzo": map[string]any{
-			"type":    "remote",
-			"url":     strings.TrimRight(opts.ControlURL, "/") + "/mcp",
-			"headers": map[string]any{"Authorization": opts.Authorization},
-			"enabled": true,
-		}},
+		"mcp": map[string]any{
+			"egzo": map[string]any{
+				"type":    "remote",
+				"url":     strings.TrimRight(opts.ControlURL, "/") + "/mcp",
+				"headers": map[string]any{"Authorization": opts.Authorization},
+				"enabled": true,
+			},
+			// null deletes it when merging: an image that lost its browser leaves no stale server in the home.
+			"playwright": nil,
+		},
 		"instructions": []any{opts.InstructionsFile},
+	}
+	if opts.hasBrowser() {
+		config["mcp"].(map[string]any)["playwright"] = map[string]any{
+			"type": "local", "command": browserCommand, "enabled": true,
+		}
 	}
 	if opts.Bypass {
 		config["permission"] = map[string]any{"*": "allow"}

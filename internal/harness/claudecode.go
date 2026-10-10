@@ -61,11 +61,20 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 		"hasCompletedOnboarding": true,
 		"customApiKeyResponses":  map[string]any{"approved": []any{claudeKey[len(claudeKey)-20:]}, "rejected": []any{}},
 		"projects":               trusted,
-		"mcpServers": map[string]any{"egzo": map[string]any{
-			"type":    "http",
-			"url":     strings.TrimRight(o.ControlURL, "/") + "/mcp",
-			"headers": map[string]any{"Authorization": o.Authorization},
-		}},
+		"mcpServers": map[string]any{
+			"egzo": map[string]any{
+				"type":    "http",
+				"url":     strings.TrimRight(o.ControlURL, "/") + "/mcp",
+				"headers": map[string]any{"Authorization": o.Authorization},
+			},
+			// null deletes it when merging: an image that lost its browser leaves no stale server in the home.
+			"playwright": nil,
+		},
+	}
+	if o.hasBrowser() {
+		state["mcpServers"].(map[string]any)["playwright"] = map[string]any{
+			"type": "stdio", "command": browserCommand[0], "args": browserCommand[1:], "env": map[string]any{},
+		}
 	}
 
 	hooks := map[string]any{}
