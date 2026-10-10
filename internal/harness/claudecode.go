@@ -69,14 +69,11 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 			},
 		},
 	}
-	// The browser's server is egzo's to refresh or delete only when egzo wrote it (command "egzo").
+	// The browser's server is egzo's to refresh or delete only when egzo wrote it (`egzo agent browser ...`).
 	statePath := filepath.Join(home, ".claude.json")
 	var replace [][]string
 	entry := map[string]any{"type": "stdio", "command": browserCommand[0], "args": toAny(browserCommand[1:]), "env": map[string]any{}}
-	if value, present, wholesale := o.browserServer(statePath, []string{"mcpServers"}, entry, func(existing any) bool {
-		server, _ := existing.(map[string]any)
-		return server["command"] == "egzo"
-	}); present {
+	if value, present, wholesale := o.browserServer(statePath, []string{"mcpServers"}, entry, ownsClaudeCodeBrowser); present {
 		state["mcpServers"].(map[string]any)["playwright"] = value
 		if wholesale {
 			replace = [][]string{{"mcpServers", "playwright"}}

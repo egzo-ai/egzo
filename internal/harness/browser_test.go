@@ -58,9 +58,9 @@ func TestAStaleBrowserServerIsRemovedFromAPersistedHomeAndWhatTheUserAddedStays(
 		existing    string
 	}{
 		{"claude-code", claudeCode{}, []string{".claude.json"}, "mcpServers",
-			`{"mcpServers":{"playwright":{"type":"stdio","command":"egzo"},"mine":{"type":"stdio","command":"x"}}}`},
+			`{"mcpServers":{"playwright":{"type":"stdio","command":"egzo","args":["agent","browser"]},"mine":{"type":"stdio","command":"x"}}}`},
 		{"opencode", openCode{}, []string{".config", "opencode", "opencode.json"}, "mcp",
-			`{"mcp":{"playwright":{"type":"local","command":["egzo"]},"mine":{"type":"local","command":["x"]}}}`},
+			`{"mcp":{"playwright":{"type":"local","command":["egzo","agent","browser"]},"mine":{"type":"local","command":["x"]}}}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -152,8 +152,8 @@ func TestAFreshHomeGetsTheBrowserServer(t *testing.T) {
 
 func TestAnEntryEgzoWroteIsReplacedWholesaleNotMerged(t *testing.T) {
 	existing := map[string]string{
-		"claude-code": `{"mcpServers":{"playwright":{"type":"stdio","command":"egzo","args":["agent","old","--x"],"env":{"A":"1"}},"mine":{"command":"x"}}}`,
-		"opencode":    `{"mcp":{"playwright":{"type":"local","command":["egzo","agent","old"],"enabled":false,"environment":{"A":"1"}},"mine":{"command":["x"]}}}`,
+		"claude-code": `{"mcpServers":{"playwright":{"type":"stdio","command":"egzo","args":["agent","browser","--old"],"env":{"A":"1"}},"mine":{"command":"x"}}}`,
+		"opencode":    `{"mcp":{"playwright":{"type":"local","command":["egzo","agent","browser","--old"],"enabled":false,"environment":{"A":"1"}},"mine":{"command":["x"]}}}`,
 	}
 	want := map[string]string{
 		"claude-code": `{"args":["agent","browser"],"command":"egzo","env":{},"type":"stdio"}`,
@@ -198,4 +198,38 @@ func TestWithoutABrowserOnlyAnEntryEgzoWroteIsDeleted(t *testing.T) {
 		}
 	}
 	// the other test (a stale server is removed) covers the entry egzo wrote
+}
+
+func TestOnlyAnEntryThatLooksLikeEgzosOwnIsEgzos(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		entry    string
+		claude   bool
+		opencode bool
+	}{
+		{"egzo's own", `{"command":"egzo","args":["agent","browser"]}`, true, false},
+		{"egzo's own with more arguments", `{"command":"egzo","args":["agent","browser","--x"]}`, true, false},
+		{"egzo's own for OpenCode", `{"command":["egzo","agent","browser"]}`, false, true},
+		{"egzo's own for OpenCode with more", `{"command":["egzo","agent","browser","--x"]}`, false, true},
+		{"egzo with other arguments", `{"command":"egzo","args":["something","else"]}`, false, false},
+		{"egzo without arguments", `{"command":"egzo"}`, false, false},
+		{"egzo with other arguments for OpenCode", `{"command":["egzo","mine"]}`, false, false},
+		{"egzo alone for OpenCode", `{"command":["egzo"]}`, false, false},
+		{"egzo agent only", `{"command":["egzo","agent"]}`, false, false},
+		{"another program", `{"command":"npx","args":["agent","browser"]}`, false, false},
+		{"another program for OpenCode", `{"command":["npx","egzo","agent","browser"]}`, false, false},
+		{"not an object", `"egzo"`, false, false},
+		{"arguments of the wrong type", `{"command":"egzo","args":"agent browser"}`, false, false},
+	} {
+		var entry any
+		if err := json.Unmarshal([]byte(c.entry), &entry); err != nil {
+			t.Fatal(err)
+		}
+		if got := ownsClaudeCodeBrowser(entry); got != c.claude {
+			t.Errorf("%s: Claude Code owns = %v, want %v", c.name, got, c.claude)
+		}
+		if got := ownsOpenCodeBrowser(entry); got != c.opencode {
+			t.Errorf("%s: OpenCode owns = %v, want %v", c.name, got, c.opencode)
+		}
+	}
 }

@@ -32,9 +32,7 @@ func found(string) (string, error)   { return "/usr/bin/certutil", nil }
 func missing(string) (string, error) { return "", os.ErrNotExist }
 
 func caFile(t *testing.T) string {
-	path := filepath.Join(t.TempDir(), "ca.crt")
-	os.WriteFile(path, []byte("-----BEGIN CERTIFICATE-----"), 0o644)
-	return path
+	return authority(t, "egzo test CA")
 }
 
 func TestTheFirstStartCreatesTheDatabaseAndTrustsTheCAForTLS(t *testing.T) {
@@ -62,7 +60,7 @@ func TestAnotherStartReplacesTheCertificateWithoutCreatingTheDatabaseOrAccumulat
 	if err := TrustProjectCA(home, ca, found, r.run); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.calls) != 2 || !strings.Contains(r.calls[0], " -D -n egzo-project-ca") || !strings.Contains(r.calls[1], " -A ") {
+	if len(r.calls) != 3 || !strings.Contains(r.calls[0], " -L") || !strings.Contains(r.calls[1], " -D -n egzo-project-ca") || !strings.Contains(r.calls[2], " -A ") {
 		t.Errorf("calls = %v", r.calls)
 	}
 }
@@ -83,9 +81,13 @@ func TestWithoutCertutilOrWithoutACAThereIsNothingToDo(t *testing.T) {
 
 func TestAFailureIsReturnedWithWhatCertutilSaidAndAFailedRemovalIsIgnored(t *testing.T) {
 	r := recorder{fail: map[string]bool{"-A": true}}
-	err := TrustProjectCA(t.TempDir(), caFile(t), found, r.run)
+	home := t.TempDir()
+	err := TrustProjectCA(home, caFile(t), found, r.run)
 	if err == nil || !strings.Contains(err.Error(), "it failed") {
 		t.Errorf("err = %v", err)
+	}
+	if set, _ := filepath.Glob(filepath.Join(home, ".pki", "nssdb.broken-*")); len(set) != 0 {
+		t.Errorf("a failed import set the database aside: %v", set)
 	}
 	r = recorder{fail: map[string]bool{"-D": true}} // nothing to remove the first time
 	if err := TrustProjectCA(t.TempDir(), caFile(t), found, r.run); err != nil {

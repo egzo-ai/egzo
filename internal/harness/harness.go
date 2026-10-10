@@ -73,6 +73,34 @@ func (o Options) browserServer(file string, path []string, entry any, owned func
 	return entry, true, exists
 }
 
+// ownsClaudeCodeBrowser says whether a Claude Code `playwright` entry is egzo's own: the command is egzo and the
+// arguments start with the ones egzo registers. Another use of the egzo command is the user's.
+func ownsClaudeCodeBrowser(existing any) bool {
+	server, _ := existing.(map[string]any)
+	args, _ := server["args"].([]any)
+	return server["command"] == browserCommand[0] && startsWith(args, browserCommand[1:])
+}
+
+// ownsOpenCodeBrowser is the same for OpenCode, whose command is one list.
+func ownsOpenCodeBrowser(existing any) bool {
+	server, _ := existing.(map[string]any)
+	command, _ := server["command"].([]any)
+	return startsWith(command, browserCommand)
+}
+
+// startsWith reports whether list begins with the strings in prefix.
+func startsWith(list []any, prefix []string) bool {
+	if len(list) < len(prefix) {
+		return false
+	}
+	for i, want := range prefix {
+		if list[i] != want {
+			return false
+		}
+	}
+	return true
+}
+
 // existingServer reads servers["playwright"] from the JSON object at path in the file (not there, unreadable or
 // not JSON: no entry; the merge deals with a damaged file).
 func existingServer(file string, path []string) (any, bool) {

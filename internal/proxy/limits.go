@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -64,8 +63,12 @@ func (l *limiter) acquire(agent string, maxPerAgent, maxTotal int) (release func
 type idleConn struct {
 	net.Conn
 	idle time.Duration
+	// mu makes "load the external limit, set the underlying deadline" one step, so a deadline set from
+	// outside (net/http aborts a pending read with a deadline in the past) is never overwritten by a
+	// Read or Write that loaded the old limit just before. It is never held across a blocking Read or Write.
+	mu sync.Mutex
 	// the deadlines set from outside, in Unix nanoseconds, 0 for none
-	readLimit, writeLimit atomic.Int64
+	readLimit, writeLimit int64
 }
 
 func newIdleConn(conn net.Conn, idle time.Duration) *idleConn {
@@ -73,21 +76,25 @@ func newIdleConn(conn net.Conn, idle time.Duration) *idleConn {
 }
 
 // deadline is the sooner of now+idle and the limit.
-func (c *idleConn) deadline(limit *atomic.Int64) time.Time {
+func (c *idleConn) deadline(limit int64) time.Time {
 	deadline := time.Now().Add(c.idle)
-	if at := limit.Load(); at != 0 && at < deadline.UnixNano() {
-		return time.Unix(0, at)
+	if limit != 0 && limit < deadline.UnixNano() {
+		return time.Unix(0, limit)
 	}
 	return deadline
 }
 
 func (c *idleConn) Read(p []byte) (int, error) {
-	c.Conn.SetReadDeadline(c.deadline(&c.readLimit))
+	c.mu.Lock()
+	c.Conn.SetReadDeadline(c.deadline(c.readLimit))
+	c.mu.Unlock()
 	return c.Conn.Read(p)
 }
 
 func (c *idleConn) Write(p []byte) (int, error) {
-	c.Conn.SetWriteDeadline(c.deadline(&c.writeLimit))
+	c.mu.Lock()
+	c.Conn.SetWriteDeadline(c.deadline(c.writeLimit))
+	c.mu.Unlock()
 	return c.Conn.Write(p)
 }
 
@@ -99,18 +106,23 @@ func limitOf(t time.Time) int64 {
 }
 
 func (c *idleConn) SetDeadline(t time.Time) error {
-	c.readLimit.Store(limitOf(t))
-	c.writeLimit.Store(limitOf(t))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.readLimit, c.writeLimit = limitOf(t), limitOf(t)
 	return c.Conn.SetDeadline(t)
 }
 
 func (c *idleConn) SetReadDeadline(t time.Time) error {
-	c.readLimit.Store(limitOf(t))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.readLimit = limitOf(t)
 	return c.Conn.SetReadDeadline(t)
 }
 
 func (c *idleConn) SetWriteDeadline(t time.Time) error {
-	c.writeLimit.Store(limitOf(t))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.writeLimit = limitOf(t)
 	return c.Conn.SetWriteDeadline(t)
 }
 

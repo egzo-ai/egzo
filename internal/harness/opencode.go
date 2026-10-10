@@ -89,15 +89,11 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		},
 		"instructions": []any{opts.InstructionsFile},
 	}
-	// The browser's server is egzo's to refresh or delete only when egzo wrote it (a command starting with "egzo").
+	// The browser's server is egzo's to refresh or delete only when egzo wrote it (a command starting with `egzo agent browser`).
 	configPath := filepath.Join(opts.Home, ".config", "opencode", "opencode.json")
 	var replace [][]string
 	entry := map[string]any{"type": "local", "command": toAny(browserCommand), "enabled": true}
-	if value, present, wholesale := opts.browserServer(configPath, []string{"mcp"}, entry, func(existing any) bool {
-		server, _ := existing.(map[string]any)
-		command, _ := server["command"].([]any)
-		return len(command) > 0 && command[0] == "egzo"
-	}); present {
+	if value, present, wholesale := opts.browserServer(configPath, []string{"mcp"}, entry, ownsOpenCodeBrowser); present {
 		config["mcp"].(map[string]any)["playwright"] = value
 		if wholesale {
 			replace = [][]string{{"mcp", "playwright"}}

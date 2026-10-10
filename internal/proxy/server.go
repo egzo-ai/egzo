@@ -27,6 +27,7 @@ const (
 	dialTimeout             = 10 * time.Second
 	defaultHandshakeTimeout = 10 * time.Second
 	allowedPort             = "443"
+	maxToken                = 256
 )
 
 // Server is the CONNECT proxy agents use for all egress.
@@ -73,6 +74,21 @@ func NewServer(ca *CA, audit *Audit) *Server {
 		},
 		Dial: dialer.DialContext,
 	}
+}
+
+// idleTimeout and handshakeTimeout are the configured values, or the default for one left at zero.
+func (s *Server) idleTimeout() time.Duration {
+	if s.IdleTimeout <= 0 {
+		return defaultIdleTimeout
+	}
+	return s.IdleTimeout
+}
+
+func (s *Server) handshakeTimeout() time.Duration {
+	if s.HandshakeTimeout <= 0 {
+		return defaultHandshakeTimeout
+	}
+	return s.HandshakeTimeout
 }
 
 // SetCA switches the CA that signs the certificates of intercepted hosts.
@@ -143,6 +159,10 @@ func (s *Server) BoundAgents() []string {
 func (s *Server) authenticate(policy *Policy, agent, token string) *Profile {
 	current := s.agents.Load()
 	if current == nil {
+		return nil
+	}
+	// No real token is this long: refuse before hashing, so a huge value costs nothing.
+	if len(token) > maxToken {
 		return nil
 	}
 	// An unknown agent takes the same path as a wrong token: the comparison always runs, on digests, so
@@ -326,7 +346,7 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 	wg.Add(2)
 	pump := func(dst, src net.Conn, counted *int64) {
 		defer wg.Done()
-		*counted = copyIdle(dst, src, s.IdleTimeout)
+		*counted = copyIdle(dst, src, s.idleTimeout())
 		if closer, ok := dst.(interface{ CloseWrite() error }); ok {
 			closer.CloseWrite()
 		}
@@ -403,7 +423,7 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 	}
 	// The idle timeout applies from the first byte, but the handshake has a hard limit of its own that a
 	// trickle of bytes cannot extend.
-	idle := newIdleConn(client, s.IdleTimeout)
+	idle := newIdleConn(client, s.idleTimeout())
 	tlsConn := tls.Server(idle, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"http/1.1"},
@@ -414,7 +434,7 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 			return s.minter.Certificate(host)
 		},
 	})
-	idle.SetDeadline(time.Now().Add(s.HandshakeTimeout))
+	idle.SetDeadline(time.Now().Add(s.handshakeTimeout()))
 	if err := tlsConn.Handshake(); err != nil {
 		// Clients such as Claude Code open connections ahead of time and drop them: not a denial.
 		action := "error"
@@ -443,7 +463,7 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 	server := &http.Server{
 		Handler:           s.interceptHandler(agent, host, decision.Inject, newSwapper(decision.Substitutions), ech),
 		ReadHeaderTimeout: 30 * time.Second,
-		IdleTimeout:       s.IdleTimeout,
+		IdleTimeout:       s.idleTimeout(),
 		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 	server.Serve(listener)
@@ -477,6 +497,7 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 		// Requests inside the tunnel may only go to the host the tunnel was approved for.
 		requested, ok := requestHost(r.Host)
 		if !ok {
+			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "malformed Host header " + quoteName(clip(r.Host))})
 			http.Error(w, "bad Host header", http.StatusBadRequest)
 			return
 		}
@@ -500,21 +521,28 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 }
 
 // requestHost is the normalized host name of a Host header, with any port dropped. Anything that is not a
-// plain name or IPv4 address with an optional numeric port is refused (false), so a header that some
-// parser reads differently, such as "evil@example.com" or "example.com:443/x", is never compared. A
-// bracketed IPv6 literal comes back with its brackets and so matches no approved name.
+// plain name, IPv4 address or bracketed IPv6 literal with an optional numeric port is refused (false), so a
+// header that some parser reads differently, such as "evil@example.com" or "example.com:443/x", is never
+// compared. An IPv6 literal comes back without its brackets, as the CONNECT target has it.
 func requestHost(header string) (string, bool) {
 	if strings.HasPrefix(header, "[") {
-		return strings.ToLower(header), !strings.ContainsAny(header, "@/\\ ")
+		inside, rest, found := strings.Cut(header[1:], "]")
+		if !found || inside == "" || !strings.Contains(inside, ":") || (rest != "" && !validPort(rest)) {
+			return "", false
+		}
+		for _, c := range inside {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' || c == ':' || c == '.') {
+				return "", false
+			}
+		}
+		return strings.ToLower(inside), true
 	}
 	name, port, _ := strings.Cut(header, ":")
 	if name == "" || strings.Contains(port, ":") {
 		return "", false
 	}
-	for _, c := range port {
-		if c < '0' || c > '9' {
-			return "", false
-		}
+	if port != "" && !validPort(":"+port) {
+		return "", false
 	}
 	for _, c := range name {
 		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_') {
@@ -522,6 +550,19 @@ func requestHost(header string) (string, bool) {
 		}
 	}
 	return normalizeHost(name), true
+}
+
+// validPort reports whether text is ":" and digits, as after the host of a Host header.
+func validPort(text string) bool {
+	if text == "" || text[0] != ':' {
+		return false
+	}
+	for _, c := range text[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type agentPathKey struct{}

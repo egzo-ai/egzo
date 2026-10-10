@@ -280,10 +280,10 @@ func TestATrailingDotDoesNotReachAnotherHost(t *testing.T) {
 
 func TestRequestHost(t *testing.T) {
 	for header, want := range map[string]string{
-		"example.com": "example.com", "Example.COM.": "example.com", "example.com:443": "example.com", "[::1]": "[::1]",
+		"example.com": "example.com", "Example.COM.": "example.com", "example.com:443": "example.com", "[::1]": "::1", "[2001:DB8::1]:443": "2001:db8::1", "[::ffff:1.2.3.4]": "::ffff:1.2.3.4",
 		"1.2.3.4:80": "1.2.3.4", "a_b.example": "a_b.example",
 		"": "!", "evil@example.com": "!", "example.com@other": "!", "example.com:443/x": "!", "example.com:": "example.com",
-		"example.com:80:80": "!", "a b": "!", ":443": "!", "example.com/x": "!", "[::1]@x": "!",
+		"example.com:80:80": "!", "a b": "!", ":443": "!", "example.com/x": "!", "[::1]@x": "!", "[::1": "!", "[]": "!", "[example.com]": "!", "[::1]x": "!", "[::1]:80x": "!", "[::g]": "!", "[::1]/x": "!",
 	} {
 		got, ok := requestHost(header)
 		if !ok {
