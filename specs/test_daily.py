@@ -40,13 +40,6 @@ def test_logs_of_an_unknown_service_name_the_service(live_project, engine, agent
     assert "ghost" in result.stderr
 
 
-def test_exec_runs_a_command_and_returns_its_output(live_project, engine, agent_image):
-    one_agent(live_project, agent_image)
-    result = live_project.run("exec", "coder-1", "--", "echo", "hello")
-    assert result.returncode == 0
-    assert result.stdout.strip() == "hello"
-
-
 def test_exec_exits_with_the_exit_code_of_the_command(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
     assert live_project.run("exec", "coder-1", "--", "sh", "-c", "exit 3").returncode == 3

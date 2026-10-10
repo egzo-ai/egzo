@@ -130,6 +130,54 @@ def test_a_service_without_inject_is_a_pure_allowlist_and_needs_no_secret(projec
     assert "secret" not in service
 
 
+def test_a_service_without_a_secret_may_cover_hosts_with_wildcards(project):
+    """Service hosts take the patterns `allow` takes. Names are folded like any host, wildcards included."""
+    resolved = project.resolved(
+        spec(
+            egress={
+                "default": {
+                    "services": {
+                        "docs": {"hosts": ["*.Example.COM.", "docs.example.org"], "inspect": True},
+                        "everything": {"hosts": ["*"]},
+                    }
+                }
+            }
+        )
+    )
+    services = profile(resolved, "default")["services"]
+    assert services["docs"]["hosts"] == ["*.example.com", "docs.example.org"] and services["docs"]["inspect"] is True
+    assert services["everything"]["hosts"] == ["*"]
+
+
+@pytest.mark.parametrize("hosts", [["*.example.com"], ["api.example.com", "*"]])
+@pytest.mark.parametrize("secret", [{"inject": DEPLOY_INJECT}, {"placeholder": "SITE_PASSWORD"}])
+def test_a_secret_binds_to_exact_hosts_never_to_a_wildcard(project, hosts, secret):
+    """`*.example.com` would hand the secret to every subdomain, including ones somebody else controls."""
+    service = {"hosts": hosts, "secret": "main/DEPLOY_TOKEN", **secret}
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": service}}}))
+    assert result.returncode != 0
+    wildcard = next(host for host in hosts if "*" in host)
+    assert "deploy-api" in result.stderr and wildcard in result.stderr and "exact" in result.stderr
+
+
+def test_a_secret_cannot_be_bound_to_an_inherited_wildcard_service(project):
+    browse = {"browse": {"hosts": ["*"], "inspect": True}}
+    project.resolved(spec(egress={"default": {"services": browse}, "other": {"extend": "default"}}))
+    document = spec(egress={"default": {"services": browse}, "other": {"extend": "default", "services": {"browse": "main/DEPLOY_TOKEN"}}})
+    result = project.config(document)
+    assert result.returncode != 0
+    assert "browse" in result.stderr and "inject" in result.stderr
+
+
+@pytest.mark.parametrize("key", ["insecure", "skip_verify", "verify", "tls", "ech", "ca"])
+def test_a_service_has_no_setting_that_weakens_tls(project, key):
+    """egzo has no switch for accepting a certificate it cannot verify, or a hello it cannot read. An unknown key is
+    an error rather than ignored, so a file asking for one cannot look as if it worked."""
+    result = project.config(spec(egress={"default": {"services": {"docs": {"hosts": ["example.com"], key: True}}}}))
+    assert result.returncode != 0
+    assert key in result.stderr
+
+
 def test_a_string_for_an_unknown_service_is_an_error(project):
     result = project.config(spec(egress={"default": {"services": {"nonesuch": "main/ANTHROPIC_API_KEY"}}}))
     assert result.returncode != 0
@@ -284,6 +332,13 @@ def test_a_profile_that_cannot_reach_the_harness_provider_warns(project):
 
 def test_a_profile_that_reaches_the_provider_does_not_warn(project):
     result = project.config(spec(egress={"default": anthropic_profile()}, agents={"coder": agent()}))
+    assert result.returncode == 0, result.stderr
+    assert "warning" not in result.stderr.lower()
+
+
+def test_a_wildcard_service_is_an_allow_and_counts_for_reaching_the_provider(project):
+    """A service that covers every host reaches the model API too, so there is nothing to warn about."""
+    result = project.config(spec(egress={"default": {"services": {"web": {"hosts": ["*"]}}}}, agents={"coder": agent()}))
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr.lower()
 

@@ -71,6 +71,13 @@ outcome per area (one area per `test_<area>.py`).
 `claude-1`, container `<project>-claude-1`), `start(*templates)` (`up`, then one instance of each) and
 `container(instance)`. The `engine` fixture has `instances(project)` and `instance(project, name)`.
 
+## Fixtures
+
+`fixtures/` holds the programs the specs run *inside* an agent: `fake-tui.sh` (a stand-in TUI), `tls_client.py` (sends one
+ClientHello through the proxy, with or without Encrypted Client Hello, and says what answered; the spec agent image
+carries `python3` for it) and `mcp_client.mjs` (starts the MCP server a harness is configured with and calls its tools,
+for the browser specs).
+
 ## Output contract assumed by the specs
 
 `egzo config` prints the resolved configuration as YAML and exits non-zero with a message on stderr
@@ -102,17 +109,18 @@ do not change the exit code. Changing this contract means changing these specs f
 | `test_schema.py` | validation of `egzo.yaml`, no users in files, no secrets in output |
 | `test_project_name.py` | name resolution and the same-name-other-directory refusal |
 | `test_workspaces.py` | mounts, working directory, git sources, the dropped cross-agent reference |
-| `test_egress.py` | profiles, services, built-ins, extend, placeholders, by-host rules, reachability warnings |
+| `test_egress.py` | profiles, services (wildcards only without a secret), built-ins, extend, placeholders, by-host rules, reachability warnings |
 | `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`), `egzo secrets` |
 | `test_labels.py` | the `ai.egzo.*` label contract |
 | `test_up_down.py` | `up` (infrastructure and templates, no agent), `down`, `--dry-run`, idempotency, workspace safety |
 | `test_spawn.py` | templates and `egzo spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
 | `test_instances.py` | `ps` and `ps --json`, `rm`, `prune`, stale instances and the `up` refusal |
 | `test_agents.py` | one container per instance, networks, isolation, who agents run as |
-| `test_proxy.py` | injection, placeholders, `inspect`, TLS, deny unless allowed, per-agent policy, CA, audit |
+| `test_proxy.py` | injection, placeholders, `inspect` and wildcard services, TLS, Encrypted Client Hello, deny unless allowed, per-agent policy, CA, audit |
 | `test_session.py` | `egzo attach` and the session fidelity matrix, against a stand-in TUI |
 | `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
 | `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
+| `test_browser.py` | the Chromium and Playwright MCP server built into both harness images: registered with the harness, browsing through the proxy, a form login with a placeholder |
 | `test_git_workspaces.py` | the prep container at spawn: clone, shared, worktree, `down --workspaces` and `rm --workspaces` safety (clones from github.com) |
 | `test_operations.py` | `doctor`, `diff`, `ca rotate`, `up` taking no agent, `proxy rules` |
 | `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |

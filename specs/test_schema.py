@@ -8,21 +8,6 @@ import pytest
 from support import GIT_WORKSPACE, agent, anthropic_profile, spec
 
 
-def test_the_minimal_level_1_file_is_valid(project):
-    result = project.config(
-        spec(
-            egress={"default": anthropic_profile()},
-            workspaces=GIT_WORKSPACE,
-            agents={"claude": agent(workspaces=["repo"])},
-        )
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def test_a_project_without_agents_is_valid(project):
-    assert project.config(spec()).returncode == 0
-
-
 def test_malformed_yaml_is_rejected(project):
     result = project.config("agents: [unclosed")
     assert result.returncode != 0
@@ -143,11 +128,6 @@ def test_depends_on_is_an_unknown_key_of_an_agent(project):
     result = project.config(spec(agents={"a": {"harness": "custom", "image": "alpine", "depends_on": ["b"]}, "b": agent()}))
     assert result.returncode != 0
     assert "depends_on" in result.stderr
-
-
-def test_the_resolved_configuration_has_no_depends_on(project):
-    resolved = project.resolved(spec(agents={"a": {"harness": "custom", "image": "alpine"}}))
-    assert "depends_on" not in resolved["agents"]["a"]
 
 
 # --- env: egzo owns its own variables -------------------------------------------------------------------

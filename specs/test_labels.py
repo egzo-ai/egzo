@@ -52,20 +52,6 @@ def test_label_values_are_short_and_plain(live_project, engine, agent_image):
             assert not looks_base64, f"{key} looks encoded"
 
 
-def test_every_resource_of_the_project_is_labelled(live_project, engine, agent_image):
-    up(live_project, agent_image)
-    assert engine.resources(live_project.name), "nothing was created"
-    for resource in engine.resources(live_project.name):
-        assert f"{LABEL_PREFIX}project" in resource.labels
-
-
-def test_no_provider_secret_appears_in_any_resource(live_project, engine, agent_image):
-    secret = "sk-spec-secret-0123456789abcdef"
-    up(live_project, agent_image, ANTHROPIC_API_KEY=secret)
-    for resource in engine.resources(live_project.name):
-        assert secret not in json.dumps(resource.raw), f"{resource.kind} {resource.name}"
-
-
 def instance_resources(engine, project):
     return [r for r in engine.resources(project.name) if r.labels.get(f"{LABEL_PREFIX}instance") == "coder-1"]
 

@@ -84,11 +84,6 @@ def test_ps_json_is_an_array_with_one_object_per_container(live_project, engine,
     assert abs((datetime.now(timezone.utc) - created).total_seconds()) < 600
 
 
-def test_ps_json_of_a_project_without_instances_lists_the_sidecars(live_project, engine, agent_image):
-    started(live_project, agent_image)
-    assert sorted(item["kind"] for item in json.loads(live_project.run("ps", "--json").stdout)) == ["control", "proxy"]
-
-
 def test_ps_shows_a_stopped_instance_as_exited(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")

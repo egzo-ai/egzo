@@ -222,12 +222,12 @@ class Engine:
 
     def agent_image(self):
         """A small image that stays up, standing in for a harness (the custom harness takes any image)."""
-        tag = "egzo-spec-agent:3"
+        tag = "egzo-spec-agent:4"
         if self.run("image", "inspect", tag).returncode == 0:
             return tag
         with tempfile.TemporaryDirectory() as context:
             (Path(context) / "Dockerfile").write_text(
-                'FROM docker.io/library/alpine:3\nRUN apk add --no-cache curl git\nCMD ["sleep", "infinity"]\n'
+                'FROM docker.io/library/alpine:3\nRUN apk add --no-cache curl git python3\nCMD ["sleep", "infinity"]\n'
             )
             built = self.run("build", "-t", tag, context)
         assert built.returncode == 0, f"could not build the agent image with {self.cli}:\n{built.stderr}"

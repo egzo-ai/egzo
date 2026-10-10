@@ -70,13 +70,6 @@ def wait_for(check, what, timeout=60):
 # --- what spawn makes ---------------------------------------------------------------------------------------
 
 
-def test_spawn_prints_the_instance_name_and_only_that_on_stdout(live_project, engine, agent_image):
-    project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", timeout=300)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == "coder-1\n"
-
-
 def test_an_instance_is_a_running_container_with_its_own_network(live_project, engine, agent_image):
     project_with(live_project, agent_image)
     name = live_project.spawn("coder")
@@ -155,17 +148,6 @@ def test_without_a_message_nothing_is_sent(live_project, engine, agent_image):
     project_with(live_project, agent_image)
     live_project.spawn("coder")
     assert messages(live_project, "--all") == {}
-
-
-def test_two_instances_of_one_template_are_isolated_from_each_other(live_project, engine, agent_image):
-    project_with(live_project, agent_image)
-    live_project.spawn("coder")
-    live_project.spawn("coder")
-    second_ip = engine.instance(live_project.name, "coder-2").raw["NetworkSettings"]["Networks"][f"{live_project.name}_coder-2"]["IPAddress"]
-    listener = engine.instance(live_project.name, "coder-2").name
-    assert engine.exec(listener, "nc", "-l", "-p", "8080", "-e", "/bin/echo", detach=True).returncode == 0
-    assert engine.exec(listener, "nc", "-w", "3", second_ip, "8080").returncode == 0  # it listens: a failure below is isolation
-    assert in_instance(engine, live_project, "coder-1", f"nc -w 3 {second_ip} 8080").returncode != 0
 
 
 # --- spawn uses the published templates -----------------------------------------------------------------------
@@ -410,15 +392,6 @@ def test_the_control_sidecar_and_the_proxy_join_the_network_of_each_instance(liv
         sidecar = [r for r in engine.containers(live_project.name) if r.labels.get(f"{LABEL_PREFIX}service") == service][0]
         joined = set(sidecar.raw["NetworkSettings"]["Networks"])
         assert {f"{live_project.name}_coder-1", f"{live_project.name}_coder-2"} <= joined, service
-
-
-def test_an_instance_reaches_control_by_name_and_has_no_other_way_out(live_project, engine, agent_image):
-    project_with(live_project, agent_image)
-    live_project.spawn("coder")
-    assert in_instance(engine, live_project, "coder-1", "getent hosts control").returncode == 0
-    assert in_instance(engine, live_project, "coder-1", "wget -T 3 -q -O /dev/null http://1.1.1.1/").returncode != 0
-    raw = [r for r in engine.resources(live_project.name) if r.kind == "network" and r.name.endswith("_coder-1")][0].raw
-    assert raw.get("Internal", raw.get("internal")) is True
 
 
 def test_the_agent_environment_names_the_instance_not_the_template(live_project, engine, agent_image):

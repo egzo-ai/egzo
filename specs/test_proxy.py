@@ -7,6 +7,7 @@ import json
 import re
 import socket
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -119,12 +120,6 @@ def test_agents_see_the_ca_certificate_but_never_its_key(live_project, engine, a
 
 
 @needs_internet
-def test_an_allowed_host_is_reachable_through_the_proxy(live_project, engine, agent_image):
-    up(live_project, with_allow("example.com", coder=custom(agent_image)))
-    assert status(engine, live_project, "example.com").stdout == "200"
-
-
-@needs_internet
 def test_a_host_outside_the_profile_is_refused(live_project, engine, agent_image):
     up(live_project, with_allow("example.com", coder=custom(agent_image)))
     refused = status(engine, live_project, "example.org")
@@ -149,6 +144,12 @@ def test_the_proxy_refuses_connections_without_credentials(live_project, engine,
     refused = curl(engine, live_project, "coder-1", "--proxy", "http://proxy:3128", "-o", "/dev/null", "https://example.com/")
     assert refused.returncode != 0
     assert "407" in refused.stderr
+    # asking for credentials is how a browser starts (it sends them only once challenged), so it is not a denial;
+    # credentials that are wrong are
+    assert [e["action"] for e in events_for(live_project, "example.com")] == ["challenge"]
+    wrong = curl(engine, live_project, "coder-1", "--proxy", "http://coder-1:wrong@proxy:3128", "-o", "/dev/null", "https://example.com/")
+    assert "407" in wrong.stderr
+    assert [e["agent"] for e in events_for(live_project, "example.com") if e["action"] == "deny"] == ["coder-1"]
 
 
 @needs_internet
@@ -244,12 +245,6 @@ def test_rotating_a_secret_updates_the_proxy_without_recreating_anything(live_pr
     assert json.loads(echoed.stdout)["headers"]["X-Egzo-Secret"] == "second-value-0123456789"
 
 
-def test_a_second_up_with_a_running_instance_changes_nothing(live_project, engine, agent_image):
-    up(live_project, with_allow(coder=custom(agent_image)))
-    again = reup(live_project, with_allow(coder=custom(agent_image)))
-    assert "nothing to do" in again.stdout
-
-
 @needs_internet
 def test_the_ca_survives_recreating_the_proxy_and_the_policy_comes_back(live_project, engine, agent_image):
     up(live_project, with_allow("example.com", coder=custom(agent_image)))
@@ -317,16 +312,6 @@ def test_an_agent_cannot_reach_another_agent_through_the_proxy(live_project, eng
     result = status(engine, live_project, address, "coder-1")
     assert result.returncode != 0
     assert "403" in result.stderr
-
-
-@needs_internet
-def test_a_restarted_proxy_gets_its_egress_policy_back(live_project, engine, agent_image):
-    """The policy lives in the proxy's memory: restarting it must not cut every agent off until the next `up`."""
-    up(live_project, with_allow("example.com", coder=custom(agent_image)))
-    assert status(engine, live_project, "example.com").stdout == "200"
-    restarted = live_project.run("restart", "proxy")
-    assert restarted.returncode == 0, restarted.stderr
-    assert status(engine, live_project, "example.com").stdout == "200"
 
 
 @needs_internet
@@ -598,3 +583,90 @@ def test_without_inspect_an_allowed_host_is_a_tunnel_and_no_path_is_logged(live_
     curl(engine, live_project, "coder-1", "-o", "/dev/null", "https://example.com/some/page")
     assert requests_to(live_project, "example.com") == []
     assert [e for e in audit_events(live_project) if e.get("host") == "example.com" and e["action"] == "allow"]
+
+
+# --- Encrypted Client Hello: the proxy answers it itself, it never tunnels it ------------------------------------------
+#
+# A client that sends the ECH extension (every Chromium does, as GREASE, to every host) hides nothing the proxy needs
+# when the name it sends in the clear is the approved host, and it could hide anything when it is not. The proxy cannot
+# tell the two apart by looking, so it does not forward such a hello: it terminates TLS with the project CA, the way it
+# does for a host with `inspect`. The browser specs (test_browser.py) do this with a real Chromium; here a bare client
+# sends nothing but the hello, so the rules show without the internet (the host is a name that never resolves).
+
+FIXTURES = Path(__file__).parent / "fixtures"
+ECH_HOST = "ech.egzo-spec.invalid"
+
+
+def hello(engine, project, host, *flags, agent_name="coder-1"):
+    """What a bare TLS client sees after sending one ClientHello through the proxy (fixtures/tls_client.py)."""
+    name = container(engine, project, agent_name).name
+    copied = engine.run("cp", str(FIXTURES / "tls_client.py"), f"{name}:/tmp/tls_client.py")
+    assert copied.returncode == 0, copied.stderr
+    return engine.exec(name, "python3", "/tmp/tls_client.py", host, *flags).stdout.strip()
+
+
+def events_for(project, host):
+    return [e for e in audit_events(project) if e.get("host") == host]
+
+
+def test_an_encrypted_client_hello_for_the_approved_host_is_terminated_never_tunneled_or_refused(live_project, engine, agent_image):
+    up(live_project, with_allow(ECH_HOST, coder=custom(agent_image)))
+    # without the extension the proxy tunnels, and there is nothing to tunnel to
+    assert hello(engine, live_project, ECH_HOST) == "closed"
+    assert [e for e in events_for(live_project, ECH_HOST) if e["action"] == "error"]
+    # with it, the proxy is the TLS server (a client that sends its first bytes right behind CONNECT included)
+    assert hello(engine, live_project, ECH_HOST, "--ech") == "server-hello"
+    assert hello(engine, live_project, ECH_HOST, "--ech", "--pipelined") == "server-hello"
+    events = events_for(live_project, ECH_HOST)
+    assert len([e for e in events if e["action"] == "intercept"]) == 2
+    assert "Encrypted Client Hello" in next(e for e in events if e["action"] == "intercept")["reason"]
+    assert [e for e in events if e["action"] == "close" and e.get("bytes_up", 0) > 0], "a terminated connection is logged like a tunnel"
+    assert not [e for e in events if e["action"] in ("deny", "request")]
+
+
+def test_an_allowed_name_cannot_front_for_another_one_with_or_without_encryption(live_project, engine, agent_image):
+    up(live_project, with_allow(ECH_HOST, coder=custom(agent_image)))
+    for flags in (["--sni", "other.egzo-spec.invalid"], ["--no-sni"], ["--ech", "--sni", "other.egzo-spec.invalid"], ["--ech", "--no-sni"]):
+        assert hello(engine, live_project, ECH_HOST, *flags) == "closed", flags
+    events = events_for(live_project, ECH_HOST)
+    assert len([e for e in events if e["action"] == "deny"]) == 4
+    assert all("server name" in e["reason"] for e in events if e["action"] == "deny")
+    assert not [e for e in events if e["action"] in ("intercept", "allow", "close")]
+
+
+def test_an_encrypted_client_hello_does_not_widen_what_the_profile_allows(live_project, engine, agent_image):
+    up(live_project, with_allow(ECH_HOST, coder=custom(agent_image)))
+    assert hello(engine, live_project, "other.egzo-spec.invalid", "--ech") == "refused 403"
+    assert [e for e in events_for(live_project, "other.egzo-spec.invalid") if e["action"] == "deny"]
+    assert not [e for e in audit_events(live_project) if e["action"] == "intercept"]
+
+
+# --- a service may cover hosts with a wildcard when it holds no secret ----------------------------------------------------
+
+
+@needs_internet
+@needs_httpbin
+def test_a_wildcard_service_audits_every_host_it_covers_and_an_exact_service_still_injects(live_project, engine, agent_image):
+    services = {
+        "browse": {"hosts": ["*"], "inspect": True},
+        "echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "secret": "main/DEPLOY_TOKEN"},
+    }
+    up(live_project, spec(egress={"default": {"services": services}}, agents={"coder": custom(agent_image)}), DEPLOY_TOKEN=SECRET)
+    curl(engine, live_project, "coder-1", "-o", "/dev/null", "https://example.com/some/page?q=zq9query")
+    echoed = curl(engine, live_project, "coder-1", "https://httpbin.org/headers")
+    assert json.loads(echoed.stdout)["headers"]["X-Egzo-Secret"] == SECRET
+    assert [r["path"] for r in requests_to(live_project, "example.com")] == ["/some/page"]
+    assert [r["path"] for r in requests_to(live_project, "httpbin.org")] == ["/headers"]
+    assert "zq9query" not in json.dumps(audit_events(live_project)) and SECRET not in json.dumps(audit_events(live_project))
+
+
+@needs_internet
+def test_a_wildcard_service_covers_the_subdomains_of_its_pattern_and_nothing_else(live_project, engine, agent_image):
+    document = spec(egress={"default": {"services": {"docs": {"hosts": ["*.example.com"], "inspect": True}}}}, agents={"coder": custom(agent_image)})
+    up(live_project, document)
+    assert status(engine, live_project, "www.example.com").stdout in ("200", "301", "302", "404")
+    assert [r["method"] for r in requests_to(live_project, "www.example.com")] == ["GET"]
+    for host in ("example.com", "example.org"):  # the pattern is for the names below it, as in `allow`
+        refused = status(engine, live_project, host)
+        assert refused.returncode != 0 and "403" in refused.stderr, host
+

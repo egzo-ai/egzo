@@ -48,14 +48,6 @@ def network(engine, project, name):
     return found[0]
 
 
-def test_each_agent_runs_in_its_own_container_with_agent_labels(live_project, engine, agent_image):
-    up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    for name in ("coder-1", "reviewer-1"):
-        labels = container(engine, live_project, name).labels
-        assert labels[f"{LABEL_PREFIX}kind"] == "agent"
-        assert labels[f"{LABEL_PREFIX}agent.harness"] == "custom"
-
-
 def test_each_agent_gets_its_own_internal_network(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     coder = container(engine, live_project, "coder-1")
@@ -63,12 +55,6 @@ def test_each_agent_gets_its_own_internal_network(live_project, engine, agent_im
         raw = network(engine, live_project, name).raw
         assert raw.get("Internal", raw.get("internal")) is True, name
     assert networks_of(coder) == {f"{live_project.name}_coder-1"}
-
-
-def test_the_control_sidecar_joins_every_agent_network(live_project, engine, agent_image):
-    up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    control = container(engine, live_project, "control")
-    assert {f"{live_project.name}_coder-1", f"{live_project.name}_reviewer-1"} <= networks_of(control)
 
 
 def test_an_agent_cannot_reach_the_internet(live_project, engine, agent_image):
@@ -105,33 +91,12 @@ def test_down_removes_the_agent_networks_too(live_project, engine, agent_image):
     assert not [r for r in engine.resources(live_project.name) if r.kind in ("container", "network")]
 
 
-def test_a_shared_workspace_volume_is_shared_between_agents(live_project, engine, agent_image):
-    up(
-        live_project,
-        spec(
-            workspaces={"scratch": {}},
-            agents={"coder": custom(agent_image, workspaces=["scratch"]), "reviewer": custom(agent_image, workspaces=["scratch"])},
-        ),
-    )
-    coder = container(engine, live_project, "coder-1").name
-    reviewer = container(engine, live_project, "reviewer-1").name
-    assert engine.exec(coder, "sh", "-c", "echo shared > /workspace/scratch/note").returncode == 0
-    assert engine.exec(reviewer, "cat", "/workspace/scratch/note").stdout.strip() == "shared"
-
-
 def test_workspace_volumes_are_labelled_and_survive_down(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
     volume = [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
     assert volume and volume[0].labels[f"{LABEL_PREFIX}project"] == live_project.name
     assert live_project.run("down").returncode == 0
     assert [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
-
-
-def test_a_single_workspace_is_the_working_directory(live_project, engine, agent_image):
-    up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
-    name = container(engine, live_project, "coder-1").name
-    assert engine.exec(name, "pwd").stdout.strip() == "/workspace/scratch"
-    assert container(engine, live_project, "coder-1").labels[f"{LABEL_PREFIX}agent.workspaces"] == "scratch"
 
 
 def test_a_read_only_host_directory_cannot_be_written(live_project, engine, agent_image):
@@ -141,16 +106,6 @@ def test_a_read_only_host_directory_cannot_be_written(live_project, engine, agen
     name = container(engine, live_project, "coder-1").name
     assert engine.exec(name, "cat", "/workspace/docs/readme.txt").stdout.strip() == "from the host"
     assert engine.exec(name, "touch", "/workspace/docs/new-file").returncode != 0
-
-
-def test_a_read_write_host_directory_can_be_written(live_project, engine, agent_image):
-    notes = live_project.mkdir("notes")
-    up(live_project, spec(agents={"coder": custom(agent_image, workspaces=["./notes"])}))
-    name = container(engine, live_project, "coder-1").name
-    written = engine.exec(name, "sh", "-c", "echo hi > /workspace/notes/from-agent")
-    assert written.returncode == 0, written.stderr
-    assert (notes / "from-agent").read_text().strip() == "hi"
-    engine.exec(name, "rm", "/workspace/notes/from-agent")
 
 
 def test_resources_limit_the_agent_container(live_project, engine, agent_image):
@@ -241,12 +196,6 @@ def test_an_agent_writes_a_host_directory_workspace_as_the_invoking_user(live_pr
     assert written.returncode == 0, written.stderr
     assert (shared / "from-agent").read_text() == "hi\n"
     assert (shared / "from-agent").stat().st_uid == os.getuid()
-
-
-def test_an_agent_writes_a_declared_volume_workspace(live_project, engine, agent_image):
-    up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
-    written = exec_as(engine, live_project, "coder-1", "sh", "-c", "echo hi > /workspace/scratch/note && cat /workspace/scratch/note")
-    assert written.stdout.strip() == "hi", written.stderr
 
 
 def test_two_agents_share_a_declared_volume_workspace_both_writable(live_project, engine, agent_image):

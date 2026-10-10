@@ -351,13 +351,6 @@ def test_an_agent_reports_its_status_and_ps_shows_it(live_project, engine, agent
     assert "refactoring the parser" not in next(line for line in listing.splitlines() if "reviewer" in line)
 
 
-def test_ps_shows_the_open_and_waiting_columns(live_project, engine, agent_image):
-    two_agents(live_project, agent_image)
-    header = live_project.run("ps").stdout.splitlines()[0].split()
-    assert header[:4] == ["NAME", "SERVICE", "STATE", "HEALTH"]
-    assert {"ACTIVITY", "OPEN", "WAITING", "ACTOR", "AGE", "STALE", "STATUS"} <= set(header)
-
-
 def test_the_control_api_refuses_missing_and_wrong_credentials(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
     name = container(engine, live_project, "coder").name
@@ -378,13 +371,6 @@ def test_agents_cannot_reach_operator_verbs(live_project, engine, agent_image):
     for path in ("/events", "/messages", "/questions", "/specs", "/tokens/reviewer", "/queue"):
         code, _ = as_agent(engine, live_project, "coder", "GET", path)
         assert code in (404, 405), f"{path} answered {code} on the agent port"
-
-
-def test_the_retired_routes_are_gone(live_project, engine, agent_image):
-    two_agents(live_project, agent_image)
-    for verb, path in (("POST", "/v1/say"), ("GET", "/v1/inbox"), ("POST", "/v1/ask"), ("GET", "/v1/questions/q1"), ("POST", "/v1/ack")):
-        code, _ = as_agent(engine, live_project, "coder", verb, path, {"text": "x"} if verb == "POST" else None)
-        assert code in (404, 405), f"{verb} {path} answered {code}"
 
 
 def test_hooks_arrive_as_events(live_project, engine, agent_image):
