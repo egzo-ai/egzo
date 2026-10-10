@@ -31,13 +31,13 @@ var (
 // it. Every codepoint the drafts used counts, and the legacy ESNI extension too: terminating is the safe
 // branch, and a client that sends one that is no longer standard is rare.
 var echExtensions = map[uint16]string{
-	0xfe08: "encrypted_client_hello, an ECH draft (08)",
-	0xfe09: "encrypted_client_hello, an ECH draft (09)",
-	0xfe0a: "encrypted_client_hello, an ECH draft (10)",
-	0xfe0b: "encrypted_client_hello, an ECH draft (11)",
-	0xfe0c: "encrypted_client_hello, an ECH draft (12)",
-	0xfe0d: "encrypted_client_hello, the final codepoint, from ECH draft 13 on",
-	0xff03: "encrypted_client_hello, an early ECH draft",
+	0xfe08: "encrypted_client_hello, a codepoint of an ECH draft",
+	0xfe09: "encrypted_client_hello, a codepoint of an ECH draft",
+	0xfe0a: "encrypted_client_hello, a codepoint of an ECH draft",
+	0xfe0b: "encrypted_client_hello, a codepoint of an ECH draft",
+	0xfe0c: "encrypted_client_hello, a codepoint of an ECH draft",
+	0xfe0d: "encrypted_client_hello, the codepoint of the final specification",
+	0xff03: "encrypted_client_hello, a codepoint of an early ECH draft",
 	0xffce: "encrypted_server_name, the legacy ESNI that ECH replaced",
 }
 
