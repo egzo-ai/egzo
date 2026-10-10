@@ -494,6 +494,14 @@ egress:
   with neither is a pure allowlist and cannot have a secret. Optional `inspect: true` audits request paths.
   Rules are by host only: a service has no path or method scope, and keys for them are rejected like any
   other unknown key. They can be added if a real use-case turns up.
+- **Service hosts are exact, or a wildcard without a secret.** `hosts` take what `allow` takes (`host`, `*.domain`,
+  `*`, folded like any name). A service with `inject` or a `placeholder` may only name exact hosts: a wildcard
+  would hand the secret to every subdomain, including attacker-controlled ones, so `egzo config` refuses it (a secret
+  bound to an inherited wildcard service fails the same way). A wildcard service without a secret is an allowlist entry
+  (it counts for reachability and for the harness-provider warning) and, with `inspect`, audits every request to the
+  hosts it covers. It can sit next to an exact injecting service on a covered host: the exact one injects, `inspect`
+  still applies. `*.domain` does not cover `domain`. There is no key that weakens TLS verification or the Encrypted
+  Client Hello rule, and unknown keys stay errors.
 - `services` entries have two forms: a **string** `<vault>/<secret>` gives the secret for a service
   that already resolves (inherited via `extend`, or built-in); an **object** defines the service
   (hosts, optional inject, optional secret). There is no null form.
@@ -519,8 +527,17 @@ egress:
 - Unverified: that GitHub accepts `Authorization: Bearer` for git over HTTPS (spike).
 
 ## Egress proxy and TLS (decided)
-- MITM only for hosts of services with credential injection in the agent's profile. Everything else allowed
-  is a CONNECT tunnel with host/SNI match (domain-fronting protection). Hosts of services with a
+- MITM for hosts of services with credential injection in the agent's profile. Everything else allowed
+  is a CONNECT tunnel with host/SNI match (domain-fronting protection), **except for a client that sends Encrypted
+  Client Hello**: the extension can hide the real server name, and GREASE (what Chromium sends to every host through a
+  proxy, since it never resolves the destination and so never learns an ECHConfig) has the same format as real ECH
+  (RFC 9849), so the proxy cannot tell them apart and cannot strip the extension (the client's `Finished` covers
+  its hello). It therefore never tunnels such a hello: if the outer SNI is the approved host it terminates TLS with the
+  project CA, replaying the bytes it read (failing closed to interception, never to passthrough); a missing or different
+  name is denied as for any hello. This needs no switch and no client change. A terminated-because-ECH connection is
+  logged as `intercept` (reason Encrypted Client Hello) and `close` with bytes, not per request, unless the host has
+  `inspect`. A client that does not trust the project CA fails the handshake and the audit says why. Clients that send
+  no ECH are tunneled as before. Hosts of services with a
   `placeholder` are intercepted too. `inspect: true` on a service intercepts its hosts only to audit them
   (off by default): the audit then has a `request` line (method, path, status; never the query string or a
   body) for every request, which is exactly what an intercepted host with `inject` or `placeholder` already
@@ -539,6 +556,18 @@ egress:
   never re-encode bodiless responses (304/204/1xx/HEAD) as chunked; aborted handshakes from
   pre-warmed connections log as `aborted`, not `denied`; `platform.claude.com` allowed w/o injection.
 - Pinned-cert hosts cannot be injected (out of scope).
+
+## Browser (decided, `roadmap/browser-access.md`)
+- The stock `claude-code` and `opencode` images carry Chromium (installed at build time in `/opt/ms-playwright`), the
+  pinned `@playwright/mcp`, and `libnss3-tools`. No flavor, no recipe: a browser is a basic tool.
+- `egzo agent browser` (in-container role) builds the Playwright MCP configuration from the agent's environment (the
+  proxy URL's credentials as separate fields, loopback bypassing the proxy, headless, isolated profile, no sandbox,
+  small `/dev/shm`, output in a temporary directory, never the workspace) and runs `playwright-mcp`. Nothing is configured
+  by hand in the client: no ECH policy, no proxy flags.
+- The harness integration registers it as a stdio MCP server `playwright` next to `egzo`, only when `playwright-mcp` is on
+  the `PATH`. `egzo agent run` imports the project CA into `~/.pki/nssdb` when `certutil` is on the `PATH` (Chromium
+  ignores `SSL_CERT_FILE`).
+- Reach is the egress profile; the proxy terminates what a browser sends (see Egress proxy and TLS).
 
 ## Session backend (decided: the pty holder, built)
 The holder is `egzo agent run`, the entrypoint of every egzo harness image (`internal/session`). It runs the
@@ -791,7 +820,10 @@ Decisions taken while building (reversible; each is covered by specs):
   target, requests for any other host inside the tunnel get 421, the credential replaces whatever
   the agent sent, the agent is always spoken to in HTTP/1.1, responses stream unbuffered. Every
   other allowed host is a tunnel, but the proxy reads the TLS ClientHello first and refuses the
-  tunnel when the server name is missing or differs from the approved host (domain fronting). Plain HTTP is refused (405); agents get `HTTP_PROXY`
+  tunnel when the server name is missing or differs from the approved host (domain fronting), and terminates
+  instead of tunneling when the hello carries Encrypted Client Hello with the approved name. A CONNECT with no
+  `Proxy-Authorization` at all (how a browser starts: it sends credentials once challenged) is answered 407 and logged as
+  `challenge`; credentials that are present and wrong are a `deny` naming the agent. Plain HTTP is refused (405); agents get `HTTP_PROXY`
   too so `http://` fails loudly. Audit lines (JSON, no bodies or query strings) go to the proxy's
   stdout (`egzo proxy log [--agent]`).
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
@@ -881,7 +913,7 @@ separate `egzo-hub` deliverable (see `roadmap/hub-and-web-ui.md`). What that mea
   stashes (which block), lists ignored files (which only inform), removes only real checkouts, and starts the agents
   again if it is refused.
 - **Proxy.** It connects only to public addresses (checked on the address a name resolved to), caps connections per agent
-  and in all, closes idle connections, refuses Encrypted Client Hello, keeps bytes sent right behind CONNECT, truncates
+  and in all, closes idle connections, terminates Encrypted Client Hello instead of tunneling it, keeps bytes sent right behind CONNECT, truncates
   logged values, logs bytes and duration of a tunnel, bounds its certificate cache, and answers 503 "run `egzo up`" when
   it has no policy; `egzo start|restart proxy` reloads the policy. The CA is only ever replaced by an explicit rotation.
 - **Control.** Verbs that write to the log have budgets per agent; hook payloads are reduced to a few named fields (plus

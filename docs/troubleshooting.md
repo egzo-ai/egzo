@@ -32,6 +32,21 @@ A `503` from the proxy means it lost its policy after a restart: `egzo restart p
 A TLS error on an injected host usually means the tool pins certificates or ignores the CA bundle egzo provides
 (`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, and similar). `egzo ca rotate` issues a new CA and restarts the agents.
 
+## A browser page does not load
+
+```console
+$ egzo proxy log --agent NAME        # the host, and `deny` with its reason
+```
+
+- `deny` ... `not allowed by the agent's egress profile`: the page pulls from a host the profile does not list. Add it, or
+  use a wildcard (`allow: ["*.cdn.example.com"]`); [browsing](browser.md) says how much to open.
+- `intercept` followed by `error` ... `tls handshake`: the browser does not trust the project CA. The stock images
+  import it into Chromium's store; an image of your own needs `certutil` (the `libnss3-tools` package) and the `egzo
+  agent run` entrypoint. Chromium ignores `SSL_CERT_FILE`.
+- A site that loads for curl but not for the browser, with `intercept` in the log: it pins its certificate.
+- `challenge` lines are not failures: a browser asks for the proxy credentials before it sends them.
+- `Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED`: the proxy refused the host (see its `deny`).
+
 ## An agent is not doing what you sent
 
 (How messages work: [messaging](messaging.md).)

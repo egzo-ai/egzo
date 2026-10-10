@@ -6,7 +6,10 @@ profile** the agent's template names. Anything not allowed is denied. This page 
 What the proxy does for an agent, in order: it checks the proxy credential the agent was given at spawn (an agent
 cannot use another's profile), allows only port 443, checks the host against the profile, refuses private and
 internal addresses, and then either tunnels the connection or, for hosts with a credential, terminates TLS with the
-project's own CA, adds the credential and forwards. Every decision is logged.
+project's own CA, adds the credential and forwards. A tunnel is checked too: the TLS server name must be the approved
+host (an allowed name cannot front for another one), and a client that sends Encrypted Client Hello, which would hide the
+name, is not tunneled but terminated like a credential host (this is what a browser does, see [browsing](browser.md)).
+Every decision is logged.
 
 ## A profile
 
@@ -56,13 +59,23 @@ egress:
 A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.
 Rules are by host: a service cannot be limited to a path or a method.
 
+Service `hosts` take the patterns `allow` takes (`host`, `*.domain`, `*`), **but only for a service without a secret**: a
+secret binds to exact hosts, because a wildcard would hand it to every subdomain, including ones somebody else controls.
+`inject` or `placeholder` with a wildcard host is an error at `egzo config` and `up`. A wildcard service is an allowlist
+entry too: it lets the agent reach every host it covers. `*.example.com` covers the names below `example.com`, not
+`example.com` itself. A service has no setting that weakens TLS: unknown keys are errors.
+
 `inspect: true` logs the method, path and status of every request to the service's hosts (never the query string or a
 body); `egzo proxy log` shows them. It is off by default because it makes the proxy terminate TLS for the host, which
 a client that pins its certificate cannot accept. A host with `inject` or a `placeholder` is already logged this way.
 
 ```yaml
       docs-site: { hosts: [docs.example.com], inspect: true }
+      every-page: { hosts: ["*"], inspect: true }     # a wildcard is fine without a secret: audit everything
 ```
+
+An exact service that injects still injects where a wildcard service also covers the host; the wildcard only adds the
+`inspect` audit.
 
 ## Secrets the agent has to type: placeholders
 

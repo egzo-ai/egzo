@@ -15,8 +15,9 @@ detail, and the executable specs in `specs/` are the status report.
 6. [Messaging](messaging.md): sending tasks, questions from agents, agents talking to each other
 7. [Supported harnesses](harnesses.md): Claude Code and OpenCode
 8. [Overriding base images](images.md): adding tools to an agent
+9. [Browsing](browser.md): the browser every agent has, and what it may reach
 
 **Safety and problems**
-9. [Sandboxing agents](sandboxing.md): writing egress policies
-10. [The security model](security.md): what is enforced and what is not
-11. [Troubleshooting](troubleshooting.md)
+10. [Sandboxing agents](sandboxing.md): writing egress policies
+11. [The security model](security.md): what is enforced and what is not
+12. [Troubleshooting](troubleshooting.md)

@@ -37,9 +37,11 @@ with the project CA. These do not get injection, or do not work at all:
 
 - Clients that ignore `HTTPS_PROXY` (some language runtimes and SDKs, and software that opens sockets itself). The
   agent's network has no other route, so they fail to connect rather than leak.
-- Clients that do not read the CA bundle egzo provides. Chromium uses its own NSS database, not `SSL_CERT_FILE`
-  (`roadmap/browser-access.md`); Java uses its own keystore; some Python HTTP libraries bundle their own CA list.
-  They reject the proxy's certificate for any host that is injected into or inspected.
+- Clients that do not read the CA bundle egzo provides. Chromium uses its own NSS database, not `SSL_CERT_FILE`: the
+  harness images import the project CA there (`egzo agent run`, needs `certutil`), and a browser in an image of your
+  own needs the same. Java uses its own keystore; some Python HTTP libraries bundle their own CA list. They reject the
+  proxy's certificate for any host that is injected into, inspected, or that the client reaches with Encrypted Client
+  Hello (see `docs/browser.md`).
 - Clients that pin certificates, for the same reason.
 - Anything that is not HTTPS on port 443: SSH, raw TCP, plain HTTP (refused), UDP, a database protocol. A git remote
   over SSH cannot use a secret from egzo; git over HTTPS can.

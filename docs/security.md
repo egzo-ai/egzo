@@ -63,8 +63,15 @@ can see it.
 For hosts with an injected credential, the proxy terminates TLS with a CA that egzo generates per project (ECDSA
 P-256). The CA private key lives in a volume mounted only into the proxy; agents receive just the certificate, as part
 of their CA bundle. All other allowed hosts are plain tunnels where the proxy sees only the host name, which it checks
-against the TLS server name. `egzo ca rotate` replaces the CA. Clients that pin certificates cannot be intercepted and
-so cannot have credentials injected.
+against the TLS server name. A client that sends Encrypted Client Hello (every browser does) is not tunneled, because the
+extension can hide the real server name and the proxy cannot tell a harmless one from one that does: the proxy terminates
+TLS for it with the project CA instead, checks the site's real certificate itself, and refuses any request for another
+host. egzo has no setting that accepts a hello it cannot read or a certificate it cannot verify. `egzo ca rotate` replaces
+the CA. Clients that pin certificates cannot be intercepted, so they cannot have credentials injected, and a pinning
+client that sends Encrypted Client Hello does not work either.
+
+A secret binds to exact host names, never to a wildcard. A service with a wildcard host cannot have an `inject` or a
+`placeholder`, because the secret would go to every subdomain, whoever controls it.
 
 ## Messages
 

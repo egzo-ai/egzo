@@ -46,6 +46,7 @@ See [`docs/`](docs/README.md).
   greatly reducing consequences of prompt injections and risks of secrets leaking.
 - **Git worktrees.** Clone, worktree or shared checkouts made through the proxy, so agents hold no git credentials.
 - **Messaging.** Send messages or tasks to agents without opening their full UI, opening the door for quick work or automated jobs.
+- **A browser.** Chromium and the Playwright MCP server are in the harness images; they reach what the egress profile allows ([docs/browser.md](docs/browser.md)).
 - **Your own tools.** Extend a harness image with extra software, or run any image with the `custom` harness.
 
 ## Example: architect with Claude, code with OpenCode
