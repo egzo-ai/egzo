@@ -22,89 +22,89 @@ const (
 var errNotClientHello = errors.New("the first bytes are not a TLS ClientHello")
 
 // With Encrypted Client Hello the name in the clear can differ from the real one, which defeats the
-// check that the tunnel carries TLS for the host it was approved for.
-var errECH = errors.New("the ClientHello uses Encrypted Client Hello, which hides the real server name")
-
+// check that the tunnel carries TLS for the host it was approved for. The parser reports the extension
+// so the proxy can terminate TLS for such a hello instead of tunneling it.
 const (
 	extensionECH      = 0xfe0d
 	extensionECHDraft = 0xff03
 )
 
 // readClientHello reads the client's first TLS record and returns the raw bytes, which must be
-// replayed to the upstream, and the server name the client asks for ("" when it sends none).
-func readClientHello(conn net.Conn) (raw []byte, serverName string, err error) {
+// replayed to whoever serves the connection, the server name the client asks for ("" when it sends none)
+// and whether it carries an Encrypted Client Hello extension.
+func readClientHello(conn net.Conn) (raw []byte, serverName string, ech bool, err error) {
 	conn.SetReadDeadline(time.Now().Add(clientHelloReadWindow))
 	defer conn.SetReadDeadline(time.Time{})
 
 	header := make([]byte, 5)
 	if _, err := io.ReadFull(conn, header); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	if header[0] != recordTypeHandshake {
-		return nil, "", errNotClientHello
+		return nil, "", false, errNotClientHello
 	}
 	length := int(binary.BigEndian.Uint16(header[3:5]))
 	if length == 0 || length > maxClientHelloRecord {
-		return nil, "", errNotClientHello
+		return nil, "", false, errNotClientHello
 	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(conn, payload); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	raw = append(header, payload...)
-	name, err := parseServerName(payload)
-	return raw, name, err
+	name, ech, err := parseServerName(payload)
+	return raw, name, ech, err
 }
 
-// parseServerName extracts the SNI from the handshake message of a ClientHello record.
-func parseServerName(hello []byte) (string, error) {
+// parseServerName extracts the SNI from the handshake message of a ClientHello record, and whether the
+// hello carries an Encrypted Client Hello extension.
+func parseServerName(hello []byte) (name string, ech bool, err error) {
 	r := reader(hello)
 	if kind, ok := r.byte(); !ok || kind != handshakeClientHello {
-		return "", errNotClientHello
+		return "", false, errNotClientHello
 	}
 	if _, ok := r.skip(3 + 2 + 32); !ok { // handshake length, version, random
-		return "", errNotClientHello
+		return "", false, errNotClientHello
 	}
 	for _, width := range []int{1, 2, 1} { // session id, cipher suites, compression methods
 		length, ok := r.length(width)
 		if !ok {
-			return "", errNotClientHello
+			return "", false, errNotClientHello
 		}
 		if _, ok := r.skip(length); !ok {
-			return "", errNotClientHello
+			return "", false, errNotClientHello
 		}
 	}
 	extensionsLength, ok := r.length(2)
 	if !ok {
-		return "", nil // no extensions at all: no server name
+		return "", false, nil // no extensions at all: no server name
 	}
 	extensions, ok := r.take(extensionsLength)
 	if !ok {
-		return "", errNotClientHello
+		return "", false, errNotClientHello
 	}
-	name := ""
 	for len(extensions) >= 4 {
 		kind := binary.BigEndian.Uint16(extensions[:2])
 		size := int(binary.BigEndian.Uint16(extensions[2:4]))
 		if len(extensions) < 4+size {
-			return "", errNotClientHello
+			return "", false, errNotClientHello
 		}
 		body := extensions[4 : 4+size]
 		extensions = extensions[4+size:]
 		switch kind {
 		case extensionECH, extensionECHDraft:
-			return "", errECH
+			ech = true
 		case extensionServerName:
 			found, err := serverNameFrom(body)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
 			if name == "" {
 				name = found
 			}
 		}
 	}
-	return name, nil
+	return name, ech, nil
 }
 
 // serverNameFrom reads the host_name entry of a server_name extension.

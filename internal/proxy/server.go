@@ -187,7 +187,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		agentPolicy = s.authenticate(policy, agent, token)
 	}
 	if agentPolicy == nil {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "missing or invalid proxy credentials"})
+		if _, sent := r.Header["Proxy-Authorization"]; !sent {
+			// How a browser starts: it sends credentials only once challenged. Not a denial.
+			s.audit.Log(Event{Host: host, Action: "challenge", Reason: "proxy credentials required"})
+		} else {
+			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "invalid proxy credentials"})
+		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="egzo"`)
 		http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
 		return
@@ -266,7 +271,7 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 	// The tunnel was approved for host: the TLS server name must say the same, or an allowed name
 	// could be used to reach a different server (domain fronting).
 	started := time.Now()
-	hello, serverName, err := readClientHello(client)
+	hello, serverName, ech, err := readClientHello(client)
 	switch {
 	case err != nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)):
 		s.audit.Log(Event{Agent: agent, Host: host, Action: "aborted", Reason: "client closed before sending a ClientHello"})
@@ -276,6 +281,14 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 		return
 	case !strings.EqualFold(serverName, host):
 		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "TLS server name " + quoteName(serverName) + " differs from the approved host"})
+		return
+	}
+
+	if ech {
+		// The hello may hide the server it really asks for, and the proxy cannot tell a harmless one from
+		// one that does: never tunnel it, terminate TLS here and check the real certificate ourselves.
+		// The upstream is not contacted until a request inside names the approved host.
+		s.terminate(&prefixedConn{Conn: client, pending: hello}, agent, host, Decision{}, started, true)
 		return
 	}
 
@@ -326,6 +339,24 @@ func (c *prefixedConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
+// countingConn counts the bytes that move on the connection.
+type countingConn struct {
+	net.Conn
+	read, written atomic.Int64
+}
+
+func (c *countingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.read.Add(int64(n))
+	return n, err
+}
+
+func (c *countingConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.written.Add(int64(n))
+	return n, err
+}
+
 func (c *prefixedConn) CloseWrite() error {
 	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return closer.CloseWrite()
@@ -337,6 +368,22 @@ func (c *prefixedConn) CloseWrite() error {
 // the credential, then forwards each request to the real host. Toward the agent it always speaks
 // HTTP/1.1, whatever the upstream speaks.
 func (s *Server) intercept(client net.Conn, agent, host string, decision Decision) {
+	s.terminate(client, agent, host, decision, time.Now(), false)
+}
+
+// terminate is intercept for a connection that may have been read from already. With ech the client
+// sent an Encrypted Client Hello at a plain tunnel: the connection is logged like a tunnel (intercept,
+// then close with the bytes that went through) and its requests are not, unless the host is inspected.
+func (s *Server) terminate(client net.Conn, agent, host string, decision Decision, started time.Time, ech bool) {
+	var counted *countingConn
+	if ech {
+		counted = &countingConn{Conn: client}
+		client = counted
+		s.audit.Log(Event{Agent: agent, Host: host, Action: "intercept", Reason: "the client sent Encrypted Client Hello, which can hide the server it asks for, so TLS is terminated here instead of tunneled"})
+		defer func() {
+			s.audit.Log(Event{Agent: agent, Host: host, Action: "close", BytesUp: counted.read.Load(), BytesDown: counted.written.Load(), DurationMs: time.Since(started).Milliseconds()})
+		}()
+	}
 	tlsConn := tls.Server(idleConn{client, s.IdleTimeout}, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"http/1.1"},
@@ -354,21 +401,27 @@ func (s *Server) intercept(client net.Conn, agent, host string, decision Decisio
 		if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "EOF") {
 			action = "aborted"
 		}
-		s.audit.Log(Event{Agent: agent, Host: host, Action: action, Reason: "tls handshake: " + err.Error()})
+		reason := "tls handshake: " + err.Error()
+		if ech {
+			reason = "the client sent Encrypted Client Hello, so egzo had to terminate TLS, and it probably does not trust the project CA (" + reason + ")"
+		}
+		s.audit.Log(Event{Agent: agent, Host: host, Action: action, Reason: reason})
 		client.Close()
 		return
 	}
 	client.SetDeadline(time.Time{})
 
-	action := "inspect"
-	if decision.Inject != nil || len(decision.Substitutions) > 0 {
-		action = "inject"
+	if !ech {
+		action := "inspect"
+		if decision.Inject != nil || len(decision.Substitutions) > 0 {
+			action = "inject"
+		}
+		s.audit.Log(Event{Agent: agent, Host: host, Action: action})
 	}
-	s.audit.Log(Event{Agent: agent, Host: host, Action: action})
 
 	listener := newConnListener(tlsConn)
 	server := &http.Server{
-		Handler:           s.interceptHandler(agent, host, decision.Inject, newSwapper(decision.Substitutions)),
+		Handler:           s.interceptHandler(agent, host, decision.Inject, newSwapper(decision.Substitutions), ech),
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       s.IdleTimeout,
 		ErrorLog:          log.New(io.Discard, "", 0),
@@ -376,7 +429,7 @@ func (s *Server) intercept(client net.Conn, agent, host string, decision Decisio
 	server.Serve(listener)
 }
 
-func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *swapper) http.Handler {
+func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *swapper, quiet bool) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme = "https"
@@ -390,7 +443,9 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 		Transport:     s.Transport,
 		FlushInterval: -1, // stream responses, such as model output, as they arrive
 		ModifyResponse: func(response *http.Response) error {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "request", Method: response.Request.Method, Path: loggedPath(response.Request), Status: response.StatusCode})
+			if !quiet {
+				s.audit.Log(Event{Agent: agent, Host: host, Action: "request", Method: response.Request.Method, Path: loggedPath(response.Request), Status: response.StatusCode})
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

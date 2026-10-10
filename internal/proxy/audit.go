@@ -16,7 +16,7 @@ type Event struct {
 	Time   time.Time `json:"time"`
 	Agent  string    `json:"agent,omitempty"`
 	Host   string    `json:"host,omitempty"`
-	Action string    `json:"action"` // allow, inject, deny, aborted, request, close, error
+	Action string    `json:"action"` // allow, inject, inspect, intercept, challenge, deny, aborted, request, close, error
 	Reason string    `json:"reason,omitempty"`
 	Method string    `json:"method,omitempty"`
 	Path   string    `json:"path,omitempty"`
