@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/egzo-ai/egzo/internal/agentclient"
+	"github.com/egzo-ai/egzo/internal/browser"
 	"github.com/egzo-ai/egzo/internal/harness"
 	sess "github.com/egzo-ai/egzo/internal/session"
 )
@@ -59,7 +60,25 @@ func newAgentCommand() *cobra.Command {
 		}
 		return nil
 	}
-	cmd.AddCommand(run, attach)
+	browserCommand := &cobra.Command{
+		Use:   "browser",
+		Short: "Run the Playwright MCP server, configured for this agent's proxy",
+		Long: "Run `playwright-mcp` with a configuration built from this container's environment: the proxy of\n" +
+			"HTTPS_PROXY with its credentials as separate fields, a headless isolated Chromium, and its output in a\n" +
+			"temporary directory. The harness's MCP configuration starts this instead of `playwright-mcp`.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			code, err := browser.Run(os.Environ(), os.Stdin, os.Stdout, os.Stderr)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				return ExitError{Code: code}
+			}
+			return nil
+		},
+	}
+	cmd.AddCommand(run, attach, browserCommand)
 	return cmd
 }
 
@@ -78,11 +97,17 @@ func runAgent(args []string) error {
 	environment := os.Environ()
 	interrupt := "\x03"
 
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/home/agent"
+	}
+	// Chromium reads its own database, not SSL_CERT_FILE. Best effort: a browser that does not trust the
+	// project CA is a smaller problem than a harness that does not start.
+	if err := browser.TrustProjectCA(home, browser.ProjectCA, exec.LookPath, browser.ExecRunner); err != nil {
+		fmt.Fprintf(os.Stderr, "egzo: could not trust the project CA in the browser's database: %v\n", err)
+	}
+
 	if hasIntegration {
-		home := os.Getenv("HOME")
-		if home == "" {
-			home = "/home/agent"
-		}
 		options := harness.Options{
 			Agent:            os.Getenv("EGZO_AGENT"),
 			Home:             home,
@@ -90,6 +115,7 @@ func runAgent(args []string) error {
 			Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",
 			ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
 			InstructionsFile: home + "/.egzo/instructions.md",
+			LookPath:         exec.LookPath,
 		}
 		if workspaces := os.Getenv("EGZO_WORKSPACES"); workspaces != "" {
 			options.Workspaces = strings.Split(workspaces, ":")

@@ -35,6 +35,22 @@ type Options struct {
 	// InstructionsFile is where the platform instructions (how to read an egzo message header) and
 	// the agent's own prompt are written for the harness to load.
 	InstructionsFile string
+	// LookPath finds a program on the PATH (exec.LookPath in the container). The integrations register the
+	// browser's MCP server only when `playwright-mcp` is there; nil means nothing is.
+	LookPath func(file string) (string, error)
+}
+
+// browserCommand is what a harness runs for the browser's MCP server: the role of the egzo binary that
+// configures `playwright-mcp` from the agent's environment.
+var browserCommand = []string{"egzo", "agent", "browser"}
+
+// hasBrowser says whether the image carries the browser, so no harness is given a server that cannot start.
+func (o Options) hasBrowser() bool {
+	if o.LookPath == nil {
+		return false
+	}
+	_, err := o.LookPath("playwright-mcp")
+	return err == nil
 }
 
 // Plan is what an integration produces.
