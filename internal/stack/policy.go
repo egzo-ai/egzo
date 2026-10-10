@@ -7,10 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -22,7 +19,7 @@ import (
 // profile. It embeds secret values, so it must only travel through exec stdin, never a label,
 // environment variable or file visible to `inspect`. Which agent uses which profile is a matter of
 // bindings (see BindingFor), which carry no secret.
-func BuildPolicy(project *config.Resolved, secrets map[string]string) proxy.Policy {
+func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]string) proxy.Policy {
 	policy := proxy.Policy{Profiles: map[string]proxy.Profile{}}
 	for _, name := range usedProfiles(project) {
 		profile := project.Egress[name]
@@ -32,6 +29,12 @@ func BuildPolicy(project *config.Resolved, secrets map[string]string) proxy.Poli
 			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Secret: secrets[service.Secret], Inspect: service.Inspect}
 			if service.Inject != nil {
 				service2.Header, service2.Value = service.Inject.Header, service.Inject.Value
+			}
+			if service.Placeholder != "" {
+				service2.Placeholder = placeholders[service.Secret]
+				if service2.Placeholder == "" {
+					service2.Placeholder = placeholderStandIn
+				}
 			}
 			entry.Services = append(entry.Services, service2)
 		}
@@ -66,7 +69,7 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 	needed := map[string]bool{}
 	for _, agent := range project.Agents {
 		for _, service := range project.Egress[agent.Egress].Services {
-			if service.Inject != nil && service.Secret != "" {
+			if (service.Inject != nil || service.Placeholder != "") && service.Secret != "" {
 				needed[service.Secret] = true
 			}
 		}
@@ -79,7 +82,7 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 	}
 	sort.Strings(refs)
 	for _, ref := range refs {
-		value, err := readSecret(project.SecretSources[ref], dir)
+		value, err := ReadSecret(project.Secrets[ref], dir)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("secret %s: %v", ref, err))
 			continue
@@ -129,49 +132,4 @@ func contains(list []string, value string) bool {
 		}
 	}
 	return false
-}
-
-// SecretFilePath is where a file: secret lives: ~ is the home directory and a relative path is
-// relative to the project directory.
-func SecretFilePath(location, dir string) string {
-	path := location
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, path[2:])
-		}
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(dir, path)
-	}
-	return path
-}
-
-// ReadSecret reads the value a secret source points to.
-func ReadSecret(source, dir string) (string, error) { return readSecret(source, dir) }
-
-// ErrEmptySecret is wrapped by the error for a secret file that holds nothing.
-var ErrEmptySecret = errors.New("empty secret")
-
-func readSecret(source, dir string) (string, error) {
-	scheme, location, _ := strings.Cut(source, ":")
-	switch scheme {
-	case "env":
-		value, ok := os.LookupEnv(location)
-		if !ok || value == "" {
-			return "", fmt.Errorf("environment variable %s is not set", location)
-		}
-		return value, nil
-	case "file":
-		path := SecretFilePath(location, dir)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("cannot read %s: %w", path, err)
-		}
-		value := strings.TrimRight(string(data), "\r\n")
-		if value == "" {
-			return "", fmt.Errorf("%s is empty: %w", path, ErrEmptySecret)
-		}
-		return value, nil
-	}
-	return "", fmt.Errorf("unsupported source %q", source)
 }

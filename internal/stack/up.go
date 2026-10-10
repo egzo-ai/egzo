@@ -58,7 +58,10 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err := CheckOwnership(observed, project.Name, dir); err != nil {
 		return err
 	}
-	published, err := Publish(project, dir, opts.Image, opts.HarnessPrefix, AgentUser(c))
+	// What the placeholders are so far: a dry run, and the staleness check before anything is changed,
+	// use the stand-in for one that is not made yet.
+	placeholders := ReadPlaceholders(ctx, c, project)
+	published, err := PublishWith(project, dir, opts.Image, opts.HarnessPrefix, AgentUser(c), placeholders)
 	if err != nil {
 		return err
 	}
@@ -92,6 +95,15 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		return err
 	}
 	markFresh(fresh, plan)
+	if !opts.DryRun && len(placeholders) > 0 {
+		// The control sidecar exists now: it makes the placeholders that are missing, once.
+		if placeholders, err = EnsurePlaceholders(ctx, c, project); err != nil {
+			return err
+		}
+		if published, err = PublishWith(project, dir, opts.Image, opts.HarnessPrefix, AgentUser(c), placeholders); err != nil {
+			return err
+		}
+	}
 
 	out = &lockedWriter{w: out}
 	var pushed, stored, published2 bool
@@ -100,7 +112,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		pushed, pushErr = pushPolicy(ctx, c, project, desired, secrets, opts, fresh[desired.Proxy], out)
+		pushed, pushErr = pushPolicy(ctx, c, project, desired, secrets, placeholders, opts, fresh[desired.Proxy], out)
 		if pushErr == nil && !opts.DryRun && desired.Proxy != "" {
 			// A proxy that was created, started again or restarted has no bindings: the instances that
 			// exist and are not bound get theirs back.
@@ -277,7 +289,7 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 	published, err := ReadPublished(ctx, c, project.Name)
 	source, notPublished := project, errors.Is(err, ErrNotPublished)
 	if err == nil {
-		source = published.AsProject(project.SecretSources)
+		source = published.AsProject(project.Secrets)
 	} else if !notPublished {
 		return err
 	}
@@ -285,7 +297,11 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(BuildPolicy(source, secrets))
+	placeholders, err := EnsurePlaceholders(ctx, c, source)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(BuildPolicy(source, secrets, placeholders))
 	if err != nil {
 		return err
 	}
@@ -318,7 +334,7 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 // policy carries secret values, so it goes through exec stdin and lives only in the proxy's memory.
 func pushPolicy(
 	ctx context.Context, c *engine.Client, project *config.Resolved, desired Desired,
-	secrets map[string]string, opts Options, fresh bool, out io.Writer,
+	secrets, placeholders map[string]string, opts Options, fresh bool, out io.Writer,
 ) (bool, error) {
 	if desired.Proxy == "" {
 		return false, nil
@@ -334,7 +350,7 @@ func pushPolicy(
 			return true, nil
 		}
 		if secrets != nil {
-			policy := BuildPolicy(project, secrets)
+			policy := BuildPolicy(project, secrets, placeholders)
 			loaded, err := c.Exec(ctx, desired.Proxy, []string{"/egzo", "proxy", "request", "GET", "/policy"}, nil)
 			var current struct {
 				Hash string `json:"hash"`
@@ -351,7 +367,7 @@ func pushPolicy(
 		return false, nil
 	}
 
-	policy := BuildPolicy(project, secrets)
+	policy := BuildPolicy(project, secrets, placeholders)
 
 	// The policy lives in the proxy's memory only: a proxy this run just created has none.
 	if !fresh {

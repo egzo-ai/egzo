@@ -9,12 +9,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 )
 
 func TestNewSnapshot(t *testing.T) {
 	project := desireProject()
-	project.SecretSources = map[string]string{"main/KEY": "env:SUPER_SECRET_SOURCE"}
+	project.Secrets = map[string]config.SecretRef{"main/KEY": {Vault: "main", Name: "SUPER_SECRET_SOURCE", Backend: "env"}}
 	desired := desire(t, project)
 
 	data, hash, err := newSnapshot(project, desired)

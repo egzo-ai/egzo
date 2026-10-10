@@ -70,7 +70,7 @@ name=
 for argument; do case $argument in -*) ;; *) name=$argument ;; esac; done
 file="$PASS_STUB_STORE/$name"
 case $command in
-  show) if [ -f "$file" ]; then cat "$file"; else echo "Error: $name is not in the password store." >&2; exit 1; fi ;;
+  show) if [ -d "$file" ]; then printf '%s\\n\\342\\224\\224\\342\\224\\200\\342\\224\\200 entry\\n' "$name"; elif [ -f "$file" ]; then cat "$file"; else echo "Error: $name is not in the password store." >&2; exit 1; fi ;;
   *) echo "pass stub: unsupported command $command" >&2; exit 2 ;;
 esac
 """

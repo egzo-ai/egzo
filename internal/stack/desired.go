@@ -132,6 +132,8 @@ type Inputs struct {
 	PromptDigests map[string]string
 	// Instances are the names of the instances that exist: the sidecars are attached to their networks.
 	Instances []string
+	// Placeholders maps each instance to the variables it gets and their placeholder texts (not secrets).
+	Placeholders map[string]map[string]string
 }
 
 // The sidecars run as an unprivileged user and are limited in memory and processes: they parse what
@@ -376,6 +378,9 @@ func agentContainer(
 		}
 	}
 	for key, value := range agent.Env {
+		env[key] = value
+	}
+	for key, value := range in.Placeholders[name] {
 		env[key] = value
 	}
 	if agent.Prompt != "" {

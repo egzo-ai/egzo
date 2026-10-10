@@ -13,9 +13,7 @@ const vaultFixture = `
 vaults:
   main:
     backend: env
-    secrets:
-      KEY: { from: "env:KEY" }
-      OTHER: { from: "env:OTHER" }
+    secrets: [KEY, OTHER]
 `
 
 func TestEgressBuiltinServices(t *testing.T) {
@@ -68,11 +66,11 @@ func TestEgressEmptyServiceEntryIsRejected(t *testing.T) {
 func TestEgressSecretReferences(t *testing.T) {
 	cases := []struct{ name, ref, want string }{
 		{"no slash", "KEY", "invalid secret reference"},
-		{"too many parts", "main/KEY/x", "invalid secret reference"},
+		{"a secret with a slash the vault does not list", "main/KEY/x", `does not list "KEY/x"`},
 		{"empty vault", "/KEY", "invalid secret reference"},
 		{"empty secret", "main/", "invalid secret reference"},
 		{"unknown vault", "ghost/KEY", `unknown vault "ghost"`},
-		{"unknown secret", "main/NOPE", `has no secret "NOPE"`},
+		{"unknown secret", "main/NOPE", `does not list "NOPE"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -118,9 +116,9 @@ egress:
 		{"wildcard host", "{ hosts: ['*.example.com'] }", "invalid host"},
 		{"host with scheme", "{ hosts: ['https://example.com'] }", "invalid host"},
 		{"inject without header", "{ hosts: [a.com], inject: {}, secret: main/KEY }", "inject needs a header"},
-		{"secret without inject", "{ hosts: [a.com], secret: main/KEY }", "nothing would use it"},
-		{"bad secret", "{ hosts: [a.com], inject: { header: H }, secret: main/NOPE }", `has no secret "NOPE"`},
-		{"inject without any secret", "{ hosts: [a.com], inject: { header: H } }", "injects a credential but has no secret"},
+		{"secret without inject", "{ hosts: [a.com], secret: main/KEY }", "neither inject nor placeholder"},
+		{"bad secret", "{ hosts: [a.com], inject: { header: H }, secret: main/NOPE }", `does not list "NOPE"`},
+		{"inject without any secret", "{ hosts: [a.com], inject: { header: H } }", "needs a secret"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -287,4 +285,73 @@ func TestTheAnthropicOAuthServiceIsBuiltInAndSendsABearerToken(t *testing.T) {
 	if !ok || service.Hosts[0] != "api.anthropic.com" || service.Inject.Header != "Authorization" || service.Inject.Value != "Bearer {secret}" {
 		t.Errorf("service = %+v, ok = %v", service, ok)
 	}
+}
+
+func TestPlaceholderServices(t *testing.T) {
+	const login = `hosts: [app.example.com], secret: main/KEY, placeholder: SITE_PASSWORD`
+
+	t.Run("a placeholder service resolves and prints the variable", func(t *testing.T) {
+		resolved, _ := mustResolve(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      login: { "+login+" }\n")
+		service := resolved.Egress["default"].Services["login"]
+		if service.Placeholder != "SITE_PASSWORD" || service.Secret != "main/KEY" || service.Inject != nil {
+			t.Errorf("service = %+v", service)
+		}
+	})
+
+	t.Run("a child string keeps the placeholder", func(t *testing.T) {
+		resolved, _ := mustResolve(t, t.TempDir(), vaultFixture+`
+egress:
+  base: { services: { login: { `+login+` } } }
+  child: { extend: base, services: { login: main/OTHER } }
+`)
+		service := resolved.Egress["child"].Services["login"]
+		if service.Placeholder != "SITE_PASSWORD" || service.Secret != "main/OTHER" {
+			t.Errorf("service = %+v", service)
+		}
+	})
+
+	cases := []struct{ name, service, want string }{
+		{"no secret", "{ hosts: [a.com], placeholder: SITE_PASSWORD }", `"login" has a placeholder but no secret`},
+		{"inject and placeholder", "{ " + login + ", inject: { header: X } }", "both inject and placeholder"},
+		{"secret with neither", "{ hosts: [a.com], secret: main/KEY }", `service "login" has a secret but neither inject nor placeholder`},
+		{"dash in the name", "{ hosts: [a.com], secret: main/KEY, placeholder: MY-PASSWORD }", `"MY-PASSWORD"`},
+		{"leading digit", "{ hosts: [a.com], secret: main/KEY, placeholder: 1PASSWORD }", `"1PASSWORD"`},
+		{"set by egzo", "{ hosts: [a.com], secret: main/KEY, placeholder: HTTPS_PROXY }", `"HTTPS_PROXY"`},
+		{"egzo prefix", "{ hosts: [a.com], secret: main/KEY, placeholder: EGZO_TOKEN }", `"EGZO_TOKEN"`},
+		{"home", "{ hosts: [a.com], secret: main/KEY, placeholder: HOME }", `"HOME"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      login: "+c.service+"\n", c.want)
+		})
+	}
+
+	t.Run("two services cannot share a variable", func(t *testing.T) {
+		wantProblems(t, t.TempDir(), vaultFixture+`
+egress:
+  default:
+    services:
+      login: { `+login+` }
+      other: { hosts: [b.example.com], secret: main/OTHER, placeholder: SITE_PASSWORD }
+`, "SITE_PASSWORD")
+	})
+
+	t.Run("an agent cannot set a placeholder variable", func(t *testing.T) {
+		wantProblems(t, t.TempDir(), vaultFixture+`
+egress:
+  default:
+    services:
+      login: { `+login+` }
+agents:
+  coder: { harness: custom, image: x, env: { SITE_PASSWORD: hunter2 } }
+`, "SITE_PASSWORD")
+	})
+
+	t.Run("rules are by host only", func(t *testing.T) {
+		for _, key := range []string{"path", "paths", "method", "methods"} {
+			if _, err := Parse([]byte("egress:\n  default:\n    services:\n      login: { " + login + ", " + key + ": [x] }\n")); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("%s: err = %v", key, err)
+			}
+		}
+	})
 }

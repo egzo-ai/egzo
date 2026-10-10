@@ -33,37 +33,14 @@ func inProject(t *testing.T, yaml string, stdin string, args ...string) (string,
 	return out.String(), errOut.String(), err
 }
 
-func vaultYAML(dir string) string {
-	return "vaults:\n  main:\n    backend: file\n    secrets:\n      KEY: {from: \"file:" + dir + "/KEY\"}\n      FROM_ENV: {from: \"env:EGZO_TEST_UNSET_VARIABLE\"}\n"
-}
-
-func TestSecretsSetWritesAPrivateFileAndLsNeverShowsTheValue(t *testing.T) {
-	secrets := t.TempDir()
-	yaml := vaultYAML(secrets)
-	out, _, err := inProject(t, yaml, "hunter2-value\n", "secrets", "set", "main/KEY")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(out, "hunter2-value") {
-		t.Error("set printed the value")
-	}
-	info, err := os.Stat(filepath.Join(secrets, "KEY"))
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("file: %v, %v", info, err)
-	}
-	if data, _ := os.ReadFile(filepath.Join(secrets, "KEY")); string(data) != "hunter2-value\n" {
-		t.Errorf("file = %q", data)
-	}
-	listing, _, err := inProject(t, yaml, "", "secrets", "ls")
-	if err != nil || strings.Contains(listing, "hunter2-value") {
-		t.Fatalf("ls: %q, %v", listing, err)
-	}
+func vaultYAML() string {
+	return "vaults:\n  main:\n    backend: env\n    secrets: [EGZO_TEST_SET_VARIABLE, EGZO_TEST_UNSET_VARIABLE]\n"
 }
 
 func TestSecretsLsShowsSetAndMissing(t *testing.T) {
-	secrets := t.TempDir()
-	os.WriteFile(filepath.Join(secrets, "KEY"), []byte("value\n"), 0o600)
-	out, _, err := inProject(t, vaultYAML(secrets), "", "secrets", "ls")
+	t.Setenv("EGZO_TEST_SET_VARIABLE", "value")
+	t.Setenv("EGZO_TEST_UNSET_VARIABLE", "")
+	out, _, err := inProject(t, vaultYAML(), "", "secrets", "ls")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,41 +48,17 @@ func TestSecretsLsShowsSetAndMissing(t *testing.T) {
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n")[1:] {
 		rows[strings.Fields(line)[0]] = line
 	}
-	if !strings.HasSuffix(rows["main/KEY"], "set") || !strings.HasSuffix(rows["main/FROM_ENV"], "missing") {
+	if !strings.HasSuffix(rows["main/EGZO_TEST_SET_VARIABLE"], "set") || !strings.HasSuffix(rows["main/EGZO_TEST_UNSET_VARIABLE"], "missing") {
 		t.Errorf("rows = %v", rows)
 	}
-}
-
-func TestSecretsSetRefusesAnEnvironmentSourceAndAnUnknownSecret(t *testing.T) {
-	yaml := vaultYAML(t.TempDir())
-	_, _, err := inProject(t, yaml, "x\n", "secrets", "set", "main/FROM_ENV")
-	if err == nil || !strings.Contains(err.Error(), "EGZO_TEST_UNSET_VARIABLE") {
-		t.Errorf("err = %v", err)
-	}
-	_, _, err = inProject(t, yaml, "x\n", "secrets", "set", "main/NOPE")
-	if err == nil || !strings.Contains(err.Error(), "main/KEY") {
-		t.Errorf("err = %v", err)
-	}
-	_, _, err = inProject(t, yaml, "\n", "secrets", "set", "main/KEY")
-	if err == nil || !strings.Contains(err.Error(), "empty") {
-		t.Errorf("an empty value: err = %v", err)
-	}
-}
-
-func TestSecretsRmDeletesTheFile(t *testing.T) {
-	secrets := t.TempDir()
-	os.WriteFile(filepath.Join(secrets, "KEY"), []byte("v\n"), 0o600)
-	if _, _, err := inProject(t, vaultYAML(secrets), "", "secrets", "rm", "main/KEY"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(secrets, "KEY")); !os.IsNotExist(err) {
-		t.Error("the file is still there")
+	if strings.Contains(out, "value") {
+		t.Errorf("ls printed a value: %q", out)
 	}
 }
 
 func TestProxyRulesListWhatEachAgentMayReachWithoutSecrets(t *testing.T) {
 	yaml := `
-vaults: {main: {backend: env, secrets: {S: {from: "env:S"}}}}
+vaults: {main: {backend: env, secrets: [S]}}
 egress:
   default: {allow: [docs.example.org]}
   wide:

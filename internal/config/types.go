@@ -25,13 +25,11 @@ type File struct {
 	Control    Control              `yaml:"control"`
 }
 
+// Vault is one secret store: a backend and the names of the secrets read from it. Nothing says where a
+// secret is; the backend knows.
 type Vault struct {
-	Backend string                  `yaml:"backend"`
-	Secrets map[string]SecretSource `yaml:"secrets"`
-}
-
-type SecretSource struct {
-	From string `yaml:"from"`
+	Backend string   `yaml:"backend"`
+	Secrets []string `yaml:"secrets"`
 }
 
 // Proxy is the infrastructure of the egress sidecar. Policy lives in Egress.
@@ -58,10 +56,12 @@ type ServiceEntry struct {
 }
 
 type ServiceDef struct {
-	Hosts   []string `yaml:"hosts"`
-	Inject  *Inject  `yaml:"inject,omitempty"`
-	Secret  string   `yaml:"secret,omitempty"`
-	Inspect bool     `yaml:"inspect,omitempty"`
+	Hosts  []string `yaml:"hosts"`
+	Inject *Inject  `yaml:"inject,omitempty"`
+	Secret string   `yaml:"secret,omitempty"`
+	// Placeholder is the environment variable that holds the stand-in for the secret in the agent.
+	Placeholder string `yaml:"placeholder,omitempty"`
+	Inspect     bool   `yaml:"inspect,omitempty"`
 }
 
 type Inject struct {
@@ -69,7 +69,7 @@ type Inject struct {
 	Value  string `yaml:"value,omitempty"`
 }
 
-var serviceDefKeys = map[string]bool{"hosts": true, "inject": true, "secret": true, "inspect": true}
+var serviceDefKeys = map[string]bool{"hosts": true, "inject": true, "secret": true, "placeholder": true, "inspect": true}
 
 // UnmarshalYAML accepts a string (secret reference) or a mapping (definition). Null and any
 // other shape are rejected.
@@ -87,7 +87,7 @@ func (e *ServiceEntry) UnmarshalYAML(node *yaml.Node) error {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			if key := node.Content[i].Value; !serviceDefKeys[key] {
-				return fmt.Errorf("line %d: unknown key %q in service definition (allowed: hosts, inject, secret, inspect)", node.Content[i].Line, key)
+				return fmt.Errorf("line %d: unknown key %q in service definition (allowed: hosts, inject, secret, placeholder, inspect)", node.Content[i].Line, key)
 			}
 		}
 		var def ServiceDef

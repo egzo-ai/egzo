@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -40,6 +41,8 @@ type server struct {
 	// sendMu makes the checks of a send and its write one step.
 	sendMu sync.Mutex
 	key    []byte // the project key, read once
+	// placeholderMu makes reading and making placeholders one step.
+	placeholderMu sync.Mutex
 }
 
 func newServer(dir string) (*server, error) {
@@ -69,6 +72,8 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("DELETE /agents/{name}", s.unregisterAgent)
 	mux.HandleFunc("PUT /templates", s.putTemplates)
 	mux.HandleFunc("GET /templates", s.getTemplates)
+	mux.HandleFunc("GET /placeholders", s.getPlaceholders)
+	mux.HandleFunc("POST /placeholders", s.postPlaceholders)
 	return mux
 }
 
@@ -543,4 +548,110 @@ func (s *server) getTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(data)
+}
+
+// placeholdersFile keeps the placeholders: one random stand-in per secret reference, made once and kept
+// for as long as the control volume lives. A placeholder is not a secret and not derived from one.
+const placeholdersFile = "placeholders.json"
+
+// PlaceholderPrefix starts every placeholder text.
+const PlaceholderPrefix = "egzo-ph-"
+
+func (s *server) readPlaceholders() (map[string]string, error) {
+	data, err := os.ReadFile(filepath.Join(s.dir, placeholdersFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]string{}, nil
+	} else if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("the placeholders %s are damaged: %w", placeholdersFile, err)
+	}
+	return out, nil
+}
+
+// getPlaceholders lists the placeholders made so far, creating nothing.
+func (s *server) getPlaceholders(w http.ResponseWriter, r *http.Request) {
+	s.placeholderMu.Lock()
+	defer s.placeholderMu.Unlock()
+	all, err := s.readPlaceholders()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(all)
+}
+
+// postPlaceholders takes a JSON list of secret references and returns the placeholder of each, making
+// the ones that have none. An existing placeholder is never replaced.
+func (s *server) postPlaceholders(w http.ResponseWriter, r *http.Request) {
+	var refs []string
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&refs); err != nil {
+		http.Error(w, "a JSON list of secret references is expected: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	for _, ref := range refs {
+		if ref == "" || len(ref) > 256 || strings.ContainsFunc(ref, unicode.IsControl) {
+			http.Error(w, fmt.Sprintf("%q is not a secret reference name", ref), http.StatusBadRequest)
+			return
+		}
+	}
+	s.placeholderMu.Lock()
+	defer s.placeholderMu.Unlock()
+	all, err := s.readPlaceholders()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	changed := false
+	for _, ref := range refs {
+		if all[ref] != "" {
+			continue
+		}
+		random := make([]byte, 16)
+		if _, err := rand.Read(random); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		all[ref] = PlaceholderPrefix + hex.EncodeToString(random)
+		changed = true
+	}
+	if changed {
+		data, _ := json.Marshal(all)
+		temp, err := os.CreateTemp(s.dir, "placeholders.*.tmp")
+		if err == nil {
+			defer os.Remove(temp.Name())
+			_, err = temp.Write(data)
+			if err == nil {
+				err = temp.Sync() // a crash must not leave an empty file behind the rename
+			}
+			if closeErr := temp.Close(); err == nil {
+				err = closeErr
+			}
+		}
+		if err == nil {
+			err = os.Chmod(temp.Name(), 0o644)
+		}
+		if err == nil {
+			err = os.Rename(temp.Name(), filepath.Join(s.dir, placeholdersFile))
+		}
+		if err == nil {
+			if dir, openErr := os.Open(s.dir); openErr == nil {
+				dir.Sync()
+				dir.Close()
+			}
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	out := map[string]string{}
+	for _, ref := range refs {
+		out[ref] = all[ref]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
 }

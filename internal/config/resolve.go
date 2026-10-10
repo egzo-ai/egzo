@@ -18,14 +18,19 @@ import (
 
 // Resolved is the fully resolved project: what `egzo config` prints.
 type Resolved struct {
-	// SecretSources maps "vault/SECRET" to its from: source. It is never printed.
-	SecretSources map[string]string            `yaml:"-"`
-	Name          string                       `yaml:"name"`
-	Vaults        map[string][]string          `yaml:"vaults,omitempty"`
-	Workspaces    map[string]ResolvedWorkspace `yaml:"workspaces"`
-	Agents        map[string]ResolvedAgent     `yaml:"agents"`
-	Egress        map[string]*ResolvedProfile  `yaml:"egress"`
-	Proxy         *ResolvedProxy               `yaml:"proxy,omitempty"`
+	// Secrets maps "vault/name" to where that secret is read from. It is never printed.
+	Secrets    map[string]SecretRef         `yaml:"-"`
+	Name       string                       `yaml:"name"`
+	Vaults     map[string][]string          `yaml:"vaults,omitempty"`
+	Workspaces map[string]ResolvedWorkspace `yaml:"workspaces"`
+	Agents     map[string]ResolvedAgent     `yaml:"agents"`
+	Egress     map[string]*ResolvedProfile  `yaml:"egress"`
+	Proxy      *ResolvedProxy               `yaml:"proxy,omitempty"`
+}
+
+// SecretRef is one secret of a vault: the vault it is listed in, its name there and that vault's backend.
+type SecretRef struct {
+	Vault, Name, Backend string
 }
 
 // ResolvedProxy is what the file says about the proxy sidecar; nil when it says nothing.
@@ -125,12 +130,11 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	if file.Proxy.Image != "" {
 		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image}
 	}
-	resolved.SecretSources = map[string]string{}
+	resolved.Secrets = map[string]SecretRef{}
 	for vault, definition := range file.Vaults {
-		names := make([]string, 0, len(definition.Secrets))
-		for secret, source := range definition.Secrets {
-			names = append(names, secret)
-			resolved.SecretSources[vault+"/"+secret] = source.From
+		names := slices.Clone(definition.Secrets)
+		for _, secret := range names {
+			resolved.Secrets[vault+"/"+secret] = SecretRef{Vault: vault, Name: secret, Backend: definition.Backend}
 		}
 		sort.Strings(names)
 		resolved.Vaults[vault] = names
@@ -204,6 +208,16 @@ func resolveAgent(
 		}
 	}
 
+	if profile != nil {
+		for _, serviceName := range sortedServices(profile) {
+			if placeholder := profile.Services[serviceName].Placeholder; placeholder != "" {
+				if _, set := agent.Env[placeholder]; set {
+					p.addf("agent %q: env %s is also the placeholder variable of service %q in egress profile %q", name, placeholder, serviceName, profileName)
+				}
+			}
+		}
+	}
+
 	if agent.Harness == "opencode" {
 		if profile != nil {
 			for serviceName, service := range profile.Services {
@@ -245,36 +259,69 @@ func resolveAgent(
 	}, warnings
 }
 
-var vaultBackends = map[string]bool{"env": true, "file": true, "sops": true, "pass": true, "1password": true}
-
-// secretSchemes are the sources `from:` can read today.
-var secretSchemes = []string{"env", "file"}
+// vaultBackends are the backends that exist.
+var vaultBackends = []string{"env", "pass"}
 
 func checkVaults(vaults map[string]Vault, p *problems) {
-	for name, vault := range vaults {
+	names := make([]string, 0, len(vaults))
+	for name := range vaults {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		vault := vaults[name]
 		if strings.Contains(name, "/") {
 			p.addf("vault %q: names cannot contain '/'", name)
 		}
-		if vault.Backend != "" && !vaultBackends[vault.Backend] {
-			p.addf("vault %q: unknown backend %q", name, vault.Backend)
+		switch {
+		case vault.Backend == "":
+			p.addf("vault %q: backend is required (backends: %s)", name, strings.Join(vaultBackends, ", "))
+			continue
+		case !slices.Contains(vaultBackends, vault.Backend):
+			p.addf("vault %q: unknown backend %q (backends: %s)", name, vault.Backend, strings.Join(vaultBackends, ", "))
+			continue
 		}
-		for secret, source := range vault.Secrets {
-			if strings.Contains(secret, "/") {
-				p.addf("vault %q: secret name %q cannot contain '/'", name, secret)
+		seen := map[string]bool{}
+		for _, secret := range vault.Secrets {
+			if seen[secret] {
+				p.addf("vault %q: secret %q is listed twice", name, secret)
 			}
-			scheme, rest, found := strings.Cut(source.From, ":")
-			supported := false
-			for _, s := range secretSchemes {
-				supported = supported || s == scheme
-			}
-			switch {
-			case !found || rest == "":
-				p.addf("vault %q: secret %q needs from: <scheme>:<location> (schemes: %s)", name, secret, strings.Join(secretSchemes, ", "))
-			case !supported:
-				p.addf("vault %q: secret %q: unsupported source scheme %q (schemes: %s)", name, secret, scheme, strings.Join(secretSchemes, ", "))
+			seen[secret] = true
+			if reason := secretNameProblem(vault.Backend, secret); reason != "" {
+				p.addf("vault %q: secret name %q %s", name, secret, reason)
 			}
 		}
 	}
+}
+
+// secretNameProblem says why name is not a secret name for the backend, or returns "".
+func secretNameProblem(backend, name string) string {
+	if backend == "env" {
+		if !envName.MatchString(name) {
+			return "is not an environment variable name (letters, digits and '_', not starting with a digit)"
+		}
+		return ""
+	}
+	if strings.HasPrefix(name, "-") {
+		return "cannot start with '-' (pass would read it as an option)"
+	}
+	for _, char := range name {
+		if char < 0x20 || char == 0x7f {
+			return "cannot contain a control character"
+		}
+	}
+	if strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") {
+		return "cannot start or end with '/'"
+	}
+	for _, segment := range strings.Split(name, "/") {
+		switch segment {
+		case "":
+			return "cannot have an empty segment"
+		case ".", "..":
+			return "cannot have a '.' or '..' segment"
+		}
+	}
+	return ""
 }
 
 var (
@@ -313,4 +360,10 @@ func checkEnv(agent string, env map[string]string, p *problems) {
 			p.addf("agent %q: env %s looks like a secret; put it in a vault and bind it through an egress profile", agent, key)
 		}
 	}
+}
+
+func sortedServices(profile *ResolvedProfile) []string {
+	names := serviceKeys(profile)
+	sort.Strings(names)
+	return names
 }

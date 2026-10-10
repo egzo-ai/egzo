@@ -237,7 +237,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		conn = &prefixedConn{Conn: conn, pending: append([]byte(nil), pending...)}
 	}
 
-	if decision.Inject != nil || decision.Inspect {
+	if decision.Inject != nil || decision.Inspect || len(decision.Substitutions) > 0 {
 		s.intercept(conn, agent, host, decision)
 		return
 	}
@@ -361,14 +361,14 @@ func (s *Server) intercept(client net.Conn, agent, host string, decision Decisio
 	client.SetDeadline(time.Time{})
 
 	action := "inspect"
-	if decision.Inject != nil {
+	if decision.Inject != nil || len(decision.Substitutions) > 0 {
 		action = "inject"
 	}
 	s.audit.Log(Event{Agent: agent, Host: host, Action: action})
 
 	listener := newConnListener(tlsConn)
 	server := &http.Server{
-		Handler:           s.interceptHandler(agent, host, decision.Inject),
+		Handler:           s.interceptHandler(agent, host, decision.Inject, newSwapper(decision.Substitutions)),
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       s.IdleTimeout,
 		ErrorLog:          log.New(io.Discard, "", 0),
@@ -376,7 +376,7 @@ func (s *Server) intercept(client net.Conn, agent, host string, decision Decisio
 	server.Serve(listener)
 }
 
-func (s *Server) interceptHandler(agent, host string, inject *Injection) http.Handler {
+func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *swapper) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme = "https"
@@ -390,11 +390,11 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection) http.Ha
 		Transport:     s.Transport,
 		FlushInterval: -1, // stream responses, such as model output, as they arrive
 		ModifyResponse: func(response *http.Response) error {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "request", Method: response.Request.Method, Path: response.Request.URL.Path, Status: response.StatusCode})
+			s.audit.Log(Event{Agent: agent, Host: host, Action: "request", Method: response.Request.Method, Path: loggedPath(response.Request), Status: response.StatusCode})
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "error", Method: r.Method, Path: r.URL.Path, Reason: err.Error()})
+			s.audit.Log(Event{Agent: agent, Host: host, Action: "error", Method: r.Method, Path: loggedPath(r), Reason: err.Error()})
 			http.Error(w, "egzo: upstream error", http.StatusBadGateway)
 		},
 	}
@@ -409,8 +409,28 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection) http.Ha
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
+		if swap != nil {
+			// The path as the agent wrote it: the one that is logged, never the one with a secret in it.
+			path := r.URL.Path
+			r = r.WithContext(context.WithValue(r.Context(), agentPathKey{}, path))
+			if status, reason := swap.apply(r); status != 0 {
+				s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Method: r.Method, Path: path, Reason: reason})
+				http.Error(w, "egzo: "+reason, status)
+				return
+			}
+		}
 		proxy.ServeHTTP(w, r)
 	})
+}
+
+type agentPathKey struct{}
+
+// loggedPath is the path to record for r: the one the agent sent, before any placeholder was swapped.
+func loggedPath(r *http.Request) string {
+	if path, ok := r.Context().Value(agentPathKey{}).(string); ok {
+		return path
+	}
+	return r.URL.Path
 }
 
 // connListener serves exactly one connection with http.Server, then reports closed once that

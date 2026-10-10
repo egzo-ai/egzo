@@ -31,6 +31,10 @@ type Template struct {
 	PromptDigest string
 	// Image is the harness image, resolved when `up` ran.
 	Image string
+	// Placeholders maps each variable the agent gets to its placeholder text. A placeholder is not a
+	// secret. The text is made once and never changes, so the hash leaves it out: what decides whether
+	// an instance is stale is the profile's service, which names the variable and the secret.
+	Placeholders map[string]string `json:",omitempty"`
 	// Hash fingerprints all of the above. An instance carries the hash of the template it was spawned
 	// from; when the template's hash moves, the instance is stale.
 	Hash string
@@ -55,6 +59,11 @@ type Published struct {
 // Publish resolves the templates of a project. It reads the prompt files, since an instance mounts
 // them and a changed prompt must make its instances stale.
 func Publish(project *config.Resolved, dir, image, harnessPrefix, user string) (Published, error) {
+	return PublishWith(project, dir, image, harnessPrefix, user, nil)
+}
+
+// PublishWith is Publish with the placeholders (by secret reference) the agents get.
+func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user string, placeholders map[string]string) (Published, error) {
 	digests, err := PromptDigests(project, dir)
 	if err != nil {
 		return Published{}, err
@@ -69,6 +78,7 @@ func Publish(project *config.Resolved, dir, image, harnessPrefix, user string) (
 			Workspaces:   map[string]config.ResolvedWorkspace{},
 			PromptDigest: digests[name],
 			Image:        agentImage(agent, harnessPrefix),
+			Placeholders: templatePlaceholders(project.Egress[agent.Egress], placeholders),
 		}
 		if agent.Prompt != "" {
 			template.PromptPath = agent.Prompt
@@ -90,6 +100,7 @@ func Publish(project *config.Resolved, dir, image, harnessPrefix, user string) (
 
 func templateHash(template Template) string {
 	template.Hash = ""
+	template.Placeholders = nil
 	return hash(template)
 }
 
@@ -142,14 +153,14 @@ func (p Published) View(instances map[string]string) *config.Resolved {
 
 // AsProject is the project as the published templates describe it, each template an agent under its own
 // name: what restarting the proxy builds its policy from, so a file edited since `up` changes nothing.
-// secretSources are the file's, since the templates hold references and never where a secret lives.
-func (p Published) AsProject(secretSources map[string]string) *config.Resolved {
+// secrets are the file's, since the templates hold references and never where a secret lives.
+func (p Published) AsProject(secrets map[string]config.SecretRef) *config.Resolved {
 	instances := map[string]string{}
 	for name := range p.Templates {
 		instances[name] = name
 	}
 	view := p.View(instances)
-	view.SecretSources = secretSources
+	view.Secrets = secrets
 	return view
 }
 
@@ -166,7 +177,13 @@ func (p Published) digests(instances map[string]string) map[string]string {
 
 // inputs is what DesireInstance needs besides the view.
 func (p Published) inputs(instances map[string]string, tokens map[string]string, existing []string) Inputs {
-	return Inputs{Image: p.Image, Tokens: tokens, User: p.User, PromptDigests: p.digests(instances), Instances: existing}
+	placeholders := map[string]map[string]string{}
+	for name, templateName := range instances {
+		if vars := p.Templates[templateName].Placeholders; len(vars) > 0 {
+			placeholders[name] = vars
+		}
+	}
+	return Inputs{Image: p.Image, Tokens: tokens, User: p.User, PromptDigests: p.digests(instances), Instances: existing, Placeholders: placeholders}
 }
 
 // ErrNotPublished means `up` has not published templates yet.

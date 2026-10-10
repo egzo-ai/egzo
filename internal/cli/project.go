@@ -36,6 +36,9 @@ func projectFile(opts *options) (string, error) {
 	return config.FindFile(cwd)
 }
 
+// EnvBackendWarning is printed once per command by any command that loads a project with an env vault.
+const EnvBackendWarning = "Using ENV var based secret backend is not recommended."
+
 // loadProject reads egzo.yaml from the current directory and resolves it.
 func loadProject(opts *options) (*project, error) {
 	path, err := projectFile(opts)
@@ -60,6 +63,15 @@ func loadProject(opts *options) (*project, error) {
 	resolved, warnings, err := config.Resolve(file, name, dir)
 	if err != nil {
 		return nil, err
+	}
+	if !opts.envWarned {
+		for _, vault := range file.Vaults {
+			if vault.Backend == "env" {
+				opts.envWarned = true
+				fmt.Fprintln(os.Stderr, EnvBackendWarning)
+				break
+			}
+		}
 	}
 	return &project{Dir: dir, Resolved: resolved, Warnings: warnings}, nil
 }

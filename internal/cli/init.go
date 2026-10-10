@@ -81,7 +81,7 @@ func scaffold(harness, repoURL string) string {
   main:
     backend: env
     secrets:
-      ANTHROPIC_API_KEY: { from: env:ANTHROPIC_API_KEY }
+      - ANTHROPIC_API_KEY
 
 egress:
   default:                      # everything not allowed here is denied

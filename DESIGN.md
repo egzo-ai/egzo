@@ -405,11 +405,13 @@ templates are declared and published by `up`.
   works, together with its specs.
 - **`env`** reads the environment variable of the same name from the shell that runs the CLI. A secret name
   must be a valid variable name. It is accepted but discouraged (every process of the user can read it, and
-  it ends up in shell history and dotfiles): every command that loads a project with an `env` vault prints
+  it ends up in shell history and dotfiles): every command that loads a project with an `env` vault, except the ones that relay a process's own output (`exec`, `attach`, `logs`), prints
   `Using ENV var based secret backend is not recommended.` on stderr, once, and goes on.
 - **`pass`** runs the `pass` program (https://www.passwordstore.org/) directly, `pass show <name>`, with the
-  secret name as the entry name, slashes included. The secret is the first line of the entry (pass's own
-  convention; the other lines are notes). egzo gives pass the environment and terminal of the CLI untouched,
+  secret name as the entry name, slashes included (a name never starts with `-`, and egzo passes it after `--`,
+  so it cannot be taken for an option). The secret is the first line of the entry (pass's own convention; the
+  other lines are notes). A name that is a pass directory is not a secret: `pass show` prints a tree for it,
+  and egzo reports it as a directory. egzo gives pass the environment and terminal of the CLI untouched,
   so unlocking is whatever the user's pass and gpg-agent already do (a pinentry prompt, or none when the
   agent has the key). **The project file cannot configure pass**: no store path, no gpg home, nothing. Someone
   with another store sets `PASSWORD_STORE_DIR`, `GNUPGHOME` and the like in their shell, as for any use of
@@ -421,7 +423,8 @@ templates are declared and published by `up`.
   nothing but permissions, which is not a store egzo supports. `env` stays only because a throwaway shell
   export is how people try things; it warns for that reason.
 - **When secrets are read.** On the host, by the CLI, in the user's session, once per command, and only by the
-  commands that need the values (`up` and `diff`; `spawn` and `rm` never read one). They go to the
+  commands that need the values (`up`, `diff` and `restart proxy`, which loads the policy again; `spawn` and
+  `rm` never read one). They go to the
   proxy as described under Hardening ("Secrets reach the proxy only through `engine exec` stdin"). A command
   that cannot read a secret fails before it creates anything. `secrets ls` reads nothing it does not have
   to show: it reports `set`, `empty` or `missing` (with the reason pass gave) and never a value.
@@ -470,7 +473,8 @@ egress:
   body that cannot be scanned (compressed, or over 1 MiB) is refused**, never forwarded half-handled: the proxy
   answers `413` (too large) or `415` (compressed) with a message that names the reason, and logs a `deny`
   with the same reason. The rule depends only on the request, so a given request always succeeds or always
-  fails, and the failure says why. Hosts of a placeholder service are meant for logins and API calls, not
+  fails, and the failure says why. The reason is a fixed sentence: nothing taken from the request is ever put
+  in it, since the agent controls the request (it could otherwise put its own placeholder there). Hosts of a placeholder service are meant for logins and API calls, not
   uploads; see `known-issues/secret-injection-limits.md`.
 - Hosts of a placeholder service are TLS-intercepted, like those of `inject`, and are audited the same way.
 

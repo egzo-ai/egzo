@@ -12,6 +12,7 @@ import (
 type options struct {
 	projectName string
 	file        string
+	envWarned   bool // the env backend warning has been printed by this command
 }
 
 // New builds the root command.

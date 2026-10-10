@@ -70,6 +70,7 @@ func newLogsCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
 			defer stop()
+			opts.envWarned = true // the output of the command is the command's: no warning of ours in it
 			s, err := openSession(ctx, opts)
 			if err != nil {
 				return err
@@ -112,6 +113,7 @@ func newExecCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
 			defer stop()
+			opts.envWarned = true // the output of the command is the command's: no warning of ours in it
 			s, err := openSession(ctx, opts)
 			if err != nil {
 				return err
@@ -254,6 +256,7 @@ func newAttachCommand(opts *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
 			defer stop()
+			opts.envWarned = true // the output of the command is the command's: no warning of ours in it
 			s, err := openSession(ctx, opts)
 			if err != nil {
 				return err

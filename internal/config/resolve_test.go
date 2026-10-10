@@ -163,31 +163,75 @@ vaults:
   main:
     backend: env
     secrets:
-      B: { from: "env:B" }
-      A: { from: "file:~/a" }
+      - B
+      - A
 `)
 		if want := []string{"A", "B"}; !reflect.DeepEqual(resolved.Vaults["main"], want) {
 			t.Errorf("vault secrets = %v, want %v", resolved.Vaults["main"], want)
 		}
-		if resolved.SecretSources["main/A"] != "file:~/a" || resolved.SecretSources["main/B"] != "env:B" {
-			t.Errorf("sources = %v", resolved.SecretSources)
+		if want := (SecretRef{Vault: "main", Name: "A", Backend: "env"}); resolved.Secrets["main/A"] != want {
+			t.Errorf("secrets = %v", resolved.Secrets)
 		}
 	})
 
 	cases := []struct {
 		name, yaml, want string
 	}{
-		{"slash in vault name", "vaults:\n  a/b: {}\n", "names cannot contain '/'"},
-		{"unknown backend", "vaults:\n  v: { backend: vault }\n", `unknown backend "vault"`},
-		{"slash in secret name", "vaults:\n  v:\n    secrets:\n      a/b: { from: 'env:X' }\n", "secret name"},
-		{"missing from", "vaults:\n  v:\n    secrets:\n      S: {}\n", "needs from:"},
-		{"empty location", "vaults:\n  v:\n    secrets:\n      S: { from: 'env:' }\n", "needs from:"},
-		{"no scheme", "vaults:\n  v:\n    secrets:\n      S: { from: plain }\n", "needs from:"},
-		{"unsupported scheme", "vaults:\n  v:\n    secrets:\n      S: { from: 'sops:x' }\n", `unsupported source scheme "sops"`},
+		{"slash in vault name", "vaults:\n  a/b: { backend: pass }\n", "names cannot contain '/'"},
+		{"no backend", "vaults:\n  v: { secrets: [S] }\n", "backend is required"},
+		{"unknown backend", "vaults:\n  v: { backend: vault }\n", `unknown backend "vault" (backends: env, pass)`},
+		{"file is not a backend", "vaults:\n  v: { backend: file }\n", `unknown backend "file" (backends: env, pass)`},
+		{"slash in env secret name", "vaults:\n  v: { backend: env, secrets: [a/b] }\n", `"a/b"`},
+		{"env secret name with a dash", "vaults:\n  v: { backend: env, secrets: [MY-TOKEN] }\n", `"MY-TOKEN"`},
+		{"env secret name with a leading digit", "vaults:\n  v: { backend: env, secrets: [1TOKEN] }\n", `"1TOKEN"`},
+		{"duplicate secret", "vaults:\n  v: { backend: env, secrets: [S, S] }\n", "listed twice"},
+		{"absolute pass name", "vaults:\n  v: { backend: pass, secrets: [/abs] }\n", `"/abs"`},
+		{"pass name ending in a slash", "vaults:\n  v: { backend: pass, secrets: ['a/'] }\n", `"a/"`},
+		{"empty pass segment", "vaults:\n  v: { backend: pass, secrets: ['a//b'] }\n", `"a//b"`},
+		{"dot pass segment", "vaults:\n  v: { backend: pass, secrets: ['a/./b'] }\n", `"a/./b"`},
+		{"pass name starting with a dash", "vaults:\n  v: { backend: pass, secrets: ['-c'] }\n", `"-c"`},
+		{"pass name that is an option", "vaults:\n  v: { backend: pass, secrets: ['--version'] }\n", `"--version"`},
+		{"pass name with a newline", "vaults:\n  v: { backend: pass, secrets: [\"a\\nb\"] }\n", "\"a\\nb\""},
+		{"pass name with a NUL", "vaults:\n  v: { backend: pass, secrets: [\"a\\0b\"] }\n", "\"a\\x00b\""},
+		{"dot dot pass segment", "vaults:\n  v: { backend: pass, secrets: ['../x'] }\n", `"../x"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { wantProblems(t, t.TempDir(), c.yaml, c.want) })
 	}
+}
+
+func TestVaultsAreDecodedStrictly(t *testing.T) {
+	for _, bad := range []string{
+		"vaults:\n  v: { backend: pass, secrets: [S], store: /x }\n",
+		"vaults:\n  v: { backend: pass, secrets: [S], path: /x }\n",
+		"vaults:\n  v: { backend: env, secrets: { S: { from: 'env:S' } } }\n",
+	} {
+		if _, err := Parse([]byte(bad)); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestPassSecretNamesAreHierarchicalAndReferencesSplitAtTheFirstSlash(t *testing.T) {
+	resolved, _ := mustResolve(t, t.TempDir(), `
+vaults:
+  main: { backend: pass, secrets: [company/project/test] }
+egress:
+  default:
+    services:
+      deploy: { hosts: [api.example.com], inject: { header: X-Key }, secret: main/company/project/test }
+`)
+	if want := (SecretRef{Vault: "main", Name: "company/project/test", Backend: "pass"}); resolved.Secrets["main/company/project/test"] != want {
+		t.Errorf("secrets = %v", resolved.Secrets)
+	}
+	wantProblems(t, t.TempDir(), `
+vaults:
+  main: { backend: pass, secrets: [company/project/test] }
+egress:
+  default:
+    services:
+      deploy: { hosts: [api.example.com], inject: { header: X-Key }, secret: main/company/project }
+`, "main/company/project")
 }
 
 func TestResolveRejectsSecretLookingEnv(t *testing.T) {

@@ -16,10 +16,12 @@ type ResolvedProfile struct {
 }
 
 type ResolvedService struct {
-	Hosts   []string `yaml:"hosts"`
-	Inject  *Inject  `yaml:"inject,omitempty"`
-	Secret  string   `yaml:"secret,omitempty"`
-	Inspect bool     `yaml:"inspect,omitempty"`
+	Hosts  []string `yaml:"hosts"`
+	Inject *Inject  `yaml:"inject,omitempty"`
+	Secret string   `yaml:"secret,omitempty"`
+	// Placeholder is the variable the agents of the profile get, holding a stand-in the proxy swaps for the secret.
+	Placeholder string `yaml:"placeholder,omitempty"`
+	Inspect     bool   `yaml:"inspect,omitempty"`
 }
 
 const defaultProfile = "default"
@@ -127,8 +129,8 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 			current.Services[name] = builtin
 			existing = builtin
 		}
-		if existing.Inject == nil {
-			r.problems.addf("egress profile %q: service %q injects no credential (it has no inject), so a secret cannot be bound to it", profile, name)
+		if existing.Inject == nil && existing.Placeholder == "" {
+			r.problems.addf("egress profile %q: service %q has neither inject nor placeholder, so a secret cannot be bound to it", profile, name)
 			return
 		}
 		if r.checkSecret(profile, name, entry.Ref) {
@@ -157,9 +159,22 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 		r.problems.addf("egress profile %q: service %q: inject needs a header", profile, name)
 		valid = false
 	}
-	if def.Inject == nil && def.Secret != "" {
-		r.problems.addf("egress profile %q: service %q has a secret but no inject, so nothing would use it", profile, name)
+	switch {
+	case def.Inject != nil && def.Placeholder != "":
+		r.problems.addf("egress profile %q: service %q has both inject and placeholder; a service has one or the other", profile, name)
 		valid = false
+	case def.Placeholder != "" && def.Secret == "":
+		r.problems.addf("egress profile %q: service %q has a placeholder but no secret to stand for", profile, name)
+		valid = false
+	case def.Inject == nil && def.Placeholder == "" && def.Secret != "":
+		r.problems.addf("egress profile %q: service %q has a secret but neither inject nor placeholder, so nothing would use it", profile, name)
+		valid = false
+	}
+	if def.Placeholder != "" {
+		if reason := placeholderProblem(def.Placeholder); reason != "" {
+			r.problems.addf("egress profile %q: service %q: placeholder %q %s", profile, name, def.Placeholder, reason)
+			valid = false
+		}
 	}
 	if def.Secret != "" && !r.checkSecret(profile, name, def.Secret) {
 		valid = false
@@ -167,7 +182,7 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 	if !valid {
 		return
 	}
-	resolved := &ResolvedService{Hosts: slices.Clone(def.Hosts), Secret: def.Secret, Inspect: def.Inspect}
+	resolved := &ResolvedService{Hosts: slices.Clone(def.Hosts), Secret: def.Secret, Placeholder: def.Placeholder, Inspect: def.Inspect}
 	if def.Inject != nil {
 		inject := *def.Inject
 		resolved.Inject = &inject
@@ -183,23 +198,35 @@ func serviceKeys(profile *ResolvedProfile) []string {
 	return names
 }
 
-// checkSecret validates a <vault>/<secret> reference against the declared vaults.
+// checkSecret validates a <vault>/<secret> reference against the declared vaults. The reference is
+// split at the first '/': a vault name has none, a secret name can.
 func (r *egressResolver) checkSecret(profile, service, ref string) bool {
-	parts := strings.Split(ref, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	vaultName, secret, found := strings.Cut(ref, "/")
+	if !found || vaultName == "" || secret == "" {
 		r.problems.addf("egress profile %q: service %q: invalid secret reference %q (want <vault>/<secret>)", profile, service, ref)
 		return false
 	}
-	vault, ok := r.file.Vaults[parts[0]]
+	vault, ok := r.file.Vaults[vaultName]
 	if !ok {
-		r.problems.addf("egress profile %q: service %q: secret reference %q names unknown vault %q", profile, service, ref, parts[0])
+		r.problems.addf("egress profile %q: service %q: secret reference %q names unknown vault %q", profile, service, ref, vaultName)
 		return false
 	}
-	if _, ok := vault.Secrets[parts[1]]; !ok {
-		r.problems.addf("egress profile %q: service %q: vault %q has no secret %q", profile, service, parts[0], parts[1])
+	if !slices.Contains(vault.Secrets, secret) {
+		r.problems.addf("egress profile %q: service %q: secret reference %q: vault %q does not list %q", profile, service, ref, vaultName, secret)
 		return false
 	}
 	return true
+}
+
+// placeholderProblem says why name cannot be a placeholder variable, or returns "".
+func placeholderProblem(name string) string {
+	switch {
+	case !envName.MatchString(name):
+		return "is not a valid environment variable name"
+	case placeholderReserved(name):
+		return "is a variable egzo sets itself"
+	}
+	return ""
 }
 
 // checkProfile enforces the rules that need the fully merged profile.
@@ -208,9 +235,21 @@ func (r *egressResolver) checkProfile(name string, profile *ResolvedProfile) {
 	sort.Strings(names)
 	for _, service := range names {
 		resolved := profile.Services[service]
-		if resolved.Inject != nil && resolved.Secret == "" {
-			r.problems.addf("egress profile %q: service %q injects a credential but has no secret; bind one as %s: <vault>/<secret>", name, service, service)
+		if (resolved.Inject != nil || resolved.Placeholder != "") && resolved.Secret == "" {
+			r.problems.addf("egress profile %q: service %q needs a secret; bind one as %s: <vault>/<secret>", name, service, service)
 		}
+	}
+	holders := map[string]string{}
+	for _, service := range names {
+		placeholder := profile.Services[service].Placeholder
+		if placeholder == "" {
+			continue
+		}
+		if other, taken := holders[placeholder]; taken {
+			r.problems.addf("egress profile %q: services %q and %q share the placeholder variable %s", name, other, service, placeholder)
+			continue
+		}
+		holders[placeholder] = service
 	}
 	for i, a := range names {
 		for _, b := range names[i+1:] {

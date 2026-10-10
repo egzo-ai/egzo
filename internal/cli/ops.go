@@ -119,9 +119,6 @@ func checkProject(opts *options, report func(level, format string, a ...any)) {
 	for _, warning := range p.Warnings {
 		report("warn", "%s", strings.TrimPrefix(warning, "warning: "))
 	}
-	for _, warning := range secretFileWarnings(p.Resolved.SecretSources, p.Dir) {
-		report("warn", "%s", warning)
-	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		if _, err := exec.LookPath("git"); err == nil {
 			ignored := exec.Command("git", "check-ignore", "-q", ".egzo/probe")
@@ -275,6 +272,9 @@ func newProxyRulesCommand(opts *options) *cobra.Command {
 					access := "allowed"
 					if definition.Inject != nil {
 						access = fmt.Sprintf("credential injected as %s (service %s, secret %s)", definition.Inject.Header, service, definition.Secret)
+					}
+					if definition.Placeholder != "" {
+						access = fmt.Sprintf("placeholder $%s swapped for the secret (service %s, secret %s)", definition.Placeholder, service, definition.Secret)
 					}
 					for _, host := range definition.Hosts {
 						fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", name, profileName, host, access)

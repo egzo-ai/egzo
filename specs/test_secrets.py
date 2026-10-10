@@ -78,7 +78,7 @@ def test_a_reference_to_a_name_the_vault_does_not_list_is_refused(project):
     assert "main/company/project" in result.stderr
 
 
-@pytest.mark.parametrize("name", ["/absolute", "../outside", "a//b", "a/", "a/./b"])
+@pytest.mark.parametrize("name", ["/absolute", "../outside", "a//b", "a/", "a/./b", "-c", "--version"])
 def test_a_pass_secret_name_stays_inside_the_store(project, name):
     result = project.config(spec(vaults=vault("pass", name)))
     assert result.returncode != 0
@@ -135,6 +135,14 @@ def test_the_pass_backend_runs_pass_show_with_the_name_and_its_slashes(project, 
     assert "set" in found["main/company/project/test"] and "missing" in found["main/company/project/gone"]
     assert "pass-secret-value" not in result.stdout + result.stderr
     assert (["show", "company/project/test"], "unset") in fake_pass.calls()
+
+
+def test_a_pass_directory_is_not_a_secret(project, fake_pass):
+    """`pass show company` on a directory prints a tree and succeeds: its first line must not become the secret."""
+    fake_pass.put("company/token", "value\n")
+    project.write(spec(vaults=vault("pass", "company")))
+    found = rows(project.run("secrets", "ls", env=fake_pass.env))
+    assert "directory" in found["main/company"]
 
 
 def test_secrets_ls_says_what_pass_said_about_a_secret_it_cannot_read(project, fake_pass):
