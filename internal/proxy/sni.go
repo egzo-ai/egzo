@@ -15,19 +15,31 @@ const (
 	recordTypeHandshake   = 0x16
 	handshakeClientHello  = 0x01
 	extensionServerName   = 0x0000
+	extensionECH          = 0xfe0d // the final one, which echHello in the tests sends
 	maxClientHelloRecord  = 16 << 10
 	clientHelloReadWindow = 10 * time.Second
 )
 
-var errNotClientHello = errors.New("the first bytes are not a TLS ClientHello")
-
-// With Encrypted Client Hello the name in the clear can differ from the real one, which defeats the
-// check that the tunnel carries TLS for the host it was approved for. The parser reports the extension
-// so the proxy can terminate TLS for such a hello instead of tunneling it.
-const (
-	extensionECH      = 0xfe0d
-	extensionECHDraft = 0xff03
+var (
+	errNotClientHello     = errors.New("the first bytes are not a TLS ClientHello")
+	errDuplicateExtension = errors.New("the ClientHello repeats an extension")
 )
+
+// The extension codepoints of Encrypted Client Hello. With ECH the name in the clear can differ from
+// the real one, which defeats the check that the tunnel carries TLS for the host it was approved for.
+// The parser reports any of them so the proxy can terminate TLS for such a hello instead of tunneling
+// it. Every codepoint the drafts used counts, and the legacy ESNI extension too: terminating is the safe
+// branch, and a client that sends one that is no longer standard is rare.
+var echExtensions = map[uint16]string{
+	0xfe08: "encrypted_client_hello, an ECH draft (08)",
+	0xfe09: "encrypted_client_hello, an ECH draft (09)",
+	0xfe0a: "encrypted_client_hello, an ECH draft (10)",
+	0xfe0b: "encrypted_client_hello, an ECH draft (11)",
+	0xfe0c: "encrypted_client_hello, an ECH draft (12)",
+	0xfe0d: "encrypted_client_hello, the final codepoint, from ECH draft 13 on",
+	0xff03: "encrypted_client_hello, an early ECH draft",
+	0xffce: "encrypted_server_name, the legacy ESNI that ECH replaced",
+}
 
 // readClientHello reads the client's first TLS record and returns the raw bytes, which must be
 // replayed to whoever serves the connection, the server name the client asks for ("" when it sends none)
@@ -83,6 +95,7 @@ func parseServerName(hello []byte) (name string, ech bool, err error) {
 	if !ok {
 		return "", false, errNotClientHello
 	}
+	seen := map[uint16]bool{}
 	for len(extensions) >= 4 {
 		kind := binary.BigEndian.Uint16(extensions[:2])
 		size := int(binary.BigEndian.Uint16(extensions[2:4]))
@@ -91,9 +104,14 @@ func parseServerName(hello []byte) (name string, ech bool, err error) {
 		}
 		body := extensions[4 : 4+size]
 		extensions = extensions[4+size:]
-		switch kind {
-		case extensionECH, extensionECHDraft:
+		if seen[kind] { // illegal, and parsers disagree on which one counts
+			return "", false, errDuplicateExtension
+		}
+		seen[kind] = true
+		if _, isECH := echExtensions[kind]; isECH {
 			ech = true
+		}
+		switch kind {
 		case extensionServerName:
 			found, err := serverNameFrom(body)
 			if err != nil {

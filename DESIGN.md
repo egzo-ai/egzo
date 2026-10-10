@@ -535,8 +535,12 @@ egress:
   its hello). It therefore never tunnels such a hello: if the outer SNI is the approved host it terminates TLS with the
   project CA, replaying the bytes it read (failing closed to interception, never to passthrough); a missing or different
   name is denied as for any hello. This needs no switch and no client change. A terminated-because-ECH connection is
-  logged as `intercept` (reason Encrypted Client Hello) and `close` with bytes, not per request, unless the host has
-  `inspect`. A client that does not trust the project CA fails the handshake and the audit says why. Clients that send
+  logged as `intercept` (reason Encrypted Client Hello) and `close` with bytes, not per request (a host with `inspect`
+  never gets there: it is intercepted for every client from the start and logs each request, with `inspect` and no
+  `intercept`). Every ECH codepoint of the drafts and the legacy ESNI extension count as ECH. A client that does not
+  trust the project CA fails the handshake and the audit says why and what to do. The handshake has a hard time limit
+  that a trickle of bytes cannot extend; the idle timeout counts after it. Hosts are compared lower case with one
+  trailing dot trimmed (CONNECT target and Host header alike), and a Host header that is not a plain name is a 400. Clients that send
   no ECH are tunneled as before. Hosts of services with a
   `placeholder` are intercepted too. `inspect: true` on a service intercepts its hosts only to audit them
   (off by default): the audit then has a `request` line (method, path, status; never the query string or a

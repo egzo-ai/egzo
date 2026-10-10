@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -57,25 +58,65 @@ func (l *limiter) acquire(agent string, maxPerAgent, maxTotal int) (release func
 }
 
 // idleConn gives every read and write its own deadline, so a connection that goes quiet is closed
-// while one that keeps moving data is not.
+// while one that keeps moving data is not. A deadline set on the connection from outside, such as the
+// handshake timeout or the HTTP server's header timeout, is a hard limit the idle deadline never
+// extends: a peer that sends one byte per idle period does not get past it.
 type idleConn struct {
 	net.Conn
 	idle time.Duration
+	// the deadlines set from outside, in Unix nanoseconds, 0 for none
+	readLimit, writeLimit atomic.Int64
 }
 
-func (c idleConn) Read(p []byte) (int, error) {
-	c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+func newIdleConn(conn net.Conn, idle time.Duration) *idleConn {
+	return &idleConn{Conn: conn, idle: idle}
+}
+
+// deadline is the sooner of now+idle and the limit.
+func (c *idleConn) deadline(limit *atomic.Int64) time.Time {
+	deadline := time.Now().Add(c.idle)
+	if at := limit.Load(); at != 0 && at < deadline.UnixNano() {
+		return time.Unix(0, at)
+	}
+	return deadline
+}
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	c.Conn.SetReadDeadline(c.deadline(&c.readLimit))
 	return c.Conn.Read(p)
 }
 
-func (c idleConn) Write(p []byte) (int, error) {
-	c.Conn.SetWriteDeadline(time.Now().Add(c.idle))
+func (c *idleConn) Write(p []byte) (int, error) {
+	c.Conn.SetWriteDeadline(c.deadline(&c.writeLimit))
 	return c.Conn.Write(p)
+}
+
+func limitOf(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
+}
+
+func (c *idleConn) SetDeadline(t time.Time) error {
+	c.readLimit.Store(limitOf(t))
+	c.writeLimit.Store(limitOf(t))
+	return c.Conn.SetDeadline(t)
+}
+
+func (c *idleConn) SetReadDeadline(t time.Time) error {
+	c.readLimit.Store(limitOf(t))
+	return c.Conn.SetReadDeadline(t)
+}
+
+func (c *idleConn) SetWriteDeadline(t time.Time) error {
+	c.writeLimit.Store(limitOf(t))
+	return c.Conn.SetWriteDeadline(t)
 }
 
 // copyIdle copies src to dst with an idle timeout on both sides, and reports how many bytes moved.
 func copyIdle(dst, src net.Conn, idle time.Duration) int64 {
-	n, _ := io.Copy(idleConn{dst, idle}, idleConn{src, idle})
+	n, _ := io.Copy(newIdleConn(dst, idle), newIdleConn(src, idle))
 	return n
 }
 

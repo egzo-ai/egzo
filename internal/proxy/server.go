@@ -5,6 +5,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
@@ -23,9 +24,9 @@ import (
 )
 
 const (
-	dialTimeout      = 10 * time.Second
-	handshakeTimeout = 10 * time.Second
-	allowedPort      = "443"
+	dialTimeout             = 10 * time.Second
+	defaultHandshakeTimeout = 10 * time.Second
+	allowedPort             = "443"
 )
 
 // Server is the CONNECT proxy agents use for all egress.
@@ -48,21 +49,24 @@ type Server struct {
 	MaxPerAgent int
 	MaxTotal    int
 	IdleTimeout time.Duration
-	limits      limiter
+	// HandshakeTimeout is the hard limit for a client's TLS handshake with the proxy, however it trickles.
+	HandshakeTimeout time.Duration
+	limits           limiter
 }
 
 func NewServer(ca *CA, audit *Audit) *Server {
 	dialer := &net.Dialer{Timeout: dialTimeout, Control: publicOnly}
 	return &Server{
-		MaxPerAgent: defaultMaxPerAgent,
-		MaxTotal:    defaultMaxTotal,
-		IdleTimeout: defaultIdleTimeout,
-		minter:      NewMinter(ca),
-		audit:       audit,
+		MaxPerAgent:      defaultMaxPerAgent,
+		MaxTotal:         defaultMaxTotal,
+		IdleTimeout:      defaultIdleTimeout,
+		HandshakeTimeout: defaultHandshakeTimeout,
+		minter:           NewMinter(ca),
+		audit:            audit,
 		Transport: &http.Transport{
 			ForceAttemptHTTP2:     true,
 			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   handshakeTimeout,
+			TLSHandshakeTimeout:   defaultHandshakeTimeout,
 			ResponseHeaderTimeout: 5 * time.Minute,
 			MaxIdleConnsPerHost:   4,
 			IdleConnTimeout:       90 * time.Second,
@@ -141,8 +145,13 @@ func (s *Server) authenticate(policy *Policy, agent, token string) *Profile {
 	if current == nil {
 		return nil
 	}
+	// An unknown agent takes the same path as a wrong token: the comparison always runs, on digests, so
+	// neither the answer's timing nor the token's length tells which agents exist.
 	binding, ok := (*current)[agent]
-	if !ok || binding.Token == "" || subtle.ConstantTimeCompare([]byte(binding.Token), []byte(token)) != 1 {
+	expected := sha256.Sum256([]byte(binding.Token))
+	given := sha256.Sum256([]byte(token))
+	match := subtle.ConstantTimeCompare(expected[:], given[:]) == 1
+	if !ok || binding.Token == "" || !match {
 		return nil
 	}
 	profile, ok := policy.Profiles[binding.Profile]
@@ -171,7 +180,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad CONNECT target", http.StatusBadRequest)
 		return
 	}
-	host = strings.ToLower(host)
+	host = normalizeHost(host)
 
 	policy := s.policy.Load()
 	if policy == nil {
@@ -249,6 +258,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.tunnel(conn, agent, host)
 }
 
+// normalizeHost is the form a host is compared and logged in: lower case, without the one trailing dot
+// that names the same host in DNS (the configuration is normalized the same way).
+func normalizeHost(host string) string {
+	return strings.TrimSuffix(strings.ToLower(host), ".")
+}
+
 // proxyCredentials reads the agent name and token from Proxy-Authorization.
 func proxyCredentials(r *http.Request) (agent, token string, ok bool) {
 	header := r.Header.Get("Proxy-Authorization")
@@ -288,7 +303,7 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 		// The hello may hide the server it really asks for, and the proxy cannot tell a harmless one from
 		// one that does: never tunnel it, terminate TLS here and check the real certificate ourselves.
 		// The upstream is not contacted until a request inside names the approved host.
-		s.terminate(&prefixedConn{Conn: client, pending: hello}, agent, host, Decision{}, started, true)
+		s.terminate(&prefixedConn{Conn: client, pending: hello}, agent, host, Decision{}, true)
 		return
 	}
 
@@ -339,6 +354,13 @@ func (c *prefixedConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
+func (c *prefixedConn) CloseWrite() error {
+	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return nil
+}
+
 // countingConn counts the bytes that move on the connection.
 type countingConn struct {
 	net.Conn
@@ -357,26 +379,21 @@ func (c *countingConn) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (c *prefixedConn) CloseWrite() error {
-	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
-		return closer.CloseWrite()
-	}
-	return nil
-}
-
 // intercept terminates the agent's TLS with a certificate from the project CA so the proxy can add
 // the credential, then forwards each request to the real host. Toward the agent it always speaks
 // HTTP/1.1, whatever the upstream speaks.
 func (s *Server) intercept(client net.Conn, agent, host string, decision Decision) {
-	s.terminate(client, agent, host, decision, time.Now(), false)
+	s.terminate(client, agent, host, decision, false)
 }
 
 // terminate is intercept for a connection that may have been read from already. With ech the client
 // sent an Encrypted Client Hello at a plain tunnel: the connection is logged like a tunnel (intercept,
-// then close with the bytes that went through) and its requests are not, unless the host is inspected.
-func (s *Server) terminate(client net.Conn, agent, host string, decision Decision, started time.Time, ech bool) {
+// then close with the bytes that went through) and its requests are not. A host that is inspected never
+// gets here with ech: it is intercepted from the start, and its requests are logged.
+func (s *Server) terminate(client net.Conn, agent, host string, decision Decision, ech bool) {
 	var counted *countingConn
 	if ech {
+		started := time.Now()
 		counted = &countingConn{Conn: client}
 		client = counted
 		s.audit.Log(Event{Agent: agent, Host: host, Action: "intercept", Reason: "the client sent Encrypted Client Hello, which can hide the server it asks for, so TLS is terminated here instead of tunneled"})
@@ -384,7 +401,10 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 			s.audit.Log(Event{Agent: agent, Host: host, Action: "close", BytesUp: counted.read.Load(), BytesDown: counted.written.Load(), DurationMs: time.Since(started).Milliseconds()})
 		}()
 	}
-	tlsConn := tls.Server(idleConn{client, s.IdleTimeout}, &tls.Config{
+	// The idle timeout applies from the first byte, but the handshake has a hard limit of its own that a
+	// trickle of bytes cannot extend.
+	idle := newIdleConn(client, s.IdleTimeout)
+	tlsConn := tls.Server(idle, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"http/1.1"},
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -394,7 +414,7 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 			return s.minter.Certificate(host)
 		},
 	})
-	client.SetDeadline(time.Now().Add(handshakeTimeout))
+	idle.SetDeadline(time.Now().Add(s.HandshakeTimeout))
 	if err := tlsConn.Handshake(); err != nil {
 		// Clients such as Claude Code open connections ahead of time and drop them: not a denial.
 		action := "error"
@@ -403,13 +423,13 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 		}
 		reason := "tls handshake: " + err.Error()
 		if ech {
-			reason = "the client sent Encrypted Client Hello, so egzo had to terminate TLS, and it probably does not trust the project CA (" + reason + ")"
+			reason = "the client sent Encrypted Client Hello, so egzo had to terminate TLS, and it probably does not trust the project CA (" + reason + "): the client must trust the project CA (the harness images do it with certutil, see docs/browser.md)"
 		}
 		s.audit.Log(Event{Agent: agent, Host: host, Action: action, Reason: reason})
 		client.Close()
 		return
 	}
-	client.SetDeadline(time.Time{})
+	idle.SetDeadline(time.Time{})
 
 	if !ech {
 		action := "inspect"
@@ -455,12 +475,13 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Requests inside the tunnel may only go to the host the tunnel was approved for.
-		requested := r.Host
-		if h, _, err := net.SplitHostPort(requested); err == nil {
-			requested = h
+		requested, ok := requestHost(r.Host)
+		if !ok {
+			http.Error(w, "bad Host header", http.StatusBadRequest)
+			return
 		}
-		if !strings.EqualFold(requested, host) {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "request host " + requested + " differs from the approved tunnel host"})
+		if requested != host {
+			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "request host " + quoteName(requested) + " differs from the approved tunnel host"})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
@@ -476,6 +497,31 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 		}
 		proxy.ServeHTTP(w, r)
 	})
+}
+
+// requestHost is the normalized host name of a Host header, with any port dropped. Anything that is not a
+// plain name or IPv4 address with an optional numeric port is refused (false), so a header that some
+// parser reads differently, such as "evil@example.com" or "example.com:443/x", is never compared. A
+// bracketed IPv6 literal comes back with its brackets and so matches no approved name.
+func requestHost(header string) (string, bool) {
+	if strings.HasPrefix(header, "[") {
+		return strings.ToLower(header), !strings.ContainsAny(header, "@/\\ ")
+	}
+	name, port, _ := strings.Cut(header, ":")
+	if name == "" || strings.Contains(port, ":") {
+		return "", false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return "", false
+		}
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_') {
+			return "", false
+		}
+	}
+	return normalizeHost(name), true
 }
 
 type agentPathKey struct{}
