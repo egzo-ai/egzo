@@ -305,6 +305,53 @@ func TestRequiresValidProxyCredentials(t *testing.T) {
 	}
 }
 
+func TestNoCredentialsIsAChallengeAndWrongCredentialsAreADenial(t *testing.T) {
+	r := newRig(t, nil)
+	r.setPolicy("coder", "tok", []string{"*"})
+	connect := func(header string) *http.Response {
+		conn, err := net.Dial("tcp", strings.TrimPrefix(r.front.URL, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		io.WriteString(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n"+header+"\r\n")
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	basic := func(login string) string {
+		return "Proxy-Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(login)) + "\r\n"
+	}
+	response := connect("")
+	if response.StatusCode != http.StatusProxyAuthRequired || response.Header.Get("Proxy-Authenticate") == "" {
+		t.Fatalf("no credentials: %d, challenge %q", response.StatusCode, response.Header.Get("Proxy-Authenticate"))
+	}
+	if events := r.events("example.com"); len(events) != 1 || events[0].Action != "challenge" || events[0].Agent != "" || events[0].Reason == "" {
+		t.Fatalf("events after a bare CONNECT = %+v", events)
+	}
+
+	headers := []string{basic("coder:nope"), basic("ghost:tok"), "Proxy-Authorization: Bearer abc\r\n", "Proxy-Authorization: Basic !!!\r\n", "Proxy-Authorization: \r\n"}
+	for _, header := range headers {
+		if got := connect(header).StatusCode; got != http.StatusProxyAuthRequired {
+			t.Errorf("%q: status = %d", header, got)
+		}
+	}
+	events := r.events("example.com")[1:]
+	if len(events) != len(headers) {
+		t.Fatalf("events = %+v", events)
+	}
+	for _, event := range events {
+		if event.Action != "deny" || event.Reason != "invalid proxy credentials" {
+			t.Errorf("event = %+v", event)
+		}
+	}
+	if events[0].Agent != "coder" || events[1].Agent != "ghost" || events[2].Agent != "" {
+		t.Errorf("agents = %q, %q, %q", events[0].Agent, events[1].Agent, events[2].Agent)
+	}
+}
+
 func TestOnlyPort443IsReachable(t *testing.T) {
 	r := newRig(t, nil)
 	r.setPolicy("coder", "tok", []string{"*"})
@@ -447,7 +494,7 @@ func TestParseServerNameHandlesOddHellos(t *testing.T) {
 		"wrong":     {0x02, 0, 0, 1, 0},
 		"truncated": {0x01, 0, 0, 40, 3, 3},
 	} {
-		if got, err := parseServerName(hello); err == nil && got != "" {
+		if got, _, err := parseServerName(hello); err == nil && got != "" {
 			t.Errorf("%s: parsed %q from garbage", name, got)
 		}
 	}

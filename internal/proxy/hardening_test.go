@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -291,40 +292,356 @@ func serverNameExtension(name string) []byte {
 
 func TestParseServerNameFindsTheNameAmongOtherExtensions(t *testing.T) {
 	hello := buildHello(extension(0x0010, []byte{0, 0}), serverNameExtension("example.com"), extension(0x002b, []byte{2, 3, 4}))
-	if name, err := parseServerName(hello); err != nil || name != "example.com" {
-		t.Errorf("name = %q, err = %v", name, err)
+	if name, ech, err := parseServerName(hello); err != nil || name != "example.com" || ech {
+		t.Errorf("name = %q, ech = %v, err = %v", name, ech, err)
 	}
 }
 
-func TestAClientHelloWithEncryptedClientHelloIsRefused(t *testing.T) {
+func TestParseServerNameReportsEncryptedClientHelloAndStillReturnsTheOuterName(t *testing.T) {
 	for _, kind := range []uint16{0xfe0d, 0xff03} {
-		hello := buildHello(serverNameExtension("example.com"), extension(kind, []byte{0, 1, 2, 3}))
-		if _, err := parseServerName(hello); err == nil || !strings.Contains(err.Error(), "Encrypted Client Hello") {
-			t.Errorf("extension %#x: err = %v", kind, err)
+		// the name may come before or after the extension
+		for _, hello := range [][]byte{
+			buildHello(serverNameExtension("example.com"), extension(kind, []byte{0, 1, 2, 3})),
+			buildHello(extension(kind, []byte{0, 1, 2, 3}), serverNameExtension("example.com")),
+		} {
+			if name, ech, err := parseServerName(hello); err != nil || name != "example.com" || !ech {
+				t.Errorf("extension %#x: name = %q, ech = %v, err = %v", kind, name, ech, err)
+			}
+		}
+		if name, ech, err := parseServerName(buildHello(extension(kind, nil))); err != nil || name != "" || !ech {
+			t.Errorf("extension %#x without a name: name = %q, ech = %v, err = %v", kind, name, ech, err)
 		}
 	}
 }
 
-func TestAnECHClientHelloIsDeniedAtTheTunnel(t *testing.T) {
+// echHello is a ClientHello record a TLS 1.3 server can answer, with the server name and the Encrypted
+// Client Hello extension of the shape a browser sends as GREASE, as specs/fixtures/tls_client.py does.
+func echHello(name string, ech bool) []byte {
+	extensions := [][]byte{}
+	if name != "" {
+		extensions = append(extensions, serverNameExtension(name))
+	}
+	extensions = append(extensions,
+		extension(0x000a, []byte{0, 2, 0, 0x1d}),
+		extension(0x000d, []byte{0, 6, 4, 3, 8, 4, 8, 7}),
+		extension(0x002b, []byte{2, 3, 4}),
+		extension(0x0033, append([]byte{0, 36, 0, 0x1d, 0, 32}, bytes.Repeat([]byte{7}, 32)...)),
+	)
+	if ech {
+		extensions = append(extensions, extension(extensionECH, bytes.Join([][]byte{{0, 0, 1, 0, 1, 9, 0, 32}, bytes.Repeat([]byte{5}, 32), {0, 176}, bytes.Repeat([]byte{6}, 176)}, nil)))
+	}
+	hello := buildHello(extensions...)
+	return append([]byte{recordTypeHandshake, 3, 1, byte(len(hello) >> 8), byte(len(hello))}, hello...)
+}
+
+// readServerHello reads what a TLS server answers a hello with and reports whether it was a ServerHello.
+func readServerHello(conn io.Reader) bool {
+	header := make([]byte, 6)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return false
+	}
+	return header[0] == recordTypeHandshake && header[5] == 0x02
+}
+
+// events parses the audit lines of one host.
+func (r *rig) events(host string) []Event {
+	var out []Event
+	for _, line := range strings.Split(r.audit.String(), "\n") {
+		var event Event
+		if json.Unmarshal([]byte(line), &event) == nil && event.Host == host {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func actions(events []Event) []string {
+	var out []string
+	for _, event := range events {
+		out = append(out, event.Action)
+	}
+	return out
+}
+
+func (r *rig) hasAction(host, action string) bool {
+	for _, event := range r.events(host) {
+		if event.Action == action {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAnECHClientHelloForTheApprovedHostIsTerminatedAndTheUpstreamIsNeverDialed(t *testing.T) {
 	r := newRig(t, nil)
+	var dialed atomic.Bool
+	r.proxy.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed.Store(true)
+		return nil, io.ErrClosedPipe
+	}
 	r.setPolicy("coder", "tok", []string{"example.com"})
 	conn := r.tunnelTo("example.com")
-	hello := buildHello(serverNameExtension("example.com"), extension(0xfe0d, []byte{0, 1}))
-	record := append([]byte{recordTypeHandshake, 3, 1, byte(len(hello) >> 8), byte(len(hello))}, hello...)
-	conn.Write(record)
-	waitFor(t, func() bool { return strings.Contains(r.audit.String(), "Encrypted Client Hello") })
+	conn.Write(echHello("example.com", true))
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if !readServerHello(conn) {
+		t.Fatal("the proxy did not answer with a ServerHello: the hello was refused or tunneled")
+	}
+	conn.Close()
+	waitFor(t, func() bool { return r.hasAction("example.com", "close") })
+	if dialed.Load() {
+		t.Error("an ECH hello was tunneled: the upstream was dialed")
+	}
 	if r.requests() != 0 {
 		t.Error("the upstream was contacted")
 	}
+	events := r.events("example.com")
+	if got := actions(events); got[0] != "intercept" || got[len(got)-1] != "close" || len(got) != 3 || (got[1] != "error" && got[1] != "aborted") { // the client left after the ServerHello
+		t.Fatalf("actions = %v", got)
+	}
+	if !strings.Contains(events[0].Reason, "Encrypted Client Hello") {
+		t.Errorf("reason = %q", events[0].Reason)
+	}
+	closed := events[len(events)-1]
+	if closed.BytesUp < int64(len(echHello("example.com", true))) || closed.BytesDown == 0 {
+		t.Errorf("close: up %d, down %d", closed.BytesUp, closed.BytesDown)
+	}
+}
+
+func TestAnECHClientHelloSentRightBehindCONNECTIsTerminated(t *testing.T) {
+	r := newRig(t, nil)
+	r.setPolicy("coder", "tok", []string{"example.com"})
+	conn, err := net.Dial("tcp", strings.TrimPrefix(r.front.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	auth := base64.StdEncoding.EncodeToString([]byte("coder:tok"))
+	conn.Write(append([]byte("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nProxy-Authorization: Basic "+auth+"\r\n\r\n"), echHello("example.com", true)...))
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reader := bufio.NewReader(conn)
+	if response, err := http.ReadResponse(reader, nil); err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT: %v %v", response, err)
+	}
+	if !readServerHello(reader) {
+		t.Fatal("a hello sent right behind CONNECT was lost")
+	}
+}
+
+func TestAHelloWithAnotherOrNoServerNameIsDeniedNeverTerminatedWithOrWithoutECH(t *testing.T) {
+	for name, hello := range map[string][]byte{
+		"other name":         echHello("other.example", true),
+		"no name":            echHello("", true),
+		"other name, no ECH": echHello("other.example", false),
+		"no name, no ECH":    echHello("", false),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, nil)
+			var dialed atomic.Bool
+			r.proxy.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+				dialed.Store(true)
+				return nil, io.ErrClosedPipe
+			}
+			r.setPolicy("coder", "tok", []string{"example.com"})
+			conn := r.tunnelTo("example.com")
+			conn.Write(hello)
+			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if n, _ := conn.Read(make([]byte, 1)); n != 0 {
+				t.Error("the proxy answered a hello with a name it did not approve")
+			}
+			waitFor(t, func() bool { return r.hasAction("example.com", "deny") })
+			for _, event := range r.events("example.com") {
+				switch event.Action {
+				case "deny":
+					if !strings.Contains(event.Reason, "server name") {
+						t.Errorf("reason = %q", event.Reason)
+					}
+				case "intercept", "allow", "close":
+					t.Errorf("unexpected %q event", event.Action)
+				}
+			}
+			if dialed.Load() {
+				t.Error("the upstream was dialed")
+			}
+		})
+	}
+}
+
+func TestAnECHClientHelloForAHostTheProfileDoesNotAllowIsRefusedAtCONNECT(t *testing.T) {
+	r := newRig(t, nil)
+	r.setPolicy("coder", "tok", []string{"example.com"})
+	response, _ := connectRequest(t, r, "other.example", "443")
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	if r.hasAction("other.example", "intercept") {
+		t.Error("a host outside the profile was terminated")
+	}
+}
+
+// terminated runs the ECH path of a connection (as the tunnel does once it saw the hello) over a pipe and
+// returns the client side.
+func terminated(t *testing.T, r *rig, host string) (client net.Conn, done chan struct{}) {
+	t.Helper()
+	client, server := net.Pipe()
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		r.proxy.terminate(server, "coder", host, Decision{}, time.Now(), true)
+	}()
+	t.Cleanup(func() { client.Close() })
+	return client, done
+}
+
+func TestARequestInsideATerminatedConnectionIsForwardedUnloggedAndTheConnectionIsLoggedOnClose(t *testing.T) {
+	r := newRig(t, nil)
+	client, done := terminated(t, r, "example.com")
+	web := &http.Client{Transport: &http.Transport{
+		DialContext:     func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		TLSClientConfig: &tls.Config{RootCAs: certPool(r.ca)},
+	}}
+	response, err := web.Get("https://example.com/some/page?q=zq9query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := body(t, response); got != "upstream says hello" {
+		t.Errorf("body = %q", got)
+	}
+	web.CloseIdleConnections()
+	client.Close()
+	<-done
+	log := r.audit.String()
+	if strings.Contains(log, `"action":"request"`) || strings.Contains(log, "some/page") || strings.Contains(log, "zq9query") {
+		t.Errorf("a terminated connection logged its requests:\n%s", log)
+	}
+	events := r.events("example.com")
+	if got := actions(events); len(got) != 2 || got[0] != "intercept" || got[1] != "close" {
+		t.Fatalf("actions = %v", got)
+	}
+	if events[1].BytesUp == 0 || events[1].BytesDown == 0 {
+		t.Errorf("close: up %d, down %d", events[1].BytesUp, events[1].BytesDown)
+	}
+}
+
+func TestARequestForAnotherHostInsideATerminatedConnectionGets421(t *testing.T) {
+	r := newRig(t, nil)
+	client, done := terminated(t, r, "example.com")
+	client.SetDeadline(time.Now().Add(5 * time.Second))
+	conn := tls.Client(client, &tls.Config{ServerName: "example.com", RootCAs: certPool(r.ca)})
+	io.WriteString(conn, "GET / HTTP/1.1\r\nHost: other.example\r\n\r\n")
+	response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusMisdirectedRequest {
+		t.Errorf("status = %d", response.StatusCode)
+	}
+	if r.requests() != 0 {
+		t.Error("the upstream was contacted")
+	}
+	client.Close()
+	<-done
+}
+
+func TestATerminatedConnectionVerifiesTheUpstreamCertificate(t *testing.T) {
+	r := newRig(t, nil)
+	r.proxy.Transport = &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, r.upstream.Listener.Addr().String())
+		},
+		TLSClientConfig: &tls.Config{RootCAs: certPool(r.ca)}, // does not trust the upstream
+	}
+	client, done := terminated(t, r, "example.com")
+	web := &http.Client{Transport: &http.Transport{
+		DialContext:     func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		TLSClientConfig: &tls.Config{RootCAs: certPool(r.ca)},
+	}}
+	response, err := web.Get("https://example.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", response.StatusCode)
+	}
+	if r.requests() != 0 {
+		t.Error("an unverified upstream was talked to")
+	}
+	client.Close()
+	<-done
+}
+
+func TestAHandshakeFailureAfterECHSaysWhyAndAnInterceptedHostKeepsTheGenericMessage(t *testing.T) {
+	r := newRig(t, nil)
+	client, done := terminated(t, r, "example.com")
+	client.SetDeadline(time.Now().Add(5 * time.Second))
+	tls.Client(client, &tls.Config{ServerName: "example.com"}).Handshake() // does not trust the project CA
+	client.Close()
+	<-done
+	var reason string
+	for _, event := range r.events("example.com") {
+		if event.Action == "error" || event.Action == "aborted" {
+			reason = event.Reason
+		}
+	}
+	for _, want := range []string{"Encrypted Client Hello", "does not trust the project CA", "terminate TLS"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q lacks %q", reason, want)
+		}
+	}
+	if !r.hasAction("example.com", "close") {
+		t.Error("no close event")
+	}
+
+	r = newRig(t, nil)
+	r.setPolicy("coder", "tok", nil, anthropic)
+	conn := r.tunnelTo("example.com")
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	tls.Client(conn, &tls.Config{ServerName: "example.com"}).Handshake()
+	conn.Close()
+	waitFor(t, func() bool { return strings.Contains(r.audit.String(), "tls handshake") })
+	if strings.Contains(r.audit.String(), "Encrypted Client Hello") {
+		t.Errorf("the generic failure blames ECH:\n%s", r.audit.String())
+	}
+}
+
+func TestATerminatedECHConnectionHoldsItsConnectionSlotUntilItEnds(t *testing.T) {
+	r := newRig(t, nil)
+	r.proxy.MaxPerAgent = 1
+	r.proxy.IdleTimeout = 300 * time.Millisecond
+	r.setPolicy("coder", "tok", []string{"example.com"})
+	conn := r.tunnelTo("example.com")
+	conn.Write(echHello("example.com", true))
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if !readServerHello(conn) {
+		t.Fatal("no ServerHello")
+	}
+	if response, _ := connectRequest(t, r, "example.com", "443"); response.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("a second connection got status %d while the first was terminated", response.StatusCode)
+	}
+	// the client goes quiet: the idle timeout ends the connection, which frees the slot
+	waitFor(t, func() bool { return r.hasAction("example.com", "close") })
+	waitFor(t, func() bool {
+		response, c := connectRequest(t, r, "example.com", "443")
+		c.Close()
+		return response.StatusCode == http.StatusOK
+	})
 }
 
 func TestParseServerNameHandlesFragmentsAndLongNamesWithoutPanicking(t *testing.T) {
-	good := buildHello(serverNameExtension("example.com"))
-	for i := 0; i < len(good); i++ {
-		parseServerName(good[:i]) // must not panic on any truncation
+	for _, good := range [][]byte{buildHello(serverNameExtension("example.com")), echHello("example.com", true)[5:]} {
+		for i := 0; i < len(good); i++ {
+			parseServerName(good[:i]) // must not panic on any truncation
+		}
+		for i := range good { // nor on a damaged byte
+			damaged := append([]byte(nil), good...)
+			damaged[i] ^= 0xff
+			parseServerName(damaged)
+		}
 	}
-	if _, err := parseServerName(buildHello(extension(extensionServerName, []byte{0xff, 0xff, 0, 0xff, 0xff}))); err == nil {
+	if _, _, err := parseServerName(buildHello(extension(extensionServerName, []byte{0xff, 0xff, 0, 0xff, 0xff}))); err == nil {
 		t.Error("a server name list longer than its extension was accepted")
+	}
+	if _, _, err := parseServerName(buildHello(extension(extensionECH, nil), extension(extensionServerName, []byte{0xff, 0xff, 0, 0xff, 0xff}))); err == nil {
+		t.Error("a damaged name next to an ECH extension was accepted")
 	}
 }
 
