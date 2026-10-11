@@ -186,8 +186,6 @@ func TestInitInAGitRepositoryUsesTheOriginAndLeavesGitignoreAlone(t *testing.T) 
 	}
 }
 
-func ptr(s string) *string { return &s }
-
 func TestContains(t *testing.T) {
 	sorted := []string{"a", "c", "e"}
 	for value, want := range map[string]bool{"a": true, "c": true, "e": true, "b": false, "z": false, "": false} {

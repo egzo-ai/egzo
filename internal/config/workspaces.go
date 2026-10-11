@@ -34,7 +34,7 @@ func resolveWorkspaces(file *File, p *problems) map[string]ResolvedWorkspace {
 		if workspace.Git != nil {
 			checkGit(name, workspace.Git, p)
 		}
-		resolved[name] = ResolvedWorkspace{Git: workspace.Git}
+		resolved[name] = ResolvedWorkspace(workspace)
 	}
 	return resolved
 }
