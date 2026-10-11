@@ -110,6 +110,22 @@ class Project:
         """The engine name of an instance's container: `<project>-<instance>`."""
         return f"{self.name}-{instance}"
 
+    def volume(self, workspace):
+        """The volume of a directory workspace."""
+        return f"{self.name}_ws.{workspace}"
+
+    def base_volume(self, workspace):
+        """The volume of a git workspace's base clone."""
+        return f"{self.name}_ws.{workspace}.base"
+
+    def worktree_volume(self, workspace, instance):
+        """The volume of an instance's worktree of a git workspace."""
+        return f"{self.name}_ws.{workspace}.wt.{instance}"
+
+    def left_in_directory(self):
+        """What is in the project directory besides what the user wrote: egzo makes nothing there."""
+        return sorted(str(p.relative_to(self.root)) for p in self.root.rglob("*") if p.name != "egzo.yaml")
+
     def up(self, document=None, **kwargs):
         """`egzo up`, which must succeed. With a document, writes it first. A template starts nothing:
         use spawn (or start) for an agent."""
@@ -281,6 +297,20 @@ class Engine:
     def exec(self, container, *command, detach=False):
         flags = ["-d"] if detach else []
         return self.run("exec", *flags, container, *command)
+
+    def volume_exists(self, name):
+        return self.run("volume", "inspect", name).returncode == 0
+
+    def in_volumes(self, volumes, command, *, read_only=False, workdir=None):
+        """Run `sh -c command` as root in a throwaway container (the spec agent image: alpine and git) that mounts
+        volumes, a dict of volume name to mount point. This is how the specs look inside a workspace volume, which
+        the host cannot browse."""
+        flags = ["--rm", "--network", "none", "-u", "0"]
+        for name, target in volumes.items():
+            flags += ["-v", f"{name}:{target}{':ro' if read_only else ''}"]
+        if workdir:
+            flags += ["-w", workdir]
+        return self.run("run", *flags, "--entrypoint", "sh", self.agent_image(), "-c", command)
 
     def _list(self, kind, project):
         listing = {

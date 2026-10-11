@@ -46,19 +46,11 @@ def test_init_mounts_nothing_from_the_directory(project):
         assert all("host_path" not in mount for mount in agent["workspaces"])
 
 
-def test_init_in_a_git_repository_ignores_the_workspace_data(project):
+def test_init_leaves_gitignore_alone_because_egzo_keeps_nothing_in_the_directory(project):
     git(project, "init", "-q")
+    (project.root / ".gitignore").write_text("node_modules/\n")
     assert project.run("project", "init").returncode == 0
-    lines = (project.root / ".gitignore").read_text().splitlines()
-    assert ".egzo/" in lines and "workspaces/" in lines
-
-
-def test_init_does_not_duplicate_the_ignore_entry(project):
-    git(project, "init", "-q")
-    (project.root / ".gitignore").write_text("node_modules/\n.egzo/\nworkspaces/\n")
-    assert project.run("project", "init").returncode == 0
-    lines = (project.root / ".gitignore").read_text().splitlines()
-    assert lines.count(".egzo/") == 1 and lines.count("workspaces/") == 1
+    assert (project.root / ".gitignore").read_text() == "node_modules/\n"
 
 
 def test_init_outside_a_git_repository_leaves_gitignore_alone(project):

@@ -68,6 +68,14 @@ def test_a_prompt_that_is_not_an_existing_file_is_rejected(project):
     assert project.config(spec(agents={"coder": agent(harness="custom", image="alpine", prompt="./prompts/missing.md")})).returncode == 0
 
 
+def test_a_prompt_larger_than_64_kb_is_rejected_because_it_travels_in_the_template(project):
+    (project.root / "prompts").mkdir()
+    (project.root / "prompts" / "big.md").write_text("x" * (64 * 1024 + 1))
+    result = project.config(spec(agents={"coder": agent(harness="custom", image="alpine", prompt="./prompts/big.md")}))
+    assert result.returncode != 0
+    assert "prompts/big.md" in result.stderr and "64 KB" in result.stderr
+
+
 # --- names are identities: they become containers, networks, volumes, DNS names and refs ------------------
 
 
@@ -171,17 +179,6 @@ def test_a_workdir_cannot_climb_out_of_its_workspace(project):
     assert "workdir" in result.stderr
 
 
-def test_a_host_directory_holding_the_engine_socket_is_warned_about(project):
-    result = project.config(spec(workspaces={"run": {"path": "/var/run"}}, agents={"coder": agent(harness="custom", image="alpine", workspaces=["run"])}))
-    assert result.returncode == 0
-    assert "docker.sock" in result.stderr
-
-
-def test_mounting_the_filesystem_root_is_rejected(project):
-    result = project.config(spec(workspaces={"root": {"path": "/"}}, agents={"coder": agent(harness="custom", image="alpine", workspaces=["root"])}))
-    assert result.returncode != 0
-
-
 # --- unknown keys: every one is reported, where it is, with a suggestion for a typo -------------------------------------
 
 
@@ -189,7 +186,7 @@ def test_an_unknown_key_says_where_it_is_and_what_the_valid_keys_are(project):
     result = project.config(spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "mode": "clone"}}))
     assert result.returncode != 0
     assert 'egzo.yaml:' in result.stderr
-    assert 'workspaces.repo: unknown key "mode" (valid keys: git, path)' in result.stderr
+    assert 'workspaces.repo: unknown key "mode" (valid keys: git)' in result.stderr
     assert "worktree" not in result.stderr  # no story about what the key used to do
 
 
@@ -200,18 +197,18 @@ def test_a_typo_gets_a_suggestion(project):
 
 
 def test_every_unknown_key_is_reported_not_only_the_first(project):
-    result = project.config(spec(nonsense=1, agents={"coder": agent(imge="x", harnes="y")}, workspaces={"w": {"pth": "./w"}}))
+    result = project.config(spec(nonsense=1, agents={"coder": agent(imge="x", harnes="y")}, workspaces={"w": {"gti": "./w"}}))
     assert result.returncode != 0
-    for expected in ('unknown key "nonsense"', 'unknown key "imge"', 'unknown key "harnes"', 'unknown key "pth"'):
+    for expected in ('unknown key "nonsense"', 'unknown key "imge"', 'unknown key "harnes"', 'unknown key "gti"'):
         assert expected in result.stderr
     assert "yaml: unmarshal errors" not in result.stderr
 
 
 def test_an_unknown_key_is_reported_with_its_line_and_column(project):
-    project.write("name: demo\nworkspaces:\n  repo:\n    pth: ./x\n")
+    project.write("name: demo\nworkspaces:\n  repo:\n    gti: ./x\n")
     result = project.run("project", "check", "--resolved")
     assert result.returncode != 0
-    assert 'egzo.yaml:4:5: workspaces.repo: unknown key "pth", did you mean "path"?' in result.stderr
+    assert 'egzo.yaml:4:5: workspaces.repo: unknown key "gti", did you mean "git"?' in result.stderr
 
 
 def test_an_unknown_key_in_a_service_definition_is_reported_the_same_way(project):

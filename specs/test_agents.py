@@ -91,45 +91,82 @@ def test_down_removes_the_agent_networks_too(live_project, engine, agent_image):
     assert not [r for r in engine.resources(live_project.name) if r.kind in ("container", "network")]
 
 
-def test_a_workspace_without_a_source_is_a_directory_in_the_project_and_survives_down(live_project, engine, agent_image):
-    up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
-    directory = live_project.root / "workspaces" / "scratch"
-    assert directory.is_dir() and directory.stat().st_uid == __import__("os").getuid()
-    assert not [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
+def test_a_directory_workspace_is_a_volume_made_by_up_owned_by_the_invoking_user(live_project, engine, agent_image):
+    import os
+
+    live_project.up(spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
+    volume = [r for r in engine.resources(live_project.name) if r.name == live_project.volume("scratch")]
+    assert [(r.kind, r.labels[f"{LABEL_PREFIX}kind"], r.labels[f"{LABEL_PREFIX}service"]) for r in volume] == [("volume", "workspace", "scratch")]
+    assert f"{LABEL_PREFIX}instance" not in volume[0].labels, "a directory workspace belongs to the project, not to an instance"
+    owner = engine.in_volumes({live_project.volume("scratch"): "/w"}, "stat -c %u:%g /w")
+    assert owner.stdout.strip() == f"{os.getuid()}:{os.getgid()}"
+    assert not (live_project.root / "workspaces").exists(), "nothing is made in the project directory"
+
+
+def test_a_directory_workspace_survives_down_and_a_new_up_finds_it(live_project, engine, agent_image):
+    document = spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])})
+    up(live_project, document)
     assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo kept > /workspace/scratch/note").returncode == 0
-    assert live_project.run("project", "down", "--force").returncode == 0
-    assert (directory / "note").read_text() == "kept\n"
+    down = live_project.run("project", "down", "--force")
+    assert down.returncode == 0, down.stderr
+    assert "scratch" in down.stdout, "down says which workspaces it keeps"
+    assert [r.name for r in engine.resources(live_project.name)] == [live_project.volume("scratch")]
+    up(live_project, document)
+    assert exec_as(engine, live_project, "coder-1", "cat", "/workspace/scratch/note").stdout == "kept\n"
 
 
-def test_a_workspace_directory_is_created_empty_when_it_is_missing_at_spawn_and_never_deleted(live_project, engine, agent_image):
-    up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
-    directory = live_project.root / "data"
+def test_rm_never_deletes_a_directory_workspace(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
+    assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo mine > /workspace/data/f").returncode == 0
     assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
-    assert directory.is_dir(), "rm never deletes a directory workspace"
-    directory.rmdir()
+    assert engine.volume_exists(live_project.volume("data"))
     assert live_project.spawn("coder") == "coder-1"
-    assert directory.is_dir() and list(directory.iterdir()) == []
-    assert live_project.run("project", "down", "--force").returncode == 0
-    assert directory.is_dir()
+    assert exec_as(engine, live_project, "coder-1", "cat", "/workspace/data/f").stdout == "mine\n"
 
 
-def test_agent_start_creates_a_missing_directory_workspace(live_project, engine, agent_image):
-    up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
+def test_agent_start_gives_a_stopped_agent_back_the_workspace_it_had(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
+    assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo mine > /workspace/data/f").returncode == 0
     assert live_project.run("agent", "stop", "coder-1").returncode == 0
-    (live_project.root / "data").rmdir()
     started = live_project.run("agent", "start", "coder-1")
     assert started.returncode == 0, started.stderr
-    assert (live_project.root / "data").is_dir()
-    assert engine.instance(live_project.name, "coder-1").raw["State"]["Running"] is True
+    assert exec_as(engine, live_project, "coder-1", "cat", "/workspace/data/f").stdout == "mine\n"
 
 
-def test_a_read_only_host_directory_cannot_be_written(live_project, engine, agent_image):
-    docs = live_project.mkdir("docs")
-    (docs / "readme.txt").write_text("from the host")
-    up(live_project, spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": custom(agent_image, workspaces=["docs:ro"])}))
+def test_a_read_only_workspace_cannot_be_written_by_the_agent(live_project, engine, agent_image):
+    live_project.up(spec(workspaces={"docs": {}}, agents={"coder": custom(agent_image, workspaces=["docs:ro"])}))
+    assert live_project.run("workspace", "put", "docs", str(_file(live_project, "readme.txt", "from the host")), "readme.txt").returncode == 0
+    live_project.spawn("coder")
     name = container(engine, live_project, "coder-1").name
     assert engine.exec(name, "cat", "/workspace/docs/readme.txt").stdout.strip() == "from the host"
     assert engine.exec(name, "touch", "/workspace/docs/new-file").returncode != 0
+
+
+def _file(project, name, text):
+    path = project.root / "inbox" / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def test_an_agent_container_binds_nothing_from_the_host(live_project, engine, agent_image):
+    (live_project.root / "prompt.md").write_text("be brief\n")
+    up(live_project, spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"], prompt="./prompt.md")}))
+    mounts = container(engine, live_project, "coder-1").raw["Mounts"]
+    assert mounts and all(m["Type"] == "volume" for m in mounts), [(m["Type"], m["Destination"]) for m in mounts]
+
+
+def test_egzo_leaves_nothing_in_the_project_directory(live_project, engine, agent_image):
+    """Everything egzo makes is in the engine, so a project directory is only what the user wrote."""
+    (live_project.root / "prompt.md").write_text("be brief\n")
+    document = spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"], prompt="./prompt.md")})
+    live_project.write(document)
+    before = live_project.left_in_directory()
+    up(live_project, document)
+    live_project.spawn("coder", "second")
+    assert live_project.run("agent", "rm", "--force", "second").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
+    assert live_project.left_in_directory() == before
 
 
 def test_a_single_workspace_is_the_working_directory(live_project, engine, agent_image):
@@ -218,15 +255,14 @@ def test_agents_run_as_the_invoking_user_not_as_root(live_project, engine, agent
     assert result.stdout.strip() == f"{os.getuid()}:{os.getgid()}"
 
 
-def test_an_agent_writes_a_host_directory_workspace_as_the_invoking_user(live_project, engine, agent_image):
+def test_an_agent_writes_a_workspace_as_the_invoking_user(live_project, engine, agent_image):
     import os
 
-    shared = live_project.mkdir("data")
-    up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
+    up(live_project, spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
     written = exec_as(engine, live_project, "coder-1", "sh", "-c", "echo hi > /workspace/data/from-agent && ls -ln /workspace/data/from-agent")
     assert written.returncode == 0, written.stderr
-    assert (shared / "from-agent").read_text() == "hi\n"
-    assert (shared / "from-agent").stat().st_uid == os.getuid()
+    owner = engine.in_volumes({live_project.volume("data"): "/w"}, "cat /w/from-agent && stat -c %u /w/from-agent")
+    assert owner.stdout.split() == ["hi", str(os.getuid())]
 
 
 def test_two_agents_share_a_declared_workspace_both_writable(live_project, engine, agent_image):

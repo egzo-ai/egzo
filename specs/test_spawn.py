@@ -159,6 +159,17 @@ def test_spawn_does_not_need_the_file_only_what_up_published(live_project, engin
     assert live_project.spawn("coder") == "coder-1"
 
 
+def test_spawn_does_not_read_the_prompt_file_the_template_carries_it(live_project, engine, agent_image):
+    prompt = live_project.root / "prompt.md"
+    prompt.write_text("be brief\n")
+    live_project.up(spec(agents={"coder": custom(agent_image, prompt="./prompt.md")}))
+    prompt.unlink()
+    assert live_project.spawn("coder") == "coder-1"
+    env = dict(item.split("=", 1) for item in engine.instance(live_project.name, "coder-1").raw["Config"]["Env"])
+    assert env["EGZO_PROMPT"] == "be brief\n"
+    assert "EGZO_PROMPT_FILE" not in env
+
+
 def test_editing_the_file_changes_nothing_for_spawn_until_up_runs(live_project, engine, agent_image):
     project_with(live_project, agent_image, coder=custom(agent_image, env={"WHICH": "published"}))
     live_project.write(spec(agents={"coder": custom(agent_image, env={"WHICH": "edited"})}))

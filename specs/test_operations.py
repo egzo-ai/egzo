@@ -62,22 +62,11 @@ def test_system_check_reports_the_isolation_runtimes(project, engine):
     assert re.search(r"(ok|warn)\s+.*(rootless|rootful)", out), out
 
 
-def test_project_check_warns_when_the_egzo_directory_is_not_git_ignored(project, engine):
+def test_project_check_does_not_ask_for_a_gitignore_because_egzo_keeps_nothing_in_the_directory(project, engine):
     subprocess.run(["git", "init", "-q"], cwd=project.root, check=True)
-    project.write(spec(vaults={}))
+    project.write(spec(vaults={}, workspaces={"scratch": {}}))
     result = project.run("project", "check")
-    assert re.search(r"warn\s+.*\.egzo", result.stdout), result.stdout
-    (project.root / ".gitignore").write_text(".egzo/\n")
-    assert not re.search(r"warn\s+.*\.egzo", project.run("project", "check").stdout)
-
-
-def test_project_check_warns_when_the_workspaces_directory_is_not_git_ignored(project, engine):
-    subprocess.run(["git", "init", "-q"], cwd=project.root, check=True)
-    project.write(spec(vaults={}))
-    (project.root / ".gitignore").write_text(".egzo/\n")
-    assert re.search(r"warn\s+.*workspaces", project.run("project", "check").stdout)
-    (project.root / ".gitignore").write_text(".egzo/\nworkspaces/\n")
-    assert not re.search(r"warn\s+.*workspaces", project.run("project", "check").stdout)
+    assert not re.search(r"warn\s+.*(\.egzo|workspaces/)", result.stdout), result.stdout
 
 
 # --- up --dry-run: what `up` would change, exit 1 when something would -------------------------------------------------------------------------------------------------
@@ -232,16 +221,44 @@ def test_system_check_checks_that_the_engine_can_make_the_internal_networks_isol
     assert "internal networks work" in result.stdout, result.stdout
 
 
-def test_two_commands_do_not_change_one_project_at_once(live_project, engine, agent_image):
-    """While one command holds the project's lock, `up` and `down` refuse, and they work again once it is released."""
-    import fcntl
+def lease(engine, project):
+    """The container that is the project's lock, or None."""
+    found = [r for r in engine.run("ps", "-a", "--filter", f"name={project.name}.lock", "--format", "{{.Names}}").stdout.split()]
+    return found[0] if found else None
 
+
+def test_two_commands_do_not_change_one_project_at_once(live_project, engine, agent_image):
+    """While a command holds the project's lock, `up` and `down` refuse, and they work again once it is released."""
     live_project.write(spec(agents={"coder": custom(agent_image), "second": custom(agent_image)}))
-    lock_dir = live_project.root / ".egzo"
-    lock_dir.mkdir(exist_ok=True)
-    with open(lock_dir / "lock", "w") as holder:
-        fcntl.flock(holder, fcntl.LOCK_EX)  # what another egzo command that is changing the project does
-        for command in (("project", "up"), ("project", "down", "--force")):
-            refused = live_project.run(*command, timeout=300)
-            assert refused.returncode != 0 and "another egzo command" in refused.stderr, (command, refused.returncode, refused.stderr)
+    labels = ["--label", f"{LABEL_PREFIX}project={live_project.name}", "--label", f"{LABEL_PREFIX}kind=lock",
+              "--label", f"{LABEL_PREFIX}lock-holder=another-command", "--label", f"{LABEL_PREFIX}lock-expires=9999999999"]
+    assert engine.run("create", "--name", f"{live_project.name}.lock", *labels, agent_image).returncode == 0  # what another command that is changing the project does
+    for command in (("project", "up"), ("project", "down", "--force")):
+        refused = live_project.run(*command, timeout=300)
+        assert refused.returncode != 0 and "another egzo command" in refused.stderr and "another-command" in refused.stderr, (command, refused.returncode, refused.stderr)
+    assert engine.run("rm", f"{live_project.name}.lock").returncode == 0
     assert live_project.run("project", "up", timeout=300).returncode == 0, "the lock was not released"
+
+
+def test_the_lock_is_an_engine_side_lease_that_a_command_releases_when_it_ends(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    live_project.spawn("coder")
+    assert lease(engine, live_project) is None, "a finished command leaves no lease"
+    failed = live_project.run("agent", "rm", "no-such-instance")
+    assert failed.returncode != 0 and lease(engine, live_project) is None, "a failed command releases it too"
+
+
+def test_the_lock_does_not_need_the_project_directory(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    assert not (live_project.root / ".egzo").exists()
+    live_project.spawn("coder")
+    assert not (live_project.root / ".egzo").exists()
+
+
+def test_an_expired_lease_is_taken_over_and_its_holder_named(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    labels = ["--label", f"{LABEL_PREFIX}project={live_project.name}", "--label", f"{LABEL_PREFIX}kind=lock",
+              "--label", f"{LABEL_PREFIX}lock-holder=long-gone", "--label", f"{LABEL_PREFIX}lock-expires=1"]
+    assert engine.run("create", "--name", f"{live_project.name}.lock", *labels, agent_image).returncode == 0
+    assert live_project.spawn("coder", "taken") == "taken"
+    assert lease(engine, live_project) is None

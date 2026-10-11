@@ -3,10 +3,10 @@
 
 """The shape of the command line: commands grouped by what they act on.
 
-    egzo project   init | up | down | check | rotate-ca
+    egzo project   init | up | down | check | rotate-ca | unlock
     egzo agent     spawn | ls | rm | start | stop | attach
     egzo message   send | ls | reply            (alias: msg)
-    egzo workspace ls | fetch
+    egzo workspace ls | put | get | fetch | rm
     egzo system    check
     top level      ps, logs, start, stop, restart, exec, events, proxy, version, completion
 
@@ -15,10 +15,10 @@ There are no aliases for the commands that moved: egzo is pre-1.0.
 
 import json
 import re
-import shutil
 
 import pytest
 
+from conftest import LABEL_PREFIX
 from support import agent, spec, table
 
 GROUPS = ["project", "agent", "message", "workspace", "system"]
@@ -60,10 +60,10 @@ def test_a_command_that_moved_is_unknown_and_has_no_alias(project, name):
 @pytest.mark.parametrize(
     "group, commands",
     [
-        ("project", ["init", "up", "down", "check", "rotate-ca"]),
+        ("project", ["init", "up", "down", "check", "rotate-ca", "unlock"]),
         ("agent", ["spawn", "ls", "rm", "start", "stop", "attach"]),
         ("message", ["send", "ls", "reply"]),
-        ("workspace", ["ls", "fetch"]),
+        ("workspace", ["ls", "put", "get", "fetch", "rm"]),
         ("system", ["check"]),
     ],
 )
@@ -249,7 +249,7 @@ def test_message_reply_answers_what_message_ls_lists(live_project, engine, agent
     assert unknown.returncode != 0
 
 
-# --- workspace ls and fetch --------------------------------------------------------------------------------
+# --- workspace ls, put, get, rm and fetch ------------------------------------------------------------------
 
 
 def workspaces_of(project, *args, **kwargs):
@@ -261,38 +261,147 @@ def workspaces_of(project, *args, **kwargs):
 GIT = {"git": {"url": "https://github.com/octocat/Hello-World.git"}}
 
 
-def test_workspace_ls_works_without_an_engine_and_shows_every_workspace_with_its_path(project):
-    project.write(spec(workspaces={"docs": {"path": "./docs"}, "scratch": {}, "repo": GIT}))
-    rows = workspaces_of(project, env={"DOCKER_HOST": "unix:///nonexistent.sock"})
+def test_workspace_ls_shows_every_workspace_with_its_volume(live_project, engine):
+    live_project.write(spec(workspaces={"docs": {}, "scratch": {}, "repo": GIT}))
+    rows = workspaces_of(live_project)
     assert set(rows) == {"docs", "scratch", "repo"}
-    assert rows["docs"]["PATH"].endswith("/docs") and rows["scratch"]["PATH"].endswith("/workspaces/scratch")
-    assert rows["repo"]["PATH"].endswith("/workspaces/repo")
+    assert rows["docs"]["VOLUME"] == live_project.volume("docs")
+    assert rows["repo"]["VOLUME"] == live_project.base_volume("repo")
     assert (rows["docs"]["KIND"], rows["repo"]["KIND"]) == ("directory", "git")
+    assert "PATH" not in rows["docs"]
 
 
-def test_workspace_ls_says_whether_a_directory_exists_and_whether_a_base_is_cloned(project):
-    project.write(spec(workspaces={"docs": {"path": "./docs"}, "repo": GIT}))
-    rows = workspaces_of(project)
+def test_workspace_ls_says_whether_a_directory_exists_and_whether_a_base_is_cloned(live_project, engine, agent_image):
+    live_project.write(spec(egress={"default": {"allow": ["example.com"]}}, workspaces={"docs": {}, "repo": GIT},
+                            agents={"coder": custom(agent_image, workspaces=["docs", "repo"])}))
+    rows = workspaces_of(live_project)
     assert rows["docs"]["STATE"] == "missing" and rows["repo"]["STATE"] == "not cloned"
-    (project.root / "docs").mkdir()
-    (project.root / "workspaces" / "repo" / ".base" / ".git").mkdir(parents=True)
-    rows = workspaces_of(project)
-    assert rows["docs"]["STATE"] == "exists" and rows["repo"]["STATE"] == "cloned"
+    live_project.up()  # github.com is not allowed: the clone fails and up goes on
+    rows = workspaces_of(live_project)
+    assert rows["docs"]["STATE"] == "exists" and rows["repo"]["STATE"] == "not cloned"
 
 
-def test_workspace_ls_names_the_worktrees_of_a_git_workspace(project):
-    project.write(spec(workspaces={"repo": GIT}))
-    meta = project.root / "workspaces" / "repo" / ".base" / ".git" / "worktrees"
-    for name in ("coder-1", "coder-2"):
-        (meta / name).mkdir(parents=True)
-    rows = workspaces_of(project)
-    assert rows["repo"]["WORKTREES"] == "coder-1,coder-2"
+def test_workspace_ls_needs_the_engine_and_says_so(project):
+    project.write(spec(workspaces={"docs": {}}))
+    result = project.run("workspace", "ls", env={"DOCKER_HOST": "unix:///nonexistent.sock"})
+    assert result.returncode != 0 and "engine" in result.stderr.lower()
 
 
-def test_workspace_ls_json(project):
-    project.write(spec(workspaces={"docs": {"path": "./docs"}}))
-    listed_json = json.loads(project.run("workspace", "ls", "--json").stdout)
-    assert [(w["name"], w["kind"]) for w in listed_json] == [("docs", "directory")]
+def test_workspace_ls_json(live_project, engine):
+    live_project.write(spec(workspaces={"docs": {}}))
+    [row] = json.loads(live_project.run("workspace", "ls", "--json").stdout)
+    assert (row["name"], row["kind"], row["volume"], row["state"]) == ("docs", "directory", live_project.volume("docs"), "missing")
+    assert row["worktrees"] == []
+
+
+@pytest.mark.usefixtures("github")
+def test_workspace_ls_names_the_worktrees_of_a_git_workspace(live_project, engine, agent_image):
+    live_project.up(spec(egress={"default": {"allow": ["github.com"]}}, workspaces={"repo": GIT}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
+    live_project.spawn("coder")
+    live_project.spawn("coder")
+    assert workspaces_of(live_project)["repo"]["WORKTREES"] == "coder-1,coder-2"
+    assert workspaces_of(live_project)["repo"]["STATE"] == "cloned"
+
+
+def written(project, name, text):
+    path = project.root / "inbox" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def test_workspace_put_copies_a_file_and_a_directory_in_for_the_agent_user(live_project, engine, agent_image):
+    import os
+
+    live_project.up(spec(workspaces={"docs": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
+    written(live_project, "a.txt", "alpha\n")
+    written(live_project, "sub/b.txt", "beta\n")
+    assert live_project.run("workspace", "put", "docs", "inbox/a.txt", "a.txt").returncode == 0
+    assert live_project.run("workspace", "put", "docs", "inbox/sub", "sub").returncode == 0
+    live_project.spawn("coder")
+    name = engine.instance(live_project.name, "coder-1").name
+    assert engine.exec(name, "sh", "-c", "cat /workspace/docs/a.txt /workspace/docs/sub/b.txt").stdout == "alpha\nbeta\n"
+    owner = engine.in_volumes({live_project.volume("docs"): "/w"}, "stat -c %u:%g /w/a.txt /w/sub /w/sub/b.txt")
+    assert set(owner.stdout.split()) == {f"{os.getuid()}:{os.getgid()}"}
+    assert engine.exec(name, "sh", "-c", "echo more >> /workspace/docs/a.txt").returncode == 0, "the agent can write what was put"
+
+
+def test_workspace_put_works_before_up_and_up_then_keeps_what_was_put(live_project, engine, agent_image):
+    live_project.write(spec(workspaces={"docs": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
+    written(live_project, "a.txt", "alpha\n")
+    put = live_project.run("workspace", "put", "docs", "inbox/a.txt", "a.txt")
+    assert put.returncode == 0, put.stderr
+    live_project.up()
+    live_project.spawn("coder")
+    assert engine.exec(engine.instance(live_project.name, "coder-1").name, "cat", "/workspace/docs/a.txt").stdout == "alpha\n"
+
+
+def test_workspace_get_copies_a_path_out_and_what_the_agent_wrote(live_project, engine, agent_image, tmp_path):
+    live_project.up(spec(workspaces={"docs": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
+    live_project.spawn("coder")
+    name = engine.instance(live_project.name, "coder-1").name
+    assert engine.exec(name, "sh", "-c", "mkdir /workspace/docs/out && echo result > /workspace/docs/out/r.txt").returncode == 0
+    got = live_project.run("workspace", "get", "docs", "out", str(tmp_path / "copy"))
+    assert got.returncode == 0, got.stderr
+    assert (tmp_path / "copy" / "r.txt").read_text() == "result\n"
+    everything = live_project.run("workspace", "get", "docs", str(tmp_path / "all"))
+    assert everything.returncode == 0, everything.stderr
+    assert (tmp_path / "all" / "out" / "r.txt").read_text() == "result\n"
+
+
+@pytest.mark.parametrize("destination", ["../escape.txt", "/etc/escape.txt", "a/../../escape.txt"])
+def test_workspace_put_refuses_a_destination_outside_the_workspace(live_project, engine, destination):
+    live_project.write(spec(workspaces={"docs": {}}))
+    written(live_project, "a.txt", "alpha\n")
+    result = live_project.run("workspace", "put", "docs", "inbox/a.txt", destination)
+    assert result.returncode != 0 and "outside" in result.stderr
+
+
+def test_workspace_put_and_get_refuse_names_that_are_not_directory_workspaces(live_project, engine, tmp_path):
+    live_project.write(spec(workspaces={"docs": {}, "repo": GIT}))
+    written(live_project, "a.txt", "alpha\n")
+    for command in (["put", "repo", "inbox/a.txt", "a.txt"], ["put", "ghost", "inbox/a.txt", "a.txt"], ["get", "ghost", str(tmp_path / "x")]):
+        result = live_project.run("workspace", *command)
+        assert result.returncode != 0 and command[1] in result.stderr, command
+    assert "git" in live_project.run("workspace", "put", "repo", "inbox/a.txt", "a.txt").stderr
+
+
+@pytest.mark.usefixtures("github")
+def test_workspace_get_reads_the_worktree_of_an_instance(live_project, engine, agent_image, tmp_path):
+    live_project.up(spec(egress={"default": {"allow": ["github.com"]}}, workspaces={"repo": GIT}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
+    live_project.spawn("coder")
+    got = live_project.run("workspace", "get", "repo/coder-1", "README", str(tmp_path / "README"))
+    assert got.returncode == 0, got.stderr
+    assert (tmp_path / "README").read_text().startswith("Hello World")
+
+
+def test_workspace_rm_removes_a_directory_volume_and_refuses_one_an_instance_mounts(live_project, engine, agent_image):
+    live_project.up(spec(workspaces={"docs": {}, "other": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
+    live_project.spawn("coder")
+    refused = live_project.run("workspace", "rm", "docs")
+    assert refused.returncode != 0 and "coder-1" in refused.stderr
+    assert engine.volume_exists(live_project.volume("docs"))
+    assert live_project.run("workspace", "rm", "other").returncode == 0
+    assert not engine.volume_exists(live_project.volume("other"))
+    assert live_project.run("workspace", "rm", "ghost").returncode != 0
+
+
+def test_workspace_rm_all_removes_every_workspace_volume(live_project, engine, agent_image):
+    live_project.up(spec(workspaces={"docs": {}, "other": {}}, agents={"coder": custom(agent_image)}))
+    result = live_project.run("workspace", "rm", "--all")
+    assert result.returncode == 0, result.stderr
+    assert not [r for r in engine.resources(live_project.name) if r.name.startswith(f"{live_project.name}_ws.")]
+
+
+def test_project_unlock_breaks_a_lease_left_by_a_killed_command(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    labels = ["--label", f"{LABEL_PREFIX}project={live_project.name}", "--label", f"{LABEL_PREFIX}kind=lock",
+              "--label", f"{LABEL_PREFIX}lock-holder=killed-1234", "--label", f"{LABEL_PREFIX}lock-expires=9999999999"]
+    assert engine.run("create", "--name", f"{live_project.name}.lock", *labels, engine.agent_image()).returncode == 0
+    assert live_project.run("agent", "spawn", "coder", "blocked").returncode != 0
+    unlocked = live_project.run("project", "unlock")
+    assert unlocked.returncode == 0 and "killed-1234" in unlocked.stdout
+    assert live_project.spawn("coder", "free") == "free"
 
 
 def test_workspace_fetch_needs_the_project_up_and_says_so(live_project, engine, agent_image):
@@ -313,12 +422,11 @@ def test_workspace_fetch_refuses_a_name_that_is_not_a_git_workspace(live_project
 def test_workspace_fetch_clones_a_base_that_up_could_not_and_refreshes_one_that_is_there(live_project, engine, agent_image):
     allow = {"default": {"allow": ["github.com"]}}
     live_project.up(spec(egress={"default": {"allow": ["example.com"]}}, workspaces={"repo": GIT}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
-    base = live_project.root / "workspaces" / "repo" / ".base"
-    assert not base.exists()  # up could not reach github.com
+    assert not engine.volume_exists(live_project.base_volume("repo"))  # up could not reach github.com
     live_project.up(spec(egress=allow, workspaces={"repo": GIT}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
-    shutil.rmtree(base)  # the clone made by this up goes: the next command has to make it again
+    assert engine.run("volume", "rm", live_project.base_volume("repo")).returncode == 0  # the clone made by this up goes: the next command has to make it again
     result = live_project.run("workspace", "fetch", timeout=300)
     assert result.returncode == 0, result.stderr
-    assert (base / ".git").exists()
+    assert engine.in_volumes({live_project.base_volume("repo"): "/b"}, "test -d /b/.git").returncode == 0
     again = live_project.run("workspace", "fetch", "repo", timeout=300)
     assert again.returncode == 0, again.stderr

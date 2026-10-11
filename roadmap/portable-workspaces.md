@@ -81,7 +81,7 @@ expires, or until `egzo project unlock` removes it (it prints who held it).
 
 - `Lock` and `LockWait` take the engine client and the project; every caller that takes the lock already has them.
 - The lock container is not part of `ps`, `up`'s plan or `down`'s removals: it is filtered out of what is observed.
-  `lock` is a reserved instance name only in the sense that the container name has a dot, which no instance can have.
+  Its name has a dot, which no project, template or instance name can have, so it never collides with one.
 - Why not a network or a volume: a network takes a subnet from a limited pool, and a volume create is idempotent, so it
   cannot decide a race.
 - `up` pulls the egzo image before it takes the lock, as the lock needs it.
@@ -91,10 +91,11 @@ expires, or until `egzo project unlock` removes it (it prints who held it).
 `down` keeps its promise: it never deletes what holds the user's work.
 
 - `down` removes the infrastructure, the instances, and their worktree volumes (as it removed worktrees).
-- It **keeps** the base volumes and the directory volumes, and says so.
-- `down --volumes` also deletes them. This is the only way a base or directory volume goes away with `down`.
-- `egzo workspace rm NAME` removes one workspace's volume (and for a git workspace its base), refusing while any
-  instance exists or a worktree of it is left; `egzo workspace rm NAME INSTANCE...` removes left-over worktree volumes.
+- It **keeps** the base volumes and the directory volumes, and says so. There is no flag that deletes them
+  (`down --volumes` stays unknown: `down` already removed every volume it owns, and workspaces are not its to remove).
+- `egzo workspace rm NAME...` (or `--all`) removes workspace volumes: the directory volume, or for a git workspace its
+  base. It refuses while an instance exists that mounts it, or a worktree of it is left;
+  `egzo workspace rm NAME --worktree INSTANCE...` removes left-over worktree volumes.
 - `up` after `down` finds the volumes by name and reuses them.
 
 ## Commands
@@ -103,8 +104,8 @@ expires, or until `egzo project unlock` removes it (it prints who held it).
     egzo workspace put NAME SRC [DEST]              # copy a file or a directory of the host into a directory workspace
     egzo workspace get NAME [SRC] DEST              # copy a path of a workspace out to the host
     egzo workspace fetch [NAME...]                  # clone or refresh git bases (unchanged)
-    egzo workspace rm NAME [INSTANCE...]            # see above
-    egzo project down [--force] [--volumes]
+    egzo workspace rm NAME... | --all [--worktree INSTANCE...]   # see above
+    egzo project down [--force]
     egzo project unlock                             # break the lease of a command that was killed
 
 `put` and `get` use the engine's archive API on a created, never-started container that mounts the volume, so they work
