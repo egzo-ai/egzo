@@ -95,7 +95,7 @@ def test_the_path_is_relative_to_the_project_directory_when_run_from_a_subdirect
     project.mkdir("docs")
     project.mkdir("src/deep/docs")  # a ./docs next to the shell must not be mistaken for the project's
     project.write(spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": agent(workspaces=["docs"])}))
-    result = project.egzo.run("config", cwd=project.root / "src" / "deep")
+    result = project.egzo.run("project", "check", "--resolved", cwd=project.root / "src" / "deep")
     assert result.returncode == 0, result.stderr
     assert path_of(result.yaml(), "docs") == project.root / "docs"
     assert result.yaml()["name"] == project.name
@@ -105,7 +105,7 @@ def test_the_path_is_relative_to_the_project_directory_when_run_from_outside_it(
     outside = tmp_path / "elsewhere"
     (outside / "docs").mkdir(parents=True)  # again, not the project's ./docs
     project.write(spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": agent(workspaces=["docs"])}))
-    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=outside)
+    result = project.egzo.run("-f", project.root / "egzo.yaml", "project", "check", "--resolved", cwd=outside)
     assert result.returncode == 0, result.stderr
     assert path_of(result.yaml(), "docs") == project.root / "docs"
     assert result.yaml()["name"] == project.name
@@ -113,7 +113,7 @@ def test_the_path_is_relative_to_the_project_directory_when_run_from_outside_it(
 
 def test_the_default_path_is_the_project_directorys_when_run_from_outside_it(project, tmp_path):
     project.write(spec(workspaces={"foo": {}}))
-    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=tmp_path)
+    result = project.egzo.run("-f", project.root / "egzo.yaml", "project", "check", "--resolved", cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     assert path_of(result.yaml(), "foo") == project.root / "workspaces" / "foo"
 
@@ -123,8 +123,8 @@ def test_a_project_reached_through_a_symlink_is_the_same_project(project, tmp_pa
     project.write(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
     link = tmp_path / "link"
     link.symlink_to(project.root)
-    direct = project.run("config").yaml()["workspaces"]["repo"]["path"]
-    through = project.egzo.run("-f", link / "egzo.yaml", "config", cwd=tmp_path).yaml()["workspaces"]["repo"]["path"]
+    direct = project.run("project", "check", "--resolved").yaml()["workspaces"]["repo"]["path"]
+    through = project.egzo.run("-f", link / "egzo.yaml", "project", "check", "--resolved", cwd=tmp_path).yaml()["workspaces"]["repo"]["path"]
     assert through == direct
 
 

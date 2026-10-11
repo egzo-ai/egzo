@@ -44,7 +44,7 @@ def bring_up(project, document, timeout=900):
     of each named `<name>` (the addresses and container names the specs below use are the instance names)."""
     names = list(document["agents"])
     project.write({**document, "agents": {f"{name}-template": fields for name, fields in document["agents"].items()}})
-    result = project.run("up", timeout=timeout)
+    result = project.run("project", "up", timeout=timeout)
     assert result.returncode == 0, result.stderr
     for name in names:
         project.spawn(f"{name}-template", name, timeout=timeout)
@@ -156,7 +156,7 @@ def test_the_tui_keeps_its_conversation_home_across_a_stop_and_start(launched, e
 
 def test_removing_an_instance_removes_its_conversation_home(launched, engine):
     project = launched()
-    assert project.run("rm", "--force", "coder").returncode == 0
+    assert project.run("agent", "rm", "--force", "coder").returncode == 0
     assert not [r for r in engine.resources(project.name) if r.kind == "volume" and r.name.endswith("coder-home")]
 
 
@@ -359,7 +359,7 @@ def test_the_real_tui_reports_idle_and_is_told_a_message_is_waiting(launched, ha
         return rows[-1]["text"] if rows else None
 
     wait_until(lambda: activity() == "idle", "the harness to report that its session started", 45)
-    sent = project.run("send", "coder", "hello from the operator, TOP-SECRET-PAYLOAD").stdout.split()[1]
+    sent = project.run("message", "send", "coder", "hello from the operator, TOP-SECRET-PAYLOAD").stdout.split()[1]
     context = lambda: "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events_of(project))
     wait_until(lambda: [e for e in events_of(project) if e["type"] == "announced"], "the message to be announced", 40, context=context)
     typed = wait_until(

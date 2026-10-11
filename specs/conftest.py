@@ -98,12 +98,12 @@ class Project:
     def config(self, document, *args, **kwargs):
         """Write the file and run `egzo config`."""
         self.write(document)
-        return self.run("config", *args, **kwargs)
+        return self.run("project", "check", "--resolved", *args, **kwargs)
 
     def resolved(self, document, **kwargs):
         """The resolved configuration; the spec fails if the file is rejected."""
         result = self.config(document, **kwargs)
-        assert result.returncode == 0, f"egzo config rejected the file:\n{result.stderr}"
+        assert result.returncode == 0, f"egzo project check rejected the file:\n{result.stderr}"
         return result.yaml()
 
     def container(self, instance):
@@ -115,7 +115,7 @@ class Project:
         use spawn (or start) for an agent."""
         if document is not None:
             self.write(document)
-        result = self.run("up", **{"timeout": 300, **kwargs})
+        result = self.run("project", "up", **{"timeout": 300, **kwargs})
         assert result.returncode == 0, f"egzo up failed:\n{result.stderr}"
         return result
 
@@ -123,7 +123,7 @@ class Project:
         """`egzo spawn TEMPLATE [NAME] ARGS...`, which must succeed; returns the instance name it printed.
         Without a name the instance is `<template>-<n>`, so `spawn("claude")` is `claude-1`, whose container
         is `<project>-claude-1`."""
-        command = ["spawn", template, *([name] if name else []), *args]
+        command = ["agent", "spawn", template, *([name] if name else []), *args]
         result = self.run(*command, **{"timeout": 300, **kwargs})
         assert result.returncode == 0, f"egzo spawn {template} failed:\n{result.stderr}"
         return result.stdout.strip().splitlines()[-1]
@@ -480,7 +480,7 @@ def live_project(make_project, engine, egzo):
     """A project bound to an engine; everything it created is removed afterwards."""
     created = make_project(env={**engine.env, "EGZO_IMAGE": engine.image_for(egzo.binary)})
     yield created
-    created.run("down", "--volumes")
+    created.run("project", "down", "--force")
     engine.cleanup(created.name)
 
 

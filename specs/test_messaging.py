@@ -69,13 +69,13 @@ def events(project, *args):
 
 
 def send(project, to, text, *flags):
-    result = project.run("send", *flags, to, text)
+    result = project.run("message", "send", *flags, to, text)
     assert result.returncode == 0, result.stderr
     return result.stdout.split()[1]
 
 
 def messages(project, *args):
-    result = project.run("messages", *args)
+    result = project.run("message", "ls", *args)
     assert result.returncode == 0, result.stderr
     return {row["ID"]: row for row in table(result.stdout)}
 
@@ -91,7 +91,7 @@ def fetched(engine, project, name, message_id):
 
 def test_send_queues_a_request_that_messages_lists(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    sent = live_project.run("send", "coder", "please", "review", "the", "diff")
+    sent = live_project.run("message", "send", "coder", "please", "review", "the", "diff")
     assert sent.returncode == 0, sent.stderr
     message_id = sent.stdout.split()[1]
     row = messages(live_project)[message_id]
@@ -107,7 +107,7 @@ def test_message_ids_are_unguessable(live_project, engine, agent_image):
 
 def test_sending_to_an_unknown_agent_is_an_error(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    result = live_project.run("send", "ghost", "hello")
+    result = live_project.run("message", "send", "ghost", "hello")
     assert result.returncode != 0
     assert "ghost" in result.stderr
 
@@ -220,7 +220,7 @@ def test_ask_questions_the_requester_keeps_the_request_open_and_the_answer_comes
     code, body = api(engine, live_project, "coder", "POST", f"/v1/messages/{message_id}/ask", {"text": "to prod?", "choices": ["yes", "no"]})
     assert code in (200, 201) and ID.match(body["id"])
     question_id = body["id"]
-    listing = live_project.run("questions").stdout
+    listing = live_project.run("message", "ls", "--kind", "question").stdout
     assert question_id in listing and "to prod?" in listing
     question = messages(live_project)[question_id]
     assert (question["FROM"], question["TO"], question["KIND"]) == ("agent:coder", "operator", "question")
@@ -230,22 +230,22 @@ def test_ask_questions_the_requester_keeps_the_request_open_and_the_answer_comes
     coder = next(row for row in ps if row["NAME"] == "coder")
     assert coder["OPEN"] == "1" and coder["WAITING"] == "yes"
 
-    answered = live_project.run("answer", question_id, "yes", "after", "the", "tests")
+    answered = live_project.run("message", "reply", question_id, "yes", "after", "the", "tests")
     assert answered.returncode == 0, answered.stderr
     answer = next(e for e in events(live_project) if e["type"] == "message" and e["data"]["kind"] == "resolution")
     assert answer["data"]["to"] == "agent:coder" and answer["data"]["re"] == question_id and answer["actor"] == "operator"
     assert answer["text"] == "yes after the tests"
     assert next(row for row in table(live_project.run("ps").stdout) if row["NAME"] == "coder")["WAITING"] == ""
-    assert live_project.run("answer", question_id, "again").returncode != 0  # terminal
+    assert live_project.run("message", "reply", question_id, "again").returncode != 0  # terminal
 
 
 def test_answer_only_resolves_what_is_addressed_to_a_person(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
     message_id = send(live_project, "coder", "mine to do")
-    result = live_project.run("answer", message_id, "I did it myself")
+    result = live_project.run("message", "reply", message_id, "I did it myself")
     assert result.returncode != 0
     assert "agent:coder" in result.stderr
-    assert live_project.run("answer", "m" + "0" * 32, "x").returncode != 0
+    assert live_project.run("message", "reply", "m" + "0" * 32, "x").returncode != 0
 
 
 # --- agents talk to each other and to the operator ----------------------------------------------------
@@ -287,7 +287,7 @@ def test_a_message_to_the_operator_waits_until_it_is_answered(live_project, engi
     sent = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": "operator", "text": "I am done with the migration"})[1]["id"]
     row = messages(live_project)[sent]
     assert (row["FROM"], row["TO"], row["STATE"]) == ("agent:coder", "operator", "queued")
-    assert live_project.run("answer", sent, "thanks").returncode == 0
+    assert live_project.run("message", "reply", sent, "thanks").returncode == 0
     assert sent not in messages(live_project)
 
 
@@ -598,7 +598,7 @@ def test_ps_and_messages_never_pass_an_agents_escape_sequences_to_the_terminal(l
     shown = live_project.run("ps").stdout
     assert "\x1b" not in shown and "\x07" not in shown
     assert len(shown.strip().splitlines()) == 5, f"the status forged rows:\n{shown}"  # header, control, proxy, 2 agents
-    listed = live_project.run("messages").stdout
+    listed = live_project.run("message", "ls").stdout
     assert "\x1b" not in listed and "\x07" not in listed
     assert len(listed.strip().splitlines()) == 2
 
@@ -609,7 +609,7 @@ def test_send_wait_prints_an_answer_without_escape_sequences(live_project, engin
     fetched(engine, live_project, "coder", message_id)
     as_agent(engine, live_project, "coder", "POST", f"/v1/messages/{message_id}/resolve",
              {"text": "done \x1b]0;pwned\x07 \x1b[31mred", "outcome": "done"})
-    waited = live_project.run("send", "--wait", "--timeout", "20s", "coder", "again")
+    waited = live_project.run("message", "send", "--wait", "--timeout", "20s", "coder", "again")
     assert "\x1b" not in waited.stdout + waited.stderr
 
 
@@ -619,22 +619,22 @@ def test_send_wait_prints_an_answer_without_escape_sequences(live_project, engin
 def test_a_spawned_instance_can_be_sent_a_message_at_once(live_project, engine, agent_image):
     live_project.up(spec(agents={"worker": custom(agent_image)}))
     name = live_project.spawn("worker")
-    sent = live_project.run("send", name, "hello")
+    sent = live_project.run("message", "send", name, "hello")
     assert sent.returncode == 0, sent.stderr
     assert messages(live_project)[sent.stdout.split()[1]]["TO"] == f"agent:{name}"
 
 
 def test_a_message_to_a_template_name_is_refused_and_says_to_spawn_it(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    result = live_project.run("send", "worker", "hello")
+    result = live_project.run("message", "send", "worker", "hello")
     assert result.returncode != 0
-    assert "worker is a template" in result.stderr and "egzo spawn worker" in result.stderr
+    assert "worker is a template" in result.stderr and "egzo agent spawn worker" in result.stderr
 
 
 def test_a_removed_instance_no_longer_receives_messages_from_people_or_agents(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    assert live_project.run("rm", "--force", "reviewer").returncode == 0
-    refused = live_project.run("send", "reviewer", "anyone there?")
+    assert live_project.run("agent", "rm", "--force", "reviewer").returncode == 0
+    refused = live_project.run("message", "send", "reviewer", "anyone there?")
     assert refused.returncode != 0 and "reviewer" in refused.stderr
     code, body = api(engine, live_project, "coder", "POST", "/v1/messages", {"to": "agent:reviewer", "text": "x"})
     assert code in (400, 404, 409), (code, body)
@@ -651,7 +651,7 @@ def test_an_agent_can_message_an_instance_spawned_after_it(live_project, engine,
 def test_the_removed_instance_keeps_its_history_but_a_new_instance_of_the_same_name_does_not_inherit_open_requests(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
     message_id = send(live_project, "reviewer", "review this")
-    assert live_project.run("rm", "--force", "reviewer").returncode == 0
+    assert live_project.run("agent", "rm", "--force", "reviewer").returncode == 0
     assert message_id in messages(live_project, "--all")  # the record stays
     live_project.spawn("worker", "reviewer")
     assert api(engine, live_project, "reviewer", "GET", "/v1/messages")[1] == []  # the old request is not announced to the new agent

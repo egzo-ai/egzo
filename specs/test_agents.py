@@ -87,7 +87,7 @@ def test_agents_cannot_reach_each_other(live_project, engine, agent_image):
 
 def test_down_removes_the_agent_networks_too(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
-    assert live_project.run("down").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
     assert not [r for r in engine.resources(live_project.name) if r.kind in ("container", "network")]
 
 
@@ -97,19 +97,19 @@ def test_a_workspace_without_a_source_is_a_directory_in_the_project_and_survives
     assert directory.is_dir() and directory.stat().st_uid == __import__("os").getuid()
     assert not [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
     assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo kept > /workspace/scratch/note").returncode == 0
-    assert live_project.run("down").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
     assert (directory / "note").read_text() == "kept\n"
 
 
 def test_a_workspace_directory_is_created_empty_when_it_is_missing_at_spawn_and_never_deleted(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
     directory = live_project.root / "data"
-    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
     assert directory.is_dir(), "rm never deletes a directory workspace"
     directory.rmdir()
     assert live_project.spawn("coder") == "coder-1"
     assert directory.is_dir() and list(directory.iterdir()) == []
-    assert live_project.run("down").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
     assert directory.is_dir()
 
 
@@ -158,7 +158,7 @@ def test_an_agent_without_a_runtime_does_not_run_under_gvisor(live_project, engi
 
 def spawn_refused(live_project, template="coder"):
     live_project.up()
-    return live_project.run("spawn", template, timeout=300)
+    return live_project.run("agent", "spawn", template, timeout=300)
 
 
 def test_a_project_that_requires_gvisor_cannot_start_an_agent_on_a_platform_without_it(live_project, engine, agent_image):

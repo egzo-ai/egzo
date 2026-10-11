@@ -24,7 +24,7 @@ def custom(image, **fields):
 def reup(project, document, **env):
     """`up` alone: infrastructure and policy, no instance."""
     project.write(document)
-    result = project.run("up", env=env, timeout=300)
+    result = project.run("project", "up", env=env, timeout=300)
     assert result.returncode == 0, result.stderr
     return result
 
@@ -228,7 +228,7 @@ def test_the_audit_log_records_allowed_and_denied_connections(live_project, engi
 
 def test_a_missing_secret_stops_up_before_anything_is_created(live_project, engine, agent_image):
     live_project.write(injecting(agent_image))
-    result = live_project.run("up", env={"DEPLOY_TOKEN": ""})
+    result = live_project.run("project", "up", env={"DEPLOY_TOKEN": ""})
     assert result.returncode != 0
     assert "main/DEPLOY_TOKEN" in result.stderr
     assert engine.resources(live_project.name) == []
@@ -255,7 +255,7 @@ def test_the_ca_survives_recreating_the_proxy_and_the_policy_comes_back(live_pro
         return json.loads(reply.stdout)["ca"]
 
     before = ca_fingerprint()
-    live_project.run("up", "--recreate")
+    live_project.run("project", "up", "--recreate")
     assert container(engine, live_project, "proxy").name == name
     assert ca_fingerprint() == before
     assert status(engine, live_project, "example.com").stdout == "200"
@@ -275,7 +275,7 @@ def test_up_refuses_an_oauth_token_bound_to_the_api_key_service(live_project, en
     """api.anthropic.com answers 401 to a subscription token sent as x-api-key: say so before starting anything."""
     live_project.env["ANTHROPIC_API_KEY"] = "sk-ant-oat01-" + "x" * 60
     live_project.write(spec(egress={"default": anthropic_profile()}, agents={"coder": custom(agent_image)}))
-    result = live_project.run("up", timeout=300)
+    result = live_project.run("project", "up", timeout=300)
     assert result.returncode != 0
     assert "OAuth" in result.stderr and "anthropic-oauth" in result.stderr
     assert "oat01" not in result.stderr and not engine.containers(live_project.name)
@@ -285,7 +285,7 @@ def test_up_refuses_an_api_key_bound_to_the_oauth_service(live_project, engine, 
     live_project.env["ANTHROPIC_API_KEY"] = "sk-ant-api03-" + "x" * 60
     profile_ = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}
     live_project.write(spec(egress={"default": profile_}, agents={"coder": custom(agent_image)}))
-    result = live_project.run("up", timeout=300)
+    result = live_project.run("project", "up", timeout=300)
     assert result.returncode != 0
     assert "API key" in result.stderr and "anthropic" in result.stderr
     assert "api03" not in result.stderr and not engine.containers(live_project.name)
@@ -323,7 +323,7 @@ def test_a_proxy_that_was_stopped_and_started_again_gets_its_bindings_back_from_
     proxy = container(engine, live_project, "proxy").name
     engine.run("stop", proxy)
     engine.run("start", proxy)
-    again = live_project.run("up")
+    again = live_project.run("project", "up")
     assert again.returncode == 0, again.stderr
     assert status(engine, live_project, "example.com").stdout == "200"
 
@@ -346,7 +346,7 @@ def test_a_proxy_that_has_no_policy_tells_the_agent_what_to_do(live_project, eng
     time.sleep(3)
     refused = curl(engine, live_project, "coder-1", "-o", "/dev/null", "https://example.com/")
     assert refused.returncode != 0
-    assert "503" in refused.stderr or "egzo up" in refused.stderr
+    assert "503" in refused.stderr or "egzo project up" in refused.stderr
     assert "407" not in refused.stderr, "a missing policy is not an authentication problem"
 
 
@@ -386,7 +386,7 @@ def test_removing_an_instance_makes_its_proxy_credentials_stop_working(live_proj
     borrowed = credentials_of(engine, live_project, "coder-1")
     through = ["--proxy", borrowed, "-o", "/dev/null", "-w", "%{http_code}", "https://example.com/"]
     assert curl(engine, live_project, "coder-2", *through).stdout == "200"  # the proxy authenticates the credential
-    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
     refused = curl(engine, live_project, "coder-2", *through)
     assert refused.returncode != 0
     assert "407" in refused.stderr
@@ -406,7 +406,7 @@ def test_an_instance_spawned_after_a_restart_of_the_proxy_gets_its_template_prof
 def test_spawn_needs_no_secret_because_the_profiles_were_loaded_by_up(live_project, engine, agent_image):
     """Spawn only binds the instance's token to its profile's name: the hub, which never reads secrets, can do it."""
     reup(live_project, injecting(agent_image), DEPLOY_TOKEN=SECRET)
-    spawned = live_project.run("spawn", "coder", env={"DEPLOY_TOKEN": ""}, timeout=300)  # the secret is unreadable now
+    spawned = live_project.run("agent", "spawn", "coder", env={"DEPLOY_TOKEN": ""}, timeout=300)  # the secret is unreadable now
     assert spawned.returncode == 0, spawned.stderr
     echoed = curl(engine, live_project, "coder-1", "https://httpbin.org/headers")
     assert json.loads(echoed.stdout)["headers"]["X-Egzo-Secret"] == SECRET

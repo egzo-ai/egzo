@@ -40,13 +40,13 @@ def project_spec(image, *, workspace=None, agents=None, allow=("github.com",), e
 
 def up_ok(project, document):
     project.write(document)
-    result = project.run("up", timeout=400)
+    result = project.run("project", "up", timeout=400)
     assert result.returncode == 0, result.stderr
     return result
 
 
 def spawn(project, template="coder", name=None, *args):
-    command = ["spawn", template, *([name] if name else []), *args]
+    command = ["agent", "spawn", template, *([name] if name else []), *args]
     return project.run(*command, timeout=400)
 
 
@@ -162,7 +162,7 @@ def test_spawn_gives_the_instance_a_worktree_on_its_own_branch(live_project, eng
 
 def test_spawn_clones_the_base_itself_when_it_is_missing(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
-    subprocess.run(["rm", "-rf", str(base_of(live_project))], check=True)
+    subprocess.run(["agent", "rm", "-rf", str(base_of(live_project))], check=True)
     spawn_ok(live_project)
     assert (base_of(live_project) / ".git").exists() and (worktree_of(live_project) / "README").exists()
 
@@ -309,7 +309,7 @@ def test_committed_work_survives_rm_on_the_branch_and_reuse_continues_it(live_pr
     spawn_ok(live_project, "coder", "issue-1")
     worktree = worktree_of(live_project, "issue-1")
     git(worktree, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "--allow-empty", "-qm", "keep me")
-    assert live_project.run("rm", "--force", "issue-1").returncode == 0
+    assert live_project.run("agent", "rm", "--force", "issue-1").returncode == 0
     assert not worktree.exists()
     assert git(base_of(live_project), "log", "-1", "--format=%s", "egzo/issue-1") == "keep me"
     refused = spawn(live_project, "coder", "issue-1")
@@ -336,7 +336,7 @@ def test_rm_deletes_the_worktree_without_a_check_and_keeps_the_base_and_the_othe
     spawn_ok(live_project)
     spawn_ok(live_project)
     (worktree_of(live_project, "coder-1") / "wip.txt").write_text("not committed, and nobody asks\n")
-    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
     assert not worktree_of(live_project, "coder-1").exists()
     assert (worktree_of(live_project, "coder-2") / "README").exists()
     assert (base_of(live_project) / ".git").exists()
@@ -348,7 +348,7 @@ def test_rm_deletes_the_worktree_without_a_check_and_keeps_the_base_and_the_othe
 def test_down_removes_the_worktrees_of_the_instances_and_keeps_the_base(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project)
-    assert live_project.run("down").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
     assert not worktree_of(live_project).exists()
     assert (base_of(live_project) / ".git").exists()
 
@@ -356,7 +356,7 @@ def test_down_removes_the_worktrees_of_the_instances_and_keeps_the_base(live_pro
 def test_down_and_rm_no_longer_know_workspace_flags(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project)
-    for command in (["down", "--workspaces"], ["rm", "--workspaces", "coder-1"], ["rm", "--yes", "coder-1"]):
+    for command in (["down", "--workspaces"], ["agent", "rm", "--workspaces", "coder-1"], ["agent", "rm", "--yes", "coder-1"]):
         result = live_project.run(*command)
         assert result.returncode != 0 and "unknown flag" in result.stderr, command
     assert worktree_of(live_project).exists()

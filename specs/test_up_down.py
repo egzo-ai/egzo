@@ -11,13 +11,13 @@ from support import agent, spec
 
 def test_up_has_no_detach_flag(project):
     project.write(spec())
-    result = project.run("up", "-d")
+    result = project.run("project", "up", "-d")
     assert result.returncode != 0
     assert "-d" in result.stderr
 
 
 def test_up_documents_dry_run_with_a_long_flag_only(project):
-    result = project.run("up", "--help")
+    result = project.run("project", "up", "--help")
     assert result.returncode == 0
     assert "--dry-run" in result.stdout
     assert "-n," not in result.stdout
@@ -46,14 +46,14 @@ def test_up_does_not_touch_a_running_instance(live_project, engine, agent_image)
     name = live_project.spawn("coder")
     before = engine.instance(live_project.name, name).raw["Id"]
     live_project.up()
-    live_project.run("up", "--recreate", timeout=300)
+    live_project.run("project", "up", "--recreate", timeout=300)
     assert engine.instance(live_project.name, name).raw["Id"] == before
 
 
 def test_up_dry_run_with_templates_creates_nothing_and_says_what_it_would_do(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image)}))
-    result = live_project.run("up", "--dry-run")
-    assert result.returncode == 0, result.stderr
+    result = live_project.run("project", "up", "--dry-run")
+    assert result.returncode == 1, result.stderr  # something would change
     assert "control" in result.stdout and "would" in result.stdout
     assert engine.resources(live_project.name) == []
 
@@ -61,15 +61,44 @@ def test_up_dry_run_with_templates_creates_nothing_and_says_what_it_would_do(liv
 def test_down_removes_the_instances_with_their_networks(live_project, engine, agent_image):
     live_project.up(spec(agents={"coder": custom(agent_image)}))
     first, second = live_project.spawn("coder"), live_project.spawn("coder", "issue-7")
-    assert live_project.run("down").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
     remaining = engine.resources(live_project.name)
     assert not [r for r in remaining if r.kind in ("container", "network")], [r.name for r in remaining]
     assert first and second
 
 
-def test_down_volumes_removes_the_home_volumes_of_the_instances_too(live_project, engine, agent_image):
+def test_down_removes_everything_egzo_made_the_home_volumes_the_control_state_and_the_ca(live_project, engine, agent_image):
     live_project.up(spec(agents={"coder": custom(agent_image)}))
     live_project.spawn("coder")
-    assert live_project.run("down", "--volumes").returncode == 0
+    assert live_project.run("project", "down", "--force").returncode == 0
     assert engine.resources(live_project.name) == []
+
+
+def test_down_is_refused_while_an_agent_runs_and_removes_nothing(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    live_project.spawn("coder")
+    refused = live_project.run("project", "down")
+    assert refused.returncode != 0
+    assert "coder-1" in refused.stderr and "--force" in refused.stderr
+    assert engine.instance(live_project.name, "coder-1") is not None
+    assert len(engine.containers(live_project.name)) == 3  # control, proxy, the agent
+
+
+def test_down_without_force_removes_a_project_whose_agents_are_stopped(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    live_project.spawn("coder")
+    assert live_project.run("stop", "coder-1").returncode == 0
+    assert live_project.run("project", "down").returncode == 0
+    assert engine.resources(live_project.name) == []
+
+
+def test_down_of_a_project_that_is_not_up_succeeds_and_changes_nothing(live_project, engine, agent_image):
+    live_project.write(spec(agents={"coder": custom(agent_image)}))
+    assert live_project.run("project", "down").returncode == 0
+    assert engine.resources(live_project.name) == []
+
+
+def test_the_volumes_flag_is_gone(live_project, engine, agent_image):
+    result = live_project.run("project", "down", "--volumes")
+    assert result.returncode != 0 and "unknown flag" in result.stderr
 

@@ -23,13 +23,13 @@ def test_the_environment_overrides_the_file(project):
 
 def test_the_flag_overrides_the_environment(project):
     project.write(spec(name="from-file"))
-    result = project.run("-p", "from-flag", "config", env={"EGZO_PROJECT_NAME": "from-env"})
+    result = project.run("-p", "from-flag", "project", "check", "--resolved", env={"EGZO_PROJECT_NAME": "from-env"})
     assert result.yaml()["name"] == "from-flag"
 
 
 def test_the_long_flag_is_equivalent(project):
     project.write(spec())
-    result = project.run("--project-name", "from-flag", "config")
+    result = project.run("--project-name", "from-flag", "project", "check", "--resolved")
     assert result.yaml()["name"] == "from-flag"
 
 
@@ -46,11 +46,11 @@ def test_invalid_names_are_rejected(project, bad):
 
 def test_a_name_in_use_from_another_directory_refuses_every_command(live_project, make_project):
     live_project.write(spec())
-    assert live_project.run("up").returncode == 0
+    assert live_project.run("project", "up").returncode == 0
 
     other = make_project(env=live_project.env)
     other.write(spec(agents={"coder": {"harness": "custom", "image": "alpine"}}))
-    for command in (["ps"], ["up"], ["down"], ["spawn", "coder"], ["rm", "coder-1"], ["prune", "--stale"], ["send", "coder-1", "hi"]):
+    for command in (["ps"], ["project", "up"], ["project", "down"], ["agent", "spawn", "coder"], ["agent", "rm", "coder-1"], ["agent", "rm", "--stale"], ["message", "send", "coder-1", "hi"]):
         result = other.run("-p", live_project.name, *command)
         assert result.returncode != 0, command
         assert str(live_project.root) in result.stderr, command

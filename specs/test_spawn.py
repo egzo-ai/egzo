@@ -38,7 +38,7 @@ def project_with(project, image, **templates):
 
 
 def messages(project, *args):
-    result = project.run("messages", *args)
+    result = project.run("message", "ls", *args)
     assert result.returncode == 0, result.stderr
     return {row["ID"]: row for row in table(result.stdout)}
 
@@ -93,7 +93,7 @@ def test_an_auto_name_takes_the_first_free_number(live_project, engine, agent_im
     project_with(live_project, agent_image)
     live_project.spawn("coder")
     live_project.spawn("coder")
-    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
     assert live_project.spawn("coder") == "coder-1"
 
 
@@ -121,7 +121,7 @@ def test_every_instance_has_its_own_identity_toward_the_control_sidecar(live_pro
 
 def test_spawn_json_describes_the_instance(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", "issue-1", "--json", timeout=300)
+    result = live_project.run("agent", "spawn", "coder", "issue-1", "--json", timeout=300)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
         "name": "issue-1", "service": "coder", "container": f"{live_project.name}-issue-1", "actor": "operator",
@@ -130,14 +130,14 @@ def test_spawn_json_describes_the_instance(live_project, engine, agent_image):
 
 def test_the_progress_goes_to_stderr(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", timeout=300)
+    result = live_project.run("agent", "spawn", "coder", timeout=300)
     assert result.stdout == "coder-1\n"
     assert result.stderr.strip(), "spawn says what it is doing, on stderr"
 
 
 def test_the_first_message_is_sent_to_the_new_instance(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", "issue-412", "-m", "Fix #412, then open a PR", timeout=300)
+    result = live_project.run("agent", "spawn", "coder", "issue-412", "-m", "Fix #412, then open a PR", timeout=300)
     assert result.returncode == 0, result.stderr
     assert result.stdout == "issue-412\n"
     [row] = [r for r in messages(live_project).values() if "Fix #412" in r["TEXT"]]
@@ -170,22 +170,22 @@ def test_editing_the_file_changes_nothing_for_spawn_until_up_runs(live_project, 
 def test_a_template_added_to_the_file_cannot_be_spawned_before_up(live_project, engine, agent_image):
     project_with(live_project, agent_image)
     live_project.write(spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    result = live_project.run("spawn", "reviewer")
+    result = live_project.run("agent", "spawn", "reviewer")
     assert result.returncode != 0
-    assert "reviewer" in result.stderr and "egzo up" in result.stderr
+    assert "reviewer" in result.stderr and "egzo project up" in result.stderr
     assert engine.instances(live_project.name) == []
 
 
 def test_an_unknown_template_names_the_published_ones(live_project, engine, agent_image):
     project_with(live_project, agent_image, coder=custom(agent_image), reviewer=custom(agent_image))
-    result = live_project.run("spawn", "nobody")
+    result = live_project.run("agent", "spawn", "nobody")
     assert result.returncode != 0
     assert "nobody" in result.stderr and "coder" in result.stderr and "reviewer" in result.stderr
 
 
 def test_the_environment_of_the_machine_that_spawns_does_not_leak_into_the_instance(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    live_project.run("spawn", "coder", env={"SPAWNER_ONLY_VARIABLE": "leak"}, timeout=300)
+    live_project.run("agent", "spawn", "coder", env={"SPAWNER_ONLY_VARIABLE": "leak"}, timeout=300)
     env = engine.instance(live_project.name, "coder-1").raw["Config"]["Env"]
     assert not [e for e in env if e.startswith("SPAWNER_ONLY_VARIABLE")]
 
@@ -195,33 +195,33 @@ def test_the_environment_of_the_machine_that_spawns_does_not_leak_into_the_insta
 
 def test_spawn_before_up_says_to_run_up_and_creates_nothing(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image)}))
-    result = live_project.run("spawn", "coder")
+    result = live_project.run("agent", "spawn", "coder")
     assert result.returncode != 0
-    assert "egzo up" in result.stderr
+    assert "egzo project up" in result.stderr
     assert engine.resources(live_project.name) == []
 
 
 def test_spawn_after_down_says_to_run_up(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    assert live_project.run("down").returncode == 0
-    result = live_project.run("spawn", "coder")
-    assert result.returncode != 0 and "egzo up" in result.stderr
+    assert live_project.run("project", "down", "--force").returncode == 0
+    result = live_project.run("agent", "spawn", "coder")
+    assert result.returncode != 0 and "egzo project up" in result.stderr
     assert engine.instances(live_project.name) == []
 
 
 def test_spawn_never_starts_the_infrastructure(live_project, engine, agent_image):
     project_with(live_project, agent_image)
     assert live_project.run("stop", "proxy").returncode == 0
-    result = live_project.run("spawn", "coder")
+    result = live_project.run("agent", "spawn", "coder")
     assert result.returncode != 0
-    assert "proxy" in result.stderr and "egzo up" in result.stderr
+    assert "proxy" in result.stderr and "egzo project up" in result.stderr
     assert engine.instances(live_project.name) == []
 
 
 @pytest.mark.parametrize("name", ["Upper", "has space", "-leading", "_leading", "a.b", "x" * 64, "a/b", "--flag"])
 def test_an_invalid_instance_name_is_refused(live_project, engine, agent_image, name):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", name)
+    result = live_project.run("agent", "spawn", "coder", name)
     assert result.returncode != 0
     assert result.returncode != 17
     assert engine.instances(live_project.name) == []
@@ -230,7 +230,7 @@ def test_an_invalid_instance_name_is_refused(live_project, engine, agent_image, 
 @pytest.mark.parametrize("name", ["coder", "reviewer", "control", "proxy", "prep", "control-1", "proxy-1"])
 def test_a_reserved_name_or_a_template_name_is_refused(live_project, engine, agent_image, name):
     project_with(live_project, agent_image, coder=custom(agent_image), reviewer=custom(agent_image))
-    result = live_project.run("spawn", "coder", name)
+    result = live_project.run("agent", "spawn", "coder", name)
     assert result.returncode != 0
     assert result.returncode != 17
     assert name in result.stderr
@@ -242,7 +242,7 @@ def test_a_name_that_exists_exits_17_and_changes_nothing(live_project, engine, a
     live_project.spawn("coder", "issue-412")
     before = {c.name: c.raw["Id"] for c in engine.containers(live_project.name)}
     sent_before = messages(live_project, "--all")
-    result = live_project.run("spawn", "coder", "issue-412", "-m", "a second task", timeout=300)
+    result = live_project.run("agent", "spawn", "coder", "issue-412", "-m", "a second task", timeout=300)
     assert result.returncode == 17, result.stderr
     assert "issue-412" in result.stderr and "coder" in result.stderr
     assert result.stdout == ""
@@ -253,7 +253,7 @@ def test_a_name_that_exists_exits_17_and_changes_nothing(live_project, engine, a
 def test_a_name_that_exists_under_another_template_also_exits_17_and_names_that_template(live_project, engine, agent_image):
     project_with(live_project, agent_image, coder=custom(agent_image), reviewer=custom(agent_image))
     live_project.spawn("reviewer", "shared-name")
-    result = live_project.run("spawn", "coder", "shared-name")
+    result = live_project.run("agent", "spawn", "coder", "shared-name")
     assert result.returncode == 17
     assert "reviewer" in result.stderr
     assert engine.instance(live_project.name, "shared-name").labels[f"{LABEL_PREFIX}service"] == "reviewer"
@@ -266,7 +266,7 @@ def test_two_spawns_of_one_name_at_once_make_exactly_one_instance(live_project, 
 
     def launch():
         return subprocess.Popen(
-            [live_project.egzo.binary, "spawn", "coder", "race"], cwd=live_project.root, env=environment,
+            [live_project.egzo.binary, "agent", "spawn", "coder", "race"], cwd=live_project.root, env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
 
@@ -280,16 +280,16 @@ def test_two_spawns_of_one_name_at_once_make_exactly_one_instance(live_project, 
 
 def test_a_template_name_is_not_an_instance_for_the_commands_that_address_one(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    for command in (["send", "coder", "hi"], ["attach", "coder"], ["rm", "coder"]):
+    for command in (["message", "send", "coder", "hi"], ["attach", "coder"], ["agent", "rm", "coder"]):
         result = live_project.run(*command, input="")
         assert result.returncode != 0, command
         assert "coder is a template" in result.stderr, command
-        assert "egzo spawn coder" in result.stderr, command
+        assert "egzo agent spawn coder" in result.stderr, command
 
 
 def test_a_spawn_that_fails_leaves_nothing_behind_and_the_name_stays_free(live_project, engine, agent_image):
     project_with(live_project, agent_image, broken=custom("egzo-spec-no-such-image:0"), coder=custom(agent_image))
-    result = live_project.run("spawn", "broken", "attempt", timeout=300)
+    result = live_project.run("agent", "spawn", "broken", "attempt", timeout=300)
     assert result.returncode != 0
     assert "egzo-spec-no-such-image" in result.stderr
     assert engine.instances(live_project.name) == []
@@ -302,7 +302,7 @@ def test_a_spawn_that_fails_leaves_nothing_behind_and_the_name_stays_free(live_p
 
 def test_wait_needs_a_message(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", "--wait")
+    result = live_project.run("agent", "spawn", "coder", "--wait")
     assert result.returncode != 0
     assert "-m" in result.stderr or "message" in result.stderr
     assert engine.instances(live_project.name) == []
@@ -310,7 +310,7 @@ def test_wait_needs_a_message(live_project, engine, agent_image):
 
 def test_wait_and_attach_exclude_each_other(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", "-m", "x", "--wait", "--attach")
+    result = live_project.run("agent", "spawn", "coder", "-m", "x", "--wait", "--attach")
     assert result.returncode != 0
     assert engine.instances(live_project.name) == []
 
@@ -319,7 +319,7 @@ def spawn_waiting(project, *args):
     environment = {**os.environ, **project.env, "NO_COLOR": "1"}
     environment.pop("EGZO_PROJECT_NAME", None)
     return subprocess.Popen(
-        [project.egzo.binary, "spawn", *args, "--wait", "--timeout", "90s"], cwd=project.root, env=environment,
+        [project.egzo.binary, "agent", "spawn", *args, "--wait", "--timeout", "90s"], cwd=project.root, env=environment,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
 
@@ -343,7 +343,7 @@ def test_wait_returns_the_resolution_of_the_first_message_like_send_wait(live_pr
 
 def test_wait_times_out_with_exit_5_and_leaves_the_instance_and_the_message_open(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", "slow", "-m", "never answered", "--wait", "--timeout", "4s", timeout=300)
+    result = live_project.run("agent", "spawn", "coder", "slow", "-m", "never answered", "--wait", "--timeout", "4s", timeout=300)
     assert result.returncode == 5, (result.stdout, result.stderr)
     assert engine.instance(live_project.name, "slow").raw["State"]["Running"] is True
     assert any("never answered" in r["TEXT"] for r in messages(live_project).values())
@@ -354,7 +354,7 @@ def test_attach_opens_the_terminal_of_the_new_instance(live_project, engine, ses
     environment = {**os.environ, **live_project.env}
     environment.pop("EGZO_PROJECT_NAME", None)
     client = pexpect.spawn(
-        egzo.binary, ["spawn", "coder", "pair", "--attach"], cwd=live_project.root, env=environment, encoding=None, timeout=120,
+        egzo.binary, ["agent", "spawn", "coder", "pair", "--attach"], cwd=live_project.root, env=environment, encoding=None, timeout=120,
     )
     client.expect(b"READY")
     client.send(b"typed in the new instance")
@@ -371,7 +371,7 @@ def test_attach_with_a_message_delivers_it_to_the_instance(live_project, engine,
     environment = {**os.environ, **live_project.env}
     environment.pop("EGZO_PROJECT_NAME", None)
     client = pexpect.spawn(
-        egzo.binary, ["spawn", "coder", "pair", "-m", "please look at this", "--attach"], cwd=live_project.root, env=environment,
+        egzo.binary, ["agent", "spawn", "coder", "pair", "-m", "please look at this", "--attach"], cwd=live_project.root, env=environment,
         encoding=None, timeout=120,
     )
     client.expect(b"READY")
@@ -405,16 +405,16 @@ def test_the_agent_environment_names_the_instance_not_the_template(live_project,
 
 def test_a_name_that_would_clash_with_the_proxys_network_is_refused(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", "egress")
+    result = live_project.run("agent", "spawn", "coder", "egress")
     assert result.returncode == 1 and "egress" in result.stderr
     assert engine.instance(live_project.name, "egress") is None
-    assert live_project.run("spawn", "coder", "notes").returncode == 0  # an ordinary name is fine
+    assert live_project.run("agent", "spawn", "coder", "notes").returncode == 0  # an ordinary name is fine
 
 
 @pytest.mark.parametrize("flags", [("--json", "--wait", "-m", "x"), ("--json", "--attach")])
 def test_json_cannot_be_combined_with_what_takes_over_the_terminal(live_project, engine, agent_image, flags):
     project_with(live_project, agent_image)
-    result = live_project.run("spawn", "coder", *flags)
+    result = live_project.run("agent", "spawn", "coder", *flags)
     assert result.returncode == 1 and "--json" in result.stderr
     assert not engine.instances(live_project.name)
 
@@ -425,7 +425,7 @@ def test_spawns_started_together_take_turns_and_all_succeed(live_project, engine
     environment.pop("EGZO_PROJECT_NAME", None)
     processes = [
         subprocess.Popen(
-            [live_project.egzo.binary, "spawn", "coder", f"batch-{n}"], cwd=live_project.root, env=environment,
+            [live_project.egzo.binary, "agent", "spawn", "coder", f"batch-{n}"], cwd=live_project.root, env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         for n in range(3)
@@ -439,8 +439,8 @@ def test_spawns_started_together_take_turns_and_all_succeed(live_project, engine
 def test_spawning_after_the_file_changed_warns_that_the_instance_is_stale_already(live_project, engine, agent_image):
     live_project.up(spec(agents={"coder": custom(agent_image, env={"V": "1"})}))
     live_project.write(spec(agents={"coder": custom(agent_image, env={"V": "2"})}))
-    result = live_project.run("spawn", "coder")
+    result = live_project.run("agent", "spawn", "coder")
     assert result.returncode == 0, result.stderr
-    assert "warning" in result.stderr and "egzo up" in result.stderr and "coder-1" in result.stderr
+    assert "warning" in result.stderr and "egzo project up" in result.stderr and "coder-1" in result.stderr
     assert result.stdout.strip() == "coder-1"
     assert live_project.run("ps").stdout.count("stale") >= 1

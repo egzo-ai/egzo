@@ -132,7 +132,7 @@ def test_restart_restarts_the_container(live_project, engine, agent_image):
 def test_up_leaves_a_stopped_instance_stopped(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
     assert live_project.run("stop", "coder-1").returncode == 0
-    result = live_project.run("up")
+    result = live_project.run("project", "up")
     assert result.returncode == 0, result.stderr
     assert state(engine, live_project, "coder-1")["Running"] is False
 
@@ -143,7 +143,7 @@ def test_naming_a_template_says_to_spawn_it(live_project, engine, agent_image):
         result = live_project.run(*command)
         assert result.returncode != 0, command
         assert "coder is a template" in result.stderr, command
-        assert "egzo spawn coder" in result.stderr, command
+        assert "egzo agent spawn coder" in result.stderr, command
 
 
 def test_the_sidecars_are_reached_by_their_service_name(live_project, engine, agent_image):

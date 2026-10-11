@@ -39,7 +39,7 @@ def session(live_project, session_image, egzo, engine):
         agents = agents or {"coder": tui(session_image, mode, **env)}
         # a project holds one set of templates: what an earlier call spawned is stale once they change
         for earlier in engine.instances(live_project.name):
-            live_project.run("rm", "--force", earlier.labels[f"{LABEL_PREFIX}instance"])
+            live_project.run("agent", "rm", "--force", earlier.labels[f"{LABEL_PREFIX}instance"])
         live_project.up(spec(agents={f"{name}-template": fields for name, fields in agents.items()}))
         for name in agents:
             live_project.spawn(f"{name}-template", name)
@@ -242,7 +242,7 @@ def test_a_read_only_observer_sees_everything_and_types_nothing(session):
 
 def test_an_agent_whose_program_exits_at_once_fails_spawn_with_its_exit_code(live_project, session_image):
     live_project.up(spec(agents={"coder": tui(session_image, "exit")}))
-    result = live_project.run("spawn", "coder", timeout=300)
+    result = live_project.run("agent", "spawn", "coder", timeout=300)
     assert result.returncode != 0
     assert "code 3" in result.stderr and "bye" in result.stderr
 
@@ -262,7 +262,7 @@ def test_when_the_program_exits_attach_exits_with_its_code(session):
 
 def test_attach_needs_a_terminal(session):
     session("cat")
-    result = session.project.run("attach", "coder", input="")
+    result = session.project.run("agent", "attach", "coder", input="")
     assert result.returncode != 0
     assert "terminal" in result.stderr
 
