@@ -299,7 +299,7 @@ def test_an_update_is_never_announced_and_reaches_the_person_waiting(run, egzo):
     project = run()
     wait_activity(project, "idle")
     waiter = subprocess.run(
-        [egzo.binary, "send", "--wait", "--timeout", "60s", "coder", "this needs-update first"], cwd=project.root,
+        [egzo.binary, "message", "send", "--wait", "--timeout", "60s", "coder", "this needs-update first"], cwd=project.root,
         env={**os.environ, **project.env}, capture_output=True, text=True, timeout=120,
     )
     assert waiter.returncode == 0, waiter.stderr
@@ -324,7 +324,7 @@ def test_send_wait_returns_what_the_agent_resolves_with(run, egzo):
     project = run()
     wait_activity(project, "idle")
     waiter = subprocess.run(
-        [egzo.binary, "send", "--wait", "--timeout", "60s", "coder", "do the thing"], cwd=project.root,
+        [egzo.binary, "message", "send", "--wait", "--timeout", "60s", "coder", "do the thing"], cwd=project.root,
         env={**os.environ, **project.env}, capture_output=True, text=True, timeout=120,
     )
     assert waiter.returncode == 0, waiter.stderr
@@ -373,7 +373,7 @@ def test_a_message_is_never_announced_while_a_person_is_typing(live_project, ses
     wait_activity(live_project, "idle")
     environment = {**os.environ, **live_project.env}
     environment.pop("EGZO_PROJECT_NAME", None)
-    client = pexpect.spawn(egzo.binary, ["attach", "coder"], cwd=live_project.root, env=environment, encoding=None, timeout=30)
+    client = pexpect.spawn(egzo.binary, ["agent", "attach", "coder"], cwd=live_project.root, env=environment, encoding=None, timeout=30)
     client.expect(b"READY")
     client.send(b"typing")
     typed = time.time()
@@ -389,7 +389,7 @@ def test_a_read_only_observer_never_holds_an_announcement_back(live_project, ses
     wait_activity(live_project, "idle")
     environment = {**os.environ, **live_project.env}
     environment.pop("EGZO_PROJECT_NAME", None)
-    observer = pexpect.spawn(egzo.binary, ["attach", "--read-only", "coder"], cwd=live_project.root, env=environment, encoding=None, timeout=30)
+    observer = pexpect.spawn(egzo.binary, ["agent", "attach", "--read-only", "coder"], cwd=live_project.root, env=environment, encoding=None, timeout=30)
     observer.expect(b"READY")
     observer.send(b"keys the observer typed")
     live_project.run("message", "send", "coder", "hello observer")

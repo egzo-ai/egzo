@@ -38,14 +38,14 @@
 
   <rect x="40" y="225" width="220" height="75" rx="8" fill="#ecfdf5" stroke="#059669"/>
   <text x="150" y="246" text-anchor="middle" font-weight="700">Your terminal</text>
-  <text x="150" y="264" text-anchor="middle" fill="#475569">egzo attach &lt;agent&gt;</text>
+  <text x="150" y="264" text-anchor="middle" fill="#475569">egzo agent attach &lt;agent&gt;</text>
   <text x="150" y="280" text-anchor="middle" fill="#475569">native scrollback, Ctrl-] detaches</text>
 
   <rect x="40" y="330" width="220" height="140" rx="8" fill="#fff" stroke="#64748b"/>
   <text x="150" y="351" text-anchor="middle" font-weight="700">egzo CLI</text>
   <text x="150" y="368" text-anchor="middle" fill="#475569">stateless, no daemon</text>
   <text x="150" y="388" text-anchor="middle" fill="#475569">up · spawn · rm · down · ps</text>
-  <text x="150" y="404" text-anchor="middle" fill="#475569">attach · secrets · doctor · diff</text>
+  <text x="150" y="404" text-anchor="middle" fill="#475569">agent attach · project check · system check</text>
   <text x="150" y="420" text-anchor="middle" fill="#475569">ca rotate · proxy rules / log</text>
   <text x="150" y="444" text-anchor="middle" fill="#475569">talks to the engine API</text>
   <text x="150" y="459" text-anchor="middle" fill="#475569">(DOCKER_HOST), socket never in agents</text>
@@ -75,7 +75,7 @@
   <g stroke="#475569" fill="none" marker-end="url(#a)">
     <path d="M442 156V200"/><path d="M650 156V200"/><path d="M856 156V200"/>
   </g>
-  <text x="450" y="182" fill="#6d28d9" font-weight="600">egzo spawn (as many as you like)</text>
+  <text x="450" y="182" fill="#6d28d9" font-weight="600">egzo agent spawn (as many as you like)</text>
 
   <!-- Instances -->
   <g>
@@ -181,8 +181,8 @@
     <text x="1014" y="302" fill="#475569">per-agent network, token and home;</text>
     <text x="1014" y="318" fill="#475569">optional gVisor runtime (runsc)</text>
     <text x="1014" y="346" font-weight="600">Lifecycle</text>
-    <text x="1014" y="362" fill="#475569">up / spawn / rm / prune / down;</text>
-    <text x="1014" y="378" fill="#475569">depends_on; handoff; diff; doctor</text>
+    <text x="1014" y="362" fill="#475569">project up / agent spawn / agent rm / project down;</text>
+    <text x="1014" y="378" fill="#475569">depends_on; handoff</text>
     <text x="1014" y="406" font-weight="600">Executable spec</text>
     <text x="1014" y="422" fill="#475569">pytest in specs/ is the status report:</text>
     <text x="1014" y="438" fill="#475569">red = not built yet</text>
@@ -195,8 +195,8 @@
   <!-- Legend -->
   <line x1="20" y1="876" x2="1240" y2="876" stroke="#e2e8f0"/>
   <g fill="#334155" font-size="11">
-    <text x="20" y="896"><tspan font-weight="700">1</tspan>  egzo up publishes templates; egzo spawn makes instances (no YAML edit)</text>
-    <text x="20" y="916"><tspan font-weight="700">2</tspan>  egzo attach: your terminal ↔ pty holder, the real TUI (detach, reattach)</text>
+    <text x="20" y="896"><tspan font-weight="700">1</tspan>  egzo project up publishes templates; egzo agent spawn makes instances (no YAML edit)</text>
+    <text x="20" y="916"><tspan font-weight="700">2</tspan>  egzo agent attach: your terminal ↔ pty holder, the real TUI (detach, reattach)</text>
     <text x="20" y="936"><tspan font-weight="700">3</tspan>  Operator commands (spawn -m, ps, status) reach control over a unix socket</text>
     <text x="640" y="896"><tspan font-weight="700">4</tspan>  Agent → control: hook status, MCP tools, inbound messages</text>
     <text x="640" y="916"><tspan font-weight="700">5</tspan>  Agent → proxy: the only route out; credentials injected here</text>

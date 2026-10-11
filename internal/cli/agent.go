@@ -21,48 +21,27 @@ import (
 	sess "github.com/egzo-ai/egzo/internal/session"
 )
 
-// newAgentCommand holds the roles that run inside an agent container.
-func newAgentCommand() *cobra.Command {
+// newAgentCommand is the group of commands about agents: the ones you run (spawn, ls, rm, start, stop, attach) and,
+// hidden, the roles that run inside an agent container (run, browser).
+func newAgentCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "agent",
-		Short:  "Roles that run inside an agent container",
-		Hidden: true,
+		Use:   "agent",
+		Short: "Spawn, list, remove, start, stop and attach to agents",
 	}
 	run := &cobra.Command{
-		Use:   "run [--] [PROGRAM [ARG...]]",
-		Short: "Run a harness on a terminal that clients can attach to (the session holder)",
+		Use:    "run [--] [PROGRAM [ARG...]]",
+		Short:  "Run a harness on a terminal that clients can attach to (the session holder)",
+		Hidden: true,
 		Long: "Run a harness TUI on a terminal inside the agent container: prepare its configuration for its\n" +
-			"harness (EGZO_HARNESS), run it, serve `egzo attach`, report its state to the control sidecar and\n" +
+			"harness (EGZO_HARNESS), run it, serve `egzo agent attach`, report its state to the control sidecar and\n" +
 			"type queued messages into it. This is the entrypoint of an egzo harness image.",
 		RunE: func(cmd *cobra.Command, args []string) error { return runAgent(args) },
 	}
 	run.Flags().SetInterspersed(false)
-	attach := &cobra.Command{
-		Use:   "attach",
-		Short: "Attach this terminal to the session of this container",
-		Args:  cobra.NoArgs,
-	}
-	var readOnly bool
-	var detachKeys string
-	attach.Flags().BoolVar(&readOnly, "read-only", false, "watch the session without typing into it")
-	attach.Flags().StringVar(&detachKeys, "detach-keys", "ctrl-]", "the key that detaches")
-	attach.RunE = func(cmd *cobra.Command, args []string) error {
-		key, err := sess.DetachKeys(detachKeys)
-		if err != nil {
-			return err
-		}
-		code, err := sess.Attach(sess.SocketPath(), readOnly, key, os.Stdin, os.Stdout)
-		if err != nil {
-			return err
-		}
-		if code != 0 {
-			return ExitError{Code: code}
-		}
-		return nil
-	}
 	browserCommand := &cobra.Command{
-		Use:   "browser",
-		Short: "Run the Playwright MCP server, configured for this agent's proxy",
+		Use:    "browser",
+		Short:  "Run the Playwright MCP server, configured for this agent's proxy",
+		Hidden: true,
 		Long: "Run `playwright-mcp` with a configuration built from this container's environment: the proxy of\n" +
 			"HTTPS_PROXY with its credentials as separate fields, a headless isolated Chromium, and its output in a\n" +
 			"temporary directory. The harness's MCP configuration starts this instead of `playwright-mcp`.",
@@ -78,8 +57,27 @@ func newAgentCommand() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(run, attach, browserCommand)
-	return cmd
+	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
+		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
+		newAttachCommand(opts), run, browserCommand)
+	return group(cmd)
+}
+
+// attachInContainer attaches this terminal to the session of the container egzo runs in: what the CLI runs
+// in an agent's container (`egzo agent attach`, with no instance) to attach you to it.
+func attachInContainer(detachKeys string, readOnly bool) error {
+	key, err := sess.DetachKeys(detachKeys)
+	if err != nil {
+		return err
+	}
+	code, err := sess.Attach(sess.SocketPath(), readOnly, key, os.Stdin, os.Stdout)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return ExitError{Code: code}
+	}
+	return nil
 }
 
 func durationEnv(name string, fallback time.Duration) time.Duration {

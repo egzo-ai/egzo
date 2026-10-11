@@ -101,8 +101,8 @@ def test_check_exits_one_on_an_invalid_file_and_says_why(project):
     assert "nope" in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("value, word", [(None, "missing"), ("", "empty")])
-def test_check_exits_one_when_a_secret_is_missing_or_empty(project, value, word):
+@pytest.mark.parametrize("value, word", [(None, "missing"), ("", "missing")])
+def test_check_exits_one_when_an_environment_secret_is_missing_or_empty(project, value, word):
     project.write(spec(vaults=secret_vault("TOKEN")))
     result = project.run("project", "check", env={} if value is None else {"TOKEN": value})
     assert result.returncode == 1, result.stdout
@@ -131,8 +131,10 @@ def test_check_resolved_prints_the_configuration_and_does_not_read_secrets(proje
 def test_drift_is_shown_but_is_not_an_error(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.write(spec(agents={"coder": custom(agent_image), "second": custom(agent_image)}))
-    result = live_project.run("project", "check")
+    secrets = {"ANTHROPIC_API_KEY": "a", "GITHUB_TOKEN": "b", "DEPLOY_TOKEN": "c"}
+    result = live_project.run("project", "check", env=secrets)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert any(line.startswith("warn") and "up --dry-run" in line for line in result.stdout.splitlines()), result.stdout
 
 
 # --- system check ------------------------------------------------------------------------------------------
@@ -165,7 +167,8 @@ def test_agent_ls_lists_the_instances_and_not_the_sidecars(live_project, engine,
     live_project.spawn("coder")
     live_project.spawn("coder", "issue-7")
     assert sorted(instance_names(live_project)) == ["coder-1", "issue-7"]
-    assert {"control", "proxy"} <= {row["NAME"] for row in table(live_project.run("ps").stdout)}
+    ps_names = [row["NAME"] for row in table(live_project.run("ps").stdout)]
+    assert any(name.endswith("control-1") for name in ps_names) and any(name.endswith("proxy-1") for name in ps_names)
 
 
 def test_agent_ls_json_is_a_list_of_the_instances(live_project, engine, agent_image):
@@ -211,17 +214,17 @@ def listed(project, *args):
 
 def test_message_ls_filters_by_recipient_and_by_sender(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    first = live_project.run("message", "send", "coder", "for the coder").stdout.split()[1]
-    second = live_project.run("message", "send", "reviewer", "for the reviewer").stdout.split()[1]
-    assert set(listed(live_project, "--to", "coder")) == {first}
-    assert set(listed(live_project, "--to", "agent:reviewer")) == {second}
+    first = live_project.run("message", "send", "coder-1", "for the coder").stdout.split()[1]
+    second = live_project.run("message", "send", "reviewer-1", "for the reviewer").stdout.split()[1]
+    assert set(listed(live_project, "--to", "coder-1")) == {first}
+    assert set(listed(live_project, "--to", "agent:reviewer-1")) == {second}
     assert set(listed(live_project, "--from", "operator")) == {first, second}
-    assert listed(live_project, "--from", "coder") == {}
+    assert listed(live_project, "--from", "coder-1") == {}
 
 
 def test_message_ls_filters_by_kind_and_by_state(live_project, engine, agent_image):
     two_agents(live_project, agent_image)
-    sent = live_project.run("message", "send", "coder", "do it").stdout.split()[1]
+    sent = live_project.run("message", "send", "coder-1", "do it").stdout.split()[1]
     assert set(listed(live_project, "--kind", "request")) == {sent}
     assert listed(live_project, "--kind", "question") == {}
     assert set(listed(live_project, "--state", "pending")) == {sent}
@@ -240,7 +243,7 @@ def test_message_ls_refuses_a_filter_value_it_does_not_know(project):
 def test_message_reply_answers_what_message_ls_lists(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    sent = live_project.run("msg", "send", "coder", "hello").stdout.split()[1]
+    sent = live_project.run("msg", "send", "coder-1", "hello").stdout.split()[1]
     assert sent in listed(live_project)
     unknown = live_project.run("message", "reply", "m" + "0" * 32, "x")
     assert unknown.returncode != 0

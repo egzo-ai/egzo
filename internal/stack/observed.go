@@ -144,7 +144,7 @@ func CheckOwnership(observed Observed, project, dir string) error {
 	for _, r := range observed.Resources {
 		if r.ProjectDir != "" && r.ProjectDir != dir {
 			return fmt.Errorf("project %q already exists from another directory (%s); "+
-				"rename this project (-p, EGZO_PROJECT_NAME or name:) or run `egzo down` from that directory",
+				"rename this project (-p, EGZO_PROJECT_NAME or name:) or run `egzo project down` from that directory",
 				project, r.ProjectDir)
 		}
 	}

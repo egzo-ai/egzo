@@ -43,7 +43,7 @@ func ExecRunner(name string, args ...string) ([]byte, error) {
 // browser sends (Encrypted Client Hello), so a browser without it fails every such page.
 //
 // It does nothing when `certutil` is not on the PATH (an image without a browser), and is idempotent: the
-// certificate is replaced, not added again, so the database follows `egzo ca rotate`. An error is for the
+// certificate is replaced, not added again, so the database follows `egzo project rotate-ca`. An error is for the
 // caller to print; it must never keep the harness from starting.
 //
 // A database certutil cannot even list is damaged: it is set aside (the newest two copies are kept, and the

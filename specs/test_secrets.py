@@ -124,7 +124,7 @@ def test_a_project_without_an_env_vault_gets_no_such_warning(project, fake_pass)
 def test_the_env_backend_reads_the_variable_of_the_same_name(project):
     project.write(spec(vaults=vault("env", "SET_ONE", "UNSET_ONE")))
     result = project.run("project", "check", env={"SET_ONE": "env-secret-value", "UNSET_ONE": ""})
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, result.stderr  # a secret that cannot be read is an error
     found = rows(result)
     assert "set" in found["main/SET_ONE"] and "missing" in found["main/UNSET_ONE"]
     assert "env-secret-value" not in result.stdout + result.stderr
@@ -137,7 +137,7 @@ def test_the_pass_backend_runs_pass_show_with_the_name_and_its_slashes(project, 
     fake_pass.put("company/project/test", "pass-secret-value\n")
     project.write(spec(vaults=vault("pass", "company/project/test", "company/project/gone")))
     result = project.run("project", "check", env=fake_pass.env)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, result.stderr  # one of the two entries is not in the store
     found = rows(result)
     assert "set" in found["main/company/project/test"] and "missing" in found["main/company/project/gone"]
     assert "pass-secret-value" not in result.stdout + result.stderr

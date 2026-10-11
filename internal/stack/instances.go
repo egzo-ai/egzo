@@ -95,5 +95,5 @@ func StaleError(stale []Instance) error {
 		names[i] = instance.Name
 	}
 	return fmt.Errorf("cannot converge while %d instance(s) are stale (their template changed or is gone): %s\n"+
-		"stop them first: `egzo rm NAME...` or `egzo prune --stale`", len(stale), strings.Join(names, ", "))
+		"stop them first: `egzo agent rm NAME...` or `egzo agent rm --stale`", len(stale), strings.Join(names, ", "))
 }

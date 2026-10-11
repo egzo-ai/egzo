@@ -4,7 +4,7 @@ A project is one `egzo.yaml`. Everything is denied unless the file declares it, 
 agents may use. It has five parts: **vaults** (where secrets come from), **egress** (what agents may reach),
 **workspaces** (what they work on), **agents** (the templates) and, optionally, **proxy**/**name**.
 
-`egzo config` prints the file validated and fully resolved; `egzo config` is the quickest way to see what a short
+`egzo project check --resolved` prints the file validated and fully resolved; `egzo project check --resolved` is the quickest way to see what a short
 file expands to. The project name defaults to the directory name (`name:`, `-p` or `EGZO_PROJECT_NAME` override it);
 renaming a project creates a new one.
 
@@ -32,7 +32,7 @@ agents:
     workspaces: [repo]
 ```
 
-`egzo up`, then `egzo spawn claude --attach` ([managing projects](managing-projects.md)). With one workspace, its directory is the agent's working directory (for a git workspace, the agent's own worktree).
+`egzo project up`, then `egzo agent spawn claude --attach` ([managing projects](managing-projects.md)). With one workspace, its directory is the agent's working directory (for a git workspace, the agent's own worktree).
 
 ## Vaults and secrets
 
@@ -68,7 +68,7 @@ vaults:
     secrets: [ANTHROPIC_API_KEY, GITHUB_TOKEN]
 ```
 
-`egzo secrets ls` shows which are set (never the values). Secrets reach the proxy only ([security
+`egzo project check` shows which are set (never the values). Secrets reach the proxy only ([security
 model](security.md)). They are never in an agent's environment, in labels or in `docker inspect`.
 
 ## Egress profiles
@@ -99,16 +99,16 @@ agents:
   it; without one it is `./workspaces/<name>`.
 - A **directory** workspace is shared by every agent that lists it. egzo creates it when it is missing and never
   deletes it. `:ro` makes it read-only for an agent.
-- A **git** workspace holds a base clone (`.base`) made by `egzo up` and a worktree per instance, made by `egzo spawn`
-  on its own branch `egzo/<instance>`. It cannot be `:ro`. `egzo rm` deletes the instance's worktree; what it
+- A **git** workspace holds a base clone (`.base`) made by `egzo project up` and a worktree per instance, made by `egzo agent spawn`
+  on its own branch `egzo/<instance>`. It cannot be `:ro`. `egzo agent rm` deletes the instance's worktree; what it
   committed stays on its branch in the base.
 - Git sources are HTTPS only. The clone and the fetch go through the proxy, which injects the token (the `github`
   service), so agents hold no git credential and push their own work.
-- Keep `workspaces/` and `.egzo/` out of git; `egzo init` adds them to `.gitignore`.
+- Keep `workspaces/` and `.egzo/` out of git; `egzo project init` adds them to `.gitignore`.
 
 ## Agents
 
-An agent entry is a **template**; nothing runs until `egzo spawn`. See [harnesses](harnesses.md) for `harness:`,
+An agent entry is a **template**; nothing runs until `egzo agent spawn`. See [harnesses](harnesses.md) for `harness:`,
 [overriding base images](images.md) for `image:`, and [messaging](messaging.md) for the `inject:` timings.
 
 ```yaml

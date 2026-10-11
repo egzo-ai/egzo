@@ -4,7 +4,7 @@
 // Package config loads, validates and resolves egzo.yaml.
 //
 // The raw types mirror the file. Resolve turns them into the fully resolved view that
-// `egzo config` prints and the rest of egzo works from.
+// `egzo project check --resolved` prints and the rest of egzo works from.
 package config
 
 import (

@@ -86,7 +86,7 @@ def spawn_attach(project, egzo, *args, dimensions=(40, 120)):
     environment = dict(os.environ)
     environment.pop("EGZO_PROJECT_NAME", None)
     environment.update(project.env)
-    return pexpect.spawn(egzo.binary, ["attach", *args, "coder"], cwd=project.root, env=environment, dimensions=dimensions, encoding=None, timeout=90)
+    return pexpect.spawn(egzo.binary, ["agent", "attach", *args, "coder"], cwd=project.root, env=environment, dimensions=dimensions, encoding=None, timeout=90)
 
 
 # --- the images --------------------------------------------------------------------------------------

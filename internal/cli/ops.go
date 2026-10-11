@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,29 +11,32 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/spf13/cobra"
 
-	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
 
-// --- doctor ---------------------------------------------------------------------------------------
+// --- system check ---------------------------------------------------------------------------------
 
-func newDoctorCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor",
-		Short: "Check the engine, its isolation and this project",
-		Long: "Check what egzo depends on: that the engine answers, whether it runs rootless, whether gVisor is\n" +
-			"registered, and the project in this directory. Each line starts with ok, warn or fail; egzo exits\n" +
-			"non-zero when any check fails.",
+func newSystemCommand() *cobra.Command {
+	cmd := group(&cobra.Command{Use: "system", Short: "What egzo depends on, outside any project"})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "check",
+		Short: "Check the engine, its isolation and git",
+		Long: "Check what egzo depends on, with no project file: that the engine answers, whether it runs rootless, whether\n" +
+			"gVisor is registered, that internal networks work, and git (in the egzo image, which makes the worktrees,\n" +
+			"and on this host, where the worktrees are read; both need 2.48 or later for relative worktree links).\n" +
+			"Each line starts with ok, warn or fail; egzo exits non-zero when any check fails.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -54,13 +56,69 @@ func newDoctorCommand(opts *options) *cobra.Command {
 			} else {
 				defer c.Close()
 				checkEngine(ctx, c, report)
+				checkImageGit(ctx, c, report)
 			}
-			checkProject(opts, report)
+			checkHostGit(report)
 			if failed {
 				return ExitError{Code: 1}
 			}
 			return nil
 		},
+	})
+	return cmd
+}
+
+// minimumGit is the oldest git that writes relative worktree links (`git worktree add --relative-paths`).
+var minimumGit = [2]int{2, 48}
+
+var gitVersion = regexp.MustCompile(`git version (\d+)\.(\d+)`)
+
+// gitAtLeast parses `git --version` output and says whether it is the minimum or later.
+func gitAtLeast(output string) (version string, ok bool) {
+	match := gitVersion.FindStringSubmatch(output)
+	if match == nil {
+		return "", false
+	}
+	major, _ := strconv.Atoi(match[1])
+	minor, _ := strconv.Atoi(match[2])
+	version = match[1] + "." + match[2]
+	return version, major > minimumGit[0] || (major == minimumGit[0] && minor >= minimumGit[1])
+}
+
+func checkHostGit(report func(level, format string, a ...any)) {
+	output, err := exec.Command("git", "--version").Output()
+	if err != nil {
+		report("warn", "git on the host: not found; workspaces work, but git does not in the worktrees you open in an editor")
+		return
+	}
+	if version, ok := gitAtLeast(string(output)); ok {
+		report("ok", "git on the host: %s, so the worktrees of git workspaces work in your editor too", version)
+	} else {
+		report("warn", "git on the host: %s is older than %d.%d, which refuses repositories with relative worktree links: git status will fail in worktrees on the host (agents are not affected)",
+			strings.TrimSpace(strings.TrimPrefix(string(output), "git version ")), minimumGit[0], minimumGit[1])
+	}
+}
+
+// checkImageGit asks the egzo image, which runs every git job, for its git. It does not pull the image.
+func checkImageGit(ctx context.Context, c *engine.Client, report func(level, format string, a ...any)) {
+	image := imageRef()
+	if _, err := c.API.ImageInspect(ctx, image); err != nil {
+		report("warn", "git in the egzo image: not checked, %s is not available locally (egzo project up pulls it)", image)
+		return
+	}
+	output, err := stack.RunPrep(ctx, c, stack.PrepSpec{
+		Image: image, Cmd: []string{"git", "--version"},
+		Identity: engine.Identity{Project: "egzo-system-check", Service: "prep", Kind: "prep"},
+		Timeout:  time.Minute,
+	})
+	if err != nil {
+		report("fail", "git in the egzo image: cannot run: %s", firstLine(err.Error()))
+		return
+	}
+	if version, ok := gitAtLeast(output); ok {
+		report("ok", "git in the egzo image: %s", version)
+	} else {
+		report("fail", "git in the egzo image: %q is older than %d.%d: worktrees cannot be made with relative links", strings.TrimSpace(output), minimumGit[0], minimumGit[1])
 	}
 }
 
@@ -103,81 +161,11 @@ func checkEngine(ctx context.Context, c *engine.Client, report func(level, forma
 	}
 }
 
-func checkProject(opts *options, report func(level, format string, a ...any)) {
-	path, err := projectFile(opts)
-	if err != nil {
-		report("ok", "no %s here or in a parent directory: project checks skipped", config.FileName)
-		return
-	}
-	dir := filepath.Dir(path)
-	p, err := loadProject(opts)
-	if err != nil {
-		report("fail", "%s: %s", config.FileName, firstLine(err.Error()))
-		return
-	}
-	report("ok", "%s is valid (project %s, %d template(s))", config.FileName, p.Resolved.Name, len(p.Resolved.Agents))
-	for _, warning := range p.Warnings {
-		report("warn", "%s", strings.TrimPrefix(warning, "warning: "))
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		if _, err := exec.LookPath("git"); err == nil {
-			for _, entry := range ignored {
-				check := exec.Command("git", "check-ignore", "-q", entry+"probe")
-				check.Dir = dir
-				if check.Run() != nil {
-					report("warn", "%s is not git-ignored: add `%s` to .gitignore, it holds egzo's state and the clones and worktrees of your workspaces, which must not be committed", entry, entry)
-				}
-			}
-		}
-	}
-}
-
-// --- diff -----------------------------------------------------------------------------------------
-
-func newDiffCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "diff",
-		Short: "Show what `egzo up` would change; exit 1 when something would",
-		Long: "Show what `egzo up` would change, the way it decides: by comparing the definition of every resource\n" +
-			"in egzo.yaml with what runs. Silent, with exit code 0, when the project is converged.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, stop := commandContext(cmd)
-			defer stop()
-			s, err := openSession(ctx, opts)
-			if err != nil {
-				return err
-			}
-			defer s.close()
-			var buffer bytes.Buffer
-			if err := stack.Up(ctx, s.engine, s.Resolved, s.Dir, stack.Options{DryRun: true, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix)}, &buffer); err != nil {
-				return err
-			}
-			changes := 0
-			scanner := bufio.NewScanner(&buffer)
-			for scanner.Scan() {
-				line := scanner.Text()
-				// what a dry run says about checking, not about changing
-				if line == "nothing to do" || strings.HasPrefix(line, "would check") {
-					continue
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), line)
-				changes++
-			}
-			if changes > 0 {
-				return ExitError{Code: 1}
-			}
-			return nil
-		},
-	}
-}
-
 // --- ca rotate ------------------------------------------------------------------------------------
 
-func newCACommand(opts *options) *cobra.Command {
-	cmd := &cobra.Command{Use: "ca", Short: "The project's certificate authority"}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "rotate",
+func newRotateCACommand(opts *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rotate-ca",
 		Short: "Issue a new project CA and restart the agents so they trust it",
 		Long: "The proxy holds the project's CA key and intercepts only the hosts that get a credential injected.\n" +
 			"rotate makes a new CA, publishes its certificate to the agents, and restarts them, because most\n" +
@@ -196,7 +184,7 @@ func newCACommand(opts *options) *cobra.Command {
 				return err
 			}
 			if proxy.State != "running" {
-				return fmt.Errorf("the proxy is %s: run `egzo up` first", proxy.State)
+				return fmt.Errorf("the proxy is %s: run `egzo project up` first", proxy.State)
 			}
 			result, err := s.engine.Exec(ctx, proxy.ID, []string{"/egzo", "proxy", "request", "POST", "/ca/rotate"}, nil)
 			if err != nil {
@@ -223,8 +211,7 @@ func newCACommand(opts *options) *cobra.Command {
 			}
 			return nil
 		},
-	})
-	return cmd
+	}
 }
 
 // --- proxy rules and the audit filter ---------------------------------------------------------------

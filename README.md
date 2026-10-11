@@ -2,14 +2,14 @@
 
 Egzo is a simple CLI tool to sandbox coding agents and keep your projects organized.
 
-Define your project in a simple YAML document, spin up the project with `egzo up`, then spawn isolated Claude Code instances using
-`egzo spawn [template]`. Monitor with `egzo ps`, and destroy them once done with `egzo rm`.
+Define your project in a simple YAML document, spin up the project with `egzo project up`, then spawn isolated Claude Code instances using
+`egzo agent spawn [template]`. Monitor with `egzo ps`, and destroy them once done with `egzo agent rm`.
 
 As a bonus, since it just spins up normal containers, any docker/podman tools or commands you use to manage containers just work.
-Destroy the containers or use `egzo down` and nothing remains on your system.
+Destroy the containers or use `egzo project down` and nothing remains on your system.
 
 If you have not guessed it by now: yes, the design is largely inspired by docker-compose. Unlike compose's `services`, agents are defined
-as templates, and you spawn throwaway instances using `egzo spawn my-template` whenever you need to work on a task. You get a Claude Code (or
+as templates, and you spawn throwaway instances using `egzo agent spawn my-template` whenever you need to work on a task. You get a Claude Code (or
 any other supported agent).
 
 ## Supported platforms
@@ -36,9 +36,9 @@ See [`docs/`](docs/README.md).
 ## Features
 
 - **Claude Code and OpenCode.** More harnesses planned.
-- **Real TUIs, in sandboxes.** The standard coding agent interface you are used to. `egzo attach` connects, `Ctrl-]` detaches.
-- **Templates and instances.** Declare agents once in `egzo.yaml`, then `egzo spawn` as many instances as you need,
-  each with its own container, network, home and worktree. `rm`, `prune`, `diff` and `down` clean up.
+- **Real TUIs, in sandboxes.** The standard coding agent interface you are used to. `egzo agent attach` connects, `Ctrl-]` detaches.
+- **Templates and instances.** Declare agents once in `egzo.yaml`, then `egzo agent spawn` as many instances as you need,
+  each with its own container, network, home and worktree. `agent rm` and `project down` clean up.
 - **Isolation by default.** Restricted internet and file access, all capabilities are dropped, memory and process limits.
 - **gVisor and rootless podman.** Fully tested with hardened container runtimes for additional security.
 - **Egress policy.** Allow internet access using a whitelist, or start simple by allowing all domains. Everything remains audited.
@@ -86,13 +86,13 @@ agents:
 
 Bring the project up, then start the agents you need from their templates.
 
-Each `agents:` entry is a template: `egzo up` starts the infra, `egzo spawn` starts a throwaway agent.
+Each `agents:` entry is a template: `egzo project up` starts the infra, `egzo agent spawn` starts a throwaway agent.
 
 ```console
 $ export ANTHROPIC_API_KEY=... GITHUB_TOKEN=...
-$ egzo up                                     # the proxy, the control sidecar, the templates
-$ egzo spawn architect -m "I want to build my own agent orchestration system"
-$ egzo spawn coder issue-123 -m "Start work on the oldest backlog item" --attach
+$ egzo project up                                     # the proxy, the control sidecar, the templates
+$ egzo agent spawn architect -m "I want to build my own agent orchestration system"
+$ egzo agent spawn coder issue-123 -m "Start work on the oldest backlog item" --attach
 $ egzo ps
 NAME        SERVICE    STATE    HEALTH   ACTIVITY  OPEN  WAITING  ACTOR     AGE  STALE  STATUS
 architect-1 architect  running           working   1              operator  2m
@@ -100,9 +100,9 @@ issue-123   coder      running           working   1              operator  1m
 foo-control-1  control  running  healthy
 foo-proxy-1    proxy    running  healthy
 
-$ egzo attach architect-1  # the real Claude Code TUI; detach with Ctrl-]
-$ egzo spawn coder review-123 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
-$ egzo rm review-123
+$ egzo agent attach architect-1  # the real Claude Code TUI; detach with Ctrl-]
+$ egzo agent spawn coder review-123 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
+$ egzo agent rm review-123
 ```
 
 An instance is named by you (`issue-123`) or by egzo (`architect-1`). The same template can be spawned as
@@ -122,8 +122,8 @@ anything not allowed is denied by default.
 
 - Agents can reach only the proxy and the control sidecar, never each other or your network.
 - Messages and status flow through harness hooks and a small MCP tool set, not screen scraping.
-- Projects are plain containers with labels, like Compose projects. `egzo up` converges the infrastructure to the file
-  and publishes the templates; `egzo spawn` makes agents from them, so day-to-day work needs no file edits.
+- Projects are plain containers with labels, like Compose projects. `egzo project up` converges the infrastructure to the file
+  and publishes the templates; `egzo agent spawn` makes agents from them, so day-to-day work needs no file edits.
 
 ## License
 

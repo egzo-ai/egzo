@@ -611,7 +611,7 @@ func (s *server) overlay(agent string) (open int, waiting bool) {
 }
 
 // retire ends an agent's life in the control sidecar, so that a new agent of the same name starts clean.
-// Every request or question still open for it is closed as failed, so whoever asked (`egzo send --wait`,
+// Every request or question still open for it is closed as failed, so whoever asked (`egzo message send --wait`,
 // another agent) is told instead of waiting for an agent that is gone. What the agent asked itself is
 // closed without a word to it, so nobody is waiting for an answer to it, and the replies and updates that
 // were still on their way to it are dropped. Its status is forgotten.

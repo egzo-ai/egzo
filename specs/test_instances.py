@@ -433,7 +433,7 @@ def test_an_instance_is_not_recreated_by_up_even_when_stopped(live_project, engi
 def test_rm_clears_what_is_left_of_an_instance_whose_container_was_removed_by_hand(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    engine.run("agent", "rm", "-f", live_project.container("coder-1"))
+    engine.run("rm", "-f", live_project.container("coder-1"))
     assert engine.instance(live_project.name, "coder-1") is None
     assert any(r.name.endswith("_coder-1") for r in engine.resources(live_project.name))  # the network is still there
     result = live_project.run("agent", "rm", "coder-1")
@@ -446,7 +446,7 @@ def test_rm_clears_what_is_left_of_an_instance_whose_container_was_removed_by_ha
 def test_prune_stopped_also_clears_what_a_removed_container_left_behind(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    engine.run("agent", "rm", "-f", live_project.container("coder-1"))
+    engine.run("rm", "-f", live_project.container("coder-1"))
     result = live_project.run("agent", "rm", "--stopped", "--yes")
     assert result.returncode == 0, result.stderr
     assert not [r for r in engine.resources(live_project.name) if r.name.endswith("_coder-1")]
@@ -455,7 +455,7 @@ def test_prune_stopped_also_clears_what_a_removed_container_left_behind(live_pro
 def test_a_name_with_leftovers_is_taken_until_they_are_removed(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    engine.run("agent", "rm", "-f", live_project.container("coder-1"))
+    engine.run("rm", "-f", live_project.container("coder-1"))
     refused = live_project.run("agent", "spawn", "coder", "coder-1")
     assert refused.returncode == 17
     assert "coder-1" in refused.stderr

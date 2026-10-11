@@ -4,11 +4,15 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,7 +53,9 @@ func openSession(ctx context.Context, opts *options) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	printWarnings(p.Warnings)
+	if !opts.quiet {
+		printWarnings(p.Warnings)
+	}
 	c, err := engine.Connect(ctx)
 	if err != nil {
 		return nil, err
@@ -84,7 +90,7 @@ func newUpCommand(opts *options) *cobra.Command {
 		Short: "Bring up the project's infrastructure and publish its templates",
 		Long: "Bring up the project's infrastructure (the control sidecar, the egress proxy, their networks and volumes),\n" +
 			"load the egress policy and publish the agent templates in egzo.yaml. up starts no agent: spawn one\n" +
-			"with `egzo spawn TEMPLATE`. up always returns once converged; there is no foreground mode.\n" +
+			"with `egzo agent spawn TEMPLATE`. up always returns once converged; there is no foreground mode.\n" +
 			"It refuses while an instance is stale (its template changed or is gone): remove those first.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -103,8 +109,18 @@ func newUpCommand(opts *options) *cobra.Command {
 				defer release()
 			}
 
-			return stack.Up(ctx, s.engine, s.Resolved, s.Dir,
-				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix), Warnings: cmd.ErrOrStderr()}, cmd.OutOrStdout())
+			options := stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix), Warnings: cmd.ErrOrStderr()}
+			if !dryRun {
+				return stack.Up(ctx, s.engine, s.Resolved, s.Dir, options, cmd.OutOrStdout())
+			}
+			changes, err := dryRunUp(ctx, s, options, cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+			if changes > 0 {
+				return ExitError{Code: 1}
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without changing anything")
@@ -112,14 +128,34 @@ func newUpCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
+// dryRunUp prints what `up` would do and counts the changes: what a dry run says about checking, not about
+// changing, is not one.
+func dryRunUp(ctx context.Context, s *session, options stack.Options, out io.Writer) (int, error) {
+	var buffer bytes.Buffer
+	if err := stack.Up(ctx, s.engine, s.Resolved, s.Dir, options, &buffer); err != nil {
+		return 0, err
+	}
+	changes := 0
+	scanner := bufio.NewScanner(&buffer)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Fprintln(out, line)
+		if line != "nothing to do" && !strings.HasPrefix(line, "would check") {
+			changes++
+		}
+	}
+	return changes, nil
+}
+
 func newDownCommand(opts *options) *cobra.Command {
-	var volumes bool
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "down",
-		Short: "Remove the project's containers and networks",
-		Long: "Remove the project's containers and networks, and the worktrees of the instances it removes. Volumes are\n" +
-			"kept unless --volumes is given. The base clones and the directory workspaces on the host are never\n" +
-			"deleted: they are yours.",
+		Short: "Remove the project's containers, networks and volumes",
+		Long: "Remove everything egzo made for the project: the sidecars, the networks, the volumes (the control state and the\n" +
+			"CA, and the home of every agent) and the worktrees of the agents it removes. It is refused while an agent\n" +
+			"runs, and removes nothing then; --force removes the agents too, as `egzo agent rm --force` does. The base\n" +
+			"clones and the directory workspaces on the host are never deleted: they are yours.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -138,8 +174,18 @@ func newDownCommand(opts *options) *cobra.Command {
 			if s.observed, err = stack.Observe(ctx, s.engine, s.Resolved.Name); err != nil {
 				return err
 			}
+			var running []string
+			for _, instance := range s.observed.Instances() {
+				if instance.State == "running" {
+					running = append(running, instance.Name)
+				}
+			}
+			if len(running) > 0 && !force {
+				return fmt.Errorf("agents are running: %s; stop them (egzo stop NAME) or use --force to remove them, with their worktrees and homes",
+					strings.Join(running, ", "))
+			}
 			instances := s.observed.InstanceNames()
-			if err := stack.Down(ctx, s.engine, s.observed, volumes, cmd.OutOrStdout()); err != nil {
+			if err := stack.Down(ctx, s.engine, s.observed, true, cmd.OutOrStdout()); err != nil {
 				// the instances that did go take their worktrees with them; the ones that are still there keep theirs
 				if again, observeErr := stack.Observe(ctx, s.engine, s.Resolved.Name); observeErr == nil {
 					still := map[string]bool{}
@@ -159,7 +205,7 @@ func newDownCommand(opts *options) *cobra.Command {
 			return stack.RemoveWorktrees(s.Resolved, instances, cmd.OutOrStdout())
 		},
 	}
-	cmd.Flags().BoolVar(&volumes, "volumes", false, "also remove the project's volumes")
+	cmd.Flags().BoolVar(&force, "force", false, "remove running agents too")
 	return cmd
 }
 

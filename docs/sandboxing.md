@@ -29,7 +29,7 @@ egress:
 - The agent's reach is `allow` plus the hosts of its services. Without a `default` profile, an agent that names none
   can reach nothing.
 
-[Troubleshooting](troubleshooting.md) covers a request that is denied. `egzo up` warns if an agent's profile cannot reach its harness's provider host.
+[Troubleshooting](troubleshooting.md) covers a request that is denied. `egzo project up` warns if an agent's profile cannot reach its harness's provider host.
 
 ## Built-in services
 
@@ -72,7 +72,7 @@ Rules are by host: a service cannot be limited to a path or a method.
 
 Service `hosts` take the patterns `allow` takes (`host`, `*.domain`, `*`), **but only for a service without a secret**: a
 secret binds to exact hosts, because a wildcard would hand it to every subdomain, including ones somebody else controls.
-`inject` or `placeholder` with a wildcard host is an error at `egzo config` and `up`. A wildcard service is an allowlist
+`inject` or `placeholder` with a wildcard host is an error at `egzo project check --resolved` and `up`. A wildcard service is an allowlist
 entry too: it lets the agent reach every host it covers. `*.example.com` covers the names below `example.com`, not
 `example.com` itself. A service has no setting that weakens TLS: unknown keys are errors.
 
@@ -158,11 +158,11 @@ injected only for the hosts of declared services. Use it for a trusted template,
 
 ## What the sandbox does not allow
 
-- **Raw TCP, UDP, ssh, ping, DNS to other servers.** Only HTTPS through the proxy. A git remote must be HTTPS: the base clone (`egzo up`) and the fetch before each worktree (`egzo spawn`) run in short-lived prep containers on a network the proxy serves, so they need the git host in `allow` and, for a private repository, the `github` service. ssh
+- **Raw TCP, UDP, ssh, ping, DNS to other servers.** Only HTTPS through the proxy. A git remote must be HTTPS: the base clone (`egzo project up`) and the fetch before each worktree (`egzo agent spawn`) run in short-lived prep containers on a network the proxy serves, so they need the git host in `allow` and, for a private repository, the `github` service. ssh
   from an agent is an idea in [`roadmap/ssh-access.md`](../roadmap/ssh-access.md), not built.
 - **Pinned-certificate clients.** A host with an injected credential is intercepted with the project CA; a client that
   pins certificates will fail on it.
-- **Agent-to-agent traffic.** Agents never share a network. They talk only through the control sidecar (`egzo send`,
+- **Agent-to-agent traffic.** Agents never share a network. They talk only through the control sidecar (`egzo message send`,
   the `message` tool).
 
 ## See what happened
@@ -170,7 +170,7 @@ injected only for the hosts of declared services. Use it for a trusted template,
 ```console
 $ egzo proxy rules       # what each agent may reach, and which credentials go where
 $ egzo proxy log         # the audit trail, one JSON event per line
-$ egzo config            # every profile fully resolved
+$ egzo project check --resolved            # every profile fully resolved
 ```
 
 Each event has a `host`, an `action` and, where it applies, the `agent` and a `reason`:
@@ -185,6 +185,6 @@ Each event has a `host`, an `action` and, where it applies, the `agent` and a `r
 | `intercept`, then `close` | a client that sent Encrypted Client Hello was terminated instead of tunneled ([browsing](browser.md)) |
 | `error`, `aborted` | the connection failed (the `reason` says where) or the client left before the handshake |
 
-Changing a profile and running `egzo up` reloads the proxy with the new policy; running instances keep their
-binding by profile name. After a proxy restart, `egzo restart proxy` (or `egzo up`) loads the policy again; until
-then the proxy answers 503. `egzo ca rotate` issues a new project CA and restarts the agents.
+Changing a profile and running `egzo project up` reloads the proxy with the new policy; running instances keep their
+binding by profile name. After a proxy restart, `egzo restart proxy` (or `egzo project up`) loads the policy again; until
+then the proxy answers 503. `egzo project rotate-ca` issues a new project CA and restarts the agents.

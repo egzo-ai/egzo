@@ -261,7 +261,7 @@ func TestInstancesAreListedFromTheLabelsAndStaleWhenTheirTemplateMoved(t *testin
 		t.Errorf("stale = %v, want the one whose hash moved and the one whose template is gone", stale)
 	}
 	err := StaleError(StaleInstances(observed, published))
-	if err == nil || !strings.Contains(err.Error(), "b, c") || !strings.Contains(err.Error(), "egzo prune --stale") {
+	if err == nil || !strings.Contains(err.Error(), "b, c") || !strings.Contains(err.Error(), "egzo agent rm --stale") {
 		t.Errorf("err = %v", err)
 	}
 }

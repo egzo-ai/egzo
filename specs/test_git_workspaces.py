@@ -162,7 +162,7 @@ def test_spawn_gives_the_instance_a_worktree_on_its_own_branch(live_project, eng
 
 def test_spawn_clones_the_base_itself_when_it_is_missing(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
-    subprocess.run(["agent", "rm", "-rf", str(base_of(live_project))], check=True)
+    subprocess.run(["rm", "-rf", str(base_of(live_project))], check=True)
     spawn_ok(live_project)
     assert (base_of(live_project) / ".git").exists() and (worktree_of(live_project) / "README").exists()
 
@@ -356,7 +356,7 @@ def test_down_removes_the_worktrees_of_the_instances_and_keeps_the_base(live_pro
 def test_down_and_rm_no_longer_know_workspace_flags(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project)
-    for command in (["down", "--workspaces"], ["agent", "rm", "--workspaces", "coder-1"], ["agent", "rm", "--yes", "coder-1"]):
+    for command in (["project", "down", "--workspaces"], ["agent", "rm", "--workspaces", "coder-1"]):
         result = live_project.run(*command)
         assert result.returncode != 0 and "unknown flag" in result.stderr, command
     assert worktree_of(live_project).exists()

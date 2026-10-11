@@ -41,10 +41,10 @@ func TestExitError(t *testing.T) {
 func TestRootCommandTree(t *testing.T) {
 	root := New()
 	want := []string{
-		"init", "config", "up", "down", "ps", "send", "events", "questions", "answer",
-		"logs", "exec", "start", "stop", "restart", "control", "proxy",
-		"attach", "agent", "hook", "prep", "version", "secrets", "doctor", "diff", "ca",
+		"project", "agent", "message", "workspace", "system",
+		"ps", "logs", "exec", "start", "stop", "restart", "events", "proxy", "version", "control", "hook", "prep",
 	}
+	removed := []string{"init", "config", "up", "down", "spawn", "rm", "prune", "send", "attach", "secrets", "doctor", "diff", "ca", "messages", "questions", "answer"}
 	have := map[string]bool{}
 	for _, c := range root.Commands() {
 		have[c.Name()] = true
@@ -52,6 +52,11 @@ func TestRootCommandTree(t *testing.T) {
 	for _, name := range want {
 		if !have[name] {
 			t.Errorf("command %q is missing", name)
+		}
+	}
+	for _, name := range removed {
+		if have[name] {
+			t.Errorf("command %q should have moved under a group", name)
 		}
 	}
 
@@ -65,13 +70,13 @@ func TestRootCommandTree(t *testing.T) {
 }
 
 func TestCommandsRejectUnexpectedArguments(t *testing.T) {
-	for _, name := range []string{"init", "config"} {
+	for _, name := range [][]string{{"project", "init"}, {"project", "check"}, {"project", "down"}, {"workspace", "ls"}, {"agent", "ls"}} {
 		root := New()
-		root.SetArgs([]string{name, "surprise"})
+		root.SetArgs(append(name, "surprise"))
 		root.SetOut(new(strings.Builder))
 		root.SetErr(new(strings.Builder))
 		if err := root.Execute(); err == nil {
-			t.Errorf("%s accepted a positional argument", name)
+			t.Errorf("%v accepted a positional argument", name)
 		}
 	}
 }

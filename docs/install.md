@@ -62,7 +62,7 @@ engine socket is root-equivalent on a rootful engine, so a rootless engine is th
 why a rootless engine and gVisor matter.)
 
 ```console
-$ egzo doctor
+$ egzo system check
 ```
 
 It tells you whether the engine answers, whether it is rootless, whether gVisor is registered, whether the engine

@@ -106,7 +106,7 @@ func (s *Server) BindAgent(name string, binding Binding) error {
 	}
 	policy := s.policy.Load()
 	if policy == nil {
-		return errors.New("no egress policy is loaded: run `egzo up` first")
+		return errors.New("no egress policy is loaded: run `egzo project up` first")
 	}
 	if _, ok := policy.Profiles[binding.Profile]; !ok {
 		return fmt.Errorf("the loaded policy has no egress profile %q", binding.Profile)
@@ -205,9 +205,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	policy := s.policy.Load()
 	if policy == nil {
 		// Not the agent's fault, and no use asking for credentials: the proxy lost its policy (it
-		// lives in memory) and is waiting for `egzo up` to load it again.
-		s.audit.Log(Event{Host: host, Action: "deny", Reason: "no egress policy loaded: run `egzo up`"})
-		http.Error(w, "egzo: this proxy has no egress policy loaded (it was restarted): run `egzo up`", http.StatusServiceUnavailable)
+		// lives in memory) and is waiting for `egzo project up` to load it again.
+		s.audit.Log(Event{Host: host, Action: "deny", Reason: "no egress policy loaded: run `egzo project up`"})
+		http.Error(w, "egzo: this proxy has no egress policy loaded (it was restarted): run `egzo project up`", http.StatusServiceUnavailable)
 		return
 	}
 	agent, token, hasCredentials := proxyCredentials(r)

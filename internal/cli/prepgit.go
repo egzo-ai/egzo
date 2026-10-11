@@ -24,6 +24,12 @@ func newPrepGitCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE:  func(cmd *cobra.Command, args []string) error { return gitprep.Clone(url, branch, args[0]) },
 	}
+	fetch := &cobra.Command{
+		Use:   "fetch DIR",
+		Short: "Fetch the configured branch into the base clone in DIR",
+		Args:  cobra.ExactArgs(1),
+		RunE:  func(cmd *cobra.Command, args []string) error { return gitprep.Fetch(url, branch, args[0]) },
+	}
 	var options gitprep.WorktreeOptions
 	worktree := &cobra.Command{
 		Use:   "worktree DIR",
@@ -38,7 +44,7 @@ func newPrepGitCommand() *cobra.Command {
 			return err
 		},
 	}
-	for _, c := range []*cobra.Command{clone, worktree} {
+	for _, c := range []*cobra.Command{clone, worktree, fetch} {
 		c.Flags().StringVar(&url, "url", "", "the repository (https)")
 		c.Flags().StringVar(&branch, "branch", "", "the branch to start from")
 		c.MarkFlagRequired("url")
@@ -49,6 +55,6 @@ func newPrepGitCommand() *cobra.Command {
 	worktree.Flags().BoolVar(&options.Reuse, "reuse", false, "continue an existing branch or worktree")
 	worktree.MarkFlagRequired("base")
 	worktree.MarkFlagRequired("agent")
-	cmd.AddCommand(clone, worktree)
+	cmd.AddCommand(clone, worktree, fetch)
 	return cmd
 }

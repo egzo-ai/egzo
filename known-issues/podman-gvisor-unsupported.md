@@ -9,7 +9,7 @@ runtime a container gets. The only way to run Podman containers under gVisor is 
 default runtime in `containers.conf`, which is a host setting egzo cannot control or check.
 
 Because the runtime is a security boundary, egzo does not start an agent that asks for one on Podman:
-`egzo up` fails and says why (`internal/stack/up.go`, spec
+`egzo project up` fails and says why (`internal/stack/up.go`, spec
 `test_podman_refuses_a_runtime_because_it_cannot_apply_or_verify_it`). Silently starting the agent in the
 default runtime was the earlier behaviour, a warning only, and it was a downgrade nobody chose.
 

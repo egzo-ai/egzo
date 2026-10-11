@@ -478,7 +478,7 @@ def test_mcp_tools_act_as_the_calling_agent_and_refuse_what_is_not_theirs(live_p
 
 def waiting_send(egzo, project, *args):
     return subprocess.Popen(
-        [egzo.binary, "send", "--wait", *args], cwd=project.root, env={**os.environ, **project.env},
+        [egzo.binary, "message", "send", "--wait", *args], cwd=project.root, env={**os.environ, **project.env},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
 
@@ -510,7 +510,7 @@ def test_send_wait_prints_the_resolution_and_exits_by_outcome(live_project, engi
 def test_send_wait_times_out_with_its_own_exit_code_and_leaves_the_message_open(live_project, engine, agent_image, egzo):
     two_agents(live_project, agent_image)
     waiter = subprocess.run(
-        [egzo.binary, "send", "--wait", "--timeout", "3s", "coder", "never answered"], cwd=live_project.root,
+        [egzo.binary, "message", "send", "--wait", "--timeout", "3s", "coder", "never answered"], cwd=live_project.root,
         env={**os.environ, **live_project.env}, capture_output=True, text=True, timeout=60,
     )
     assert waiter.returncode == 5, waiter.stderr

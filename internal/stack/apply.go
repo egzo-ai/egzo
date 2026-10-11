@@ -360,7 +360,7 @@ func registryAuth(ref string, configJSON []byte) string {
 // Workspace directories on the host are never touched.
 func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool, out io.Writer) error {
 	out = &lockedWriter{w: out}
-	// The control volume outlives the project unless --volumes is given: the agents registered in it must
+	// The control volume outlives the project never: the agents registered in it must
 	// not, or the next `up` would accept messages for instances that do not exist.
 	for _, r := range observed.Resources {
 		if r.Type == "container" && r.Kind == kindControl && r.State == "running" {

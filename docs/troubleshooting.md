@@ -1,19 +1,19 @@
 # Troubleshooting
 
-Start with `egzo doctor` ([installing](install.md)), then `egzo ps`, then `egzo proxy log`.
+Start with `egzo system check` ([installing](install.md)), then `egzo ps`, then `egzo proxy log`.
 
 ## `up` or `spawn` refuses
 
 | message or symptom | what to do |
 |---|---|
-| a secret is missing | `egzo secrets ls`; with `pass`, check that `pass show NAME` works in your shell; with `env`, export the variable. Secrets are read before anything is created, so nothing is half-made. |
-| "stale" instances block `up` | their template changed. `egzo prune --stale` (or `egzo rm NAME`), `egzo up`, spawn again. `egzo diff` shows the change. |
-| the name is taken (exit 17) | `egzo rm NAME`, or pick another. A leftover network or home volume counts as an instance; `rm` clears it. |
-| a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo down` the other. |
+| a secret is missing | `egzo project check`; with `pass`, check that `pass show NAME` works in your shell; with `env`, export the variable. Secrets are read before anything is created, so nothing is half-made. |
+| "stale" instances block `up` | their template changed. `egzo agent rm --stale` (or `egzo agent rm NAME`), `egzo project up`, spawn again. `egzo project up --dry-run` shows the change. |
+| the name is taken (exit 17) | `egzo agent rm NAME`, or pick another. A leftover network or home volume counts as an instance; `rm` clears it. |
+| a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo project down` the other. |
 | image cannot be pulled | the error names the image and the `image:` override. `make images`, or set `EGZO_HARNESS_PREFIX` ([installing](install.md), [images](images.md)). |
 | `runtime` refused on Podman | by design: Podman cannot apply or verify a runtime. Use Docker for gVisor. |
-| `spawn` says a worktree or a branch exists | an earlier instance of that name left it: `egzo spawn --reuse` continues with it, or remove the directory (and `git branch -D egzo/NAME` in `workspaces/<name>/.base`). |
-| a git workspace has no base clone | `egzo up` could not clone it (it printed why): allow the host and give the profile the `github` service, then `egzo up` again. |
+| `spawn` says a worktree or a branch exists | an earlier instance of that name left it: `egzo agent spawn --reuse` continues with it, or remove the directory (and `git branch -D egzo/NAME` in `workspaces/<name>/.base`). |
+| a git workspace has no base clone | `egzo project up` could not clone it (it printed why): allow the host and give the profile the `github` service, then `egzo project up` again. |
 
 ## The agent cannot reach something
 
@@ -28,10 +28,10 @@ Common reasons: the host is not in `allow` or in a service; the port is not 443 
 private; the agent named a profile that does not exist. Claude Code also needs `platform.claude.com`. If the proxy
 log is empty and the agent still fails, the tool may not honour `HTTPS_PROXY`.
 
-A `503` from the proxy means it lost its policy after a restart: `egzo restart proxy` or `egzo up` loads it again.
+A `503` from the proxy means it lost its policy after a restart: `egzo restart proxy` or `egzo project up` loads it again.
 
 A TLS error on an injected host usually means the tool pins certificates or ignores the CA bundle egzo provides
-(`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, and similar). `egzo ca rotate` issues a new CA and restarts the agents.
+(`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, and similar). `egzo project rotate-ca` issues a new CA and restarts the agents.
 
 ## A browser page does not load
 
@@ -55,8 +55,8 @@ $ egzo proxy log                     # the host, and `deny` with its reason (`--
 
 ```console
 $ egzo ps                   # ACTIVITY: is it working, idle or blocked?
-$ egzo messages             # is the message queued, announced, fetched or unconfirmed?
-$ egzo attach NAME          # look at the real terminal
+$ egzo message ls             # is the message queued, announced, fetched or unconfirmed?
+$ egzo agent attach NAME          # look at the real terminal
 ```
 
 - `blocked`: the harness is waiting on its own UI, often a login. Attach and answer it.
@@ -82,4 +82,4 @@ $ egzo events               # the typed event stream
 - **Platforms other than the developer's machine have not been run** by the specs
   (`known-issues/reference-platform-ci-matrix.md`).
 
-Please report anything else with the output of `egzo doctor` and `egzo version`.
+Please report anything else with the output of `egzo system check` and `egzo version`.

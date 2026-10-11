@@ -117,7 +117,7 @@ func ParsePublished(data []byte) (Published, error) {
 		return Published{}, fmt.Errorf("the published templates are unreadable: %w", err)
 	}
 	if p.Version != publishedVersion {
-		return Published{}, fmt.Errorf("the published templates are version %d, this egzo reads version %d: run `egzo up` with this version", p.Version, publishedVersion)
+		return Published{}, fmt.Errorf("the published templates are version %d, this egzo reads version %d: run `egzo project up` with this version", p.Version, publishedVersion)
 	}
 	return p, nil
 }
@@ -187,7 +187,7 @@ func (p Published) inputs(instances map[string]string, tokens map[string]string,
 }
 
 // ErrNotPublished means `up` has not published templates yet.
-var ErrNotPublished = errors.New("no templates are published: run `egzo up` first")
+var ErrNotPublished = errors.New("no templates are published: run `egzo project up` first")
 
 // ReadPublished asks the control sidecar for the templates `up` last published.
 func ReadPublished(ctx context.Context, c *engine.Client, project string) (Published, error) {

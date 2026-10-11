@@ -17,7 +17,7 @@ and secure workflows, all while the user keeps the Claude Code experience they k
 
 Rules:
 1. **Minimal fuss to a working Claude Code.** From zero to a sandboxed Claude Code prompt is a
-   tiny explicit `egzo.yaml` (scaffolded by `egzo init`), then `egzo up` and `egzo spawn AGENT --attach`. There is
+   tiny explicit `egzo.yaml` (scaffolded by `egzo project init`), then `egzo project up` and `egzo agent spawn AGENT --attach`. There is
    no implicit project and no implicit mounting of the user's directory: everything an agent can
    see is declared in the file.
 2. **The TUI is untouched.** What the user sees is the real `claude` TUI, not an Egzo
@@ -36,7 +36,7 @@ Rules:
    extra tools and `egzo` subcommands, never as changes to how `claude` itself behaves. Anything
    Egzo needs to tell the user goes out-of-band (`egzo ps`, notifications), not into the TUI.
 6. **Same experience for other harnesses.** OpenCode/pi/etc. also run as their native TUI, so
-   users can compare frameworks by attaching to each in the same way (`egzo attach <agent>`).
+   users can compare frameworks by attaching to each in the same way (`egzo agent attach <agent>`).
 7. **Progressive disclosure of config.** Level 1: a few lines. Level 2: full schema (vaults,
    egress, workspaces). Everything is denied unless declared.
 8. **Bypass mode is the default and a harness-integration requirement.** The sandbox (rootless/
@@ -80,7 +80,7 @@ agents:
 `name:` is optional. Precedence: `-p/--project-name` flag > `EGZO_PROJECT_NAME` env > `name:`
 in the file > basename of the directory containing `egzo.yaml` . The result is normalized (lowercase, `[a-z0-9_-]`, must start with a letter or digit) and
 is the identity: it becomes the `ai.egzo.project` label and the `<project>-...` name prefix, so
-renaming a project creates a new one and orphans the old containers. `egzo config` always prints
+renaming a project creates a new one and orphans the old containers. `egzo project check --resolved` always prints
 the resolved name. To catch two directories with the same basename, containers also carry
 `ai.egzo.project-dir=<abs path>`. If a project of that name already exists from another directory,
 every command (not only `up`) fails with a clear error naming the other directory and refuses
@@ -124,7 +124,7 @@ annotation is the cautionary tale).
 
 Names: sidecars `<project>-control-1`, `<project>-proxy-1`; agent instances `<project>-<instance>` (see
 "Templates and instances"); networks `<project>_<instance>` (one per instance); volumes `<project>_<vol>`.
-`egzo up` = list by label -> diff config-hash -> create/recreate/remove the **infrastructure** and publish the
+`egzo project up` = list by label -> diff config-hash -> create/recreate/remove the **infrastructure** and publish the
 templates (agent instances are not reconciled: they are spawned, and marked stale when their template moves).
 Idempotent. `up` always
 returns once converged: there is no foreground mode and no `-d` (agents are TUIs you `attach` to,
@@ -177,7 +177,7 @@ workspaces:                    # project-scoped; referenced by name from agents
   scratch: {}                  # a directory: ./workspaces/scratch
   docs: { path: ./docs }       # a directory of yours
 
-agents:                        # templates: nothing runs until `egzo spawn <name>`
+agents:                        # templates: nothing runs until `egzo agent spawn <name>`
   coder:
     harness: claude-code       # claude-code | opencode | pi | custom
     image: ghcr.io/egzo-ai/egzo-harness-claude-code
@@ -203,24 +203,31 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
 
 ## CLI UX
 
-    egzo init [--harness claude-code]      # scaffold egzo.yaml
-    egzo config                            # resolved/validated YAML (like compose config)
-    egzo up                                # reconcile the infrastructure, publish templates; --recreate; --dry-run. No -d: always returns
-    egzo spawn TEMPLATE [NAME] [-m MSG] [--attach|--wait]   # an agent from a template (see Templates and instances)
-    egzo rm NAME... | prune                # remove instances
-    egzo diff                              # file vs running (same algorithm as up --dry-run)
-    egzo down [--volumes]
-    egzo start|stop|restart <svc>          # operate on existing containers (no reconcile)
-    egzo ps                                # engine state + status from control sidecar
-    egzo attach <agent>                    # native TUI; detach key configurable (default Ctrl-])
+Commands are grouped by what they act on. There are no aliases for names that moved: egzo is pre-1.0.
+
+    egzo project init [--harness claude-code]      # scaffold egzo.yaml (and keep .egzo/ and workspaces/ out of git)
+    egzo project up [--recreate] [--dry-run]       # reconcile the infrastructure, publish templates, clone the git bases.
+                                                   #   --dry-run lists what would change and exits 1 when something would
+    egzo project down [--force]                    # remove everything egzo made; refused while an agent runs (--force removes them)
+    egzo project check [--resolved]                # the file, the secrets (set, never their values), drift as a warning; exit 1 on error
+    egzo project rotate-ca                         # new project CA; restarts agents
+    egzo agent spawn TEMPLATE [NAME] [-m MSG] [--attach|--wait] [--reuse] [--no-fetch]   # an agent from a template
+    egzo agent ls [--json]                         # the instances, without the sidecars
+    egzo agent rm NAME... | --stale|--stopped|--older-than D [--dry-run] [--yes] [--force]   # remove instances
+    egzo agent start|stop <name>                   # the same as start and stop below, for agents
+    egzo agent attach <agent>                      # native TUI; detach key configurable (default Ctrl-])
+    egzo message send <agent> "message" [--wait]   # a request from the operator; --wait prints the resolution
+    egzo message ls [--kind K] [--state S] [--to X] [--from X] [--all]    # `msg` is an alias of `message`
+    egzo message reply <id> <text>                 # answer or close one addressed to a person
+    egzo workspace ls [--json]                     # the workspaces, their paths and states (no engine needed)
+    egzo workspace fetch [NAME...]                 # clone or refresh git bases through the proxy
+    egzo system check                              # engine, rootless, gVisor, network, git: no project file needed
+    egzo ps                                        # engine state + status from control sidecar
+    egzo start|stop|restart <svc>                  # operate on existing containers (no reconcile)
     egzo logs [-f] <svc>
-    egzo send <agent> "message" [--wait]   # a request from the operator; --wait prints the resolution
-    egzo messages | answer <id> <text>     # open messages; answer or close one addressed to a person
     egzo exec <svc> -- cmd
-    egzo secrets ls                        # which secrets are set, never their values
-    egzo proxy log|rules                   # audit trail
-    egzo ca rotate                         # new project CA; restarts agents
-    egzo doctor                            # engine, rootless, gVisor, network checks
+    egzo events [-f] [--agent A]
+    egzo proxy log|rules                           # audit trail
 
 ## Decisions
 - Language: Go.
@@ -255,7 +262,7 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
     (empty, as the invoking user) when missing; egzo never deletes it and never looks inside.
   - **Git** (`git: {url, branch}`): `path` holds `.base`, the base clone (`up` makes it, last, with no files checked
     out), and one worktree per instance (`<path>/<instance>`, made by `spawn` on the branch `egzo/<instance>`).
-- The resolver fills in the missing `path`, so `egzo config` prints it.
+- The resolver fills in the missing `path`, so `egzo project check --resolved` prints it.
 - Mount point: `/workspace/<name>` for a directory. For a git workspace the container sees
   `/workspace/<name>/<instance>` (the instance's own worktree, its working directory when it is the only workspace)
   and `/workspace/<name>/.base`, the same names as on the host. Never another instance's worktree: a template cannot
@@ -283,7 +290,7 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
 - **Relative links.** Git writes the links between a worktree and its base as relative paths, `../.base/.git/...` and
   back, which resolve identically on the host and in every container because the names are kept. So `git status`
   works in the editor on the host too (git 2.48 or later there).
-- **Removal.** An instance's worktree is its own: `rm`, `prune` and `down` delete it with the instance, with no check
+- **Removal.** An instance's worktree is its own: `agent rm` and `project down` delete it with the instance, with no check
   for unsaved work (there is none yet; a check and a confirmation can come later). The branch `egzo/<name>` stays in
   the base, so what was committed outlives the instance. The base clone and directory workspaces are never deleted.
 - Harness integrations map extra workspaces to the harness (e.g. Claude Code additional directories) and seed
@@ -291,28 +298,28 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
 
 ## Templates and instances (decided, built)
 
-**Dropped by this model:** `depends_on` (nothing starts at `up`, so there is nothing to order), `egzo up AGENT...`
+**Dropped by this model:** `depends_on` (nothing starts at `up`, so there is nothing to order), `egzo project up AGENT...`
 (there are no agents to select) and the cross-agent workspace reference `agent/workspace:ro` (a template cannot name
 an instance). All three are removed from the schema, the CLI and the specs, not rejected.
 
-An entry under `agents:` is a **template**: it says how to run an agent and runs nothing. `egzo up` brings up
+An entry under `agents:` is a **template**: it says how to run an agent and runs nothing. `egzo project up` brings up
 the project's infrastructure (networks, volumes, proxy, control), validates the file and **publishes the
-resolved templates** to the control volume. An **instance** is an agent made from a template with `egzo spawn`.
+resolved templates** to the control volume. An **instance** is an agent made from a template with `egzo agent spawn`.
 Spawn does not read `egzo.yaml`: it uses the templates `up` last published, so an instance is always what `up`
 applied, and only the CLI's `up` changes templates. A spawn from the CLI, the hub or any other tool is the same
 operation (an importable package, not CLI code).
 
 ### The experience
 
-    egzo up                                       # infrastructure + publish templates; starts no agent
-    egzo spawn coder                              # instance `coder-1` (auto name), returns
-    egzo spawn coder issue-412 -m "Fix #412"      # named, first message sent
-    egzo spawn coder issue-412 -m "..." --attach  # ...and attach to it
-    egzo spawn reviewer pr-88 -m "Review PR 88" --wait [--timeout D]   # exit codes as `send --wait`
+    egzo project up                                       # infrastructure + publish templates; starts no agent
+    egzo agent spawn coder                              # instance `coder-1` (auto name), returns
+    egzo agent spawn coder issue-412 -m "Fix #412"      # named, first message sent
+    egzo agent spawn coder issue-412 -m "..." --attach  # ...and attach to it
+    egzo agent spawn reviewer pr-88 -m "Review PR 88" --wait [--timeout D]   # exit codes as `send --wait`
     egzo ps                                       # instances, with TEMPLATE, ACTOR, AGE, STALE
-    egzo attach issue-412 | send | logs | exec | start | stop | restart   # by instance name
-    egzo rm issue-412 [--force]
-    egzo prune [--stopped] [--stale] [--older-than D] [--dry-run] [--yes]
+    egzo agent attach issue-412 | send | logs | exec | start | stop | restart   # by instance name
+    egzo agent rm issue-412 [--force]
+    egzo agent rm [--stopped] [--stale] [--older-than D] [--dry-run] [--yes]
 
 There are no parameters: an instance is a template, a name and an optional first message. What differs per task is
 said in the message. Anything else per instance belongs in another template.
@@ -344,11 +351,11 @@ said in the message. Anything else per instance belongs in another template.
   **stale**: its `ai.egzo.template-hash` differs from the hash of the template in `egzo.yaml` (the hash covers
   everything that went into the instance: the agent, its egress profile, the workspaces it lists, its prompt's
   content, its image). `up` refuses before it publishes, so the file, not the last published templates, is what
-  an instance is compared with. Nothing restarts a stale instance. `ps` marks it, `prune --stale` clears it, and
+  an instance is compared with. Nothing restarts a stale instance. `ps` marks it, `agent rm --stale` clears it, and
   `up` refuses while one exists, naming them, so the user stops them first. `up --dry-run` prints `stale: NAME`
   for each and says it would refuse.
-- **Reaping.** egzo has no reaper. `prune` removes stopped, stale or old instances (age is the container's
-  creation time); `ps --json` gives a script or a timer what it needs to decide. `prune` asks first, unless `--yes`; `--dry-run` lists and changes nothing.
+- **Reaping.** egzo has no reaper. `agent rm --stopped|--stale|--older-than` removes stopped, stale or old instances (age is the container's
+  creation time); `ps --json` gives a script or a timer what it needs to decide. it asks first, unless `--yes`; `--dry-run` lists and changes nothing.
 - **Labels.** `ai.egzo.service=<template key>` (so `ps` groups by it), `ai.egzo.instance=<name>`,
   `ai.egzo.actor=<who>` (`operator` from the CLI; `user:<id>` or a service from another tool) and
   `ai.egzo.template-hash=<hash>` on the instance's container, network and home volume.
@@ -357,7 +364,7 @@ said in the message. Anything else per instance belongs in another template.
   lists them.
 
 ### For other tools (hub, broker, scripts)
-`spawn`, `ps`, `rm` and `prune` take `--json`. The hub calls the same package; a broker can run the CLI against
+`agent spawn`, `agent ls`, `agent rm` and `ps` take `--json`. The hub calls the same package; a broker can run the CLI against
 the engine. A webhook becomes `spawn` followed by `send` (or `spawn -m`). Retrying a webhook is safe for the
 spawn and not for the message. Spawning, stopping and removing instances of declared templates is **operating**,
 not creating or changing a project: the hub's rule that only YAML and the CLI create projects holds, because the
@@ -406,7 +413,7 @@ templates are declared and published by `up`.
   pass. If `pass` is not on `PATH`, a command that needs a secret fails and names it.
 - **egzo never writes a secret.** There is no `secrets set` or `secrets rm`: secrets are created, changed and
   removed with the user's own password manager (`pass insert`, an export in the shell). egzo only reads them,
-  and `egzo secrets ls` says which ones it can.
+  and `egzo project check` says which ones it can.
 - **There is no file backend, and no plain-text source of any kind**: a secret in a file is protected by
   nothing but permissions, which is not a store egzo supports. `env` stays only because a throwaway shell
   export is how people try things; it warns for that reason.
@@ -484,7 +491,7 @@ egress:
   other unknown key. They can be added if a real use-case turns up.
 - **Service hosts are exact, or a wildcard without a secret.** `hosts` take what `allow` takes (`host`, `*.domain`,
   `*`, folded like any name). A service with `inject` or a `placeholder` may only name exact hosts: a wildcard
-  would hand the secret to every subdomain, including attacker-controlled ones, so `egzo config` refuses it (a secret
+  would hand the secret to every subdomain, including attacker-controlled ones, so `egzo project check --resolved` refuses it (a secret
   bound to an inherited wildcard service fails the same way). A wildcard service without a secret is an allowlist entry
   (it counts for reachability and for the harness-provider warning) and, with `inspect`, audits every request to the
   hosts it covers. It can sit next to an exact injecting service on a covered host: the exact one injects, `inspect`
@@ -503,7 +510,7 @@ egress:
 - **Built-in services** ship with egzo as data. `anthropic-oauth` is for a Claude subscription token (`claude setup-token`, `sk-ant-oat…`), sent as `Authorization: Bearer`; the agent then gets `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. A token bound to `anthropic`, or an API key to `anthropic-oauth`, is refused at `up`. Initially `anthropic`: `api.anthropic.com` +
   `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Basic` with the token as password, which git over HTTPS needs), more later
   (openai, google-ai, package registries). An object with a built-in's name replaces it.
-  `egzo config` prints each profile fully resolved.
+  `egzo project check --resolved` prints each profile fully resolved.
 - Reachability for an agent = its profile's `allow` plus the hosts of its services (after extend).
 - Validation: unknown profile, unknown parent, cycle, unknown service name (suggest close names),
   unknown vault secret, two services in one profile sharing a host with different injection
@@ -537,7 +544,7 @@ egress:
   that pins its certificate stops working on an inspected host.
 - One CA per project, generated by the proxy on first start (ECDSA P-256), private key only in a
   volume mounted into the proxy; never in an agent, the CLI or the hub. Persistent across proxy
-  recreation (regenerating would force agent restarts); `egzo ca rotate` is explicit. Leaf certs are
+  recreation (regenerating would force agent restarts); `egzo project rotate-ca` is explicit. Leaf certs are
   minted on the fly, short-lived, cached in memory. NameConstraints = later hardening (todo spec).
 - Trust distribution: proxy publishes `ca.crt` and a combined bundle (system CAs + project CA) to a
   volume writable by the proxy, read-only for agents. Agents bind-mount the bundle over
@@ -566,7 +573,7 @@ The holder is `egzo agent run`, the entrypoint of every egzo harness image (`int
 harness on a pty inside the agent container, serves clients on a unix socket in the container, and is a raw
 pass-through: no tmux, no screen model, nothing drawn around the TUI, so the user's own terminal keeps its
 scrollback, clipboard (OSC 52), hyperlinks, truecolor, Shift+Enter and mouse. What it does add:
-- clients are `egzo agent attach` run through `engine exec` with a terminal (`egzo attach`): any number of
+- clients are `egzo agent attach` run through `engine exec` with a terminal (`egzo agent attach`): any number of
   read-write clients, and read-only observers (`--read-only`) whose keys are ignored and never count as a
   human typing; the detach key is the client's (default Ctrl-], `--detach-keys`), and the engine's own
   Ctrl-P Ctrl-Q detach is switched off for terminals, because it would swallow keys of a TUI;
@@ -592,15 +599,15 @@ the typed line a user's authority, and makes a retry safe because the announceme
 - **A message** has an id (`m` + 32 random hex characters, unguessable: it is a capability), `from`, `to`, a
   `kind`, `text` (at most 16 KB), `re` (the id it answers or belongs to), `hops`, and for a question
   `choices` (a list of strings, for quick answers; unused for now).
-- **Kinds:** `request` (`message`, or `egzo send`), `question` (`ask`), `resolution` (what `resolve`
+- **Kinds:** `request` (`message`, or `egzo message send`), `question` (`ask`), `resolution` (what `resolve`
   sends back to the sender: the result of a request, or the answer to a question; it carries an `outcome`),
   `update` (`update`: progress on a request).
 - **States** of a request or question: `queued` (written), `announced` (the line was typed into the
   recipient's terminal), `fetched` (the recipient fetched it), `resolved` (with an outcome: `done`,
   `declined` or `failed`; terminal: a requester who is unhappy sends a new message). A resolution is closed
-  once fetched. An update is passive: it is never announced, only visible (`list_messages`, `egzo messages`,
-  `egzo send --wait`). A message to a person is not announced either: it waits in `egzo messages` until
-  answered (`egzo answer`).
+  once fetched. An update is passive: it is never announced, only visible (`list_messages`, `egzo message ls`,
+  `egzo message send --wait`). A message to a person is not announced either: it waits in `egzo message ls` until
+  answered (`egzo message reply`).
 - **Ids are checked, not trusted:** `get_message`, `resolve`, `update` and `ask` work only on messages
   addressed to the calling agent, and `resolve`, `update` and `ask` only after it fetched the message. An
   unknown id and someone else's id answer the same: "no such message".
@@ -639,9 +646,9 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 
   A message pending when the harness starts is announced the same way once its TUI is ready.
 - **Fetching is the acknowledgement.** No fetch within `inject.ack_timeout` (60 s by default) announces
-  again, safely, up to three times in all; then the message is `unconfirmed`, shown by `egzo messages`, and
+  again, safely, up to three times in all; then the message is `unconfirmed`, shown by `egzo message ls`, and
   still found by `list_messages`. The `UserPromptSubmit` hook no longer acknowledges anything.
-- **Interrupt:** `egzo send --interrupt` makes the holder send the harness's interrupt key first, as before.
+- **Interrupt:** `egzo message send --interrupt` makes the holder send the harness's interrupt key first, as before.
 - **Limits** (a loop between agents is easy to start): at most 20 open requests per recipient, a thread is
   at most 8 messages deep (`re` adds one hop), and a sender may send at most 30 messages a minute.
   Past a limit the tool answers with an error that says which.
@@ -662,12 +669,12 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 - If we interrupted, control marks idle itself; a human Esc may not fire Stop.
 
 ### The human side (CLI)
-- `egzo send AGENT TEXT [--interrupt] [--wait [--timeout D]]`: a request from the operator. `--wait` prints
+- `egzo message send AGENT TEXT [--interrupt] [--wait [--timeout D]]`: a request from the operator. `--wait` prints
   updates to stderr and the resolution's text to stdout, and exits 0 for `done`, 3 for `declined`, 4 for
   `failed`, 5 when the timeout passes (the message stays open).
-- `egzo messages [--agent A] [--all]`: open messages (`--all` includes resolved ones) with id, from, to, kind,
-  state and the start of the text. `egzo questions` is `egzo messages` limited to open questions.
-- `egzo answer ID TEXT [--outcome done|declined|failed]`: resolve a message addressed to a person: it
+- `egzo message ls [--kind K] [--state S] [--to X] [--from X] [--all]`: open messages (`--all` includes resolved ones) with id, from, to, kind,
+  state and the start of the text. `egzo message ls --kind question` is `egzo message ls` limited to open questions.
+- `egzo message reply ID TEXT [--outcome done|declined|failed]`: resolve a message addressed to a person: it
   answers a question, and closes a request an agent made of the operator.
 - `egzo events`: the raw typed stream (`message`, `announced`, `fetched`, `resolved`, `unconfirmed`,
   `interrupt`, `interrupted`, `activity`, `hook`, `status`, `retired`).
@@ -681,7 +688,7 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 - Redaction: vault refs stored as refs; values from `${VAR}` interpolation stored as the original
   `${VAR}` text (the config hash covers the expanded value, so a changed var still recreates); the
   per-agent token never goes in a label or the snapshot.
-- Drift detection is CLI-side (`egzo diff` / `up --dry-run`): resolve the file, compare per-resource
+- Drift detection is CLI-side (`egzo project up --dry-run` / `up --dry-run`): resolve the file, compare per-resource
   config hashes (Compose's model).
 - Trade-off accepted: the hub's detailed spec view needs the control container running.
 
@@ -720,8 +727,8 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
       test_project_name.py # name resolution, same-name-other-directory refusal
       test_workspaces.py   # mounts, workdir rule, https git, paths and defaults, cross-agent refs
       test_egress.py       # profiles, services, built-ins, extend, placeholders, reachability warnings
-      test_secrets.py      # vaults, the env and pass backends, `egzo secrets`
-      test_init.py         # egzo init
+      test_secrets.py      # vaults, the env and pass backends, `egzo project check`
+      test_init.py         # egzo project init
       test_labels.py       # ai.egzo.* contract, label size/format, no secrets in resources
       test_up_down.py      # up/down, --dry-run, no -d, idempotency, workspace dirs survive down
       test_agents.py       # one container per agent, own internal network, isolation, workspaces
@@ -734,9 +741,9 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
     test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
     test_harnesses.py    # Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, real TUIs
     test_git_workspaces.py # prep container: base clone at up, worktree per instance, fetch, reuse, removal
-    test_operations.py   # doctor, diff, ca rotate, proxy rules
+    test_operations.py   # system check, up --dry-run, rotate-ca, proxy rules
     test_spawn.py        # spawn: templates, names, exit code 17, first message, --wait, labels, errors
-    test_instances.py    # ps, rm, prune, stale instances, down, registration in control and proxy
+    test_instances.py    # ps, agent rm, stale instances, down, registration in control and proxy
     test_images.py       # harness image names and pulling them from a registry
 
 Security specs are the differentiator: assert secrets never appear in `engine inspect`,
@@ -746,9 +753,9 @@ agent env, agent filesystem, or logs; assert direct egress fails.
 
 Built and covered by specs (Docker is the engine the specs run against now; Podman works through its
 compatible socket but is not exercised by the current suite): `init`, `config`, `up` (`--dry-run`,
-`--recreate`), `spawn`, `rm`, `prune`, `diff`, `down` (`--volumes`), `ps` (`--json`), `logs`, `exec`, `attach`, `start|stop|restart`,
+`--recreate`, `--dry-run`), `agent spawn|ls|rm|attach`, `project down`, `ps` (`--json`), `logs`, `exec`, `start|stop|restart`,
 `send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls`, `proxy log|rules`, `ca rotate`,
-`doctor`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
+`system check`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
 `egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
 the egzo image with `make images`); `custom` runs any image.
 
@@ -762,7 +769,7 @@ Decisions taken while building (reversible; each is covered by specs):
   the instance with control and binds it in the proxy, makes its worktrees (through the proxy, as the
   instance), then creates the container. If any step fails it removes what it made, in reverse, and never a worktree that holds work.
 - **Staleness is judged against what `up` would publish from `egzo.yaml`.** `up` refuses before it publishes,
-  so comparing with the last published templates would never find a stale instance. `ps` and `prune --stale`
+  so comparing with the last published templates would never find a stale instance. `ps` and `agent rm --stale`
   compute the hashes from the file. A caller without the file (the hub) compares with the published templates.
   Spawn itself always uses the published ones.
 - **Published templates** are JSON (`Published`: project, directory, egzo image, the uid:gid of whoever ran `up`,
@@ -777,10 +784,9 @@ Decisions taken while building (reversible; each is covered by specs):
   `/state/agents`). Unregistering closes every request still open for the agent as failed (so `send --wait`
   returns 4) and forgets its status. Messages to an unregistered name are refused.
 - **What is left of an instance counts as the instance.** If its container was removed by hand, or a spawn could
-  not undo itself, the network and home volume (labelled with the instance) still make it an instance: `rm`,
-  `prune` and a second spawn of the name see it, and removing it clears its registrations too. `down` unregisters
-  every instance from control before it removes anything, because the control volume outlives the project unless
-  `--volumes` is given.
+  not undo itself, the network and home volume (labelled with the instance) still make it an instance: `agent rm`
+  and a second spawn of the name see it, and removing it clears its registrations too. `project down` unregisters
+  every instance from control before it removes anything, and removes the control volume with the rest.
 - **An agent must be registered to be heard**, not only hold a valid token: a removed instance that is still
   running, and a name nobody spawned, are refused by the agent API. Tokens are still the HMAC of the name, so a
   token leaked into a shared workspace stays valid for any future instance of that name until the control volume
@@ -793,7 +799,7 @@ Decisions taken while building (reversible; each is covered by specs):
   a program that exits at once and a git mode conflict fail the spawn, and `up` succeeds.
 - **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy
   hash covers the secret values, so rotating a secret re-pushes the policy without recreating any
-  container; a restarted proxy denies everything until the next `egzo up` reloads its policy. The
+  container; a restarted proxy denies everything until the next `egzo project up` reloads its policy. The
   proxy container's `inspect` never holds a secret. Placeholders travel in the same policy, next to the
   secret each one stands for; the agent environments get only the placeholder.
 - **Operator APIs** are unix sockets inside the sidecar, called through `egzo <role> request METHOD
@@ -802,7 +808,7 @@ Decisions taken while building (reversible; each is covered by specs):
   `ca-bundle.crt`) plus `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`
   and `NODE_EXTRA_CA_CERTS`, not an overlay of `/etc/ssl/certs/ca-certificates.crt`: a directory
   mount works the same on Docker and Podman. The CA key stays in a volume only the proxy mounts.
-  `egzo ca rotate` makes a new CA in the proxy, publishes it and restarts the agents.
+  `egzo project rotate-ca` makes a new CA in the proxy, publishes it and restarts the agents.
 - **Proxy behaviour.** CONNECT only, port 443 only, agent identified by `Proxy-Authorization`
   (agent name and token). Hosts of services that inject a credential (or set `inspect`) are
   intercepted: TLS is terminated with a project-CA certificate whose name must match the CONNECT
@@ -899,7 +905,7 @@ separate `egzo-hub` deliverable (see `roadmap/hub-and-web-ui.md`). What that mea
   ignores hooks and file-system monitors of the repository it works in, which every agent that lists the workspace can write.
 - **Proxy.** It connects only to public addresses (checked on the address a name resolved to), caps connections per agent
   and in all, closes idle connections, terminates Encrypted Client Hello instead of tunneling it, keeps bytes sent right behind CONNECT, truncates
-  logged values, logs bytes and duration of a tunnel, bounds its certificate cache, and answers 503 "run `egzo up`" when
+  logged values, logs bytes and duration of a tunnel, bounds its certificate cache, and answers 503 "run `egzo project up`" when
   it has no policy; `egzo start|restart proxy` reloads the policy. The CA is only ever replaced by an explicit rotation.
 - **Control.** Verbs that write to the log have budgets per agent; hook payloads are reduced to a few named fields (plus
   the line egzo typed); the log is compacted past 64 MB; the project key is created once, atomically, and never replaced;

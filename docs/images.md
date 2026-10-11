@@ -53,7 +53,7 @@ Rules for a derived image:
 - **Prefer the image to a runtime install.** Anything an agent installs into its home volume survives, but
   anything it installs system-wide does not, and an image gives every instance the same tools.
 
-After changing the image tag, the template changes, so running instances become stale: `egzo up`, `egzo rm`, spawn again.
+After changing the image tag, the template changes, so running instances become stale: `egzo project up`, `egzo agent rm`, spawn again.
 
 ## Pin it
 
@@ -66,7 +66,7 @@ differ.
 
 ```console
 $ make images                   # builds egzo and egzo-harness-{claude-code,opencode}
-$ EGZO_HARNESS_PREFIX=registry.example/team egzo spawn coder
+$ EGZO_HARNESS_PREFIX=registry.example/team egzo agent spawn coder
 ```
 
 `EGZO_HARNESS_PREFIX` moves where the default names are looked up, so a team can mirror the stock images.

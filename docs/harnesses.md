@@ -1,7 +1,7 @@
 # Supported harnesses
 
 A harness is the coding agent that runs inside the container. Egzo runs the real TUI of each one behind a small
-session holder (`egzo agent run`), so what you see on `egzo attach` is the tool itself.
+session holder (`egzo agent run`), so what you see on `egzo agent attach` is the tool itself.
 
 | `harness:` | Tool | Status |
 |---|---|---|
@@ -69,8 +69,8 @@ agents:
 ```
 
 ```console
-$ egzo spawn claude -m "Add pagination to the orders endpoint" 
-$ egzo spawn open   -m "Add pagination to the orders endpoint"
+$ egzo agent spawn claude -m "Add pagination to the orders endpoint" 
+$ egzo agent spawn open   -m "Add pagination to the orders endpoint"
 $ egzo ps
 ```
 

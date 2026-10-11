@@ -1,12 +1,12 @@
 # egzo documentation
 
 Egzo is early, and has not been released: see [`roadmap/initial-release.md`](../roadmap/initial-release.md) for what the docs
-still have to be checked against. These pages are quick pointers, not a reference; `egzo <command> --help` and `egzo config` are the
+still have to be checked against. These pages are quick pointers, not a reference; `egzo <command> --help` and `egzo project check --resolved` are the
 detail, and the executable specs in `specs/` are the status report.
 
 **Start here**
 1. [Introduction](intro.md): what egzo is, how it is built, a first run
-2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, `egzo doctor`
+2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, `egzo system check`
 
 **Using egzo**
 3. [The project file](project-file.md): `egzo.yaml` by example

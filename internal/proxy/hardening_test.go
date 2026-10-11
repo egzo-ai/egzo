@@ -714,7 +714,7 @@ func TestAProxyWithoutAPolicySaysSoAndHowToFixIt(t *testing.T) {
 		t.Fatalf("status = %d, want 503: not an authentication problem", response.StatusCode)
 	}
 	text := body(t, response)
-	if !strings.Contains(text, "egzo up") {
+	if !strings.Contains(text, "egzo project up") {
 		t.Errorf("body = %q", text)
 	}
 	if !strings.Contains(r.audit.String(), "no egress policy") {

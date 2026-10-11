@@ -53,7 +53,7 @@ func (s *session) service(name string) (*stack.Resource, error) {
 		return found, nil
 	}
 	if _, isTemplate := s.Resolved.Agents[name]; isTemplate {
-		return nil, fmt.Errorf("%s is a template; spawn it first: egzo spawn %s", name, name)
+		return nil, fmt.Errorf("%s is a template; spawn it first: egzo agent spawn %s", name, name)
 	}
 	known := []string{"control", "proxy"}
 	known = append(known, s.observed.InstanceNames()...)
@@ -176,7 +176,7 @@ func newLifecycleCommand(opts *options, verb, short string) *cobra.Command {
 	return &cobra.Command{
 		Use:   verb + " SERVICE",
 		Short: short,
-		Long:  short + ". This works on the existing container and never reconciles: use `egzo up` to apply changes.",
+		Long:  short + ". This works on the existing container and never reconciles: use `egzo project up` to apply changes.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -206,7 +206,7 @@ func newLifecycleCommand(opts *options, verb, short string) *cobra.Command {
 			if args[0] == "proxy" && verb != "stop" {
 				// the proxy keeps its policy in memory: give it back what it lost
 				if err := stack.ReloadPolicy(ctx, s.engine, s.Resolved, s.Dir); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: the proxy has no egress policy: %v\nrun `egzo up` once the problem is fixed\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: the proxy has no egress policy: %v\nrun `egzo project up` once the problem is fixed\n", err)
 				} else {
 					fmt.Fprintln(cmd.OutOrStdout(), "load egress policy into proxy")
 				}
@@ -247,13 +247,17 @@ func newAttachCommand(opts *options) *cobra.Command {
 	var readOnly bool
 	var detachKeys string
 	cmd := &cobra.Command{
-		Use:   "attach INSTANCE",
+		Use:   "attach [INSTANCE]",
 		Short: "Attach to an instance's harness TUI",
 		Long: "Attach to the native TUI of an agent's harness. Nothing is drawn around it: your terminal shows\n" +
 			"exactly what the harness draws, and keeps its own scrollback. Detach with Ctrl-] (--detach-keys).\n" +
-			"Several people can attach at once; --read-only watches without typing.",
-		Args: cobra.ExactArgs(1),
+			"Several people can attach at once; --read-only watches without typing. Without an instance it attaches to\n" +
+			"the session of the container it runs in (what egzo itself does inside an agent's container).",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return attachInContainer(detachKeys, readOnly)
+			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
 			opts.envWarned = true // the output of the command is the command's: no warning of ours in it
@@ -287,9 +291,9 @@ func attachTo(ctx context.Context, s *session, name, detachKeys string, readOnly
 		return fmt.Errorf("%s is not an agent: nothing to attach to", name)
 	}
 	if target.State != "running" {
-		return fmt.Errorf("agent %q is %s: start it with `egzo start %s`", name, target.State, name)
+		return fmt.Errorf("agent %q is %s: start it with `egzo agent start %s`", name, target.State, name)
 	}
-	command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys}
+	command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys} // no instance: the container's own session
 	if readOnly {
 		command = append(command, "--read-only")
 	}

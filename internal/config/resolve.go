@@ -16,7 +16,7 @@ import (
 	"github.com/docker/go-units"
 )
 
-// Resolved is the fully resolved project: what `egzo config` prints.
+// Resolved is the fully resolved project: what `egzo project check --resolved` prints.
 type Resolved struct {
 	// Secrets maps "vault/name" to where that secret is read from. It is never printed.
 	Secrets    map[string]SecretRef         `yaml:"-"`

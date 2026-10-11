@@ -9,10 +9,10 @@ contains can be typed into the terminal, so a message cannot pretend to be you.
 ## Sending a task
 
 ```console
-$ egzo send coder-1 "Fix the flaky checkout test, then open a PR"
-$ egzo send coder-1 "Stop, use the v2 API instead" --interrupt    # stops what it is doing first
-$ egzo send reviewer-1 "Review PR 88" --wait                      # block until it answers
-$ egzo spawn coder issue-412 -m "..." --wait                      # spawn, send, and wait
+$ egzo message send coder-1 "Fix the flaky checkout test, then open a PR"
+$ egzo message send coder-1 "Stop, use the v2 API instead" --interrupt    # stops what it is doing first
+$ egzo message send reviewer-1 "Review PR 88" --wait                      # block until it answers
+$ egzo agent spawn coder issue-412 -m "..." --wait                      # spawn, send, and wait
 ```
 
 A message waits in the queue until the agent is idle, nobody has typed in its terminal for a while (30 s by default)
@@ -44,10 +44,10 @@ request). Agents never share a network: this is the only path between them.
 ## Questions from agents
 
 ```console
-$ egzo questions                  # what agents have asked and nobody has answered
-$ egzo messages [--all]           # every open message, and where it stands
-$ egzo answer m3f... "Use the v2 API"
-$ egzo answer m3f... "No, skip it" --outcome declined
+$ egzo message ls --kind question                  # what agents have asked and nobody has answered
+$ egzo message ls [--all]           # every open message, and where it stands
+$ egzo message reply m3f... "Use the v2 API"
+$ egzo message reply m3f... "No, skip it" --outcome declined
 ```
 
 A message to a person is not typed into any terminal; it waits here until answered. The answer goes back to the

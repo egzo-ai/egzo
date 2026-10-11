@@ -62,7 +62,7 @@ func initProject(dir, harness string, cmd *cobra.Command) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "added %s to .gitignore\n", strings.Join(added, " and "))
 	}
 	template := strings.ReplaceAll(harness, "-code", "")
-	fmt.Fprintf(cmd.OutOrStdout(), "next: edit the workspace url, check it with `egzo config`, then `egzo up` and `egzo spawn %s --attach`\n", template)
+	fmt.Fprintf(cmd.OutOrStdout(), "next: edit the workspace url, check it with `egzo project check --resolved`, then `egzo project up` and `egzo agent spawn %s --attach`\n", template)
 	return nil
 }
 

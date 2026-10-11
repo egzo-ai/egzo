@@ -361,6 +361,44 @@ func cloneBase(ctx context.Context, c *engine.Client, project *config.Resolved, 
 	return nil
 }
 
+// FetchBase makes the base clone of a git workspace when it is missing and fetches into it when it is there, through
+// the proxy under the egress profile of the first template that lists the workspace. It is `workspace fetch`.
+func FetchBase(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user, name string, out io.Writer) error {
+	ws, ok := project.Workspaces[name]
+	if !ok || ws.Git == nil {
+		return fmt.Errorf("workspace %q is not a git workspace", name)
+	}
+	agents := listing(project, name)
+	if len(agents) == 0 {
+		return fmt.Errorf("no agent lists workspace %q: nothing says which egress profile may reach %s", name, ws.Git.URL)
+	}
+	if !exists(filepath.Join(BaseDir(ws), ".git")) {
+		fmt.Fprintf(out, "clone workspace %s into %s\n", name, BaseDir(ws))
+		return cloneBase(ctx, c, project, dir, image, user, name, ws, agents[0])
+	}
+	fmt.Fprintf(out, "fetch workspace %s into %s\n", name, BaseDir(ws))
+	if err := ensureImage(ctx, c, image); err != nil {
+		return err
+	}
+	cmd := []string{"/egzo", "prep", "git", "fetch", "--url", ws.Git.URL}
+	if ws.Git.Branch != "" {
+		cmd = append(cmd, "--branch", ws.Git.Branch)
+	}
+	cmd = append(cmd, containerBase(name))
+	err := withPrepIdentity(ctx, c, project, dir, project.Agents[agents[0]].Egress, func(network, token string) error {
+		_, err := runGit(ctx, c, project, dir, image, user, prepIdentity, token, network, cmd,
+			[]MountSpec{{Bind: true, Source: BaseDir(ws), Target: containerBase(name)}})
+		return err
+	})
+	if err != nil {
+		return gitFailure(project, agents[0], name, ws.Git.URL, err)
+	}
+	return nil
+}
+
+// EnsureMountDirectories makes the host directories one agent's template mounts, when they are missing.
+func EnsureMountDirectories(agent config.ResolvedAgent) error { return ensureMountDirectories(agent) }
+
 // withPrepIdentity gives fn a network the proxy serves and a token that is bound to profile, then takes both
 // away again. It is how a job that belongs to no instance reaches the world: through the proxy, like an agent.
 func withPrepIdentity(ctx context.Context, c *engine.Client, project *config.Resolved, dir, profile string, fn func(network, token string) error) (err error) {

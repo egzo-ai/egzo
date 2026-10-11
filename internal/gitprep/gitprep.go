@@ -55,6 +55,17 @@ func Clone(url, branch, dir string) error {
 	return err
 }
 
+// Fetch brings the configured branch into the base under a ref of its own (see Worktree), leaving the base's own
+// branches and remote as they are.
+func Fetch(url, branch, base string) error {
+	refspec := "+HEAD:" + fetched
+	if branch != "" {
+		refspec = "+refs/heads/" + branch + ":" + fetched
+	}
+	_, err := Git(base, "fetch", "--quiet", "--no-tags", "--", url, refspec)
+	return err
+}
+
 // fetched is where Worktree keeps what it fetched: a ref of its own, so a base that is somebody's own
 // clone keeps its branches and its remote as they are.
 const fetched = "refs/egzo/fetched"

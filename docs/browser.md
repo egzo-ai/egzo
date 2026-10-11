@@ -34,7 +34,7 @@ egress:
 
 A service host may be `host`, `*.domain` or `*`, **only when the service holds no secret**: `inject` and `placeholder`
 are for exact hosts, because `*.example.com` would hand the secret to every subdomain, including ones somebody else
-controls. `egzo config` refuses it. `*.domain` covers the names below the domain, not the domain itself. Because a
+controls. `egzo project check --resolved` refuses it. `*.domain` covers the names below the domain, not the domain itself. Because a
 wildcard service is an allowlist entry too, it also lets the agent reach what it covers.
 
 ## Logging in to a site

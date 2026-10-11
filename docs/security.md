@@ -67,7 +67,7 @@ of their CA bundle. All other allowed hosts are plain tunnels where the proxy se
 against the TLS server name. A client that sends Encrypted Client Hello (every browser does) is not tunneled, because the
 extension can hide the real server name and the proxy cannot tell a harmless one from one that does: the proxy terminates
 TLS for it with the project CA instead, checks the site's real certificate itself, and refuses any request for another
-host. egzo has no setting that accepts a hello it cannot read or a certificate it cannot verify. `egzo ca rotate` replaces
+host. egzo has no setting that accepts a hello it cannot read or a certificate it cannot verify. `egzo project rotate-ca` replaces
 the CA. Clients that pin certificates cannot be intercepted, so they cannot have credentials injected, and a pinning
 client that sends Encrypted Client Hello does not work either.
 

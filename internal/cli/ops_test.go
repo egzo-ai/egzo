@@ -37,22 +37,24 @@ func vaultYAML() string {
 	return "vaults:\n  main:\n    backend: env\n    secrets: [EGZO_TEST_SET_VARIABLE, EGZO_TEST_UNSET_VARIABLE]\n"
 }
 
-func TestSecretsLsShowsSetAndMissing(t *testing.T) {
+func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testing.T) {
 	t.Setenv("EGZO_TEST_SET_VARIABLE", "value")
 	t.Setenv("EGZO_TEST_UNSET_VARIABLE", "")
-	out, _, err := inProject(t, vaultYAML(), "", "secrets", "ls")
-	if err != nil {
-		t.Fatal(err)
+	out, _, err := inProject(t, vaultYAML(), "", "project", "check")
+	if code, ok := IsExitError(err); !ok || code != 1 {
+		t.Fatalf("err = %v, want exit code 1 for a secret that is empty", err)
 	}
 	rows := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n")[1:] {
-		rows[strings.Fields(line)[0]] = line
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.Contains(line, "secret ") {
+			rows[strings.Fields(line)[2]] = line
+		}
 	}
-	if !strings.HasSuffix(rows["main/EGZO_TEST_SET_VARIABLE"], "set") || !strings.HasSuffix(rows["main/EGZO_TEST_UNSET_VARIABLE"], "missing") {
+	if !strings.HasPrefix(rows["main/EGZO_TEST_SET_VARIABLE"], "ok") || !strings.HasPrefix(rows["main/EGZO_TEST_UNSET_VARIABLE"], "fail") {
 		t.Errorf("rows = %v", rows)
 	}
 	if strings.Contains(out, "value") {
-		t.Errorf("ls printed a value: %q", out)
+		t.Errorf("check printed a value: %q", out)
 	}
 }
 
@@ -96,22 +98,29 @@ func TestAgentLinesKeepsOnlyOneAgentsAuditLinesAcrossWrites(t *testing.T) {
 	}
 }
 
-func TestDoctorChecksTheProjectFileWithoutAnEngine(t *testing.T) {
-	var report []string
-	collect := func(level, format string, a ...any) { report = append(report, level+" "+format) }
-	dir := t.TempDir()
-	old, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(old)
-	checkProject(&options{}, collect)
-	if len(report) != 1 || !strings.HasPrefix(report[0], "ok no ") {
-		t.Errorf("without a file: %v", report)
+func TestProjectCheckNeedsAFileAndFailsOnAnInvalidOne(t *testing.T) {
+	t.Chdir(t.TempDir())
+	root := New()
+	root.SetArgs([]string{"project", "check"})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	if err := root.Execute(); err == nil {
+		t.Error("check without a project file succeeded")
 	}
-	report = nil
-	os.WriteFile(filepath.Join(dir, "egzo.yaml"), []byte("agents: [broken"), 0o644)
-	checkProject(&options{}, collect)
-	if len(report) != 1 || !strings.HasPrefix(report[0], "fail ") {
-		t.Errorf("an invalid file: %v", report)
+	out, _, err := inProject(t, "agents: [broken", "", "project", "check")
+	if code, ok := IsExitError(err); !ok || code != 1 || !strings.HasPrefix(out, "fail ") {
+		t.Errorf("an invalid file: %q, %v", out, err)
+	}
+}
+
+func TestMinimumGit(t *testing.T) {
+	for output, want := range map[string]bool{
+		"git version 2.53.0\n": true, "git version 2.48.1": true, "git version 2.47.3": false,
+		"git version 3.0.0": true, "git version 1.9.9": false, "nonsense": false,
+	} {
+		if _, got := gitAtLeast(output); got != want {
+			t.Errorf("%q: %v, want %v", output, got, want)
+		}
 	}
 }
 
@@ -167,7 +176,7 @@ func TestMessagesAreListedWithTheirStateAndAShortenedText(t *testing.T) {
 	var out bytes.Buffer
 	cmd := New()
 	cmd.SetOut(&out)
-	sub, _, _ := cmd.Find([]string{"messages"})
+	sub, _, _ := cmd.Find([]string{"message", "ls"})
 	sub.SetOut(&out)
 	long := strings.Repeat("word ", 30)
 	err := writeMessages(sub, []messageRow{
@@ -186,22 +195,31 @@ func TestMessagesAreListedWithTheirStateAndAShortenedText(t *testing.T) {
 	}
 }
 
-func TestSendAnswerAndMessagesAreCommands(t *testing.T) {
+func TestMessageCommandsLiveUnderMessageWithAnAlias(t *testing.T) {
 	root := New()
-	for _, name := range []string{"send", "answer", "messages", "questions"} {
-		found, _, err := root.Find([]string{name})
+	for _, name := range []string{"send", "ls", "reply"} {
+		found, _, err := root.Find([]string{"message", name})
 		if err != nil || found.Name() != name {
-			t.Errorf("command %s: %v", name, err)
+			t.Errorf("command message %s: %v", name, err)
 		}
 	}
-	send, _, _ := root.Find([]string{"send"})
+	if found, _, err := root.Find([]string{"msg", "ls"}); err != nil || found.Name() != "ls" {
+		t.Errorf("the alias msg: %v", err)
+	}
+	send, _, _ := root.Find([]string{"message", "send"})
 	for _, flag := range []string{"wait", "timeout", "interrupt"} {
 		if send.Flags().Lookup(flag) == nil {
 			t.Errorf("send has no --%s", flag)
 		}
 	}
-	answer, _, _ := root.Find([]string{"answer"})
-	if answer.Flags().Lookup("outcome") == nil {
-		t.Error("answer has no --outcome")
+	reply, _, _ := root.Find([]string{"message", "reply"})
+	if reply.Flags().Lookup("outcome") == nil {
+		t.Error("reply has no --outcome")
+	}
+	list, _, _ := root.Find([]string{"message", "ls"})
+	for _, flag := range []string{"kind", "state", "to", "from", "all"} {
+		if list.Flags().Lookup(flag) == nil {
+			t.Errorf("ls has no --%s", flag)
+		}
 	}
 }

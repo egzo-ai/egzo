@@ -72,7 +72,7 @@ type queued struct {
 func queueMessage(ctx context.Context, s *session, agent, text string, interrupt bool) (queued, error) {
 	if instance, isInstance := s.observed.Instance(agent); !isInstance || instance.State == "missing" {
 		if _, isTemplate := s.Resolved.Agents[agent]; isTemplate {
-			return queued{}, fmt.Errorf("%s is a template; spawn it first: egzo spawn %s", agent, agent)
+			return queued{}, fmt.Errorf("%s is a template; spawn it first: egzo agent spawn %s", agent, agent)
 		}
 		return queued{}, fmt.Errorf("no instance %q in this project (instances: %s)", agent, strings.Join(s.observed.InstanceNames(), ", "))
 	}
@@ -139,7 +139,7 @@ func waitForResolution(ctx context.Context, cmd *cobra.Command, s *session, agen
 		return ExitError{Code: exitFailed}
 	}
 	if ctx.Err() != nil && timeout > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "no resolution after %s: message %s stays open (see `egzo messages`)\n", timeout, id)
+		fmt.Fprintf(cmd.ErrOrStderr(), "no resolution after %s: message %s stays open (see `egzo message ls`)\n", timeout, id)
 		return ExitError{Code: exitTimedOut}
 	}
 	if err != nil {
@@ -217,67 +217,107 @@ func writeMessages(cmd *cobra.Command, rows []messageRow) error {
 	return table.Flush()
 }
 
-func listMessages(cmd *cobra.Command, opts *options, query url.Values) error {
+func fetchMessages(cmd *cobra.Command, opts *options, query url.Values) ([]messageRow, error) {
 	ctx, stop := commandContext(cmd)
 	defer stop()
 	s, err := openSession(ctx, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer s.close()
 	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/messages?"+query.Encode(), nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var rows []messageRow
 	if err := json.Unmarshal(reply, &rows); err != nil {
-		return err
+		return nil, err
 	}
-	return writeMessages(cmd, rows)
+	return rows, nil
 }
 
-func newMessagesCommand(opts *options) *cobra.Command {
-	var agent string
+var (
+	messageKinds  = []string{"request", "question", "reply", "update"}
+	messageStates = []string{"pending", "resolved"}
+)
+
+func oneOf(flag, value string, allowed []string) error {
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s %q is not one of %s", flag, value, strings.Join(allowed, ", "))
+}
+
+// sameParty says whether a message's sender or recipient (`operator`, `agent:coder-1`) is the one asked for,
+// which may be given as the bare name of an agent.
+func sameParty(party, want string) bool { return party == want || party == "agent:"+want }
+
+func newMessageListCommand(opts *options) *cobra.Command {
+	var kind, state, to, from string
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "messages",
-		Short: "List the open messages",
+		Use:   "ls",
+		Short: "List messages",
 		Long: "List the requests and questions that are not resolved yet, with where each stands (queued, announced, fetched,\n" +
-			"unconfirmed). --all adds the resolved ones and the replies and updates; --agent narrows to one agent's messages.",
+			"unconfirmed). Filters narrow the list: --kind (request, question, reply or update), --state (pending: not\n" +
+			"resolved yet; resolved), --to and --from (operator, or an agent's name). Asking for resolved messages, or\n" +
+			"for replies and updates, looks through the whole record; --all lists it all.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query := url.Values{}
-			if agent != "" {
-				query.Set("agent", agent)
+			if kind != "" {
+				if err := oneOf("--kind", kind, messageKinds); err != nil {
+					return err
+				}
 			}
-			if all {
+			if state != "" {
+				if err := oneOf("--state", state, messageStates); err != nil {
+					return err
+				}
+			}
+			query := url.Values{}
+			if all || state == "resolved" || kind == "reply" || kind == "update" {
 				query.Set("all", "1")
 			}
-			return listMessages(cmd, opts, query)
+			if kind != "" {
+				// what the control API calls a reply is a resolution
+				if kind == "reply" {
+					query.Set("kind", "resolution")
+				} else {
+					query.Set("kind", kind)
+				}
+			}
+			rows, err := fetchMessages(cmd, opts, query)
+			if err != nil {
+				return err
+			}
+			var shown []messageRow
+			for _, m := range rows {
+				switch {
+				case state == "pending" && m.State == "resolved", state == "resolved" && m.State != "resolved":
+				case to != "" && !sameParty(m.To, to), from != "" && !sameParty(m.From, from):
+				default:
+					shown = append(shown, m)
+				}
+			}
+			return writeMessages(cmd, shown)
 		},
 	}
-	cmd.Flags().StringVar(&agent, "agent", "", "only messages sent or received by this agent")
+	cmd.Flags().StringVar(&kind, "kind", "", "only messages of this kind: "+strings.Join(messageKinds, ", "))
+	cmd.Flags().StringVar(&state, "state", "", "only messages in this state: "+strings.Join(messageStates, ", "))
+	cmd.Flags().StringVar(&to, "to", "", "only messages sent to this party (operator, or an agent's name)")
+	cmd.Flags().StringVar(&from, "from", "", "only messages sent by this party (operator, or an agent's name)")
 	cmd.Flags().BoolVar(&all, "all", false, "include resolved messages, replies and updates")
 	return cmd
 }
 
-func newQuestionsCommand(opts *options) *cobra.Command {
-	return &cobra.Command{
-		Use:   "questions",
-		Short: "List the questions agents have asked and nobody has answered",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return listMessages(cmd, opts, url.Values{"kind": {"question"}})
-		},
-	}
-}
-
-func newAnswerCommand(opts *options) *cobra.Command {
+func newMessageReplyCommand(opts *options) *cobra.Command {
 	var outcome string
 	cmd := &cobra.Command{
-		Use:   "answer ID ANSWER...",
+		Use:   "reply ID ANSWER...",
 		Short: "Answer a question an agent asked, or close a request it made of you",
-		Long: "Resolve a message addressed to a person (see `egzo messages`): an answer to a question goes back to the agent\n" +
+		Long: "Resolve a message addressed to a person (see `egzo message ls`): an answer to a question goes back to the agent\n" +
 			"as a reply, announced in its terminal like any message. A message addressed to an agent can only be resolved\n" +
 			"by that agent.",
 		Args: cobra.MinimumNArgs(2),
@@ -299,6 +339,16 @@ func newAnswerCommand(opts *options) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&outcome, "outcome", "done", "done, declined or failed")
 	return cmd
+}
+
+func newMessageCommand(opts *options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "message",
+		Aliases: []string{"msg"},
+		Short:   "Requests and questions between you and the agents",
+	}
+	cmd.AddCommand(newSendCommand(opts), newMessageListCommand(opts), newMessageReplyCommand(opts))
+	return group(cmd)
 }
 
 // printUntrusted prints what an agent answered: its words, without any control sequence.

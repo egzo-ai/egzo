@@ -345,7 +345,7 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"id": message.ID, "seq": event.Seq})
 }
 
-// listMessages is `egzo messages`: the open requests and questions, or with all=1 everything. agent=
+// listMessages is `egzo message ls`: the open requests and questions, or with all=1 everything. agent=
 // narrows it to the messages an agent sent or received, kind= to one kind.
 func (s *server) listMessages(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
@@ -541,7 +541,7 @@ func (s *server) putTemplates(w http.ResponseWriter, r *http.Request) {
 func (s *server) getTemplates(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(filepath.Join(s.dir, "templates.json"))
 	if errors.Is(err, os.ErrNotExist) {
-		http.Error(w, "no templates published: run `egzo up`", http.StatusNotFound)
+		http.Error(w, "no templates published: run `egzo project up`", http.StatusNotFound)
 		return
 	} else if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

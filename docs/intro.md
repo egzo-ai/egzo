@@ -28,8 +28,8 @@ In short:
                                     └─ agents    one container each, own network, own workspace
 ```
 
-- `egzo up` starts the **proxy** and the **control** sidecar and publishes the templates. It starts no agent.
-- `egzo spawn <template>` makes an **instance**: a container, its own network, home volume and git worktrees.
+- `egzo project up` starts the **proxy** and the **control** sidecar and publishes the templates. It starts no agent.
+- `egzo agent spawn <template>` makes an **instance**: a container, its own network, home volume and git worktrees.
 - An agent can reach only the proxy and the control sidecar, never another agent and never your network.
 - Messages and status flow through harness hooks and a small MCP tool set (`egzo` tools such as `resolve`, `ask`),
   not through screen scraping.
@@ -47,19 +47,19 @@ $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 gVisor: register `runsc` with Docker and set `runtime: runsc` on an agent. Podman's API cannot select a runtime, so
 egzo refuses to start such an agent there. Docker is the engine the specs run against today.
 
-Run `egzo doctor` to check the engine and its isolation. [Installing](install.md) has the details, and
+Run `egzo system check` to check the engine and its isolation. [Installing](install.md) has the details, and
 [the security model](security.md) says what the isolation does and does not give you.
 
 ## A first run
 
 ```console
-$ egzo init --harness claude-code     # scaffolds egzo.yaml
+$ egzo project init --harness claude-code     # scaffolds egzo.yaml
 $ export ANTHROPIC_API_KEY=...
-$ egzo up
-$ egzo spawn claude --attach          # the real Claude Code, in a sandbox
+$ egzo project up
+$ egzo agent spawn claude --attach          # the real Claude Code, in a sandbox
 ```
 
-Detach with `Ctrl-]`; `egzo attach <name>` comes back. `egzo init` fills the repository URL from your git `origin`;
+Detach with `Ctrl-]`; `egzo agent attach <name>` comes back. `egzo project init` fills the repository URL from your git `origin`;
 check the generated file before `up` (it leaves `TODO` comments where it had to guess). Next: [the project
 file](project-file.md), then [managing projects](managing-projects.md) and [sandboxing agents](sandboxing.md). If
 something misbehaves, see [troubleshooting](troubleshooting.md).

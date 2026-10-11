@@ -28,7 +28,7 @@ func (a Action) String() string {
 // BuildPlan compares the desired resources with what exists. The returned actions are in
 // execution order: containers go first when removing and last when creating.
 //
-// Volumes hold data, so they are never removed or recreated by up: only `down --volumes` deletes them.
+// Volumes hold data, so they are never removed or recreated by up: only `egzo project down` deletes them.
 func BuildPlan(desired Desired, observed Observed, recreate bool) []Action {
 	var removeContainers, disconnects, removeNetworks, createNetworks, createVolumes, createContainers, starts, connects []Action
 	wanted := map[string]bool{}

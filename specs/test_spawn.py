@@ -280,7 +280,7 @@ def test_two_spawns_of_one_name_at_once_make_exactly_one_instance(live_project, 
 
 def test_a_template_name_is_not_an_instance_for_the_commands_that_address_one(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    for command in (["message", "send", "coder", "hi"], ["attach", "coder"], ["agent", "rm", "coder"]):
+    for command in (["message", "send", "coder", "hi"], ["agent", "attach", "coder"], ["agent", "rm", "coder"]):
         result = live_project.run(*command, input="")
         assert result.returncode != 0, command
         assert "coder is a template" in result.stderr, command

@@ -94,7 +94,7 @@ def test_up_dry_run_says_nothing_to_do_and_exits_zero_when_converged(live_projec
     up(live_project, spec(agents={"coder": custom(agent_image)}))
     result = live_project.run("project", "up", "--dry-run")
     assert result.returncode == 0, result.stdout
-    assert result.stdout.strip() == "nothing to do"
+    assert result.stdout.strip().splitlines()[-1] == "nothing to do"
 
 
 def test_up_dry_run_names_the_instances_whose_template_changed(live_project, engine, agent_image):

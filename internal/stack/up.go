@@ -20,7 +20,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/engine"
 )
 
-// Options are the flags of `egzo up`.
+// Options are the flags of `egzo project up`.
 type Options struct {
 	DryRun   bool
 	Recreate bool

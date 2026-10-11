@@ -54,7 +54,7 @@ def attach(session, *args, agent_name="coder", dimensions=(24, 80), timeout=30):
     environment.pop("EGZO_PROJECT_NAME", None)
     environment.update(session.project.env)
     return pexpect.spawn(
-        session.egzo.binary, ["attach", *args, agent_name], cwd=session.project.root, env=environment,
+        session.egzo.binary, ["agent", "attach", *args, agent_name], cwd=session.project.root, env=environment,
         dimensions=dimensions, encoding=None, timeout=timeout,
     )
 
@@ -279,7 +279,7 @@ def test_attach_to_an_unknown_agent_names_the_known_ones(session):
 def test_attach_to_an_agent_without_a_session_explains_what_is_missing(live_project, engine, agent_image, egzo):
     live_project.up(spec(agents={"coder-template": agent(harness="custom", image=agent_image)}))
     live_project.spawn("coder-template", "coder")
-    client = pexpect.spawn(egzo.binary, ["attach", "coder"], cwd=live_project.root, env={**os.environ, **live_project.env}, encoding=None)
+    client = pexpect.spawn(egzo.binary, ["agent", "attach", "coder"], cwd=live_project.root, env={**os.environ, **live_project.env}, encoding=None)
     client.expect(pexpect.EOF)
     client.close()
     assert client.exitstatus != 0

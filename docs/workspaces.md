@@ -19,9 +19,9 @@ agents:
 ```
 
 An agent lists declared names only (`name` or `name:ro`); a path in an agent's list is an error that says to declare
-it. Every workspace has a `path`, resolved against the project directory (`egzo config` prints it); without one it is
+it. Every workspace has a `path`, resolved against the project directory (`egzo project check --resolved` prints it); without one it is
 `./workspaces/<name>`. Everything is a plain directory on the host, in the project, so you can open it in your editor.
-Keep `workspaces/` out of git: `egzo init` adds it to `.gitignore` and `egzo doctor` warns if it is missing.
+Keep `workspaces/` out of git: `egzo project init` adds it to `.gitignore` and `egzo system check` warns if it is missing.
 
 ## Directory workspaces
 
@@ -34,8 +34,8 @@ it is yours (`:ro` makes it read-only for an agent).
 `path` holds the repository, laid out for agents that work side by side:
 
 ```
-workspaces/shop/.base          the base clone, made by `egzo up`, with no files checked out
-workspaces/shop/coder-1        a worktree for the instance coder-1, made by `egzo spawn`
+workspaces/shop/.base          the base clone, made by `egzo project up`, with no files checked out
+workspaces/shop/coder-1        a worktree for the instance coder-1, made by `egzo agent spawn`
 workspaces/shop/coder-2
 ```
 
@@ -54,10 +54,10 @@ keeps between a worktree and its base are relative, so `git status` works on the
 - **Credentials.** Agents hold none. The `github` service injects the token for `github.com`, so `git push` works
   from inside the agent. Only HTTPS URLs are accepted. A repository on your disk is not a git source: use a directory
   workspace.
-- **Removing** an instance (`egzo rm`, `prune`, `down`) deletes its worktree, with no check. What the agent committed
+- **Removing** an instance (`egzo agent rm`, `egzo project down`) deletes its worktree, with no check. What the agent committed
   stays on its branch in the base clone, `egzo/<instance>`. Tell agents to commit and push when they are done. The
   base clone is never deleted: remove `workspaces/<name>` yourself.
-- **Spawning a name again** fails while its worktree directory or its branch is still there. `egzo spawn --reuse`
+- **Spawning a name again** fails while its worktree directory or its branch is still there. `egzo agent spawn --reuse`
   continues with them (the branch is checked out again in a fresh worktree). A name egzo picks itself
   (`coder-2`) skips the names that left a worktree or a branch behind.
 - A git workspace cannot be `:ro`; git needs to write. For read-only files, use a directory workspace.
