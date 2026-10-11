@@ -94,9 +94,6 @@ func unknownKeyMessage(path, key string, valid map[string]reflect.Type) string {
 	if path != "" {
 		prefix = path + ": "
 	}
-	if key == "users" {
-		return prefix + "users are never declared in project files; user management lives in the hub"
-	}
 	names := make([]string, 0, len(valid))
 	for name := range valid {
 		names = append(names, name)

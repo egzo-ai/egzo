@@ -167,7 +167,7 @@ egress:
 `, "neither inject nor placeholder")
 }
 
-func TestUsersOnlyRejectedWhereASectionCouldBeDeclared(t *testing.T) {
+func TestUsersIsAnUnknownKeyButAFineName(t *testing.T) {
 	for _, ok := range []string{
 		"workspaces:\n  users: {}\n",
 		"agents:\n  a: { harness: custom, image: x, env: { users: '4' } }\n",
@@ -183,7 +183,7 @@ func TestUsersOnlyRejectedWhereASectionCouldBeDeclared(t *testing.T) {
 		"egress:\n  p:\n    users: []\n",
 		"vaults:\n  v:\n    users: []\n",
 	} {
-		if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "users are never declared") {
+		if _, err := Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), `unknown key "users"`) {
 			t.Errorf("%q: error = %v", bad, err)
 		}
 	}

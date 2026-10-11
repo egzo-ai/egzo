@@ -20,18 +20,6 @@ def test_an_unknown_top_level_key_is_rejected_and_named(project):
     assert "nonsense" in result.stderr
 
 
-def test_users_are_never_declared_in_the_file(project):
-    result = project.config(spec(users={"alice": {"roles": ["admin"]}}))
-    assert result.returncode != 0
-    assert "users" in result.stderr
-
-
-def test_users_are_rejected_inside_an_agent_too(project):
-    result = project.config(spec(agents={"coder": agent(users=["alice"])}))
-    assert result.returncode != 0
-    assert "users" in result.stderr
-
-
 def test_an_agent_needs_a_harness(project):
     result = project.config(spec(agents={"coder": {}}))
     assert result.returncode != 0
@@ -131,7 +119,7 @@ def test_an_agent_cannot_override_the_variables_that_wire_it_to_the_sidecars(pro
 
 
 def test_a_key_named_users_is_fine_outside_the_places_users_could_be_declared(project):
-    """`users` is rejected where a users section would be (see above), not wherever the word appears."""
+    """`users` is an unknown key of a section, but a perfectly good name for a workspace or a variable."""
     document = spec(
         workspaces={"users": {}},
         agents={"coder": agent(harness="custom", image="alpine", env={"users": "4"}, workspaces=["users"])},
