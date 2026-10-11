@@ -111,10 +111,10 @@ def test_plain_names_with_dashes_underscores_and_digits_are_accepted(project):
     assert project.config(document).returncode == 0
 
 
-# --- depends_on is gone: nothing starts at `up`, so there is nothing to order -------------------------------
+# --- nothing starts at `up`, so there is nothing to order: no depends_on -------------------------------
 
 
-def test_depends_on_is_an_unknown_key_of_an_agent(project):
+def test_an_agent_has_no_depends_on(project):
     result = project.config(spec(agents={"a": {"harness": "custom", "image": "alpine", "depends_on": ["b"]}, "b": agent()}))
     assert result.returncode != 0
     assert "depends_on" in result.stderr
@@ -192,3 +192,57 @@ def test_a_host_directory_holding_the_engine_socket_is_warned_about(project):
 def test_mounting_the_filesystem_root_is_rejected(project):
     result = project.config(spec(workspaces={"root": {"path": "/"}}, agents={"coder": agent(harness="custom", image="alpine", workspaces=["root"])}))
     assert result.returncode != 0
+
+
+# --- unknown keys: every one is reported, where it is, with a suggestion for a typo -------------------------------------
+
+
+def test_an_unknown_key_says_where_it_is_and_what_the_valid_keys_are(project):
+    result = project.config(spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "mode": "clone"}}))
+    assert result.returncode != 0
+    assert 'egzo.yaml:' in result.stderr
+    assert 'workspaces.repo: unknown key "mode" (valid keys: git, path)' in result.stderr
+    assert "worktree" not in result.stderr  # no story about what the key used to do
+
+
+def test_a_typo_gets_a_suggestion(project):
+    result = project.config(spec(agents={"coder": agent(imge="x")}))
+    assert result.returncode != 0
+    assert 'agents.coder: unknown key "imge", did you mean "image"?' in result.stderr
+
+
+def test_every_unknown_key_is_reported_not_only_the_first(project):
+    result = project.config(spec(nonsense=1, agents={"coder": agent(imge="x", harnes="y")}, workspaces={"w": {"pth": "./w"}}))
+    assert result.returncode != 0
+    for expected in ('unknown key "nonsense"', 'unknown key "imge"', 'unknown key "harnes"', 'unknown key "pth"'):
+        assert expected in result.stderr
+    assert "yaml: unmarshal errors" not in result.stderr
+
+
+def test_an_unknown_key_is_reported_with_its_line_and_column(project):
+    project.write("name: demo\nworkspaces:\n  repo:\n    pth: ./x\n")
+    result = project.run("project", "check", "--resolved")
+    assert result.returncode != 0
+    assert 'egzo.yaml:4:5: workspaces.repo: unknown key "pth", did you mean "path"?' in result.stderr
+
+
+def test_an_unknown_key_in_a_service_definition_is_reported_the_same_way(project):
+    result = project.config(spec(egress={"default": {"services": {"x": {"hosts": ["a.com"], "hostss": []}}}}))
+    assert result.returncode != 0
+    assert 'egress.default.services.x: unknown key "hostss", did you mean "hosts"?' in result.stderr
+
+
+def test_project_check_prints_every_error_and_exits_1(project):
+    project.write(spec(nonsense=1, agents={"coder": agent(imge="x")}))
+    result = project.run("project", "check")
+    assert result.returncode == 1
+    fails = [line for line in result.stdout.splitlines() if line.startswith("fail")]
+    assert len(fails) == 2, result.stdout
+    assert any("nonsense" in line for line in fails) and any("imge" in line for line in fails)
+
+
+def test_a_wrong_type_is_reported_with_its_line(project):
+    project.write("name: demo\nagents:\n  coder:\n    harness: custom\n    workspaces: not-a-list\n")
+    result = project.run("project", "check", "--resolved")
+    assert result.returncode != 0
+    assert "egzo.yaml:5" in result.stderr

@@ -35,9 +35,6 @@ func resolveWorkspaces(file *File, dir string, p *problems) map[string]ResolvedW
 		if !identifier.MatchString(name) {
 			continue // checkNames reports it
 		}
-		if workspace.Mode != "" {
-			p.addf("workspace %q: mode is gone: every agent gets a worktree of the repository's base clone", name)
-		}
 		if workspace.Git != nil {
 			checkGit(name, workspace.Git, p)
 		}

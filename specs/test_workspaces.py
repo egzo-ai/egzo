@@ -229,15 +229,6 @@ def test_https_git_sources_are_accepted(project):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("mode", ["clone", "worktree", "shared"])
-def test_the_mode_key_is_gone_and_the_error_says_so(project, mode):
-    """Every agent gets a worktree of the base, always: there is nothing left to choose."""
-    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "mode": mode}})
-    result = project.config(document)
-    assert result.returncode != 0
-    assert "mode" in result.stderr and "worktree" in result.stderr
-
-
 def test_a_workspace_cannot_be_both_a_git_repository_and_a_directory_source(project):
     document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "source": "./repo"}})
     result = project.config(document)

@@ -330,8 +330,6 @@ workspaces:
 		name, yaml, want string
 	}{
 		{"bad name", "workspaces:\n  'a:b': {}\n", "a name is 1 to 63 lowercase"},
-		{"mode is gone", "workspaces:\n  w: { git: { url: https://x/y }, mode: clone }\n", "mode is gone"},
-		{"mode is gone even without git", "workspaces:\n  w: { mode: shared }\n", "worktree"},
 		{"two workspaces with one path", "workspaces:\n  a: { path: ./x }\n  b: { path: ./x }\n", "also the path of workspace"},
 		{"ssh url", "workspaces:\n  w: { git: { url: 'git@github.com:o/r.git' } }\n", "must be an https URL"},
 		{"local path url", "workspaces:\n  w: { git: { url: /srv/repo } }\n", "must be an https URL"},

@@ -4,12 +4,15 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -56,58 +59,52 @@ func FindFile(from string) (string, error) {
 	}
 }
 
-// Parse strictly decodes a project file: unknown keys are errors.
+var lineError = regexp.MustCompile(`^(?:yaml: )?line (\d+): (.*)$`)
+
+// Parse strictly decodes a project file: an unknown key is an error, and every problem found is reported, not
+// only the first (see Errors).
 func Parse(data []byte) (*File, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("%s: %w", FileName, err)
+		return nil, Errors{locate(err.Error()).String()}
 	}
-	if err := rejectUsers(&root); err != nil {
-		return nil, err
+	var found []located
+	if len(root.Content) > 0 {
+		unknownKeys(root.Content[0], reflect.TypeOf(File{}), "", &found)
 	}
-
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
 	var file File
-	if err := decoder.Decode(&file); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%s: %w", FileName, err)
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		var typeErr *yaml.TypeError
+		if errors.As(err, &typeErr) {
+			for _, message := range typeErr.Errors {
+				found = append(found, locate(message))
+			}
+		} else {
+			found = append(found, locate(err.Error()))
+		}
 	}
-	return &file, nil
+	if len(found) == 0 {
+		return &file, nil
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		if found[i].line != found[j].line {
+			return found[i].line < found[j].line
+		}
+		return found[i].column < found[j].column
+	})
+	errs := make(Errors, len(found))
+	for i, f := range found {
+		errs[i] = f.String()
+	}
+	return nil, errs
 }
 
-// rejectUsers enforces that users, roles and grants are never declared in project files: they live
-// in the hub. Only the places a users section could be declared are checked (the top level and the
-// settings of an agent, profile, workspace or vault), not every key that happens to be named users:
-// a workspace, a variable or a secret may be called that.
-func rejectUsers(root *yaml.Node) error {
-	node := root
-	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
-		node = node.Content[0]
+// locate turns a yaml message such as `line 5: cannot unmarshal ...` into the shape of every other error of the file.
+func locate(message string) located {
+	message = strings.TrimPrefix(message, "yaml: ")
+	if m := lineError.FindStringSubmatch(message); m != nil {
+		line, _ := strconv.Atoi(m[1])
+		return located{line: line, text: m[2]}
 	}
-	if node.Kind != yaml.MappingNode {
-		return nil
-	}
-	check := func(mapping *yaml.Node) error {
-		for i := 0; mapping.Kind == yaml.MappingNode && i+1 < len(mapping.Content); i += 2 {
-			if key := mapping.Content[i]; key.Value == "users" {
-				return fmt.Errorf("%s:%d: users are never declared in project files; user management lives in the hub", FileName, key.Line)
-			}
-		}
-		return nil
-	}
-	if err := check(node); err != nil {
-		return err
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch node.Content[i].Value {
-		case "agents", "egress", "workspaces", "vaults":
-			section := node.Content[i+1]
-			for j := 0; section.Kind == yaml.MappingNode && j+1 < len(section.Content); j += 2 {
-				if err := check(section.Content[j+1]); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
+	return located{text: message}
 }

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,10 @@ func TestParseRejects(t *testing.T) {
 		{"malformed yaml", "agents: [\n", "egzo.yaml"},
 		{"numeric service", "egress:\n  default:\n    services:\n      anthropic: 42\n", "secret reference"},
 		{"list service", "egress:\n  default:\n    services:\n      anthropic: [a]\n", "secret reference"},
+		{"unknown workspace key", "workspaces:\n  w: { mode: shared }\n", `workspaces.w: unknown key "mode" (valid keys: git, path)`},
+		{"typo", "agents:\n  a:\n    harness: custom\n    imge: x\n", `agents.a: unknown key "imge", did you mean "image"?`},
+		{"position", "name: x\nworkspaces:\n  w:\n    pth: x\n", `egzo.yaml:4:5: workspaces.w: unknown key "pth", did you mean "path"?`},
+		{"wrong type", "agents:\n  a:\n    harness: custom\n    workspaces: x\n", "egzo.yaml:4"},
 		{"unknown service key", "egress:\n  default:\n    services:\n      x: { hosts: [a.com], bogus: 1 }\n", "unknown key"},
 	}
 	for _, c := range cases {
@@ -147,5 +152,16 @@ func TestLoadFileReadsAFileUnderAnyName(t *testing.T) {
 	}
 	if _, err := LoadFile(path + ".missing"); err == nil || !strings.Contains(err.Error(), "team.yaml.missing") {
 		t.Errorf("a missing file: %v", err)
+	}
+}
+
+func TestParseReportsEveryError(t *testing.T) {
+	_, err := Parse([]byte("nonsense: 1\nagents:\n  a:\n    harness: custom\n    imge: x\n    harnes: y\nworkspaces:\n  w: { pth: x }\n"))
+	var errs Errors
+	if !errors.As(err, &errs) || len(errs) != 4 {
+		t.Fatalf("errors = %v, want 4", err)
+	}
+	if strings.Contains(err.Error(), "unmarshal errors") {
+		t.Errorf("yaml's own header leaked: %v", err)
 	}
 }

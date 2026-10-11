@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
 
@@ -76,7 +78,14 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 	}
 	p, err := loadProject(opts)
 	if err != nil {
-		report("fail", "%s: %s", filepath.Base(path), firstLine(err.Error()))
+		var problems config.Errors
+		if errors.As(err, &problems) {
+			for _, problem := range problems {
+				report("fail", "%s", problem)
+			}
+		} else {
+			report("fail", "%s: %s", filepath.Base(path), err)
+		}
 		return ExitError{Code: 1}
 	}
 	report("ok", "%s is valid (project %s, %d template(s))", filepath.Base(path), p.Resolved.Name, len(p.Resolved.Agents))

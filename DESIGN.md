@@ -270,7 +270,6 @@ Commands are grouped by what they act on. There are no aliases for names that mo
 - Working directory: exactly one workspace => its directory (a git workspace: the instance's worktree); two or more
   => `/workspace`. `workdir:` overrides (a workspace name or a path).
 - `:ro` on a git workspace is a validation error: git needs write access. For read access use a directory workspace.
-- `mode` (`clone`, `worktree`, `shared`) is gone: every instance gets a worktree. It is read only to refuse it.
 - Git sources are HTTPS only: ssh and local paths are validation errors. A local repository on the host is a
   directory workspace, with no git semantics.
 - Two workspaces cannot share a path; the names `control`, `ca`, `ca-private` and `egress` stay reserved.
@@ -297,10 +296,6 @@ Commands are grouped by what they act on. There are no aliases for names that mo
   workspace trust for each directory.
 
 ## Templates and instances (decided, built)
-
-**Dropped by this model:** `depends_on` (nothing starts at `up`, so there is nothing to order), `egzo project up AGENT...`
-(there are no agents to select) and the cross-agent workspace reference `agent/workspace:ro` (a template cannot name
-an instance). All three are removed from the schema, the CLI and the specs, not rejected.
 
 An entry under `agents:` is a **template**: it says how to run an agent and runs nothing. `egzo project up` brings up
 the project's infrastructure (networks, volumes, proxy, control), validates the file and **publishes the

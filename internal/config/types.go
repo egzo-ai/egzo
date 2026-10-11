@@ -73,8 +73,6 @@ type Inject struct {
 	BasicUser string `yaml:"basic_user,omitempty"`
 }
 
-var serviceDefKeys = map[string]bool{"hosts": true, "inject": true, "secret": true, "placeholder": true, "inspect": true}
-
 // UnmarshalYAML accepts a string (secret reference) or a mapping (definition). Null and any
 // other shape are rejected.
 func (e *ServiceEntry) UnmarshalYAML(node *yaml.Node) error {
@@ -89,11 +87,6 @@ func (e *ServiceEntry) UnmarshalYAML(node *yaml.Node) error {
 		e.Ref = node.Value
 		return nil
 	case yaml.MappingNode:
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			if key := node.Content[i].Value; !serviceDefKeys[key] {
-				return fmt.Errorf("line %d: unknown key %q in service definition (allowed: hosts, inject, secret, placeholder, inspect)", node.Content[i].Line, key)
-			}
-		}
 		var def ServiceDef
 		if err := node.Decode(&def); err != nil {
 			return err
@@ -105,11 +98,9 @@ func (e *ServiceEntry) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // Workspace declares a workspace of the project. Without git it is a directory on the host (path, by default
-// ./workspaces/<name>); with git, path holds the base clone and one worktree per instance. Mode is read only
-// to refuse it: every git workspace now gives each instance a worktree.
+// ./workspaces/<name>); with git, path holds the base clone and one worktree per instance.
 type Workspace struct {
 	Git  *Git   `yaml:"git,omitempty"`
-	Mode string `yaml:"mode,omitempty"`
 	Path string `yaml:"path,omitempty"`
 }
 

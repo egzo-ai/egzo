@@ -47,7 +47,7 @@ def test_a_vault_lists_the_names_of_its_secrets(project):
 
 
 def test_a_secret_has_no_source_of_its_own(project):
-    """The old `from:` form: the backend already says where secrets are read from."""
+    """The backend already says where secrets are read from."""
     result = project.config(spec(vaults={"main": {"backend": "env", "secrets": {"TOKEN": {"from": "env:TOKEN"}}}}))
     assert result.returncode != 0
 
@@ -65,7 +65,7 @@ def test_an_unknown_backend_is_refused_and_names_the_ones_that_exist(project):
     assert "env" in result.stderr and "pass" in result.stderr
 
 
-def test_the_file_backend_no_longer_exists(project):
+def test_there_is_no_file_backend(project):
     """Secrets in plain files are not supported: `file` is refused exactly like a name nobody ever heard of."""
     unknown = project.config(spec(vaults=vault("not-a-backend", "TOKEN")))
     removed = project.config(spec(vaults=vault("file", "TOKEN")))
