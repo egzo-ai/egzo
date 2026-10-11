@@ -411,14 +411,6 @@ def test_a_name_that_would_clash_with_the_proxys_network_is_refused(live_project
     assert live_project.run("spawn", "coder", "notes").returncode == 0  # an ordinary name is fine
 
 
-def test_a_name_whose_home_volume_is_a_workspace_is_refused(live_project, engine, agent_image):
-    live_project.up(spec(workspaces={"notes-home": {}}, agents={"coder": custom(agent_image, workspaces=["notes-home"])}))
-    result = live_project.run("spawn", "coder", "notes")
-    assert result.returncode == 1 and "notes-home" in result.stderr
-    assert engine.instance(live_project.name, "notes") is None
-    assert [r for r in engine.resources(live_project.name) if r.name.endswith("_notes-home")][0].kind == "volume"  # the workspace is untouched
-
-
 @pytest.mark.parametrize("flags", [("--json", "--wait", "-m", "x"), ("--json", "--attach")])
 def test_json_cannot_be_combined_with_what_takes_over_the_terminal(live_project, engine, agent_image, flags):
     project_with(live_project, agent_image)

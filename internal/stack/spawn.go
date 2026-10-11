@@ -99,7 +99,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if name == "" {
 		name = freeName(observed, req.Template, template.Workspaces)
 	}
-	if err := config.CheckInstanceName(name, published.Names(), published.WorkspaceNames); err != nil {
+	if err := config.CheckInstanceName(name, published.Names()); err != nil {
 		return Spawned{}, err
 	}
 	if existing, ok := observed.Instance(name); ok {

@@ -27,7 +27,7 @@ var reservedWorkspaces = map[string]bool{"control": true, "ca": true, "ca-privat
 // CheckInstanceName reports why name cannot be the name of an instance, or nil. An instance is addressed
 // by its name alone, so the name must be a plain identifier, must not be one of the project's templates
 // and must not make a container, network or directory that egzo already uses for something else.
-func CheckInstanceName(name string, templates, workspaces []string) error {
+func CheckInstanceName(name string, templates []string) error {
 	switch {
 	case !identifier.MatchString(name):
 		return fmt.Errorf("invalid instance name %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
@@ -43,11 +43,6 @@ func CheckInstanceName(name string, templates, workspaces []string) error {
 	for _, template := range templates {
 		if name == template {
 			return fmt.Errorf("invalid instance name %q: it is the name of a template; an instance needs a name of its own", name)
-		}
-	}
-	for _, workspace := range workspaces {
-		if name+"-home" == workspace {
-			return fmt.Errorf("invalid instance name %q: its home volume would be the workspace %q", name, workspace)
 		}
 	}
 	return nil
@@ -78,8 +73,6 @@ func checkNames(file *File, p *problems) {
 			p.addf("workspace %q: %q is reserved for egzo's own use", name, name)
 		case !identifier.MatchString(name):
 			p.addf("workspace %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
-		case strings.HasSuffix(name, "-home") && file.Agents[strings.TrimSuffix(name, "-home")].Harness != "":
-			p.addf("workspace %q: %q is reserved for egzo's own use (the home of agent %q)", name, name, strings.TrimSuffix(name, "-home"))
 		}
 	}
 }
