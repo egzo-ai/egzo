@@ -243,3 +243,50 @@ func TestAHookInTheRepositoryIsNeverRun(t *testing.T) {
 		t.Error("a hook planted in the base repository ran while a worktree was prepared")
 	}
 }
+
+func TestInfoOfADirectoryWithoutAClone(t *testing.T) {
+	info, err := Info(t.TempDir())
+	if err != nil || info.Cloned || info.URL != "" || len(info.Branches) != 0 {
+		t.Errorf("info = %+v, %v", info, err)
+	}
+}
+
+func TestInfoListsTheBranchesEgzoMadeAndTheOriginUrl(t *testing.T) {
+	url := origin(t)
+	root, base := layout(t)
+	for _, agent := range []string{"coder", "reviewer"} {
+		if _, err := worktree(t, url, "", base, root, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := Info(base)
+	if err != nil || !info.Cloned || info.URL != url {
+		t.Fatalf("info = %+v, %v", info, err)
+	}
+	if got := strings.Join(info.Branches, ","); got != "egzo/coder,egzo/reviewer" {
+		t.Errorf("branches = %q", got)
+	}
+}
+
+func TestForgetRemovesOnlyTheGivenWorktreesAndKeepsTheirBranches(t *testing.T) {
+	url := origin(t)
+	root, base := layout(t)
+	for _, agent := range []string{"coder", "reviewer"} {
+		if _, err := worktree(t, url, "", base, root, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.RemoveAll(filepath.Join(root, "coder")) // the volume that held it is gone
+	if err := Forget(base, []string{"coder"}); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := Git(base, "worktree", "list"); strings.Contains(list, "coder") || !strings.Contains(list, "reviewer") {
+		t.Errorf("worktrees = %s", list)
+	}
+	if info, _ := Info(base); len(info.Branches) != 2 {
+		t.Errorf("branches = %v: the work outlives the worktree", info.Branches)
+	}
+	if err := Forget(base, []string{"coder"}); err != nil {
+		t.Errorf("forgetting twice is not an error: %v", err)
+	}
+}

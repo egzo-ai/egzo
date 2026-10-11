@@ -193,7 +193,7 @@ func newLifecycleCommand(opts *options, verb, short string) *cobra.Command {
 			timeout := 5
 			switch verb {
 			case "start":
-				if err := ensureDirectories(s, target); err != nil {
+				if err := ensureDirectories(ctx, s, target); err != nil {
 					return err
 				}
 				err = s.engine.API.ContainerStart(ctx, target.ID, container.StartOptions{})
@@ -327,9 +327,9 @@ func agentNames(agents map[string]config.ResolvedAgent) []string {
 	return names
 }
 
-// ensureDirectories makes the directory workspaces an agent mounts that are missing, as the invoking user: the engine
-// would make a missing bind mount as root, or refuse to start the container.
-func ensureDirectories(s *session, target *stack.Resource) error {
+// ensureDirectories makes the volumes of the directory workspaces an agent mounts that are missing, empty and the
+// agent user's: the engine would make a missing volume as root, unlabelled.
+func ensureDirectories(ctx context.Context, s *session, target *stack.Resource) error {
 	if target.Kind != "agent" {
 		return nil
 	}
@@ -341,5 +341,5 @@ func ensureDirectories(s *session, target *stack.Resource) error {
 	if !ok {
 		return nil
 	}
-	return stack.EnsureMountDirectories(agent)
+	return stack.EnsureDirectoryVolumes(ctx, s.engine, s.prepEnv(ctx), s.Resolved, s.Dir, stack.DirectoryWorkspacesOf(s.Resolved, agent)...)
 }

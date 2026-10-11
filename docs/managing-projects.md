@@ -11,7 +11,7 @@ with `ps`, `logs`, `exec`, `start`, `stop`, `restart`, `events` and `proxy` at t
   and **publishes the templates**. It starts no agent, and it never removes or recreates a running instance.
 - `egzo agent spawn` makes an **instance** from a template. Spawning needs no edit of `egzo.yaml`.
 - An instance is named by you (`issue-412`) or by egzo (`coder-1`). A template can be spawned as often as you like;
-  each instance has its own container, network, home volume and, for each git workspace it lists, its own worktree.
+  each instance has its own container, network, home volume and, for each git workspace it lists, its own worktree volume.
 
 ## The daily loop
 
@@ -42,10 +42,11 @@ sidecars.
 ## Tearing down
 
 ```console
-$ egzo agent rm NAME...          # an instance: container, network, home volume, worktrees (committed work stays on its branch)
+$ egzo agent rm NAME...          # an instance: container, network, home volume, worktree volumes (committed work stays on its branch)
 $ egzo agent rm --stale       # remove instances matching a filter (see --help)
 $ egzo project down                # the whole project: sidecars, networks, volumes, CA. Refused while an agent runs
 $ egzo project down --force        # removes the running agents too, with their worktrees and homes
+$ egzo workspace rm NAME           # down keeps the workspace volumes (your files, the base clones); this deletes one
 ```
 
 ## Looking around

@@ -398,7 +398,7 @@ def test_project_unlock_breaks_a_lease_left_by_a_killed_command(live_project, en
     labels = ["--label", f"{LABEL_PREFIX}project={live_project.name}", "--label", f"{LABEL_PREFIX}kind=lock",
               "--label", f"{LABEL_PREFIX}lock-holder=killed-1234", "--label", f"{LABEL_PREFIX}lock-expires=9999999999"]
     assert engine.run("create", "--name", f"{live_project.name}.lock", *labels, engine.agent_image()).returncode == 0
-    assert live_project.run("agent", "spawn", "coder", "blocked").returncode != 0
+    assert live_project.run("project", "down").returncode != 0, "up and down refuse at once while the lease is held"
     unlocked = live_project.run("project", "unlock")
     assert unlocked.returncode == 0 and "killed-1234" in unlocked.stdout
     assert live_project.spawn("coder", "free") == "free"

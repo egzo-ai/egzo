@@ -145,7 +145,8 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		fmt.Fprintln(out, "nothing to do")
 	}
 	if !opts.DryRun {
-		if err := EnsureDirectories(project); err != nil {
+		env := PrepEnv{Image: opts.Image, User: AgentUser(c)}
+		if err := EnsureDirectoryVolumes(ctx, c, env, project, dir); err != nil {
 			return err
 		}
 		// Last, and never fatal: a repository that cannot be reached must not keep the project down.
@@ -153,7 +154,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		if warnings == nil {
 			warnings = io.Discard
 		}
-		CloneBases(ctx, c, project, dir, opts.Image, AgentUser(c), out, warnings)
+		CloneBases(ctx, c, project, dir, env, out, warnings)
 	}
 	return nil
 }

@@ -99,6 +99,9 @@ func unknownKeyMessage(path, key string, valid map[string]reflect.Type) string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	if hint := removedKeyHint(path, key); hint != "" {
+		return fmt.Sprintf("%sunknown key %q: %s (valid keys: %s)", prefix, key, hint, strings.Join(names, ", "))
+	}
 	if guess := suggest(key, names); guess != "" {
 		return fmt.Sprintf("%sunknown key %q, did you mean %q?", prefix, key, guess)
 	}
@@ -106,4 +109,13 @@ func unknownKeyMessage(path, key string, valid map[string]reflect.Type) string {
 		return fmt.Sprintf("%sunknown key %q (this section has no keys)", prefix, key)
 	}
 	return fmt.Sprintf("%sunknown key %q (valid keys: %s)", prefix, key, strings.Join(names, ", "))
+}
+
+// removedKeyHint says what to do instead for a key that egzo no longer has and that people will still write.
+func removedKeyHint(path, key string) string {
+	if key == "path" && strings.HasPrefix(path, "workspaces.") && strings.Count(path, ".") == 1 {
+		name := strings.TrimPrefix(path, "workspaces.")
+		return fmt.Sprintf("workspaces live in engine volumes, not in a directory of the host: copy files in with `egzo workspace put %s SRC`", name)
+	}
+	return ""
 }

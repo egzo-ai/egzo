@@ -131,11 +131,11 @@ func newSpawnCommand(opts *options) *cobra.Command {
 
 // lockOrWait takes the project lock, saying so when it has to wait for another command.
 func lockOrWait(s *session, cmd *cobra.Command) (func(), error) {
-	if release, err := stack.Lock(s.Dir); err == nil {
+	if release, err := stack.Lock(cmd.Context(), s.engine, s.Resolved.Name, imageRef()); err == nil {
 		return release, nil
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "waiting for another egzo command that is changing this project...")
-	return stack.LockWait(s.Dir, lockWait)
+	return stack.LockWait(cmd.Context(), s.engine, s.Resolved.Name, imageRef(), lockWait)
 }
 
 // warnIfTemplateMoved says so when egzo.yaml no longer matches the template an instance was made from:
@@ -202,11 +202,7 @@ func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observe
 			return nil, fmt.Errorf("instance %q is running: stop it first (egzo stop %s) or use --force", name, name)
 		}
 	}
-	removed, err := stack.RemoveInstances(ctx, s.engine, observed, s.Resolved.Name, names, true, cmd.ErrOrStderr())
-	if werr := stack.RemoveWorktrees(s.Resolved, removed, cmd.ErrOrStderr()); err == nil {
-		err = werr
-	}
-	return removed, err
+	return stack.RemoveInstances(ctx, s.engine, observed, s.prepEnv(ctx), s.Resolved.Name, s.Dir, names, true, cmd.ErrOrStderr())
 }
 
 func newAgentRmCommand(opts *options) *cobra.Command {

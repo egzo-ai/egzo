@@ -4,9 +4,6 @@
 package stack
 
 import (
-	"io"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,28 +12,49 @@ import (
 	"github.com/egzo-ai/egzo/internal/engine"
 )
 
-func gitProject(t *testing.T) (*config.Resolved, string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "workspaces", "repo")
+func gitProject() *config.Resolved {
 	mount := config.Mount{Name: "repo", Mount: "/workspace/repo", Mode: "rw"}
 	return &config.Resolved{
 		Name: "proj",
 		Workspaces: map[string]config.ResolvedWorkspace{
-			"repo": {Git: &config.Git{URL: "https://github.com/acme/shop.git", Branch: "main"}, Path: path},
-			"data": {Path: filepath.Join(filepath.Dir(path), "data")},
+			"repo": {Git: &config.Git{URL: "https://github.com/acme/shop.git", Branch: "main"}},
+			"data": {},
 		},
 		Agents: map[string]config.ResolvedAgent{
 			"coder":  {Harness: "custom", Image: "x", Workdir: "/workspace/repo", Workspaces: []config.Mount{mount}},
 			"tester": {Harness: "custom", Image: "x", Workdir: "/workspace/repo", Workspaces: []config.Mount{mount}},
-			"docs":   {Harness: "custom", Image: "x", Workdir: "/workspace", Workspaces: []config.Mount{{Name: "data", Mount: "/workspace/data", Mode: "rw", HostPath: filepath.Join(filepath.Dir(path), "data")}}},
+			"docs":   {Harness: "custom", Image: "x", Workdir: "/workspace", Workspaces: []config.Mount{{Name: "data", Mount: "/workspace/data", Mode: "rw"}}},
 		},
-	}, path
+	}
 }
 
-func TestEveryInstanceThatListsAGitWorkspaceGetsAWorktreeNamedAfterIt(t *testing.T) {
-	project, path := gitProject(t)
+func TestWorkspaceVolumeNamesCannotCollideWithAnyOtherVolumeOfTheProject(t *testing.T) {
+	if got := WorkspaceVolume("proj", "data"); got != "proj_ws.data" {
+		t.Errorf("directory volume = %q", got)
+	}
+	if got := BaseVolume("proj", "repo"); got != "proj_ws.repo.base" {
+		t.Errorf("base volume = %q", got)
+	}
+	if got := WorktreeVolume("proj", "repo", "coder-1"); got != "proj_ws.repo.wt.coder-1" {
+		t.Errorf("worktree volume = %q", got)
+	}
+	// an instance named base, or a workspace named like an agent's home, cannot reach another volume's name
+	if WorktreeVolume("proj", "repo", "base") == BaseVolume("proj", "repo") {
+		t.Error("a worktree of an instance called base is the base")
+	}
+	for _, other := range []string{"proj_control", "proj_ca", "proj_ca-private", "proj_egress", "proj_coder-home", "proj_x-home"} {
+		for _, ours := range []string{WorkspaceVolume("proj", "x-home"), WorkspaceVolume("proj", "control"), BaseVolume("proj", "ca"), WorktreeVolume("proj", "ca", "private")} {
+			if other == ours {
+				t.Errorf("%s collides", other)
+			}
+		}
+	}
+}
+
+func TestEveryInstanceThatListsAGitWorkspaceGetsAWorktreeVolumeNamedAfterIt(t *testing.T) {
+	project := gitProject()
 	plan := PlanWorktrees(project, "coder")
-	if len(plan) != 1 || plan[0].Dir != filepath.Join(path, "coder") || plan[0].Base != filepath.Join(path, ".base") ||
+	if len(plan) != 1 || plan[0].Volume != "proj_ws.repo.wt.coder" || plan[0].Base != "proj_ws.repo.base" ||
 		plan[0].URL != "https://github.com/acme/shop.git" || plan[0].Branch != "main" || plan[0].Workspace != "repo" {
 		t.Errorf("plan = %+v", plan)
 	}
@@ -45,42 +63,15 @@ func TestEveryInstanceThatListsAGitWorkspaceGetsAWorktreeNamedAfterIt(t *testing
 	}
 }
 
-func TestAWorktreeOrABranchThatIsThereRefusesTheSpawnUnlessReused(t *testing.T) {
-	project, path := gitProject(t)
-	plan := PlanWorktrees(project, "coder")
-	if err := CheckWorktrees(plan, false); err != nil {
-		t.Fatalf("nothing is there yet: %v", err)
-	}
-	os.MkdirAll(filepath.Join(path, "coder"), 0o755)
-	if err := CheckWorktrees(plan, false); err == nil || !strings.Contains(err.Error(), "--reuse") || !strings.Contains(err.Error(), filepath.Join(path, "coder")) {
-		t.Errorf("a worktree that exists: %v", err)
-	}
-	if err := CheckWorktrees(plan, true); err != nil {
-		t.Errorf("reuse: %v", err)
-	}
-	os.Remove(filepath.Join(path, "coder"))
-	loose := filepath.Join(path, ".base", ".git", "refs", "heads", "egzo")
-	os.MkdirAll(loose, 0o755)
-	os.WriteFile(filepath.Join(loose, "coder"), []byte("abc\n"), 0o644)
-	if err := CheckWorktrees(plan, false); err == nil || !strings.Contains(err.Error(), "egzo/coder") || !strings.Contains(err.Error(), "--reuse") {
-		t.Errorf("a loose branch: %v", err)
-	}
-	os.Remove(filepath.Join(loose, "coder"))
-	os.WriteFile(filepath.Join(path, ".base", ".git", "packed-refs"), []byte("# pack-refs\nabc refs/heads/egzo/coder\n"), 0o644)
-	if err := CheckWorktrees(plan, false); err == nil {
-		t.Error("a packed branch was not seen")
-	}
-}
-
-func TestAnInstanceMountsItsOwnWorktreeAndTheBaseUnderTheNamesTheyHaveOnTheHost(t *testing.T) {
-	project, path := gitProject(t)
+func TestAnInstanceMountsItsOwnWorktreeAndTheBaseAsSiblings(t *testing.T) {
+	project := gitProject()
 	spec, err := agentContainer(project, "/p", "coder", project.Agents["coder"], "proj_coder", Inputs{}, engine.Identity{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []MountSpec{
-		{Bind: true, Source: filepath.Join(path, "coder"), Target: "/workspace/repo/coder"},
-		{Bind: true, Source: filepath.Join(path, ".base"), Target: "/workspace/repo/.base"},
+		{Source: "proj_ws.repo.wt.coder", Target: "/workspace/repo/coder"},
+		{Source: "proj_ws.repo.base", Target: "/workspace/repo/.base"},
 	}
 	var got []MountSpec
 	for _, m := range spec.Mounts {
@@ -95,14 +86,17 @@ func TestAnInstanceMountsItsOwnWorktreeAndTheBaseUnderTheNamesTheyHaveOnTheHost(
 		t.Errorf("working directory = %q", spec.WorkingDir)
 	}
 	for _, m := range got {
-		if strings.Contains(m.Source, "tester") {
-			t.Errorf("another instance's worktree is mounted: %+v", m)
+		if strings.Contains(m.Source, "tester") || m.Bind {
+			t.Errorf("another instance's worktree, or the host, is mounted: %+v", m)
 		}
+	}
+	if !slices.Contains(spec.OwnedVolumes, "proj_ws.repo.wt.coder") || slices.Contains(spec.OwnedVolumes, "proj_ws.repo.base") {
+		t.Errorf("owned volumes = %v: the worktree is handed to the agent user, the shared base is not walked at every spawn", spec.OwnedVolumes)
 	}
 }
 
 func TestTheWorkingDirectoryMovesIntoTheWorktreeOnlyForGitWorkspaces(t *testing.T) {
-	project, _ := gitProject(t)
+	project := gitProject()
 	agent := project.Agents["coder"]
 	for workdir, want := range map[string]string{
 		"/workspace/repo":       "/workspace/repo/coder",
@@ -122,133 +116,71 @@ func TestTheWorkingDirectoryMovesIntoTheWorktreeOnlyForGitWorkspaces(t *testing.
 	}
 }
 
-func TestDirectoryWorkspacesAreCreatedEmptyAndLeftAloneWhenTheyExist(t *testing.T) {
-	project, path := gitProject(t)
-	data := filepath.Join(filepath.Dir(path), "data")
-	if err := EnsureDirectories(project); err != nil {
-		t.Fatal(err)
+func TestDirectoryWorkspacesOfAnAgentAreTheOnesWithoutGit(t *testing.T) {
+	project := gitProject()
+	if got := DirectoryWorkspacesOf(project, project.Agents["docs"]); !slices.Equal(got, []string{"data"}) {
+		t.Errorf("docs = %v", got)
 	}
-	if info, err := os.Stat(data); err != nil || !info.IsDir() {
-		t.Fatalf("the directory was not made: %v", err)
-	}
-	if _, err := os.Stat(path); err == nil {
-		t.Error("a git workspace's directory was made by EnsureDirectories: `up` clones it")
-	}
-	os.WriteFile(filepath.Join(data, "mine"), []byte("x"), 0o644)
-	if err := EnsureDirectories(project); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(data, "mine")); err != nil {
-		t.Error("an existing directory was touched")
+	if got := DirectoryWorkspacesOf(project, project.Agents["coder"]); len(got) != 0 {
+		t.Errorf("coder = %v: a git workspace is not a directory", got)
 	}
 }
 
-func TestBaseURLIsReadFromTheOriginOfTheBase(t *testing.T) {
-	base := t.TempDir()
-	os.MkdirAll(filepath.Join(base, ".git"), 0o755)
-	config := "[core]\n\turl = not-this\n[remote \"upstream\"]\n\turl = https://x/upstream.git\n[remote \"origin\"]\n\turl = https://x/y.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
-	os.WriteFile(filepath.Join(base, ".git", "config"), []byte(config), 0o644)
-	if got := baseURL(base); got != "https://x/y.git" {
-		t.Errorf("url = %q", got)
+func TestWorkspaceRowsSayWhatTheEngineHolds(t *testing.T) {
+	project := gitProject()
+	observed := Observed{Resources: []Resource{
+		{Type: "volume", Name: "proj_ws.repo.base", Kind: kindWorkspace, Workspace: "repo"},
+		{Type: "volume", Name: "proj_ws.repo.wt.b", Kind: kindWorkspace, Workspace: "repo", Instance: "b"},
+		{Type: "volume", Name: "proj_ws.repo.wt.a", Kind: kindWorkspace, Workspace: "repo", Instance: "a"},
+	}}
+	rows := WorkspaceRows(project, observed)
+	if len(rows) != 2 || rows[0].Name != "data" || rows[1].Name != "repo" {
+		t.Fatalf("rows = %+v", rows)
 	}
-	if got := baseURL(t.TempDir()); got != "" {
-		t.Errorf("a directory with no repository has the url %q", got)
+	if rows[0].State != "missing" || rows[0].Kind != "directory" || rows[0].Volume != "proj_ws.data" {
+		t.Errorf("data = %+v", rows[0])
+	}
+	if rows[1].State != "cloned" || rows[1].Kind != "git" || !slices.Equal(rows[1].Worktrees, []string{"a", "b"}) {
+		t.Errorf("repo = %+v", rows[1])
+	}
+	if rows := WorkspaceRows(project, Observed{}); rows[1].State != "not cloned" {
+		t.Errorf("with nothing observed: %+v", rows[1])
 	}
 }
 
-func TestRemovingWorktreesDeletesOnlyThoseOfTheInstancesAndWhatTheBaseKeepsAboutThem(t *testing.T) {
-	project, path := gitProject(t)
-	base := filepath.Join(path, ".base")
-	for _, instance := range []string{"coder", "tester"} {
-		os.MkdirAll(filepath.Join(path, instance), 0o755)
-		os.WriteFile(filepath.Join(path, instance, "work.txt"), []byte("x"), 0o644)
-		os.WriteFile(filepath.Join(path, instance, ".git"), []byte("gitdir: ../.base/.git/worktrees/"+instance+"\n"), 0o644)
-		meta := filepath.Join(base, ".git", "worktrees", instance)
-		os.MkdirAll(meta, 0o755)
-		os.WriteFile(filepath.Join(meta, "gitdir"), []byte("../../../../"+instance+"/.git\n"), 0o644)
+func TestOnlyBaseVolumesAreBasesAndDownKeepsOnlyWhatIsNotAnInstancesOwn(t *testing.T) {
+	observed := Observed{Resources: []Resource{
+		{Type: "volume", Name: "proj_ws.repo.base", Kind: kindWorkspace, Workspace: "repo"},
+		{Type: "volume", Name: "proj_ws.data", Kind: kindWorkspace, Workspace: "data"},
+		{Type: "volume", Name: "proj_ws.repo.wt.a", Kind: kindWorkspace, Workspace: "repo", Instance: "a"},
+		{Type: "container", Name: "proj-a", Kind: kindAgent, Instance: "a", State: "running"},
+		{Type: "volume", Name: "proj_ws.repo.wt.gone", Kind: kindWorkspace, Workspace: "repo", Instance: "gone"},
+		{Type: "volume", Name: "proj_a-home", Kind: kindAgent, Instance: "a"},
+		{Type: "volume", Name: "proj_control", Kind: kindControl},
+	}}
+	if got := baseWorkspaces(observed); !slices.Equal(got, []string{"repo"}) {
+		t.Errorf("bases = %v", got)
 	}
-	notAWorktree := filepath.Join(path, "mine")
-	os.MkdirAll(notAWorktree, 0o755)
-	os.WriteFile(filepath.Join(notAWorktree, "precious"), []byte("x"), 0o644)
-
-	if err := RemoveWorktrees(project, []string{"coder", "mine", "ghost"}, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	for path, wantGone := range map[string]bool{
-		filepath.Join(path, "coder"):                       true,
-		filepath.Join(base, ".git", "worktrees", "coder"):  true,
-		filepath.Join(path, "tester"):                      false,
-		filepath.Join(base, ".git", "worktrees", "tester"): false,
-		filepath.Join(notAWorktree, "precious"):            false, // no .git in it: not something egzo made
-		base:                                               false,
-	} {
-		if _, err := os.Stat(path); (err != nil) != wantGone {
-			t.Errorf("%s: gone = %v, want %v", path, err != nil, wantGone)
+	kept := []string{}
+	for _, r := range observed.Resources {
+		if keptByDown(r, orphanWorktrees(observed)) {
+			kept = append(kept, r.Name)
 		}
 	}
-}
-
-func TestPodmanRefusesASpawnThatAsksForARuntime(t *testing.T) {
-	err := refuseRuntime(&engine.Client{Podman: true}, "coder", "runsc")
-	if err == nil || !strings.Contains(err.Error(), "coder") || !strings.Contains(err.Error(), "runsc") || !strings.Contains(err.Error(), "Podman") {
-		t.Errorf("err = %v", err)
-	}
-	if err := refuseRuntime(&engine.Client{Podman: true}, "coder", ""); err != nil {
-		t.Errorf("an agent without a runtime was refused: %v", err)
-	}
-	if err := refuseRuntime(&engine.Client{}, "coder", "runsc"); err != nil {
-		t.Errorf("Docker applies the runtime itself: %v", err)
+	if !slices.Equal(kept, []string{"proj_ws.repo.base", "proj_ws.data", "proj_ws.repo.wt.gone"}) {
+		t.Errorf("down keeps %v: the bases, the directories, and a worktree no instance owns", kept)
 	}
 }
 
-func credProject(service string, def config.ResolvedService) *config.Resolved {
-	copied := def
-	return &config.Resolved{
-		Agents: map[string]config.ResolvedAgent{"coder": {Egress: "default"}},
-		Egress: map[string]*config.ResolvedProfile{"default": {Services: map[string]*config.ResolvedService{service: &copied}}},
+func TestPathsInsideAWorkspaceNeverLeaveIt(t *testing.T) {
+	for in, want := range map[string]string{"a.txt": "a.txt", "./a/../b": "b", "a/b/": "a/b", ".": "", "": ""} {
+		if got, err := InsidePath(in); err != nil || got != want {
+			t.Errorf("%q = %q, %v; want %q", in, got, err, want)
+		}
 	}
-}
-
-var (
-	apiKeyService = config.ResolvedService{Hosts: []string{"api.anthropic.com"}, Secret: "main/K", Inject: &config.Inject{Header: "x-api-key"}}
-	bearerService = config.ResolvedService{Hosts: []string{"api.anthropic.com"}, Secret: "main/K", Inject: &config.Inject{Header: "Authorization", Value: "Bearer {secret}"}}
-)
-
-func TestAnOAuthTokenSentAsAnAPIKeyIsRefusedWithoutShowingIt(t *testing.T) {
-	problems := checkCredentialKinds(credProject("anthropic", apiKeyService), map[string]string{"main/K": "sk-ant-oat01-secretsecret"})
-	if len(problems) != 1 || !strings.Contains(problems[0], "anthropic-oauth") || !strings.Contains(problems[0], "main/K") || strings.Contains(problems[0], "secretsecret") {
-		t.Errorf("problems = %v", problems)
-	}
-}
-
-func TestAnAPIKeySentAsABearerTokenIsRefused(t *testing.T) {
-	problems := checkCredentialKinds(credProject("anthropic-oauth", bearerService), map[string]string{"main/K": "sk-ant-api03-secretsecret"})
-	if len(problems) != 1 || !strings.Contains(problems[0], "API key") || strings.Contains(problems[0], "secretsecret") {
-		t.Errorf("problems = %v", problems)
-	}
-}
-
-func TestMatchingCredentialsAndOtherHostsAreLeftAlone(t *testing.T) {
-	if p := checkCredentialKinds(credProject("anthropic", apiKeyService), map[string]string{"main/K": "sk-ant-api03-x"}); len(p) != 0 {
-		t.Errorf("a key as a key: %v", p)
-	}
-	if p := checkCredentialKinds(credProject("anthropic-oauth", bearerService), map[string]string{"main/K": "sk-ant-oat01-x"}); len(p) != 0 {
-		t.Errorf("a token as a token: %v", p)
-	}
-	other := config.ResolvedService{Hosts: []string{"api.deploy.test"}, Secret: "main/K", Inject: &config.Inject{Header: "x-api-key"}}
-	if p := checkCredentialKinds(credProject("deploy", other), map[string]string{"main/K": "sk-ant-oat01-x"}); len(p) != 0 {
-		t.Errorf("another host: %v", p)
-	}
-}
-
-func TestBearerProviderSaysWhetherTheAnthropicCredentialIsABearerToken(t *testing.T) {
-	if !bearerProvider(credProject("anthropic-oauth", bearerService), config.ResolvedAgent{Egress: "default"}) {
-		t.Error("a bearer service on api.anthropic.com was not noticed")
-	}
-	if bearerProvider(credProject("anthropic", apiKeyService), config.ResolvedAgent{Egress: "default"}) {
-		t.Error("an API key service counted as bearer")
-	}
-	if bearerProvider(credProject("anthropic", apiKeyService), config.ResolvedAgent{Egress: "missing"}) {
-		t.Error("an unknown profile counted as bearer")
+	for _, bad := range []string{"..", "../x", "/etc/passwd", "a/../../x"} {
+		if _, err := InsidePath(bad); err == nil || !strings.Contains(err.Error(), "outside the workspace") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
 	}
 }

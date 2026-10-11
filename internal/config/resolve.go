@@ -109,6 +109,9 @@ func checkResources(agent string, r Resources, p *problems) {
 	}
 }
 
+// MaxPromptBytes is the largest prompt file: the text goes into the published template and an environment variable.
+const MaxPromptBytes = 64 * 1024
+
 // Resolve validates the file and returns the resolved project plus non-fatal warnings. dir is the
 // project directory, name the already resolved project name.
 func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
@@ -123,7 +126,7 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	resolved := &Resolved{
 		Name:       name,
 		Vaults:     map[string][]string{},
-		Workspaces: resolveWorkspaces(file, dir, p),
+		Workspaces: resolveWorkspaces(file, p),
 		Agents:     map[string]ResolvedAgent{},
 		Egress:     resolveEgress(file, p),
 	}
@@ -188,6 +191,8 @@ func resolveAgent(
 		}
 		if info, err := os.Stat(path); err != nil || info.IsDir() {
 			p.addf("agent %q: prompt %q is not an existing file (%s)", name, agent.Prompt, path)
+		} else if info.Size() > MaxPromptBytes {
+			p.addf("agent %q: prompt %q is %d bytes, over the limit of 64 KB: the prompt travels in the published template", name, agent.Prompt, info.Size())
 		}
 	}
 
@@ -230,13 +235,6 @@ func resolveAgent(
 		}
 	}
 	mounts, workdir := resolveMounts(name, agent, resolved.Workspaces, refs, p)
-	for _, mount := range mounts {
-		if mount.HostPath != "" {
-			if reason := socketWarning(mount.HostPath); reason != "" {
-				warnings = append(warnings, fmt.Sprintf("warning: agent %q mounts %s", name, reason))
-			}
-		}
-	}
 	checkResources(name, agent.Resources, p)
 
 	permissions := agent.Permissions

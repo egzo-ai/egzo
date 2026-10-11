@@ -48,9 +48,10 @@ func TestParseRejects(t *testing.T) {
 		{"malformed yaml", "agents: [\n", "egzo.yaml"},
 		{"numeric service", "egress:\n  default:\n    services:\n      anthropic: 42\n", "secret reference"},
 		{"list service", "egress:\n  default:\n    services:\n      anthropic: [a]\n", "secret reference"},
-		{"unknown workspace key", "workspaces:\n  w: { mode: shared }\n", `workspaces.w: unknown key "mode" (valid keys: git, path)`},
+		{"unknown workspace key", "workspaces:\n  w: { mode: shared }\n", `workspaces.w: unknown key "mode" (valid keys: git)`},
 		{"typo", "agents:\n  a:\n    harness: custom\n    imge: x\n", `agents.a: unknown key "imge", did you mean "image"?`},
-		{"position", "name: x\nworkspaces:\n  w:\n    pth: x\n", `egzo.yaml:4:5: workspaces.w: unknown key "pth", did you mean "path"?`},
+		{"position", "name: x\nworkspaces:\n  w:\n    gti: x\n", `egzo.yaml:4:5: workspaces.w: unknown key "gti", did you mean "git"?`},
+		{"a removed key says what to do", "workspaces:\n  w:\n    path: x\n", "egzo workspace put w SRC"},
 		{"wrong type", "agents:\n  a:\n    harness: custom\n    workspaces: x\n", "egzo.yaml:4"},
 		{"unknown service key", "egress:\n  default:\n    services:\n      x: { hosts: [a.com], bogus: 1 }\n", "unknown key"},
 	}

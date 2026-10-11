@@ -24,6 +24,14 @@ const (
 	LabelActor        = LabelPrefix + "actor"
 	LabelTemplateHash = LabelPrefix + "template-hash"
 
+	// Labels of a workspace volume (LabelKind is "workspace"): the workspace's name, on the volumes of its base clone
+	// and its worktrees too. A worktree volume also carries the instance labels above.
+	LabelWorkspace = LabelPrefix + "workspace"
+
+	// Labels of the lease that is a project's lock (LabelKind is "lock"): who holds it, and until when (Unix seconds).
+	LabelLockHolder  = LabelPrefix + "lock-holder"
+	LabelLockExpires = LabelPrefix + "lock-expires"
+
 	// Semantic labels that let a tool show an agent card without parsing a spec.
 	LabelAgentHarness    = LabelPrefix + "agent.harness"
 	LabelAgentWorkspaces = LabelPrefix + "agent.workspaces"
@@ -44,6 +52,8 @@ type Identity struct {
 	Instance     string
 	Actor        string
 	TemplateHash string
+	// Workspace names the workspace a volume belongs to.
+	Workspace string
 	// Extra holds additional ai.egzo.* labels, such as the agent's harness.
 	Extra map[string]string
 }
@@ -63,6 +73,9 @@ func (i Identity) Labels() map[string]string {
 		labels[LabelInstance] = i.Instance
 		labels[LabelActor] = i.Actor
 		labels[LabelTemplateHash] = i.TemplateHash
+	}
+	if i.Workspace != "" {
+		labels[LabelWorkspace] = i.Workspace
 	}
 	for key, value := range i.Extra {
 		labels[key] = value

@@ -4,6 +4,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,18 +123,19 @@ func TestWorkdirCannotClimbOut(t *testing.T) {
 	}
 }
 
-func TestHostMountsOfTheFilesystemAndTheEngineSocket(t *testing.T) {
-	wantProblems(t, t.TempDir(), "workspaces:\n  root: { path: / }\nagents:\n  a: { harness: custom, image: x, workspaces: [root] }\n", "filesystem root")
-	_, warnings := mustResolve(t, t.TempDir(), "workspaces:\n  run: { path: /var/run }\nagents:\n  a: { harness: custom, image: x, workspaces: [run] }\n")
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "docker.sock") {
-		t.Errorf("warnings = %q", warnings)
+func TestAWorkspaceHasNoPathAndTheErrorSaysWhatToDo(t *testing.T) {
+	_, err := Parse([]byte("workspaces:\n  docs:\n    path: ./docs\n"))
+	if err == nil || !strings.Contains(err.Error(), `workspaces.docs: unknown key "path"`) || !strings.Contains(err.Error(), "egzo workspace put docs") {
+		t.Errorf("err = %v", err)
 	}
-	if socketWarning("/home/me") != "" || socketWarning("/var/runner") != "" {
-		t.Error("an unrelated directory was flagged")
-	}
-	if socketWarning("/run") == "" || socketWarning("/var") == "" || socketWarning("/var/run/docker.sock") == "" {
-		t.Error("a directory above or at the socket was not flagged")
-	}
+}
+
+func TestAPromptOver64KBIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "big.md"), make([]byte, MaxPromptBytes+1), 0o644)
+	wantProblems(t, dir, "agents:\n  a: { harness: custom, image: x, prompt: ./big.md }\n", "64 KB")
+	os.WriteFile(filepath.Join(dir, "big.md"), make([]byte, MaxPromptBytes), 0o644)
+	mustResolve(t, dir, "agents:\n  a: { harness: custom, image: x, prompt: ./big.md }\n")
 }
 
 func TestHostsAreNormalised(t *testing.T) {

@@ -15,13 +15,13 @@ import (
 func desireProject() *config.Resolved {
 	return &config.Resolved{
 		Name:       "proj",
-		Workspaces: map[string]config.ResolvedWorkspace{"shared": {Path: "/proj/workspaces/shared"}},
+		Workspaces: map[string]config.ResolvedWorkspace{"shared": {}, "src": {}},
 		Agents: map[string]config.ResolvedAgent{
 			"coder": {
 				Harness:    "claude-code",
 				Workdir:    "/workspace/shared",
 				Egress:     "default",
-				Workspaces: []config.Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw", HostPath: "/proj/workspaces/shared"}},
+				Workspaces: []config.Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw"}},
 				Env:        map[string]string{"LOG": "debug"},
 			},
 			"review": {
@@ -29,7 +29,7 @@ func desireProject() *config.Resolved {
 				Image:      "example/review:1",
 				Workdir:    "/workspace",
 				Egress:     "default",
-				Workspaces: []config.Mount{{Name: "src", Mount: "/workspace/src", Mode: "ro", HostPath: "/host/src"}},
+				Workspaces: []config.Mount{{Name: "src", Mount: "/workspace/src", Mode: "ro"}},
 			},
 		},
 	}
@@ -58,8 +58,12 @@ func desireErr(project *config.Resolved, dir string, inputs Inputs) (Desired, er
 }
 
 func desire(t *testing.T, project *config.Resolved) Desired {
+	return desireWith(t, project, desireInputs)
+}
+
+func desireWith(t *testing.T, project *config.Resolved, inputs Inputs) Desired {
 	t.Helper()
-	desired, err := desireErr(project, "/dir", desireInputs)
+	desired, err := desireErr(project, "/dir", inputs)
 	if err != nil {
 		t.Fatalf("Desire: %v", err)
 	}
@@ -203,14 +207,24 @@ func TestDesireAgentContainer(t *testing.T) {
 	wantMounts := []MountSpec{
 		{Source: "proj_coder-home", Target: "/home/agent"},
 		{Source: "proj_ca", Target: "/etc/egzo/ca", ReadOnly: true},
-		{Bind: true, Source: "/proj/workspaces/shared", Target: "/workspace/shared"},
+		{Source: "proj_ws.shared", Target: "/workspace/shared"},
 	}
 	if !slices.Equal(coder.Mounts, wantMounts) {
 		t.Errorf("mounts = %+v, want %+v", coder.Mounts, wantMounts)
 	}
 	review := findContainer(t, d, "proj-review")
-	if want := (MountSpec{Bind: true, Source: "/host/src", Target: "/workspace/src", ReadOnly: true}); !slices.Contains(review.Mounts, want) {
+	if want := (MountSpec{Source: "proj_ws.src", Target: "/workspace/src", ReadOnly: true}); !slices.Contains(review.Mounts, want) {
 		t.Errorf("review mounts = %+v, want %+v", review.Mounts, want)
+	}
+	for _, spec := range []ContainerSpec{coder, review} {
+		for _, m := range spec.Mounts {
+			if m.Bind {
+				t.Errorf("%s binds %s from the host: workspaces are volumes", spec.Name, m.Source)
+			}
+		}
+	}
+	if !slices.Contains(coder.OwnedVolumes, "proj_ws.shared") {
+		t.Errorf("owned volumes = %v: a workspace the agent writes must be handed to the agent user", coder.OwnedVolumes)
 	}
 }
 
@@ -390,11 +404,11 @@ func TestAgentsRunAsTheGivenUserAndTheirHomeIsHandedToIt(t *testing.T) {
 	if findContainer(t, d, "proj-control-1").User != sidecarUser || findContainer(t, d, "proj-proxy-1").User != sidecarUser {
 		t.Error("the sidecars must keep their own user")
 	}
-	if got := findContainer(t, d, "proj-coder").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home"}) {
+	if got := findContainer(t, d, "proj-coder").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home", "proj_ws.shared"}) {
 		t.Errorf("volumes handed to the agent = %v", got)
 	}
-	if got := findContainer(t, d, "proj-review").OwnedVolumes; len(got) != 0 {
-		t.Errorf("a host-bound or custom agent was given volumes: %v", got)
+	if got := findContainer(t, d, "proj-review").OwnedVolumes; !slices.Equal(got, []string{"proj_ws.src"}) {
+		t.Errorf("a custom agent has no home, only the workspaces it mounts: %v", got)
 	}
 	if d.PrepImage != in.Image {
 		t.Errorf("prep image = %q", d.PrepImage)
@@ -432,15 +446,39 @@ func TestHarnessAgentsCarryTheirIntegrationInTheirDefinition(t *testing.T) {
 	}
 }
 
-func TestAnAgentPromptIsMountedReadOnlyFromTheProjectDirectory(t *testing.T) {
+func TestAnAgentPromptIsInTheEnvironmentAndNothingIsMounted(t *testing.T) {
 	project := desireProject()
+	inputs := desireInputs
+	inputs.Prompts = map[string]string{"coder": "be brief\n"}
+	spec := findContainer(t, desireWith(t, project, inputs), "proj-coder")
+	if !slices.Contains(spec.Env, "EGZO_PROMPT=be brief\n") {
+		t.Errorf("env = %v", spec.Env)
+	}
+	for _, m := range spec.Mounts {
+		if m.Bind {
+			t.Errorf("a host path is mounted: %+v", m)
+		}
+	}
+}
+
+func TestAGitWorkspaceIsMountedAsTwoSiblingVolumes(t *testing.T) {
+	project := desireProject()
+	project.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://github.com/acme/shop.git"}}
 	coder := project.Agents["coder"]
-	coder.Prompt = "./prompts/coder.md"
+	coder.Workspaces = []config.Mount{{Name: "repo", Mount: "/workspace/repo", Mode: "rw"}}
+	coder.Workdir = "/workspace/repo"
 	project.Agents["coder"] = coder
 	spec := findContainer(t, desire(t, project), "proj-coder")
-	want := MountSpec{Bind: true, Source: "/dir/prompts/coder.md", Target: "/etc/egzo/prompt.md", ReadOnly: true}
-	if !slices.Contains(spec.Mounts, want) || !slices.Contains(spec.Env, "EGZO_PROMPT_FILE=/etc/egzo/prompt.md") {
-		t.Errorf("mounts = %+v env = %v", spec.Mounts, spec.Env)
+	for _, want := range []MountSpec{
+		{Source: "proj_ws.repo.wt.coder", Target: "/workspace/repo/coder"},
+		{Source: "proj_ws.repo.base", Target: "/workspace/repo/.base"},
+	} {
+		if !slices.Contains(spec.Mounts, want) {
+			t.Errorf("mounts = %+v, want %+v", spec.Mounts, want)
+		}
+	}
+	if spec.WorkingDir != "/workspace/repo/coder" {
+		t.Errorf("working dir = %q", spec.WorkingDir)
 	}
 }
 

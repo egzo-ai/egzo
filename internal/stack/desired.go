@@ -35,7 +35,6 @@ const (
 	caPrivateDir   = "/ca-private"
 	caPublicDir    = "/ca-pub"
 	caAgentDir     = "/etc/egzo/ca"
-	promptPath     = "/etc/egzo/prompt.md"
 	proxyPort      = "3128"
 
 	kindControl = "control"
@@ -86,9 +85,6 @@ type ContainerSpec struct {
 	MemorySwap int64
 	// BoundedLogs caps the engine's log of the container, which otherwise grows without limit.
 	BoundedLogs bool
-	// PromptDigest is the content hash of the agent's prompt file: the file is mounted, so only this
-	// makes a changed prompt a changed agent.
-	PromptDigest string
 	// Agents run under an init process that reaps children and forwards signals.
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
@@ -127,8 +123,8 @@ type Inputs struct {
 	User string
 	// HarnessPrefix is the start of a harness image's name, ending in "egzo-harness-".
 	HarnessPrefix string
-	// PromptDigests maps each agent that has a prompt file to the hash of its content (see PromptDigests).
-	PromptDigests map[string]string
+	// Prompts maps each agent that has a prompt file to its text (see ReadPrompts).
+	Prompts map[string]string
 	// Instances are the names of the instances that exist: the sidecars are attached to their networks.
 	Instances []string
 	// Placeholders maps each instance to the variables it gets and their placeholder texts (not secrets).
@@ -149,10 +145,11 @@ const (
 	sidecarTmpfsState = "rw,nosuid,size=1m,uid=65532,gid=65532"
 )
 
-// PromptDigests hashes the prompt file of every agent that has one, so that editing a prompt changes the
-// agent's definition. A prompt that cannot be read is an error.
-func PromptDigests(project *config.Resolved, dir string) (map[string]string, error) {
-	digests := map[string]string{}
+// ReadPrompts reads the prompt file of every agent that has one. The text travels in the published template and
+// reaches the agent in EGZO_PROMPT, so nothing of the host is mounted and a spawn needs no file. A prompt that cannot
+// be read is an error.
+func ReadPrompts(project *config.Resolved, dir string) (map[string]string, error) {
+	prompts := map[string]string{}
 	for name, agent := range project.Agents {
 		if agent.Prompt == "" {
 			continue
@@ -165,10 +162,12 @@ func PromptDigests(project *config.Resolved, dir string) (map[string]string, err
 		if err != nil {
 			return nil, fmt.Errorf("agent %q: cannot read its prompt: %w", name, err)
 		}
-		sum := sha256.Sum256(data)
-		digests[name] = hex.EncodeToString(sum[:])
+		if len(data) > config.MaxPromptBytes {
+			return nil, fmt.Errorf("agent %q: its prompt is %d bytes, over the limit of 64 KB", name, len(data))
+		}
+		prompts[name] = string(data)
 	}
-	return digests, nil
+	return prompts, nil
 }
 
 // DefaultHarnessPrefix is where harness images are published.
@@ -343,9 +342,8 @@ func agentContainer(
 		Init:       true,
 		Identity:   identity,
 
-		PidsLimit:    defaultAgentPids,
-		BoundedLogs:  true,
-		PromptDigest: in.PromptDigests[name],
+		PidsLimit:   defaultAgentPids,
+		BoundedLogs: true,
 	}
 
 	// Agents reach the world only through the proxy and trust only the project CA on top of the
@@ -375,13 +373,8 @@ func agentContainer(
 	for key, value := range in.Placeholders[name] {
 		env[key] = value
 	}
-	if agent.Prompt != "" {
-		prompt := agent.Prompt
-		if !filepath.IsAbs(prompt) {
-			prompt = filepath.Join(dir, prompt)
-		}
-		spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: filepath.Clean(prompt), Target: promptPath, ReadOnly: true})
-		env["EGZO_PROMPT_FILE"] = promptPath
+	if prompt := in.Prompts[name]; prompt != "" {
+		env["EGZO_PROMPT"] = prompt
 	}
 	if hasHome(agent) {
 		spec.Mounts = append(spec.Mounts, MountSpec{Source: homeVolume(project.Name, name), Target: homeDir})
@@ -400,13 +393,17 @@ func agentContainer(
 
 	var workspaceNames []string
 	for _, mount := range agent.Workspaces {
-		switch declared, ok := project.Workspaces[mount.Name]; {
-		case mount.HostPath != "":
-			spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: mount.HostPath, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
-		case !ok:
+		declared, ok := project.Workspaces[mount.Name]
+		if !ok {
 			return spec, fmt.Errorf("agent %q: workspace %q is not declared", name, mount.Name)
-		case declared.Git != nil:
-			spec.Mounts = append(spec.Mounts, worktreeMounts(mount.Name, declared, name)...)
+		}
+		if declared.Git != nil {
+			spec.Mounts = append(spec.Mounts, worktreeMounts(project.Name, mount.Name, name)...)
+			spec.OwnedVolumes = append(spec.OwnedVolumes, WorktreeVolume(project.Name, mount.Name, name))
+		} else {
+			volume := WorkspaceVolume(project.Name, mount.Name)
+			spec.Mounts = append(spec.Mounts, MountSpec{Source: volume, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
+			spec.OwnedVolumes = append(spec.OwnedVolumes, volume)
 		}
 		workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))
 	}

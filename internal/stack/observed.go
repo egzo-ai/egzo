@@ -6,6 +6,7 @@ package stack
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,8 @@ type Resource struct {
 	Kind       string
 	ConfigHash string
 	ProjectDir string
+	// Workspace is the workspace a volume belongs to.
+	Workspace string
 	// Instance, Actor and TemplateHash come from the labels of what belongs to an instance.
 	Instance     string
 	Actor        string
@@ -66,6 +69,7 @@ func resourceFrom(kind, id, name string, labels map[string]string) Resource {
 		ConfigHash: labels[engine.LabelConfigHash],
 		ProjectDir: labels[engine.LabelProjectDir],
 
+		Workspace:    labels[engine.LabelWorkspace],
 		Instance:     labels[engine.LabelInstance],
 		Actor:        labels[engine.LabelActor],
 		TemplateHash: labels[engine.LabelTemplateHash],
@@ -81,6 +85,8 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 	if err != nil {
 		return observed, fmt.Errorf("list containers: %w", err)
 	}
+	// The lease that is the project's lock is the engine's business, not the project's: it never shows.
+	containers = slices.DeleteFunc(containers, func(item container.Summary) bool { return item.Labels[engine.LabelKind] == kindLock })
 	// One inspect per container, a few at a time: each is a round trip to the engine.
 	found := make([]Resource, len(containers))
 	slots := make(chan struct{}, 8)
@@ -143,9 +149,13 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 func CheckOwnership(observed Observed, project, dir string) error {
 	for _, r := range observed.Resources {
 		if r.ProjectDir != "" && r.ProjectDir != dir {
+			hint := "run `egzo project down` from that directory"
+			if keptByDown(r, nil) {
+				hint = "run `egzo project down` and `egzo workspace rm --all` from that directory, which removes the workspace volumes `down` keeps"
+			}
 			return fmt.Errorf("project %q already exists from another directory (%s); "+
-				"rename this project (-p, EGZO_PROJECT_NAME or name:) or run `egzo project down` from that directory",
-				project, r.ProjectDir)
+				"rename this project (-p, EGZO_PROJECT_NAME or name:) or %s",
+				project, r.ProjectDir, hint)
 		}
 	}
 	return nil

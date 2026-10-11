@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -58,7 +57,6 @@ func newSystemCommand() *cobra.Command {
 				checkEngine(ctx, c, report)
 				checkImageGit(ctx, c, report)
 			}
-			checkHostGit(report)
 			if failed {
 				return ExitError{Code: 1}
 			}
@@ -83,20 +81,6 @@ func gitAtLeast(output string) (version string, ok bool) {
 	minor, _ := strconv.Atoi(match[2])
 	version = match[1] + "." + match[2]
 	return version, major > minimumGit[0] || (major == minimumGit[0] && minor >= minimumGit[1])
-}
-
-func checkHostGit(report func(level, format string, a ...any)) {
-	output, err := exec.Command("git", "--version").Output()
-	if err != nil {
-		report("warn", "git on the host: not found; workspaces work, but git does not in the worktrees you open in an editor")
-		return
-	}
-	if version, ok := gitAtLeast(string(output)); ok {
-		report("ok", "git on the host: %s, so the worktrees of git workspaces work in your editor too", version)
-	} else {
-		report("warn", "git on the host: %s is older than %d.%d, which refuses repositories with relative worktree links: git status will fail in worktrees on the host (agents are not affected)",
-			strings.TrimSpace(strings.TrimPrefix(string(output), "git version ")), minimumGit[0], minimumGit[1])
-	}
 }
 
 // checkImageGit asks the egzo image, which runs every git job, for its git. It does not pull the image.

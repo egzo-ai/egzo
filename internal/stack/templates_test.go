@@ -25,7 +25,7 @@ func templateProject(t *testing.T) (*config.Resolved, string) {
 	}
 	project := desireProject()
 	project.Egress = map[string]*config.ResolvedProfile{"default": {Allow: []string{"pypi.org"}}}
-	project.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://github.com/acme/shop.git"}, Path: filepath.Join(dir, "workspaces", "repo")}
+	project.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://github.com/acme/shop.git"}}
 	coder := project.Agents["coder"]
 	coder.Prompt = "p.md"
 	coder.Workspaces = append(coder.Workspaces, config.Mount{Name: "repo", Mount: "/workspace/repo", Mode: "rw"})
@@ -49,14 +49,14 @@ func TestPublishResolvesEveryTemplateWithWhatAnInstanceNeeds(t *testing.T) {
 		t.Fatalf("templates = %v", published.Names())
 	}
 	coder := published.Templates["coder"]
-	if coder.PromptPath != filepath.Join(dir, "p.md") || coder.PromptDigest == "" {
-		t.Errorf("the prompt is not resolved: %+v", coder)
+	if coder.PromptText != "be brief" || coder.Agent.Prompt != "" {
+		t.Errorf("the prompt travels as text, and its path means nothing to a spawn: %+v", coder)
 	}
 	if !strings.HasPrefix(coder.Image, "ghcr.io/egzo-ai/egzo-harness-claude-code:") || published.Templates["review"].Image != "example/review:1" {
 		t.Errorf("images = %q, %q", coder.Image, published.Templates["review"].Image)
 	}
-	if _, ok := coder.Workspaces["repo"]; !ok || len(coder.Workspaces) != 1 || len(published.Templates["review"].Workspaces) != 0 {
-		t.Errorf("a template carries the git workspaces it lists, and no directory workspace (that is a host path in its mounts): %+v / %+v", coder.Workspaces, published.Templates["review"].Workspaces)
+	if _, ok := coder.Workspaces["repo"]; !ok || len(coder.Workspaces) != 2 || len(published.Templates["review"].Workspaces) != 1 {
+		t.Errorf("a template carries the workspaces it lists: %+v / %+v", coder.Workspaces, published.Templates["review"].Workspaces)
 	}
 	if coder.Profile == nil || published.User != "1000:1000" || published.Image != "egzo:test" || published.Dir != dir {
 		t.Errorf("published = %+v", published)
@@ -89,7 +89,7 @@ func TestATemplatesHashFollowsWhatMakesTheInstanceAndNothingElse(t *testing.T) {
 		"model":   func(p *config.Resolved) { a := p.Agents["coder"]; a.Model = "m"; p.Agents["coder"] = a },
 		"profile": func(p *config.Resolved) { p.Egress["default"].Allow = append(p.Egress["default"].Allow, "x.example") },
 		"workspace": func(p *config.Resolved) {
-			p.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}, Path: "/p"}
+			p.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}}
 		},
 	} {
 		other, otherDir := templateProject(t)
@@ -149,8 +149,8 @@ func TestAViewRunsTheInstanceUnderItsOwnNameFromItsTemplate(t *testing.T) {
 		t.Fatalf("agents = %v", sortedKeys(view.Agents))
 	}
 	agent := view.Agents["issue-1"]
-	if agent.Prompt != filepath.Join(dir, "p.md") || agent.Image != published.Templates["coder"].Image {
-		t.Errorf("prompt and image are not the resolved ones: %+v", agent)
+	if agent.Prompt != "" || agent.Image != published.Templates["coder"].Image {
+		t.Errorf("the image is not the resolved one, or a prompt path is left: %+v", agent)
 	}
 	if view.Name != "proj" || view.Egress["default"] == nil || view.Workspaces["shared"].Git != nil {
 		t.Errorf("view = %+v", view)
@@ -177,8 +177,13 @@ func TestAnInstanceIsDesiredFromItsTemplateAndCarriesItsOrigin(t *testing.T) {
 			t.Errorf("env lacks %s: %v", want, spec.Env)
 		}
 	}
-	if want := (MountSpec{Bind: true, Source: filepath.Join(dir, "p.md"), Target: "/etc/egzo/prompt.md", ReadOnly: true}); !slices.Contains(spec.Mounts, want) {
-		t.Errorf("mounts = %+v", spec.Mounts)
+	if !slices.Contains(spec.Env, "EGZO_PROMPT=be brief") {
+		t.Errorf("the prompt is not in the environment: %v", spec.Env)
+	}
+	for _, m := range spec.Mounts {
+		if m.Bind {
+			t.Errorf("a host path is mounted: %+v", m)
+		}
 	}
 	if want := (MountSpec{Source: "proj_issue-1-home", Target: "/home/agent"}); !slices.Contains(spec.Mounts, want) {
 		t.Errorf("the home volume is the instance's: %+v", spec.Mounts)
@@ -266,15 +271,18 @@ func TestInstancesAreListedFromTheLabelsAndStaleWhenTheirTemplateMoved(t *testin
 	}
 }
 
-func TestFreeNameTakesTheFirstFreeNumber(t *testing.T) {
+func TestFreeNameTakesTheFirstNumberNoInstanceOrWorktreeVolumeHas(t *testing.T) {
 	inst := func(name string) Resource {
 		return Resource{Type: "container", Name: "proj-" + name, Kind: kindAgent, Service: "coder", Instance: name}
 	}
-	if got := freeName(Observed{}, "coder", nil); got != "coder-1" {
-		t.Errorf("first = %q", got)
+	// with no git workspace the engine is never asked, so no client is needed
+	if got, err := freeName(context.Background(), nil, PrepEnv{}, Observed{}, "proj", "/p", "coder", nil); err != nil || got != "coder-1" {
+		t.Errorf("first = %q, %v", got, err)
 	}
-	if got := freeName(Observed{Resources: []Resource{inst("coder-1"), inst("coder-3"), inst("other-2")}}, "coder", nil); got != "coder-2" {
-		t.Errorf("with a gap = %q", got)
+	observed := Observed{Resources: []Resource{inst("coder-1"), inst("coder-3"), inst("other-2"),
+		{Type: "volume", Name: "proj_ws.repo.wt.coder-2", Kind: kindWorkspace, Workspace: "repo", Instance: "coder-2"}}}
+	if got, err := freeName(context.Background(), nil, PrepEnv{}, observed, "proj", "/p", "coder", nil); err != nil || got != "coder-4" {
+		t.Errorf("the gap at 2 holds a worktree volume, so it is not free: %q, %v", got, err)
 	}
 }
 
@@ -325,7 +333,7 @@ func TestRemovingChecksEveryNameBeforeTouchingAnything(t *testing.T) {
 	}}
 	// a nil client: anything that reaches the engine panics, so these must fail first
 	for name, names := range map[string][]string{"an unknown name": {"a", "ghost"}, "a running instance": {"a", "b"}} {
-		removed, err := RemoveInstances(context.Background(), nil, observed, "proj", names, false, io.Discard)
+		removed, err := RemoveInstances(context.Background(), nil, observed, PrepEnv{}, "proj", "/p", names, false, io.Discard)
 		if err == nil || len(removed) != 0 {
 			t.Errorf("%s: removed %v, err %v", name, removed, err)
 		}

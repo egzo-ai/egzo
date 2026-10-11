@@ -29,7 +29,7 @@ In short:
 ```
 
 - `egzo project up` starts the **proxy** and the **control** sidecar and publishes the templates. It starts no agent.
-- `egzo agent spawn <template>` makes an **instance**: a container, its own network, home volume and git worktrees.
+- `egzo agent spawn <template>` makes an **instance**: a container, its own network, home volume and git worktrees (all in engine volumes).
 - An agent can reach only the proxy and the control sidecar, never another agent and never your network.
 - Messages and status flow through harness hooks and a small MCP tool set (`egzo` tools such as `resolve`, `ask`),
   not through screen scraping.

@@ -194,9 +194,9 @@ func TestChangingThePromptChangesTheAgentsHash(t *testing.T) {
 	coder := project.Agents["coder"]
 	coder.Prompt = "./prompts/coder.md"
 	project.Agents["coder"] = coder
-	hashOf := func(digest string) string {
+	hashOf := func(text string) string {
 		in := desireInputs
-		in.PromptDigests = map[string]string{"coder": digest}
+		in.Prompts = map[string]string{"coder": text}
 		d, err := desireErr(project, "/dir", in)
 		if err != nil {
 			t.Fatal(err)
@@ -212,24 +212,23 @@ func TestChangingThePromptChangesTheAgentsHash(t *testing.T) {
 	}
 }
 
-func TestPromptDigestsReadTheFilesAndFailForAMissingOne(t *testing.T) {
+func TestReadPromptsReadTheFilesAndFailForAMissingOrOversizedOne(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "p.md"), []byte("be brief"), 0o644)
 	project := desireProject()
 	coder := project.Agents["coder"]
 	coder.Prompt = "p.md"
 	project.Agents["coder"] = coder
-	digests, err := PromptDigests(project, dir)
-	if err != nil || len(digests["coder"]) != 64 || digests["review"] != "" {
-		t.Fatalf("digests = %v, err = %v", digests, err)
+	prompts, err := ReadPrompts(project, dir)
+	if err != nil || prompts["coder"] != "be brief" || prompts["review"] != "" {
+		t.Fatalf("prompts = %v, err = %v", prompts, err)
 	}
-	os.WriteFile(filepath.Join(dir, "p.md"), []byte("be verbose"), 0o644)
-	again, _ := PromptDigests(project, dir)
-	if again["coder"] == digests["coder"] {
-		t.Error("the digest ignores the content")
+	os.WriteFile(filepath.Join(dir, "p.md"), make([]byte, config.MaxPromptBytes+1), 0o644)
+	if _, err := ReadPrompts(project, dir); err == nil || !strings.Contains(err.Error(), "64 KB") {
+		t.Errorf("an oversized prompt: %v", err)
 	}
 	os.Remove(filepath.Join(dir, "p.md"))
-	if _, err := PromptDigests(project, dir); err == nil {
+	if _, err := ReadPrompts(project, dir); err == nil {
 		t.Error("a missing prompt file was not reported")
 	}
 }
@@ -290,48 +289,4 @@ func TestPsShowsAnAgentsStatusAsOneHarmlessLine(t *testing.T) {
 	if lines := strings.Split(strings.TrimSpace(out.String()), "\n"); len(lines) != 3 {
 		t.Errorf("a status line forged rows: %q", out.String())
 	}
-}
-
-func TestLockWaitWaitsForTheHolderAndGivesUpAfterTheTimeout(t *testing.T) {
-	dir := t.TempDir()
-	release, err := Lock(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := time.Now()
-	if _, err := LockWait(dir, 300*time.Millisecond); err == nil || time.Since(started) < 250*time.Millisecond {
-		t.Fatalf("a held lock was not waited for: err = %v after %s", err, time.Since(started))
-	}
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		release()
-	}()
-	got, err := LockWait(dir, 5*time.Second)
-	if err != nil {
-		t.Fatalf("the lock was not taken once released: %v", err)
-	}
-	got()
-}
-
-func TestOnlyOneCommandChangesAProjectAtATime(t *testing.T) {
-	dir := t.TempDir()
-	release, err := Lock(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Lock(dir); err == nil || !strings.Contains(err.Error(), "another egzo command") {
-		t.Fatalf("a second lock on the same project: %v", err)
-	}
-	other := t.TempDir()
-	if releaseOther, err := Lock(other); err != nil {
-		t.Errorf("another project was blocked: %v", err)
-	} else {
-		releaseOther()
-	}
-	release()
-	again, err := Lock(dir)
-	if err != nil {
-		t.Fatalf("the lock was not released: %v", err)
-	}
-	again()
 }

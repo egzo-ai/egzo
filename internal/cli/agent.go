@@ -122,13 +122,7 @@ func runAgent(args []string) error {
 		if agent, token := os.Getenv("EGZO_AGENT"), os.Getenv("EGZO_TOKEN"); agent != "" && token != "" {
 			options.Authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(agent+":"+token))
 		}
-		if path := os.Getenv("EGZO_PROMPT_FILE"); path != "" {
-			prompt, err := os.ReadFile(path)
-			if err != nil {
-				return fmt.Errorf("read the agent's prompt: %w", err)
-			}
-			options.Prompt = string(prompt)
-		}
+		options.Prompt = os.Getenv("EGZO_PROMPT")
 		plan, err := integration.Plan(options, args)
 		if err != nil {
 			return err

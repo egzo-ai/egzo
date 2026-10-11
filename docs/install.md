@@ -66,8 +66,7 @@ $ egzo system check
 ```
 
 It tells you whether the engine answers, whether it is rootless, whether gVisor is registered, whether the engine
-creates internal networks (the sandbox depends on it), and problems in the project in this directory (such as `.egzo/`
-not being git-ignored). Each line is ok, warn or fail, and the exit code is non-zero if any check fails.
+creates internal networks (the sandbox depends on it), and whether the egzo image can run git. Each line is ok, warn or fail, and the exit code is non-zero if any check fails.
 
 ## Building from source
 

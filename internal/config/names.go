@@ -6,7 +6,6 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -136,18 +135,4 @@ func reservedEnvName(key string) bool {
 // normalizeHost lowercases a host pattern and drops a trailing dot, the way the proxy compares.
 func normalizeHost(host string) string {
 	return strings.TrimSuffix(strings.ToLower(host), ".")
-}
-
-// engineSockets are where container engines listen; a directory above one hands the agent the engine.
-var engineSockets = []string{"/var/run/docker.sock", "/run/docker.sock", "/run/podman/podman.sock", "/var/run/podman/podman.sock"}
-
-// socketWarning says why mounting dir is dangerous, or returns "" when it is not.
-func socketWarning(dir string) string {
-	dir = filepath.Clean(dir)
-	for _, socket := range engineSockets {
-		if socket == dir || strings.HasPrefix(socket, strings.TrimSuffix(dir, "/")+"/") {
-			return fmt.Sprintf("%s holds the container engine's socket (%s): an agent that reaches it controls the host", dir, filepath.Base(socket))
-		}
-	}
-	return ""
 }

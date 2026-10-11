@@ -296,33 +296,17 @@ agents:
 func TestResolveWorkspaces(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("a workspace without a source is a directory under workspaces", func(t *testing.T) {
+	t.Run("a workspace without a source is a directory kept in a volume", func(t *testing.T) {
 		resolved, _ := mustResolve(t, dir, "workspaces:\n  scratch: {}\n")
-		want := ResolvedWorkspace{Path: filepath.Join(dir, "workspaces", "scratch")}
-		if got := resolved.Workspaces["scratch"]; got != want {
-			t.Errorf("scratch = %+v, want %+v", got, want)
+		if got := resolved.Workspaces["scratch"]; got != (ResolvedWorkspace{}) {
+			t.Errorf("scratch = %+v, want the empty workspace", got)
 		}
 	})
 
-	t.Run("git workspace defaults", func(t *testing.T) {
-		resolved, _ := mustResolve(t, dir, "workspaces:\n  repo:\n    git: { url: https://github.com/o/r.git }\n")
-		got := resolved.Workspaces["repo"]
-		if want := filepath.Join(dir, "workspaces", "repo"); got.Path != want {
-			t.Errorf("path = %q, want %q", got.Path, want)
-		}
-	})
-
-	t.Run("relative and absolute paths", func(t *testing.T) {
-		resolved, _ := mustResolve(t, dir, `
-workspaces:
-  rel: { git: { url: https://x/y.git }, path: ./sub/../checkout }
-  abs: { git: { url: https://x/y.git }, path: /srv/abs/ }
-`)
-		if want := filepath.Join(dir, "checkout"); resolved.Workspaces["rel"].Path != want {
-			t.Errorf("rel = %q, want %q", resolved.Workspaces["rel"].Path, want)
-		}
-		if resolved.Workspaces["abs"].Path != "/srv/abs" {
-			t.Errorf("abs = %q", resolved.Workspaces["abs"].Path)
+	t.Run("a git workspace keeps its source", func(t *testing.T) {
+		resolved, _ := mustResolve(t, dir, "workspaces:\n  repo:\n    git: { url: https://github.com/o/r.git, branch: main }\n")
+		if got := resolved.Workspaces["repo"]; got.Git == nil || got.Git.URL != "https://github.com/o/r.git" || got.Git.Branch != "main" {
+			t.Errorf("repo = %+v", got)
 		}
 	})
 
@@ -330,7 +314,6 @@ workspaces:
 		name, yaml, want string
 	}{
 		{"bad name", "workspaces:\n  'a:b': {}\n", "a name is 1 to 63 lowercase"},
-		{"two workspaces with one path", "workspaces:\n  a: { path: ./x }\n  b: { path: ./x }\n", "also the path of workspace"},
 		{"ssh url", "workspaces:\n  w: { git: { url: 'git@github.com:o/r.git' } }\n", "must be an https URL"},
 		{"local path url", "workspaces:\n  w: { git: { url: /srv/repo } }\n", "must be an https URL"},
 	}
@@ -359,7 +342,7 @@ agents:
   a: { harness: custom, image: x, workspaces: [shared] }
 `)
 		agent := resolved.Agents["a"]
-		want := []Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw", HostPath: filepath.Join(dir, "workspaces", "shared")}}
+		want := []Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw"}}
 		if !reflect.DeepEqual(agent.Workspaces, want) {
 			t.Errorf("mounts = %+v, want %+v", agent.Workspaces, want)
 		}
@@ -383,19 +366,19 @@ agents:
 		}
 	})
 
-	t.Run("a directory workspace is mounted from its path", func(t *testing.T) {
+	t.Run("a directory workspace can be read-only", func(t *testing.T) {
 		resolved, _ := mustResolve(t, dir, `
-workspaces: { docs: { path: ./docs } }
+workspaces: { docs: {} }
 agents:
   a: { harness: custom, image: x, workspaces: ["docs:ro"] }
 `)
-		want := Mount{Name: "docs", Mount: "/workspace/docs", Mode: "ro", HostPath: filepath.Join(dir, "docs")}
+		want := Mount{Name: "docs", Mount: "/workspace/docs", Mode: "ro"}
 		if got := resolved.Agents["a"].Workspaces[0]; got != want {
 			t.Errorf("mount = %+v, want %+v", got, want)
 		}
 	})
 
-	t.Run("a git workspace is mounted per instance, so its mount has no host path", func(t *testing.T) {
+	t.Run("a git workspace is mounted per instance", func(t *testing.T) {
 		resolved, _ := mustResolve(t, dir, `
 workspaces: { repo: { git: { url: https://x/y.git } } }
 agents:

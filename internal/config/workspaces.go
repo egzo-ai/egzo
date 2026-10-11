@@ -11,25 +11,21 @@ import (
 
 const workspaceRoot = "/workspace"
 
-// ResolvedWorkspace is a declared workspace with defaults applied. Path is always set: the directory
-// itself, or for a git workspace the directory that holds the base clone (.base) and one worktree per
-// instance.
+// ResolvedWorkspace is a declared workspace. A workspace is never on the host: it is an engine volume, an empty
+// directory without Git, or with Git a base clone and one worktree per instance, each in a volume of its own.
 type ResolvedWorkspace struct {
-	Git  *Git   `yaml:"git,omitempty"`
-	Path string `yaml:"path"`
+	Git *Git `yaml:"git,omitempty"`
 }
 
 // Mount is one workspace as an agent sees it.
 type Mount struct {
-	Name     string `yaml:"name"`
-	Mount    string `yaml:"mount"`
-	Mode     string `yaml:"mode"`
-	HostPath string `yaml:"host_path,omitempty"`
+	Name  string `yaml:"name"`
+	Mount string `yaml:"mount"`
+	Mode  string `yaml:"mode"`
 }
 
-func resolveWorkspaces(file *File, dir string, p *problems) map[string]ResolvedWorkspace {
+func resolveWorkspaces(file *File, p *problems) map[string]ResolvedWorkspace {
 	resolved := map[string]ResolvedWorkspace{}
-	owners := map[string]string{}
 	for _, name := range sortedWorkspaceNames(file) {
 		workspace := file.Workspaces[name]
 		if !identifier.MatchString(name) {
@@ -38,53 +34,9 @@ func resolveWorkspaces(file *File, dir string, p *problems) map[string]ResolvedW
 		if workspace.Git != nil {
 			checkGit(name, workspace.Git, p)
 		}
-		path := workspace.Path
-		switch {
-		case path == "":
-			path = filepath.Join(dir, "workspaces", name)
-		case !filepath.IsAbs(path):
-			path = filepath.Join(dir, path)
-		}
-		path = filepath.Clean(path)
-		if other, taken := owners[path]; taken {
-			p.addf("workspace %q: path %s is also the path of workspace %q", name, path, other)
-		}
-		owners[path] = name
-		resolved[name] = ResolvedWorkspace{Git: workspace.Git, Path: path}
+		resolved[name] = ResolvedWorkspace{Git: workspace.Git}
 	}
-	checkPaths(resolved, dir, p)
 	return resolved
-}
-
-// checkPaths refuses paths that overlap: a workspace inside another would be exposed to every agent that lists the
-// outer one, and an instance's worktree directory (<path>/<instance>) could land on a directory somebody else owns.
-// It also refuses the root and egzo's own state.
-func checkPaths(resolved map[string]ResolvedWorkspace, dir string, p *problems) {
-	names := make([]string, 0, len(resolved))
-	for name := range resolved {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	inside := func(path, parent string) bool {
-		return path == parent || strings.HasPrefix(path, parent+string(filepath.Separator))
-	}
-	for _, name := range names {
-		path := resolved[name].Path
-		switch {
-		case path == "/":
-			p.addf("workspace %q: path / is the whole filesystem root", name)
-		case inside(path, filepath.Join(dir, ".egzo")):
-			p.addf("workspace %q: path %s is inside .egzo, where egzo keeps its own state", name, path)
-		}
-		for _, other := range names {
-			if other == name {
-				continue
-			}
-			if o := resolved[other].Path; o != path && inside(path, o) {
-				p.addf("workspace %q: path %s is inside the path of workspace %q (%s): a workspace cannot contain another", name, path, other, o)
-			}
-		}
-	}
 }
 
 func sortedWorkspaceNames(file *File) []string {
@@ -141,9 +93,9 @@ func agentRefs(file *File, p *problems) map[string][]ref {
 	return refs
 }
 
-// resolveMounts turns an agent's references into mounts and its working directory. A directory workspace
-// is mounted from its path; a git workspace is mounted per instance (its worktree and the base), which is
-// decided when the instance is made, so its mount carries no host path.
+// resolveMounts turns an agent's references into mounts and its working directory. A directory workspace is one
+// volume; a git workspace is mounted per instance (its worktree and the base), which is decided when the
+// instance is made.
 func resolveMounts(
 	name string, agent Agent, workspaces map[string]ResolvedWorkspace, refs map[string][]ref, p *problems,
 ) ([]Mount, string) {
@@ -166,12 +118,6 @@ func resolveMounts(
 					"declare a directory workspace (no git:) and list it as :ro for read access", name, r.target)
 				continue
 			}
-		} else {
-			if declared.Path == "/" {
-				p.addf("agent %q: workspace %q would mount the whole filesystem root", name, r.target)
-				continue
-			}
-			mount.HostPath = declared.Path
 		}
 		if seen[mount.Mount] {
 			p.addf("agent %q: two workspaces mount at %s", name, mount.Mount)

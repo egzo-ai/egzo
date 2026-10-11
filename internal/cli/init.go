@@ -56,11 +56,6 @@ func initProject(dir, harness string, cmd *cobra.Command) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "created %s\n", config.FileName)
 
-	if added, err := ignoreWorkspaceData(dir); err != nil {
-		return err
-	} else if len(added) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "added %s to .gitignore\n", strings.Join(added, " and "))
-	}
 	template := strings.ReplaceAll(harness, "-code", "")
 	fmt.Fprintf(cmd.OutOrStdout(), "next: edit the workspace url, check it with `egzo project check --resolved`, then `egzo project up` and `egzo agent spawn %s --attach`\n", template)
 	return nil
@@ -132,41 +127,6 @@ func originURL(dir string) string {
 		return fmt.Sprintf("https://%s/%s.git", m[1], m[2])
 	}
 	return placeholderURL
-}
-
-// ignored are the entries egzo keeps out of the user's repository: its own state, and the workspaces it
-// makes (the clones and worktrees of git workspaces, the directories of the others).
-var ignored = []string{".egzo/", "workspaces/"}
-
-// ignoreWorkspaceData adds ignored to .gitignore when the directory is a git repository, and returns what
-// it added.
-func ignoreWorkspaceData(dir string) ([]string, error) {
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		return nil, nil
-	}
-	path := filepath.Join(dir, ".gitignore")
-	existing, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	have := map[string]bool{}
-	for _, line := range strings.Split(string(existing), "\n") {
-		have[strings.TrimSuffix(strings.TrimSpace(line), "/")] = true
-	}
-	var added []string
-	for _, entry := range ignored {
-		if !have[strings.TrimSuffix(entry, "/")] {
-			added = append(added, entry)
-		}
-	}
-	if len(added) == 0 {
-		return nil, nil
-	}
-	text := string(existing)
-	if text != "" && !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
-	return added, os.WriteFile(path, []byte(text+strings.Join(added, "\n")+"\n"), 0o644)
 }
 
 func contains(list []string, value string) bool {

@@ -46,20 +46,17 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 - `egzo system check` should report what it found (Desktop, Colima, OrbStack).
 
 **2. Files the CLI writes and mounts**
-- **Host paths** (`./docs:ro`, `path:` for checkouts, `.egzo/workspaces`) are bind-mounted through the VM's file
-  sharing (virtiofs or gRPC FUSE), and the directory must be one Docker Desktop may share.
-- **File ownership.** Agents run as the invoking user's uid and gid (`os.Getuid()` in `internal/stack/up.go`). On macOS
-  these differ from the VM's, and Desktop's file sharing maps ownership itself, so "run as your uid" must become "run
-  as whatever makes the shared files writable".
-- **Git checkouts** are made by the prep container into the shared directory. Check that `--relative-paths` worktrees,
-  symlinks and executable bits survive the sharing layer, and that case-insensitive filesystems do not break a
-  repository with names that differ by case.
-- **Performance.** A bind-mounted checkout can be several times slower than native, which hurts `git` and build tools in
-  big repositories. `clone` into a named volume instead of a host directory may be the better default there (and
-  `worktree` with its relative links needs a look). Decide after measuring.
+- Workspaces, the prompt and the project lock live in the engine ([`portable-workspaces.md`](portable-workspaces.md)): no
+  host path is bind-mounted, so Docker Desktop's file sharing, `/mnt/c` on WSL2 and its slowness, and the ownership
+  mapping of shared files are not in the way. Volumes are also the fast path on Docker Desktop.
+- **File ownership.** Agents run as the invoking user's uid and gid (`os.Getuid()` in `internal/stack/up.go`) and the
+  volumes are handed to that user by a prep container. On macOS these differ from the VM's: check that "run as your
+  uid" still makes the volumes writable.
+- Check that `--relative-paths` worktrees, symlinks and executable bits survive in volumes on the VM, and that
+  `egzo workspace put` and `get` (tar through the engine API) keep modes and case-sensitive names.
 
 **3. The CLI itself**
-- The project lock uses `syscall.Flock` (`internal/stack/lock.go`), which exists on macOS. Terminal raw mode and
+- The project lock is an engine-side lease (`internal/stack/lock.go`), the same on every host. Terminal raw mode and
   `SIGWINCH` (`internal/cli/daily.go`, `internal/session/client.go`) work too. A `GOOS=darwin` build and the attach
   fidelity specs (detach key, paste, resize) on macOS terminals will tell.
 

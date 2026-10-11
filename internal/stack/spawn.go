@@ -95,9 +95,15 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if err := refuseRuntime(c, req.Template, template.Agent.Runtime); err != nil {
 		return Spawned{}, err
 	}
+	env := PrepEnv{Image: published.Image, User: published.User}
+	if dir == "" {
+		dir = published.Dir
+	}
 	name := req.Name
 	if name == "" {
-		name = freeName(observed, req.Template, template.Workspaces)
+		if name, err = freeName(ctx, c, env, observed, project, dir, req.Template, template.Workspaces); err != nil {
+			return Spawned{}, err
+		}
 	}
 	if err := config.CheckInstanceName(name, published.Names()); err != nil {
 		return Spawned{}, err
@@ -117,9 +123,6 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if r := observed.find("volume", homeVolume(project, name)); r != nil && r.Instance != name {
 		return Spawned{}, fmt.Errorf("the name %q is taken: the volume %s already exists", name, r.Name)
 	}
-	if dir == "" {
-		dir = published.Dir
-	}
 	actor := req.Actor
 	if actor == "" {
 		actor = "operator"
@@ -138,7 +141,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 		return Spawned{}, err
 	}
 	worktrees := PlanWorktrees(view, name)
-	if err := CheckWorktrees(worktrees, req.Reuse); err != nil {
+	if err := CheckWorktrees(ctx, c, env, project, dir, worktrees, req.Reuse); err != nil {
 		return Spawned{}, err
 	}
 	homeExisted := observed.find("volume", homeVolume(project, name)) != nil
@@ -147,7 +150,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
 	plan := spawnPlan{
 		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
-		worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
+		env: env, identity: identity, worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
 		container: func(tokens map[string]string) (ContainerSpec, error) {
 			full, err := DesireInstance(view, dir, published.inputs(instances, tokens, nil), name, identity)
 			if err != nil {
@@ -174,6 +177,8 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 // spawnPlan is everything spawnSteps needs.
 type spawnPlan struct {
 	project, dir, name string
+	env                PrepEnv
+	identity           InstanceIdentity
 	published          Published
 	view               *config.Resolved
 	template           Template
@@ -246,12 +251,12 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	if len(p.worktrees) > 0 {
 		// The base is cloned and fetched through the proxy as the instance, so its network and its binding come
 		// first. A worktree is never undone: it holds work.
-		if err := RunWorktreePreps(ctx, c, p.view, p.dir, p.published.Image, p.published.User, tokens, p.worktrees, p.options, out); err != nil {
+		if err := RunWorktreePreps(ctx, c, p.view, p.dir, p.env, p.identity, tokens, p.worktrees, p.options, out); err != nil {
 			return err
 		}
 	}
 
-	if err := ensureMountDirectories(p.view.Agents[p.name]); err != nil {
+	if err := EnsureDirectoryVolumes(ctx, c, p.env, p.view, p.dir, DirectoryWorkspacesOf(p.view, p.view.Agents[p.name])...); err != nil {
 		return err
 	}
 	spec, err := p.container(tokens)
@@ -276,25 +281,28 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	return nil
 }
 
-// freeName is `<template>-<n>` for the first n that no instance has and that no worktree or branch of an earlier
-// instance is left under.
-func freeName(observed Observed, template string, workspaces map[string]config.ResolvedWorkspace) string {
-	taken := map[string]bool{}
+// freeName is `<template>-<n>` for the first n that no instance has and that no worktree volume or branch of an
+// earlier instance is left under.
+func freeName(ctx context.Context, c *engine.Client, env PrepEnv, observed Observed, project, dir, template string, workspaces map[string]config.ResolvedWorkspace) (string, error) {
+	taken, err := leftOverNames(ctx, c, env, observed, project, dir, workspaces)
+	if err != nil {
+		return "", err
+	}
 	for _, name := range observed.InstanceNames() {
 		taken[name] = true
 	}
 	for n := 1; ; n++ {
-		name := fmt.Sprintf("%s-%d", template, n)
-		if !taken[name] && !leftOver(workspaces, name) {
-			return name
+		if name := fmt.Sprintf("%s-%d", template, n); !taken[name] {
+			return name, nil
 		}
 	}
 }
 
 // RemoveInstances removes instances: the container, its registration in control and in the proxy, its
-// network and its home volume. Checkouts stay. Nothing is removed unless every name is an instance and,
-// without force, every instance is stopped. It returns the names it removed.
-func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, project string, names []string, force bool, out io.Writer) ([]string, error) {
+// network, and its volumes: the home and the worktrees. The branches the instances made stay in the base clones,
+// which forget the removed worktrees. Nothing is removed unless every name is an instance and, without force,
+// every instance is stopped. It returns the names it removed.
+func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv, project, dir string, names []string, force bool, out io.Writer) (removed []string, err error) {
 	out = &lockedWriter{w: out}
 	for _, name := range names {
 		instance, ok := observed.Instance(name)
@@ -305,10 +313,16 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, p
 			return nil, fmt.Errorf("instance %q is running: stop it first (egzo stop %s) or use --force", name, name)
 		}
 	}
-	var removed []string
+	// whatever happens, the base clones forget the worktrees of the instances that did go
+	defer func() {
+		if forgetErr := ForgetWorktrees(ctx, c, env, project, dir, observed, removed); forgetErr != nil && err == nil {
+			err = forgetErr
+		}
+	}()
 	control, proxy := observed.find("container", project+"-control-1"), observed.find("container", project+"-proxy-1")
 	for _, name := range names {
-		var container, network, home *Resource
+		var container, network *Resource
+		var volumes []*Resource
 		for i := range observed.Resources {
 			r := &observed.Resources[i]
 			switch {
@@ -317,7 +331,7 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, p
 			case r.Type == "network" && r.Instance == name:
 				network = r
 			case r.Type == "volume" && r.Instance == name:
-				home = r
+				volumes = append(volumes, r)
 			}
 		}
 		// The container goes first: while it runs it can still report to control, which would bring a
@@ -349,10 +363,10 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, p
 				return removed, fmt.Errorf("remove network %s: %w", network.Name, err)
 			}
 		}
-		if home != nil {
-			fmt.Fprintf(out, "remove volume %s\n", home.Name)
-			if err := c.API.VolumeRemove(ctx, home.ID, true); err != nil {
-				return removed, fmt.Errorf("remove volume %s: %w", home.Name, err)
+		for _, volume := range volumes {
+			fmt.Fprintf(out, "remove volume %s\n", volume.Name)
+			if err := c.API.VolumeRemove(ctx, volume.ID, true); err != nil {
+				return removed, fmt.Errorf("remove volume %s: %w", volume.Name, err)
 			}
 		}
 		removed = append(removed, name)

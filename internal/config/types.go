@@ -97,11 +97,10 @@ func (e *ServiceEntry) UnmarshalYAML(node *yaml.Node) error {
 	return fmt.Errorf("line %d: a service must be a secret reference like vault/SECRET, or a definition", node.Line)
 }
 
-// Workspace declares a workspace of the project. Without git it is a directory on the host (path, by default
-// ./workspaces/<name>); with git, path holds the base clone and one worktree per instance.
+// Workspace declares a workspace of the project. Without git it is an empty directory kept in an engine volume;
+// with git, a base clone and one worktree per instance, each in a volume. Nothing of it is on the host.
 type Workspace struct {
-	Git  *Git   `yaml:"git,omitempty"`
-	Path string `yaml:"path,omitempty"`
+	Git *Git `yaml:"git,omitempty"`
 }
 
 type Git struct {

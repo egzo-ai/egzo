@@ -45,7 +45,9 @@ without a hub (accepted). A hub-less bridge could later be a separate tool on th
 4. Self-describing projects: flat labels + `inspect` give the agent/project card (observed state,
    harness, workspace) with no exec; the redacted resolved-spec snapshot on the control volume
    (read via exec) gives the detailed view while control is running.
-5. Shared Go packages (list, inspect, read-spec, start/stop, attach, send) reused by the hub.
+5. Shared Go packages (list, inspect, read-spec, start/stop, attach, send, spawn, rm, workspace put/get) reused by the
+   hub: they take an engine client and a `PrepEnv` (the egzo image and the agent user, both in the published
+   templates) and read no file of the host.
 6. Messaging contract for any client (CLI, web, chat): `message send` + queue API (to an agent); typed
    event stream (message sent, announced, fetched, resolved; status change; question asked and answered); questions (`ask`) with a
    stable message id so they can be answered later from anywhere; actor on every message/answer.
@@ -56,8 +58,10 @@ without a hub (accepted). A hub-less bridge could later be a separate tool on th
   entries and permissions from day one; actor field everywhere (default `operator`).
 - Permission vocabulary per project (e.g. observe, attach-rw, send, answer, lifecycle), defined in
   YAML as roles->permissions, with no user bindings.
-- Schema distinguishes host-bound workspaces (bind) from portable ones (git/volume) so a project
-  that is operated on a remote engine cannot silently depend on host paths.
+- **Done** ([`portable-workspaces.md`](portable-workspaces.md)): workspaces are engine volumes, the prompt travels in
+  the published template and the project lock is a lease in the engine, so `spawn`, `rm`, `start`, `attach`, `send`
+  and `workspace ...` need nothing but engine access. There are no host-bound workspaces to depend on. Left for the
+  hub: version the operator API paths (`/v1`), and an engine interface so the packages can be tested with a fake.
 - Core logic lives in importable Go packages, not inside CLI command code.
 
 ## Hub risks to track

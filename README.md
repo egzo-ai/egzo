@@ -45,7 +45,7 @@ See [`docs/`](docs/README.md).
 - **Credential injection.** API keys and tokens can be injected live by the built-in proxy, so your agents never need to see any secrets,
   greatly reducing consequences of prompt injections and risks of secrets leaking.
 - **Password manager integration.** Fetch api keys and secrets directly from your password manager.
-- **Git worktrees.** A base clone per repository, a worktree per agent, made through the proxy, so agents hold no git credentials.
+- **Git worktrees.** A base clone per repository, a worktree per agent, in engine volumes, made through the proxy, so agents hold no git credentials. Nothing is kept in your project directory.
 - **Messaging.** Send messages or tasks to agents without opening their full UI, opening the door for quick work or automated jobs.
 - **Built-in browser.** Chromium and the Playwright MCP just works out of the box; ([docs/browser.md](docs/browser.md)).
 - **Your own tools.** Extend a harness image with extra software, or run any image with the `custom` harness.

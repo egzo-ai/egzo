@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -24,11 +23,11 @@ const publishedVersion = 1
 // Template is one agent of the file as a spawn instantiates it: everything that decides what the
 // instance is, resolved by `up`, so that a spawn needs neither the file nor any secret.
 type Template struct {
-	Agent        config.ResolvedAgent
-	Profile      *config.ResolvedProfile
-	Workspaces   map[string]config.ResolvedWorkspace // the declared workspaces its mounts name
-	PromptPath   string                              // absolute; empty without a prompt
-	PromptDigest string
+	Agent      config.ResolvedAgent
+	Profile    *config.ResolvedProfile
+	Workspaces map[string]config.ResolvedWorkspace // the declared workspaces its mounts name
+	// PromptText is the text of the agent's prompt file, read when `up` ran: an instance needs nothing on the host.
+	PromptText string
 	// Image is the harness image, resolved when `up` ran.
 	Image string
 	// Placeholders maps each variable the agent gets to its placeholder text. A placeholder is not a
@@ -53,15 +52,15 @@ type Published struct {
 	Templates map[string]Template
 }
 
-// Publish resolves the templates of a project. It reads the prompt files, since an instance mounts
-// them and a changed prompt must make its instances stale.
+// Publish resolves the templates of a project. It reads the prompt files: the text travels in the template, so a
+// spawn needs no file, and a changed prompt makes its instances stale.
 func Publish(project *config.Resolved, dir, image, harnessPrefix, user string) (Published, error) {
 	return PublishWith(project, dir, image, harnessPrefix, user, nil)
 }
 
 // PublishWith is Publish with the placeholders (by secret reference) the agents get.
 func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user string, placeholders map[string]string) (Published, error) {
-	digests, err := PromptDigests(project, dir)
+	prompts, err := ReadPrompts(project, dir)
 	if err != nil {
 		return Published{}, err
 	}
@@ -72,21 +71,13 @@ func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user strin
 			Agent:        agent,
 			Profile:      project.Egress[agent.Egress],
 			Workspaces:   map[string]config.ResolvedWorkspace{},
-			PromptDigest: digests[name],
+			PromptText:   prompts[name],
 			Image:        agentImage(agent, harnessPrefix),
 			Placeholders: templatePlaceholders(project.Egress[agent.Egress], placeholders),
 		}
-		if agent.Prompt != "" {
-			template.PromptPath = agent.Prompt
-			if !filepath.IsAbs(template.PromptPath) {
-				template.PromptPath = filepath.Join(dir, template.PromptPath)
-			}
-			template.PromptPath = filepath.Clean(template.PromptPath)
-		}
+		template.Agent.Prompt = "" // the text is in PromptText: the path means nothing to a spawn
 		for _, mount := range agent.Workspaces {
-			if mount.HostPath == "" {
-				template.Workspaces[mount.Name] = project.Workspaces[mount.Name]
-			}
+			template.Workspaces[mount.Name] = project.Workspaces[mount.Name]
 		}
 		template.Hash = templateHash(template)
 		published.Templates[name] = template
@@ -119,8 +110,7 @@ func ParsePublished(data []byte) (Published, error) {
 }
 
 // View is the project as one or more instances see it: the agents are the given instances (name to
-// template), each a copy of its template under its own name, with the prompt as an absolute path and the
-// image resolved. The functions that compute an agent's resources work on it unchanged.
+// template), each a copy of its template under its own name, with the image resolved. The functions that compute an agent's resources work on it unchanged.
 func (p Published) View(instances map[string]string) *config.Resolved {
 	view := &config.Resolved{
 		Name:       p.Project,
@@ -135,7 +125,6 @@ func (p Published) View(instances map[string]string) *config.Resolved {
 		}
 		agent := template.Agent
 		agent.Image = template.Image
-		agent.Prompt = template.PromptPath
 		view.Agents[name] = agent
 		for key, ws := range template.Workspaces {
 			view.Workspaces[key] = ws
@@ -160,12 +149,12 @@ func (p Published) AsProject(secrets map[string]config.SecretRef) *config.Resolv
 	return view
 }
 
-// digests maps instances to the content hash of their template's prompt.
-func (p Published) digests(instances map[string]string) map[string]string {
+// prompts maps instances to the prompt text of their template.
+func (p Published) prompts(instances map[string]string) map[string]string {
 	out := map[string]string{}
 	for name, templateName := range instances {
-		if digest := p.Templates[templateName].PromptDigest; digest != "" {
-			out[name] = digest
+		if text := p.Templates[templateName].PromptText; text != "" {
+			out[name] = text
 		}
 	}
 	return out
@@ -179,7 +168,7 @@ func (p Published) inputs(instances map[string]string, tokens map[string]string,
 			placeholders[name] = vars
 		}
 	}
-	return Inputs{Image: p.Image, Tokens: tokens, User: p.User, PromptDigests: p.digests(instances), Instances: existing, Placeholders: placeholders}
+	return Inputs{Image: p.Image, Tokens: tokens, User: p.User, Prompts: p.prompts(instances), Instances: existing, Placeholders: placeholders}
 }
 
 // ErrNotPublished means `up` has not published templates yet.

@@ -164,6 +164,7 @@ def test_spawn_does_not_read_the_prompt_file_the_template_carries_it(live_projec
     prompt.write_text("be brief\n")
     live_project.up(spec(agents={"coder": custom(agent_image, prompt="./prompt.md")}))
     prompt.unlink()
+    (live_project.root / "egzo.yaml").write_text("# nothing here any more\n")
     assert live_project.spawn("coder") == "coder-1"
     env = dict(item.split("=", 1) for item in engine.instance(live_project.name, "coder-1").raw["Config"]["Env"])
     assert env["EGZO_PROMPT"] == "be brief\n"

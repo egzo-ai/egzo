@@ -358,7 +358,7 @@ func registryAuth(ref string, configJSON []byte) string {
 
 // Down removes everything egzo made for a project: its containers, then their networks, then its volumes (the
 // control state, the CA and the homes). Workspace directories on the host are never touched.
-func Down(ctx context.Context, c *engine.Client, observed Observed, out io.Writer) error {
+func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv, project, dir string, out io.Writer) error {
 	out = &lockedWriter{w: out}
 	// The control volume outlives the project never: the agents registered in it must
 	// not, or the next `up` would accept messages for instances that do not exist.
@@ -370,14 +370,20 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, out io.Write
 			}
 		}
 	}
+	orphans := orphanWorktrees(observed)
 	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
 	// depends on anything, and stopping containers is where the time goes, so do it together.
 	for _, kind := range []string{"container", "network", "volume"} {
 		var actions []Action
 		for _, r := range observed.Resources {
-			if r.Type == kind {
-				actions = append(actions, Action{Verb: "remove", Type: kind, Name: r.Name, ID: r.ID})
+			if r.Type != kind {
+				continue
 			}
+			if keptByDown(r, orphans) {
+				fmt.Fprintf(out, "keep volume %s (workspace %s): `egzo workspace rm %s` deletes it\n", r.Name, r.Workspace, r.Workspace)
+				continue
+			}
+			actions = append(actions, Action{Verb: "remove", Type: kind, Name: r.Name, ID: r.ID})
 		}
 		deps := make([][]int, len(actions))
 		err := runConcurrently(ctx, actions, deps, func(ctx context.Context, a Action) error {
@@ -391,7 +397,30 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, out io.Write
 			return err
 		}
 	}
-	return nil
+	return ForgetWorktrees(ctx, c, env, project, dir, observed, observed.InstanceNames())
+}
+
+// keptByDown says whether `down` leaves a resource: the volumes that hold a workspace's data, the directory and the
+// base clone. They are the user's work, not egzo's infrastructure; `egzo workspace rm` deletes them. An instance's
+// worktree volume goes with the instance.
+func keptByDown(r Resource, orphans map[string]bool) bool {
+	return r.Type == "volume" && r.Kind == kindWorkspace && (r.Instance == "" || orphans[r.Name])
+}
+
+// orphanWorktrees are the worktree volumes no instance owns: left by a spawn or a removal that did not finish. They
+// may hold work, so `down` keeps them like the bases; `egzo workspace rm NAME --worktree INSTANCE` deletes one.
+func orphanWorktrees(observed Observed) map[string]bool {
+	live := map[string]bool{}
+	for _, name := range observed.InstanceNames() {
+		live[name] = true
+	}
+	orphans := map[string]bool{}
+	for _, r := range observed.Resources {
+		if r.Type == "volume" && r.Kind == kindWorkspace && r.Instance != "" && !live[r.Instance] {
+			orphans[r.Name] = true
+		}
+	}
+	return orphans
 }
 
 // Report is what an agent last said about itself and what it is doing, as the control sidecar knows it.

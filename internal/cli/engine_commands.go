@@ -48,6 +48,15 @@ type session struct {
 
 func (s *session) close() { s.engine.Close() }
 
+// prepEnv is what the prep containers of this session need: the egzo image and the user who owns the volumes. A
+// published project says both (they are what `up` used, whoever runs this command); otherwise this process's own.
+func (s *session) prepEnv(ctx context.Context) stack.PrepEnv {
+	if published, err := stack.ReadPublished(ctx, s.engine, s.Resolved.Name); err == nil && published.Image != "" {
+		return stack.PrepEnv{Image: published.Image, User: published.User}
+	}
+	return stack.PrepEnv{Image: imageRef(), User: stack.AgentUser(s.engine)}
+}
+
 func openSession(ctx context.Context, opts *options) (*session, error) {
 	p, err := loadProject(opts)
 	if err != nil {
@@ -102,7 +111,7 @@ func newUpCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 			if !dryRun {
-				release, err := stack.Lock(s.Dir)
+				release, err := stack.Lock(ctx, s.engine, s.Resolved.Name, imageRef())
 				if err != nil {
 					return err
 				}
@@ -154,8 +163,9 @@ func newDownCommand(opts *options) *cobra.Command {
 		Short: "Remove the project's containers, networks and volumes",
 		Long: "Remove everything egzo made for the project: the sidecars, the networks, the volumes (the control state and the\n" +
 			"CA, and the home of every agent) and the worktrees of the agents it removes. It is refused while an agent\n" +
-			"runs, and removes nothing then; --force removes the agents too, as `egzo agent rm --force` does. The base\n" +
-			"clones and the directory workspaces on the host are never deleted: they are yours.",
+			"runs, and removes nothing then; --force removes the agents too, as `egzo agent rm --force` does. The\n" +
+			"volumes of the directory workspaces and of the base clones are kept: they are your work, and a later\n" +
+			"`egzo project up` finds them again. `egzo workspace rm` deletes them.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -165,7 +175,7 @@ func newDownCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			release, err := stack.Lock(s.Dir)
+			release, err := stack.Lock(ctx, s.engine, s.Resolved.Name, imageRef())
 			if err != nil {
 				return err
 			}
@@ -184,25 +194,7 @@ func newDownCommand(opts *options) *cobra.Command {
 				return fmt.Errorf("agents are running: %s; stop them (egzo stop NAME) or use --force to remove them, with their worktrees and homes",
 					strings.Join(running, ", "))
 			}
-			instances := s.observed.InstanceNames()
-			if err := stack.Down(ctx, s.engine, s.observed, cmd.OutOrStdout()); err != nil {
-				// the instances that did go take their worktrees with them; the ones that are still there keep theirs
-				if again, observeErr := stack.Observe(ctx, s.engine, s.Resolved.Name); observeErr == nil {
-					still := map[string]bool{}
-					for _, name := range again.InstanceNames() {
-						still[name] = true
-					}
-					var gone []string
-					for _, name := range instances {
-						if !still[name] {
-							gone = append(gone, name)
-						}
-					}
-					stack.RemoveWorktrees(s.Resolved, gone, cmd.OutOrStdout())
-				}
-				return err
-			}
-			return stack.RemoveWorktrees(s.Resolved, instances, cmd.OutOrStdout())
+			return stack.Down(ctx, s.engine, s.observed, s.prepEnv(ctx), s.Resolved.Name, s.Dir, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove running agents too")

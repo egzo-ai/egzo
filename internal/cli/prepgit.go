@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -44,6 +45,27 @@ func newPrepGitCommand() *cobra.Command {
 			return err
 		},
 	}
+	info := &cobra.Command{
+		Use:   "info DIR",
+		Short: "Print as JSON what the base clone in DIR is: cloned or not, its origin url, the branches egzo made in it",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			found, err := gitprep.Info(args[0])
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(found)
+		},
+	}
+	var forgetBase string
+	forget := &cobra.Command{
+		Use:   "forget INSTANCE...",
+		Short: "Make the base clone forget the worktrees of instances whose volumes are gone",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  func(cmd *cobra.Command, args []string) error { return gitprep.Forget(forgetBase, args) },
+	}
+	forget.Flags().StringVar(&forgetBase, "base", "", "the base clone")
+	forget.MarkFlagRequired("base")
 	for _, c := range []*cobra.Command{clone, worktree, fetch} {
 		c.Flags().StringVar(&url, "url", "", "the repository (https)")
 		c.Flags().StringVar(&branch, "branch", "", "the branch to start from")
@@ -55,6 +77,6 @@ func newPrepGitCommand() *cobra.Command {
 	worktree.Flags().BoolVar(&options.Reuse, "reuse", false, "continue an existing branch or worktree")
 	worktree.MarkFlagRequired("base")
 	worktree.MarkFlagRequired("agent")
-	cmd.AddCommand(clone, worktree, fetch)
+	cmd.AddCommand(clone, worktree, fetch, info, forget)
 	return cmd
 }

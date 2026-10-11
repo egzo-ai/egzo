@@ -164,65 +164,18 @@ func TestInitRejectsAnUnknownHarnessBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestIgnoreWorkspaceData(t *testing.T) {
-	cases := []struct {
-		name      string
-		existing  *string // nil: no .gitignore
-		wantAdded int
-		want      string
-	}{
-		{"creates the file", nil, 2, ".egzo/\nworkspaces/\n"},
-		{"appends to an existing file", ptr("node_modules/\n"), 2, "node_modules/\n.egzo/\nworkspaces/\n"},
-		{"adds the missing newline first", ptr("node_modules/"), 2, "node_modules/\n.egzo/\nworkspaces/\n"},
-		{"is idempotent", ptr(".egzo/\nworkspaces/\n"), 0, ".egzo/\nworkspaces/\n"},
-		{"adds only what is missing", ptr(".egzo/\n"), 1, ".egzo/\nworkspaces/\n"},
-		{"accepts the form without a slash", ptr("bin\n.egzo\nworkspaces\n"), 0, "bin\n.egzo\nworkspaces\n"},
-		{"ignores surrounding whitespace", ptr("  .egzo/  \n  workspaces/\n"), 0, "  .egzo/  \n  workspaces/\n"},
-		{"is not fooled by a similar entry", ptr(".egzo-cache/\nworkspaces-old/\n"), 2, ".egzo-cache/\nworkspaces-old/\n.egzo/\nworkspaces/\n"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			path := filepath.Join(dir, ".gitignore")
-			if c.existing != nil {
-				if err := os.WriteFile(path, []byte(*c.existing), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			added, err := ignoreWorkspaceData(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(added) != c.wantAdded {
-				t.Errorf("added = %v, want %d entries", added, c.wantAdded)
-			}
-			if got, _ := os.ReadFile(path); string(got) != c.want {
-				t.Errorf(".gitignore = %q, want %q", got, c.want)
-			}
-		})
-	}
-
-	t.Run("outside a repository nothing happens", func(t *testing.T) {
-		dir := t.TempDir()
-		added, err := ignoreWorkspaceData(dir)
-		if err != nil || len(added) != 0 {
-			t.Errorf("added = %v, err = %v", added, err)
-		}
-	})
-}
-
-func TestInitInAGitRepositoryIgnoresTheWorkspaceData(t *testing.T) {
+func TestInitInAGitRepositoryUsesTheOriginAndLeavesGitignoreAlone(t *testing.T) {
 	dir := t.TempDir()
 	gitInit(t, dir, "git@github.com:acme/app.git")
 	out, err := runInit(t, dir, "claude-code")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "added .egzo/ and workspaces/ to .gitignore") {
-		t.Errorf("output = %q", out)
+	if strings.Contains(out, ".gitignore") {
+		t.Errorf("output = %q: egzo keeps nothing in the directory, so nothing is ignored", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err == nil {
+		t.Error("a .gitignore was made")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, config.FileName))
 	if err != nil {

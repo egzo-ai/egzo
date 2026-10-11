@@ -155,3 +155,71 @@ func requireEmpty(dir string) error {
 	}
 	return nil
 }
+
+// BaseInfo is what a base clone says about itself, for the CLI to decide with: the CLI cannot look inside the
+// volume that holds it.
+type BaseInfo struct {
+	// Cloned is whether the directory holds a clone at all.
+	Cloned bool `json:"cloned"`
+	// URL is the url of the clone's origin, "" when it has none.
+	URL string `json:"url"`
+	// Branches are the branches egzo made in it, one per instance that was ever made (egzo/<instance>).
+	Branches []string `json:"branches"`
+}
+
+// Info reads the base clone in base. A directory with no clone is not an error: it says so.
+func Info(base string) (BaseInfo, error) {
+	info := BaseInfo{Branches: []string{}}
+	if _, err := os.Stat(filepath.Join(base, ".git")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return info, nil
+		}
+		return info, err
+	}
+	info.Cloned = true
+	if url, err := Git(base, "config", "--get", "remote.origin.url"); err == nil {
+		info.URL = url
+	}
+	listed, err := Git(base, "for-each-ref", "--format=%(refname)", "refs/heads/egzo/")
+	if err != nil {
+		return info, err
+	}
+	for _, ref := range strings.Split(listed, "\n") {
+		if name := strings.TrimPrefix(strings.TrimSpace(ref), "refs/heads/"); name != "" {
+			info.Branches = append(info.Branches, name)
+		}
+	}
+	return info, nil
+}
+
+// Forget removes what the base keeps about the worktrees of the given instances, which sit next to it and are
+// gone: git would refuse to make a worktree of the same name while it remembers one. Only those worktrees are
+// forgotten: the base cannot see the others (each is in a volume of its own) and a prune would take them for gone.
+func Forget(base string, instances []string) error {
+	entries, err := os.ReadDir(filepath.Join(base, ".git", "worktrees"))
+	if err != nil {
+		return nil // nothing is remembered
+	}
+	gone := map[string]bool{}
+	for _, instance := range instances {
+		gone[filepath.Join(filepath.Dir(base), instance, ".git")] = true
+	}
+	var failed []error
+	for _, entry := range entries {
+		meta := filepath.Join(base, ".git", "worktrees", entry.Name())
+		data, err := os.ReadFile(filepath.Join(meta, "gitdir"))
+		if err != nil {
+			continue
+		}
+		target := strings.TrimSpace(string(data))
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(meta, target)
+		}
+		if gone[filepath.Clean(target)] {
+			if err := os.RemoveAll(meta); err != nil {
+				failed = append(failed, err)
+			}
+		}
+	}
+	return errors.Join(failed...)
+}
