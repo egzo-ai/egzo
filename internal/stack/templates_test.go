@@ -25,8 +25,10 @@ func templateProject(t *testing.T) (*config.Resolved, string) {
 	}
 	project := desireProject()
 	project.Egress = map[string]*config.ResolvedProfile{"default": {Allow: []string{"pypi.org"}}}
+	project.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://github.com/acme/shop.git"}, Path: filepath.Join(dir, "workspaces", "repo")}
 	coder := project.Agents["coder"]
 	coder.Prompt = "p.md"
+	coder.Workspaces = append(coder.Workspaces, config.Mount{Name: "repo", Mount: "/workspace/repo", Mode: "rw"})
 	project.Agents["coder"] = coder
 	return project, dir
 }
@@ -53,8 +55,8 @@ func TestPublishResolvesEveryTemplateWithWhatAnInstanceNeeds(t *testing.T) {
 	if !strings.HasPrefix(coder.Image, "ghcr.io/egzo-ai/egzo-harness-claude-code:") || published.Templates["review"].Image != "example/review:1" {
 		t.Errorf("images = %q, %q", coder.Image, published.Templates["review"].Image)
 	}
-	if _, ok := coder.Workspaces["shared"]; !ok || len(published.Templates["review"].Workspaces) != 0 {
-		t.Errorf("a template carries the declared workspaces it lists and no host path: %+v / %+v", coder.Workspaces, published.Templates["review"].Workspaces)
+	if _, ok := coder.Workspaces["repo"]; !ok || len(coder.Workspaces) != 1 || len(published.Templates["review"].Workspaces) != 0 {
+		t.Errorf("a template carries the git workspaces it lists, and no directory workspace (that is a host path in its mounts): %+v / %+v", coder.Workspaces, published.Templates["review"].Workspaces)
 	}
 	if coder.Profile == nil || published.User != "1000:1000" || published.Image != "egzo:test" || published.Dir != dir {
 		t.Errorf("published = %+v", published)
@@ -87,7 +89,7 @@ func TestATemplatesHashFollowsWhatMakesTheInstanceAndNothingElse(t *testing.T) {
 		"model":   func(p *config.Resolved) { a := p.Agents["coder"]; a.Model = "m"; p.Agents["coder"] = a },
 		"profile": func(p *config.Resolved) { p.Egress["default"].Allow = append(p.Egress["default"].Allow, "x.example") },
 		"workspace": func(p *config.Resolved) {
-			p.Workspaces["shared"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}, Mode: "clone", Path: "/p"}
+			p.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}, Path: "/p"}
 		},
 	} {
 		other, otherDir := templateProject(t)
@@ -268,10 +270,10 @@ func TestFreeNameTakesTheFirstFreeNumber(t *testing.T) {
 	inst := func(name string) Resource {
 		return Resource{Type: "container", Name: "proj-" + name, Kind: kindAgent, Service: "coder", Instance: name}
 	}
-	if got := freeName(Observed{}, "coder"); got != "coder-1" {
+	if got := freeName(Observed{}, "coder", nil); got != "coder-1" {
 		t.Errorf("first = %q", got)
 	}
-	if got := freeName(Observed{Resources: []Resource{inst("coder-1"), inst("coder-3"), inst("other-2")}}, "coder"); got != "coder-2" {
+	if got := freeName(Observed{Resources: []Resource{inst("coder-1"), inst("coder-3"), inst("other-2")}}, "coder", nil); got != "coder-2" {
 		t.Errorf("with a gap = %q", got)
 	}
 }

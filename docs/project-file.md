@@ -32,7 +32,7 @@ agents:
     workspaces: [repo]
 ```
 
-`egzo up`, then `egzo spawn claude --attach` ([managing projects](managing-projects.md)). With one workspace, its directory is the agent's working directory.
+`egzo up`, then `egzo spawn claude --attach` ([managing projects](managing-projects.md)). With one workspace, its directory is the agent's working directory (for a git workspace, the agent's own worktree).
 
 ## Vaults and secrets
 
@@ -79,32 +79,32 @@ agents](sandboxing.md).
 
 ## Workspaces
 
-Declared once, listed by name in agents. They appear at `/workspace/<name>`. [Git workspaces](workspaces.md) covers the
-modes, credentials and cleanup.
+Declared once, project-wide, listed by name in agents. They appear at `/workspace/<name>`. [Workspaces](workspaces.md)
+covers worktrees, credentials and cleanup.
 
 ```yaml
 workspaces:
   repo:
-    git: { url: https://github.com/acme/shop.git, branch: main }
-    mode: worktree        # clone (default) | worktree | shared
-  scratch: {}             # no source: a volume shared by every agent that lists it
+    git: { url: https://github.com/acme/shop.git, branch: main }   # a git repository: each agent gets a worktree
+  docs: { path: ./docs }       # a directory of yours, mounted as it is
+  scratch: {}                  # a directory egzo makes: ./workspaces/scratch
 
 agents:
   coder:
     harness: claude-code
-    workspaces: [repo, scratch, ./docs:ro]   # two or more: the working directory is /workspace
+    workspaces: [repo, "docs:ro", scratch]   # two or more: the working directory is /workspace
 ```
 
-- `clone` (default): each instance gets its own independent clone, so one agent cannot corrupt another's `.git`.
-- `worktree`: each instance gets a git worktree of one shared base clone. Faster, and the base `.git` is writable by
-  all of them.
-- `shared`: one checkout used by every instance that lists it.
-- `./path` or `/abs/path`, with optional `:ro`, mounts a host directory. Nothing from the host is mounted unless the
-  file says so. A git workspace cannot be `:ro`.
-- Git sources are HTTPS only. The clone goes through the proxy, which injects the token (the `github` service), so
-  agents hold no git credential and push their own work.
-- Checkouts live in `.egzo/workspaces/<name>` (`path:` changes it). `egzo down` never deletes them;
-  `egzo down --workspaces` does, after checking each for unpushed work. Keep `.egzo/` out of git.
+- Every workspace is a directory on the host, in the project. `path:` (relative to the project, or absolute) moves
+  it; without one it is `./workspaces/<name>`.
+- A **directory** workspace is shared by every agent that lists it. egzo creates it when it is missing and never
+  deletes it. `:ro` makes it read-only for an agent.
+- A **git** workspace holds a base clone (`.base`) made by `egzo up` and a worktree per instance, made by `egzo spawn`
+  on its own branch `egzo/<instance>`. It cannot be `:ro`. `egzo rm` deletes the instance's worktree; what it
+  committed stays on its branch in the base.
+- Git sources are HTTPS only. The clone and the fetch go through the proxy, which injects the token (the `github`
+  service), so agents hold no git credential and push their own work.
+- Keep `workspaces/` and `.egzo/` out of git; `egzo init` adds them to `.gitignore`.
 
 ## Agents
 

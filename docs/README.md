@@ -11,7 +11,7 @@ detail, and the executable specs in `specs/` are the status report.
 **Using egzo**
 3. [The project file](project-file.md): `egzo.yaml` by example
 4. [Managing projects](managing-projects.md): `up`, `spawn`, `attach`, `rm`, `down`
-5. [Git workspaces](workspaces.md): clone, worktree, shared, and keeping work safe
+5. [Workspaces](workspaces.md): directories, git worktrees, and what removing an agent deletes
 6. [Messaging](messaging.md): sending tasks, questions from agents, agents talking to each other
 7. [Supported harnesses](harnesses.md): Claude Code and OpenCode
 8. [Overriding base images](images.md): adding tools to an agent

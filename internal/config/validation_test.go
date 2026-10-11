@@ -14,7 +14,6 @@ func TestReservedAndMalformedNames(t *testing.T) {
 		{"agent control", "agents:\n  control: " + custom + "\n", "reserved"},
 		{"agent proxy", "agents:\n  proxy: " + custom + "\n", "reserved"},
 		{"agent prep", "agents:\n  prep: " + custom + "\n", "reserved"},
-		{"agent shared", "agents:\n  shared: " + custom + "\n", "reserved"},
 		{"agent with a space", "agents:\n  'my agent': " + custom + "\n", "lowercase"},
 		{"agent in capitals", "agents:\n  Coder: " + custom + "\n", "lowercase"},
 		{"agent too long", "agents:\n  " + strings.Repeat("a", 64) + ": " + custom + "\n", "lowercase"},
@@ -50,7 +49,6 @@ func TestInstanceNames(t *testing.T) {
 		"control":                     "reserved",
 		"proxy":                       "reserved",
 		"prep":                        "reserved",
-		"shared":                      "reserved",
 		"control-1":                   "name of a sidecar",
 		"proxy-1":                     "name of a sidecar",
 		"coder-home":                  "-home",
@@ -130,8 +128,8 @@ func TestWorkdirCannotClimbOut(t *testing.T) {
 }
 
 func TestHostMountsOfTheFilesystemAndTheEngineSocket(t *testing.T) {
-	wantProblems(t, t.TempDir(), "agents:\n  a: { harness: custom, image: x, workspaces: [/] }\n", "filesystem root")
-	_, warnings := mustResolve(t, t.TempDir(), "agents:\n  a: { harness: custom, image: x, workspaces: [/var/run] }\n")
+	wantProblems(t, t.TempDir(), "workspaces:\n  root: { path: / }\nagents:\n  a: { harness: custom, image: x, workspaces: [root] }\n", "filesystem root")
+	_, warnings := mustResolve(t, t.TempDir(), "workspaces:\n  run: { path: /var/run }\nagents:\n  a: { harness: custom, image: x, workspaces: [run] }\n")
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "docker.sock") {
 		t.Errorf("warnings = %q", warnings)
 	}

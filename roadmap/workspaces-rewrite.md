@@ -26,7 +26,7 @@ agents:
 | `path` | the directory itself; default `./workspaces/<name>` | the directory that holds the repo; default `./workspaces/<name>` |
 | created by | `up` or `spawn`/`start`, empty, if missing (as the user) | `up` clones the base, last, non-fatal on failure |
 | per agent | nothing; every agent sees the same directory | its own worktree |
-| deleted by | nothing, ever | `agent rm` deletes the agent's worktree; `project down` deletes nothing |
+| deleted by | nothing, ever | `agent rm` deletes the agent's worktree, and so does `project down` for the agents it removes; the base is never deleted |
 | `:ro` | allowed | rejected (git has to write) |
 
 The resolver fills in the missing `path`, so `project check --resolved` shows it.

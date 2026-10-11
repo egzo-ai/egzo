@@ -13,11 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
 
@@ -36,14 +34,17 @@ func currentTemplates(s *session) (stack.Published, error) {
 
 func newSpawnCommand(opts *options) *cobra.Command {
 	var message string
-	var attach, wait, asJSON bool
+	var attach, wait, asJSON, reuse, noFetch bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "spawn TEMPLATE [NAME]",
 		Short: "Start an agent from a template",
 		Long: "Start an agent from one of the templates `egzo up` published (the agents of egzo.yaml). NAME is the\n" +
 			"instance's name, `<template>-<n>` when left out. -m sends it a first message, the task. A name that\n" +
-			"is taken fails with exit code 17 and changes nothing.\n" +
+			"is taken fails with exit code 17 and changes nothing. Each git workspace the template lists gives the\n" +
+			"instance a worktree of its base clone on a branch of its own, egzo/NAME, made from a fresh fetch\n" +
+			"(--no-fetch skips it; a fetch that fails only warns). A worktree or a branch that is there already\n" +
+			"fails the spawn; --reuse continues with it.\n" +
 			"The instance's name is printed to stdout. --attach attaches to it; --wait (with -m) waits for the\n" +
 			"message to be resolved, prints the resolution to stdout and exits as `send --wait` does.",
 		Args: cobra.RangeArgs(1, 2),
@@ -70,7 +71,7 @@ func newSpawnCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 
-			request := stack.SpawnRequest{Template: args[0], Actor: operatorActor}
+			request := stack.SpawnRequest{Template: args[0], Actor: operatorActor, NoFetch: noFetch, Reuse: reuse}
 			if len(args) == 2 {
 				request.Name = args[1]
 			}
@@ -123,6 +124,8 @@ func newSpawnCommand(opts *options) *cobra.Command {
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the first message to be resolved and print the answer (needs -m)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "with --wait, give up after this long (exit code 5); the message stays open")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the instance as one JSON object")
+	cmd.Flags().BoolVar(&reuse, "reuse", false, "continue with the worktree or the branch an earlier instance of this name left")
+	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "make the worktrees from the base clones as they are, without fetching first")
 	return cmd
 }
 
@@ -168,30 +171,9 @@ func attachAfterSpawn(ctx context.Context, s *session, name string) error {
 	return attachTo(ctx, s, name, envOr("EGZO_DETACH_KEYS", "ctrl-]"), false)
 }
 
-// viewOfInstances is the project with the given instances as its agents, from the published templates
-// when they can be read and from the file otherwise: it says which checkouts belong to each instance.
-func viewOfInstances(ctx context.Context, cmd *cobra.Command, s *session, instances []stack.Instance) *config.Resolved {
-	byName := map[string]string{}
-	for _, instance := range instances {
-		byName[instance.Name] = instance.Template
-	}
-	if published, err := stack.ReadPublished(ctx, s.engine, s.Resolved.Name); err == nil {
-		return published.View(byName)
-	}
-	fmt.Fprintln(cmd.ErrOrStderr(), "warning: the published templates cannot be read: the checkouts are found from egzo.yaml")
-	view := *s.Resolved
-	view.Agents = map[string]config.ResolvedAgent{}
-	for name, template := range byName {
-		if agent, ok := s.Resolved.Agents[template]; ok {
-			view.Agents[name] = agent
-		}
-	}
-	return &view
-}
-
-// removeInstances removes the instances named, and with workspaces the checkouts of their own, after the
-// inspection `down --workspaces` does. Nothing is removed unless everything may be.
-func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names []string, workspaces, force, yes bool) ([]string, error) {
+// removeInstances removes the instances named, and with them their worktrees. Nothing is removed unless
+// everything may be.
+func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names []string, force bool) ([]string, error) {
 	release, err := lockOrWait(s, cmd)
 	if err != nil {
 		return nil, err
@@ -201,13 +183,13 @@ func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names 
 	if err != nil {
 		return nil, err
 	}
-	return removeObserved(ctx, cmd, s, observed, names, workspaces, force, yes)
+	return removeObserved(ctx, cmd, s, observed, names, force)
 }
 
-// removeObserved is removeInstances under the lock, for what was just observed.
-func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observed stack.Observed, names []string, workspaces, force, yes bool) ([]string, error) {
-	var err error
-	var instances []stack.Instance
+// removeObserved is removeInstances under the lock, for what was just observed. An instance's worktree is
+// its own and goes with it, with no check for work in it: what was committed stays on the branch egzo/NAME
+// in the base clone.
+func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observed stack.Observed, names []string, force bool) ([]string, error) {
 	for _, name := range names {
 		instance, ok := observed.Instance(name)
 		if !ok {
@@ -219,119 +201,24 @@ func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observe
 		if instance.State == "running" && !force {
 			return nil, fmt.Errorf("instance %q is running: stop it first (egzo stop %s) or use --force", name, name)
 		}
-		instances = append(instances, instance)
-	}
-
-	var doomed []string
-	if workspaces {
-		view := viewOfInstances(ctx, cmd, s, instances)
-		var dirs []string
-		for _, instance := range instances {
-			dirs = append(dirs, stack.InstanceGitDirs(view, instance.Name)...)
-		}
-		// Nothing may write to a checkout while it is inspected and while the person decides.
-		var stopped []stack.Resource
-		for _, instance := range instances {
-			if instance.State != "running" {
-				continue
-			}
-			for _, r := range observed.Resources {
-				if r.Type == "container" && r.Instance == instance.Name && r.Kind == "agent" {
-					timeout := 5
-					if err := s.engine.API.ContainerStop(ctx, r.ID, container.StopOptions{Timeout: &timeout}); err != nil {
-						stack.StartAgents(ctx, s.engine, stopped)
-						return nil, fmt.Errorf("stop %s: %w", instance.Name, err)
-					}
-					stopped = append(stopped, r)
-				}
-			}
-		}
-		doomed, err = chooseCheckoutsToRemove(ctx, cmd, s, dirs, yes, force)
-		if err != nil {
-			stack.StartAgents(ctx, s.engine, stopped)
-			return nil, err
-		}
 	}
 	removed, err := stack.RemoveInstances(ctx, s.engine, observed, s.Resolved.Name, names, true, cmd.ErrOrStderr())
-	if err != nil {
-		return removed, err
+	if werr := stack.RemoveWorktrees(s.Resolved, removed, cmd.ErrOrStderr()); err == nil {
+		err = werr
 	}
-	for _, dir := range doomed {
-		fmt.Fprintf(cmd.ErrOrStderr(), "remove workspace %s\n", dir)
-		if err := os.RemoveAll(dir); err != nil {
-			return removed, err
-		}
-	}
-	return removed, nil
-}
-
-// chooseCheckoutsToRemove is chooseWorkspacesToRemove for a given list of directories.
-func chooseCheckoutsToRemove(ctx context.Context, cmd *cobra.Command, s *session, dirs []string, yes, force bool) ([]string, error) {
-	var existing []string
-	var skipped []string
-	for _, dir := range dirs {
-		if _, err := os.Lstat(dir); err != nil {
-			continue
-		}
-		if err := stack.RemovalProblem(dir, s.Dir); err != nil {
-			skipped = append(skipped, err.Error())
-			continue
-		}
-		existing = append(existing, dir)
-	}
-	unsaved, err := stack.InspectDirs(ctx, s.engine, s.Resolved.Name, existing, s.Dir, imageRef(), stack.AgentUser(s.engine))
-	if err != nil {
-		return nil, err
-	}
-	var blocking []stack.Unsaved
-	ignored := map[string]int{}
-	for _, u := range unsaved {
-		if u.Blocks() {
-			blocking = append(blocking, u)
-		}
-		ignored[u.Dir] = u.Ignored
-	}
-	if len(blocking) > 0 && !force {
-		lines := make([]string, len(blocking))
-		for i, u := range blocking {
-			lines[i] = "  " + u.String()
-		}
-		return nil, fmt.Errorf("refusing to remove workspaces that hold unsaved work (uncommitted files, unpushed commits or stashes):\n%s\n"+
-			"commit and push it, or use --force to throw it away", strings.Join(lines, "\n"))
-	}
-	for _, reason := range skipped {
-		fmt.Fprintf(cmd.ErrOrStderr(), "not removing: %s\n", reason)
-	}
-	if len(existing) == 0 || yes {
-		return existing, nil
-	}
-	var listing []string
-	for _, dir := range existing {
-		line := dir
-		if n := ignored[dir]; n > 0 {
-			line += fmt.Sprintf("  (%d ignored file(s) or director(ies) in no commit will be deleted too)", n)
-		}
-		listing = append(listing, line)
-	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Remove these workspace directories?\n  %s\n[y/N] ", strings.Join(listing, "\n  "))
-	answer, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
-	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
-		return nil, fmt.Errorf("aborted: nothing was removed")
-	}
-	return existing, nil
+	return removed, err
 }
 
 func newRmCommand(opts *options) *cobra.Command {
-	var workspaces, force, yes, asJSON bool
+	var force, asJSON bool
 	cmd := &cobra.Command{
 		Use:   "rm INSTANCE...",
 		Short: "Remove instances",
-		Long: "Remove instances: the container, the network and the home volume, and the agent's registration in the\n" +
-			"control sidecar and the proxy. What was asked of the agent and is still open is closed as failed.\n" +
-			"A running instance needs --force. Checkouts on the host are kept because they hold work: --workspaces\n" +
-			"removes the instance's own clone or worktree (never a shared checkout or a worktree base), after looking\n" +
-			"for uncommitted files and unpushed commits and refusing when it finds any (--force removes anyway), and\n" +
-			"after asking (--yes does not).",
+		Long: "Remove instances: the container, the network, the home volume and the worktrees of its git workspaces,\n" +
+			"and the agent's registration in the control sidecar and the proxy. What was asked of the agent and is\n" +
+			"still open is closed as failed. A running instance needs --force. Nothing is checked first: what the\n" +
+			"agent committed stays on its branch egzo/NAME in the base clone, the rest of a worktree is gone.\n" +
+			"Directory workspaces are never touched.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -341,7 +228,7 @@ func newRmCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			removed, err := removeInstances(ctx, cmd, s, args, workspaces, force, yes)
+			removed, err := removeInstances(ctx, cmd, s, args, force)
 			if asJSON {
 				if removed == nil {
 					removed = []string{}
@@ -352,9 +239,7 @@ func newRmCommand(opts *options) *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&workspaces, "workspaces", false, "also remove the instance's own git checkout, once it is known to hold no unsaved work")
-	cmd.Flags().BoolVar(&force, "force", false, "remove a running instance, and checkouts that hold unsaved work")
-	cmd.Flags().BoolVar(&yes, "yes", false, "do not ask before removing workspaces")
+	cmd.Flags().BoolVar(&force, "force", false, "remove a running instance")
 	cmd.Flags().BoolVar(&asJSON, "json", false, `print {"removed": [names]}`)
 	return cmd
 }
@@ -398,7 +283,7 @@ func newPruneCommand(opts *options) *cobra.Command {
 		Short: "Remove the instances that match a filter",
 		Long: "Remove the instances that match any filter given: --stopped (not running), --stale (their template changed\n" +
 			"or is gone) and --older-than DURATION (created longer ago). At least one is needed. It lists what it would\n" +
-			"remove and asks first (--yes does not, --dry-run only lists). Checkouts on the host are kept.",
+			"remove and asks first (--yes does not, --dry-run only lists). Removing an instance removes its worktrees.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stopped && !stale && olderThan == 0 {
@@ -475,7 +360,7 @@ func newPruneCommand(opts *options) *cobra.Command {
 					still = append(still, c.Name)
 				}
 			}
-			removed, err := removeObserved(ctx, cmd, s, observed, still, false, true, true)
+			removed, err := removeObserved(ctx, cmd, s, observed, still, true)
 			if asJSON {
 				if removed == nil {
 					removed = []string{}

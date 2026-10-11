@@ -34,8 +34,9 @@ Be clear about these before running agents on something you care about.
   profiles tight, and keep secrets and private data out of workspaces the agent does not need.
 - **Prompt injection.** Text the agent reads (an issue, a web page, a file) can steer it. The sandbox limits what
   steering can do; it does not stop the agent from being steered.
-- **The workspace is writable.** Agents can delete or corrupt what you mount read-write. Use `:ro`, git, and the
-  `clone` mode (the default) so one agent cannot damage another's `.git`. `worktree` mode shares the base `.git`.
+- **The workspace is writable.** Agents can delete or corrupt what you mount read-write. Use `:ro` for directories and git for
+  code. Every agent has its own worktree, but the base clone's `.git` is writable by all of them, so one agent could damage
+  what the others share.
 - **Host paths** you mount are as exposed as you make them.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
   that is root-equivalent. Prefer a rootless engine.

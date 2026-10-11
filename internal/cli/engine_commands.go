@@ -4,19 +4,16 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/stack"
 	"github.com/egzo-ai/egzo/internal/version"
@@ -107,7 +104,7 @@ func newUpCommand(opts *options) *cobra.Command {
 			}
 
 			return stack.Up(ctx, s.engine, s.Resolved, s.Dir,
-				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix)}, cmd.OutOrStdout())
+				stack.Options{DryRun: dryRun, Recreate: recreate, Image: imageRef(), HarnessPrefix: os.Getenv(EnvHarnessPrefix), Warnings: cmd.ErrOrStderr()}, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change without changing anything")
@@ -116,14 +113,13 @@ func newUpCommand(opts *options) *cobra.Command {
 }
 
 func newDownCommand(opts *options) *cobra.Command {
-	var volumes, workspaces, yes, force bool
+	var volumes bool
 	cmd := &cobra.Command{
 		Use:   "down",
 		Short: "Remove the project's containers and networks",
-		Long: "Remove the project's containers and networks. Volumes are kept unless --volumes is given.\n" +
-			"Workspace directories on the host are never deleted, because they hold work that exists nowhere\n" +
-			"else. --workspaces removes the git checkouts, after looking in each for uncommitted files and\n" +
-			"unpushed commits and refusing when it finds any (--force removes them anyway), and after asking.",
+		Long: "Remove the project's containers and networks, and the worktrees of the instances it removes. Volumes are\n" +
+			"kept unless --volumes is given. The base clones and the directory workspaces on the host are never\n" +
+			"deleted: they are yours.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -142,103 +138,29 @@ func newDownCommand(opts *options) *cobra.Command {
 			if s.observed, err = stack.Observe(ctx, s.engine, s.Resolved.Name); err != nil {
 				return err
 			}
-			var doomed []string
-			if workspaces {
-				// Nothing may write to a checkout while it is inspected and while the person decides:
-				// the agents are stopped first, and started again if the removal is refused.
-				stopped, err := stack.StopAgents(ctx, s.engine, s.observed)
-				if err != nil {
-					return err
-				}
-				doomed, err = chooseWorkspacesToRemove(ctx, cmd, s, yes, force)
-				if err != nil {
-					stack.StartAgents(ctx, s.engine, stopped)
-					return err
-				}
-			}
+			instances := s.observed.InstanceNames()
 			if err := stack.Down(ctx, s.engine, s.observed, volumes, cmd.OutOrStdout()); err != nil {
+				// the instances that did go take their worktrees with them; the ones that are still there keep theirs
+				if again, observeErr := stack.Observe(ctx, s.engine, s.Resolved.Name); observeErr == nil {
+					still := map[string]bool{}
+					for _, name := range again.InstanceNames() {
+						still[name] = true
+					}
+					var gone []string
+					for _, name := range instances {
+						if !still[name] {
+							gone = append(gone, name)
+						}
+					}
+					stack.RemoveWorktrees(s.Resolved, gone, cmd.OutOrStdout())
+				}
 				return err
 			}
-			for _, dir := range doomed {
-				fmt.Fprintf(cmd.OutOrStdout(), "remove workspace %s\n", dir)
-				if err := os.RemoveAll(dir); err != nil {
-					return err
-				}
-			}
-			for _, root := range stack.WorkspaceRoots(s.Resolved) {
-				os.Remove(root) // only when nothing is left in it
-			}
-			return nil
+			return stack.RemoveWorktrees(s.Resolved, instances, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&volumes, "volumes", false, "also remove the project's volumes")
-	cmd.Flags().BoolVar(&workspaces, "workspaces", false, "also remove the git checkouts on the host, once they are known to hold no unsaved work")
-	cmd.Flags().BoolVar(&yes, "yes", false, "do not ask before removing workspaces")
-	cmd.Flags().BoolVar(&force, "force", false, "remove workspaces even when they hold uncommitted or unpushed work")
 	return cmd
-}
-
-// removableCheckouts splits the directories down --workspaces could remove into real checkouts, which may
-// go, and everything else, which is left alone with the reason.
-func removableCheckouts(project *config.Resolved, projectDir string) (ok, skipped []string) {
-	for _, dir := range stack.GitDirs(project) {
-		if _, err := os.Lstat(dir); err != nil {
-			continue
-		}
-		if err := stack.RemovalProblem(dir, projectDir); err != nil {
-			skipped = append(skipped, err.Error())
-			continue
-		}
-		ok = append(ok, dir)
-	}
-	return ok, skipped
-}
-
-// chooseWorkspacesToRemove returns the checkouts down --workspaces may remove, or an error when one
-// holds unsaved work or the user says no. It runs before anything is removed.
-func chooseWorkspacesToRemove(ctx context.Context, cmd *cobra.Command, s *session, yes, force bool) ([]string, error) {
-	user := stack.AgentUser(s.engine)
-	unsaved, err := stack.InspectCheckouts(ctx, s.engine, s.Resolved, s.Dir, imageRef(), user)
-	if err != nil {
-		return nil, err
-	}
-	var blocking []stack.Unsaved
-	ignored := map[string]int{}
-	for _, u := range unsaved {
-		if u.Blocks() {
-			blocking = append(blocking, u)
-		}
-		ignored[u.Dir] = u.Ignored
-	}
-	if len(blocking) > 0 && !force {
-		lines := make([]string, len(blocking))
-		for i, u := range blocking {
-			lines[i] = "  " + u.String()
-		}
-		return nil, fmt.Errorf("refusing to remove workspaces that hold unsaved work (uncommitted files, unpushed commits or stashes):\n%s\n"+
-			"commit and push it, or use --force to throw it away", strings.Join(lines, "\n"))
-	}
-	existing, skipped := removableCheckouts(s.Resolved, s.Dir)
-	for _, reason := range skipped {
-		fmt.Fprintf(cmd.ErrOrStderr(), "not removing: %s\n", reason)
-	}
-	if len(existing) == 0 || yes {
-		return existing, nil
-	}
-	var listing []string
-	for _, dir := range existing {
-		line := dir
-		if n := ignored[dir]; n > 0 {
-			line += fmt.Sprintf("  (%d ignored file(s) or director(ies) in no commit will be deleted too)", n)
-		}
-		listing = append(listing, line)
-	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Remove these workspace directories?\n  %s\n[y/N] ", strings.Join(listing, "\n  "))
-	answer, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
-	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
-		return nil, fmt.Errorf("aborted: nothing was removed")
-	}
-	return existing, nil
 }
 
 func newPsCommand(opts *options) *cobra.Command {

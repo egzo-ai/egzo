@@ -83,8 +83,8 @@ def test_a_prompt_that_is_not_an_existing_file_is_rejected(project):
 # --- names are identities: they become containers, networks, volumes, DNS names and refs ------------------
 
 
-@pytest.mark.parametrize("name", ["control", "proxy", "prep", "shared"])
-def test_an_agent_cannot_take_the_name_of_a_sidecar_or_a_reserved_directory(project, name):
+@pytest.mark.parametrize("name", ["control", "proxy", "prep"])
+def test_an_agent_cannot_take_the_name_of_a_sidecar_or_egzos_own_identity(project, name):
     result = project.config(spec(agents={name: agent(harness="custom", image="alpine")}))
     assert result.returncode != 0
     assert name in result.stderr and "reserved" in result.stderr

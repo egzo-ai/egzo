@@ -296,20 +296,18 @@ agents:
 func TestResolveWorkspaces(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("volume workspace has no source", func(t *testing.T) {
+	t.Run("a workspace without a source is a directory under workspaces", func(t *testing.T) {
 		resolved, _ := mustResolve(t, dir, "workspaces:\n  scratch: {}\n")
-		if got := resolved.Workspaces["scratch"]; got != (ResolvedWorkspace{}) {
-			t.Errorf("scratch = %+v", got)
+		want := ResolvedWorkspace{Path: filepath.Join(dir, "workspaces", "scratch")}
+		if got := resolved.Workspaces["scratch"]; got != want {
+			t.Errorf("scratch = %+v, want %+v", got, want)
 		}
 	})
 
 	t.Run("git workspace defaults", func(t *testing.T) {
 		resolved, _ := mustResolve(t, dir, "workspaces:\n  repo:\n    git: { url: https://github.com/o/r.git }\n")
 		got := resolved.Workspaces["repo"]
-		if got.Mode != "clone" {
-			t.Errorf("mode = %q, want clone", got.Mode)
-		}
-		if want := filepath.Join(dir, ".egzo", "workspaces", "repo"); got.Path != want {
+		if want := filepath.Join(dir, "workspaces", "repo"); got.Path != want {
 			t.Errorf("path = %q, want %q", got.Path, want)
 		}
 	})
@@ -332,11 +330,11 @@ workspaces:
 		name, yaml, want string
 	}{
 		{"bad name", "workspaces:\n  'a:b': {}\n", "a name is 1 to 63 lowercase"},
-		{"mode without git", "workspaces:\n  w: { mode: clone }\n", "mode only applies to git"},
-		{"path without git", "workspaces:\n  w: { path: ./x }\n", "path only applies to git"},
+		{"mode is gone", "workspaces:\n  w: { git: { url: https://x/y }, mode: clone }\n", "mode is gone"},
+		{"mode is gone even without git", "workspaces:\n  w: { mode: shared }\n", "worktree"},
+		{"two workspaces with one path", "workspaces:\n  a: { path: ./x }\n  b: { path: ./x }\n", "also the path of workspace"},
 		{"ssh url", "workspaces:\n  w: { git: { url: 'git@github.com:o/r.git' } }\n", "must be an https URL"},
 		{"local path url", "workspaces:\n  w: { git: { url: /srv/repo } }\n", "must be an https URL"},
-		{"unknown mode", "workspaces:\n  w: { git: { url: https://x/y }, mode: copy }\n", `unknown mode "copy"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { wantProblems(t, dir, c.yaml, c.want) })
@@ -363,7 +361,7 @@ agents:
   a: { harness: custom, image: x, workspaces: [shared] }
 `)
 		agent := resolved.Agents["a"]
-		want := []Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw"}}
+		want := []Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw", HostPath: filepath.Join(dir, "workspaces", "shared")}}
 		if !reflect.DeepEqual(agent.Workspaces, want) {
 			t.Errorf("mounts = %+v, want %+v", agent.Workspaces, want)
 		}
@@ -387,12 +385,25 @@ agents:
 		}
 	})
 
-	t.Run("host directories mount by their base name", func(t *testing.T) {
+	t.Run("a directory workspace is mounted from its path", func(t *testing.T) {
 		resolved, _ := mustResolve(t, dir, `
+workspaces: { docs: { path: ./docs } }
 agents:
-  a: { harness: custom, image: x, workspaces: ["./docs:ro"] }
+  a: { harness: custom, image: x, workspaces: ["docs:ro"] }
 `)
 		want := Mount{Name: "docs", Mount: "/workspace/docs", Mode: "ro", HostPath: filepath.Join(dir, "docs")}
+		if got := resolved.Agents["a"].Workspaces[0]; got != want {
+			t.Errorf("mount = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a git workspace is mounted per instance, so its mount has no host path", func(t *testing.T) {
+		resolved, _ := mustResolve(t, dir, `
+workspaces: { repo: { git: { url: https://x/y.git } } }
+agents:
+  a: { harness: custom, image: x, workspaces: [repo] }
+`)
+		want := Mount{Name: "repo", Mount: "/workspace/repo", Mode: "rw"}
 		if got := resolved.Agents["a"].Workspaces[0]; got != want {
 			t.Errorf("mount = %+v, want %+v", got, want)
 		}
@@ -426,11 +437,10 @@ agents:
 	}{
 		{"malformed reference", "agents:\n  a: { harness: custom, image: x, workspaces: ['a:b:c'] }\n", "unsupported workspace reference"},
 		{"undeclared workspace", "agents:\n  a: { harness: custom, image: x, workspaces: [ghost] }\n", `workspace "ghost" is not declared`},
-		{"missing host directory", "agents:\n  a: { harness: custom, image: x, workspaces: ['./nope'] }\n", "not an existing directory"},
-		{"host path is a file", "agents:\n  a: { harness: custom, image: x, workspaces: ['./afile'] }\n", "not an existing directory"},
+		{"an inline path is not a workspace", "agents:\n  a: { harness: custom, image: x, workspaces: ['./nope'] }\n", "declare it once under workspaces:"},
 		{"read-only git workspace", "workspaces:\n  r: { git: { url: https://x/y } }\nagents:\n  a: { harness: custom, image: x, workspaces: ['r:ro'] }\n", "cannot be read-only"},
-		{"read-only git workspace points at the alternatives", "workspaces:\n  r: { git: { url: https://x/y } }\nagents:\n  a: { harness: custom, image: x, workspaces: ['r:ro'] }\n", "host path (./path:ro) or a shared workspace"},
-		{"mount collision", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w, './docs', 'w'] }\n", "two workspaces mount at /workspace/w"},
+		{"read-only git workspace points at the alternatives", "workspaces:\n  r: { git: { url: https://x/y } }\nagents:\n  a: { harness: custom, image: x, workspaces: ['r:ro'] }\n", "declare a directory workspace"},
+		{"mount collision", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w, 'w'] }\n", "two workspaces mount at /workspace/w"},
 		{"another agent's checkout cannot be mounted", "workspaces: { w: {} }\nagents:\n  a: { harness: custom, image: x, workspaces: [w] }\n  b: { harness: custom, image: x, workspaces: ['a/w:ro'] }\n", "unsupported workspace reference"},
 	}
 	for _, c := range cases {

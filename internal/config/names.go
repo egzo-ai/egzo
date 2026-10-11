@@ -18,7 +18,7 @@ import (
 var identifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
 // reservedAgents are names egzo gives to its own containers, networks, DNS aliases or directories.
-var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": true, "shared": true}
+var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": true}
 
 // reservedWorkspaces are volumes egzo creates for itself: a workspace with one of these names would hand
 // an agent the control volume (which holds the key every token derives from) or the CA the agents trust.

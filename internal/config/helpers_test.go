@@ -9,24 +9,22 @@ func TestParseRef(t *testing.T) {
 	cases := []struct {
 		raw      string
 		ok       bool
-		kind     refKind
 		target   string
-		agent    string // unused: kept so the table reads as before
 		readOnly bool
 	}{
-		{"repo", true, refWorkspace, "repo", "", false},
-		{"repo:ro", true, refWorkspace, "repo", "", true},
-		{"repo:rw", true, refWorkspace, "repo", "", false},
-		{"./docs:ro", true, refHost, "./docs", "", true},
-		{"../shared", true, refHost, "../shared", "", false},
-		{"/srv/data", true, refHost, "/srv/data", "", false},
-		{"coder/repo:ro", false, 0, "", "", false}, // another agent's checkout cannot be mounted
-		{"coder/repo", false, 0, "", "", false},
-		{"", false, 0, "", "", false},
-		{":ro", false, 0, "", "", false},
-		{"a:b:ro", false, 0, "", "", false},
-		{"a/b/c:ro", false, 0, "", "", false},
-		{"/b:ro:x", false, 0, "", "", false},
+		{"repo", true, "repo", false},
+		{"repo:ro", true, "repo", true},
+		{"repo:rw", true, "repo", false},
+		{"./docs:ro", false, "", false}, // a path is not a workspace: it is declared under workspaces:
+		{"../shared", false, "", false},
+		{"/srv/data", false, "", false},
+		{"coder/repo:ro", false, "", false}, // another agent's worktree cannot be mounted
+		{"coder/repo", false, "", false},
+		{"", false, "", false},
+		{":ro", false, "", false},
+		{"a:b:ro", false, "", false},
+		{"a/b/c:ro", false, "", false},
+		{"/b:ro:x", false, "", false},
 	}
 	for _, c := range cases {
 		got, ok := parseRef(c.raw)
@@ -37,7 +35,7 @@ func TestParseRef(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if got.kind != c.kind || got.target != c.target || got.readOnly != c.readOnly {
+		if got.target != c.target || got.readOnly != c.readOnly {
 			t.Errorf("parseRef(%q) = %+v", c.raw, got)
 		}
 	}

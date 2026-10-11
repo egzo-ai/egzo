@@ -205,14 +205,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 	}
 	desired.Control = control.Name
 
-	// Declared workspaces without a source are shared volumes.
-	workspaceNames := sortedKeys(project.Workspaces)
 	volumes := []VolumeSpec{controlVolume}
-	for _, name := range workspaceNames {
-		if project.Workspaces[name].Git == nil {
-			volumes = append(volumes, VolumeSpec{Name: project.Name + "_" + name, Identity: identity(name, kindWorkspace)})
-		}
-	}
 
 	networks := []NetworkSpec{controlNetwork}
 	containers := []ContainerSpec{control}
@@ -408,29 +401,17 @@ func agentContainer(
 
 	var workspaceNames []string
 	for _, mount := range agent.Workspaces {
-		switch {
+		switch declared, ok := project.Workspaces[mount.Name]; {
 		case mount.HostPath != "":
 			spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: mount.HostPath, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
-		default:
-			declared, ok := project.Workspaces[mount.Name]
-			if !ok {
-				return spec, fmt.Errorf("agent %q: workspace %q is not declared", name, mount.Name)
-			}
-			if declared.Git != nil {
-				spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: CheckoutDir(declared, name), Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
-				if declared.Mode == "worktree" {
-					spec.Mounts = append(spec.Mounts, MountSpec{Bind: true, Source: BaseDir(declared), Target: baseMountPath(mount.Name)})
-				}
-				workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))
-				continue
-			}
-			spec.Mounts = append(spec.Mounts, MountSpec{Source: project.Name + "_" + mount.Name, Target: mount.Mount, ReadOnly: mount.Mode == "ro"})
-			if mount.Mode != "ro" && in.User != "" {
-				spec.OwnedVolumes = append(spec.OwnedVolumes, project.Name+"_"+mount.Name)
-			}
+		case !ok:
+			return spec, fmt.Errorf("agent %q: workspace %q is not declared", name, mount.Name)
+		case declared.Git != nil:
+			spec.Mounts = append(spec.Mounts, worktreeMounts(mount.Name, declared, name)...)
 		}
 		workspaceNames = append(workspaceNames, strings.TrimPrefix(mount.Mount, "/workspace/"))
 	}
+	spec.WorkingDir = instanceWorkdir(project, agent, name)
 
 	spec.Runtime = agent.Runtime
 	if agent.Resources.CPUs > 0 {

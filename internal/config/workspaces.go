@@ -4,7 +4,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,11 +11,12 @@ import (
 
 const workspaceRoot = "/workspace"
 
-// ResolvedWorkspace is a declared workspace with defaults applied.
+// ResolvedWorkspace is a declared workspace with defaults applied. Path is always set: the directory
+// itself, or for a git workspace the directory that holds the base clone (.base) and one worktree per
+// instance.
 type ResolvedWorkspace struct {
 	Git  *Git   `yaml:"git,omitempty"`
-	Mode string `yaml:"mode,omitempty"`
-	Path string `yaml:"path,omitempty"`
+	Path string `yaml:"path"`
 }
 
 // Mount is one workspace as an agent sees it.
@@ -27,56 +27,81 @@ type Mount struct {
 	HostPath string `yaml:"host_path,omitempty"`
 }
 
-var gitModes = map[string]bool{"clone": true, "worktree": true, "shared": true}
-
 func resolveWorkspaces(file *File, dir string, p *problems) map[string]ResolvedWorkspace {
 	resolved := map[string]ResolvedWorkspace{}
-	for name, workspace := range file.Workspaces {
+	owners := map[string]string{}
+	for _, name := range sortedWorkspaceNames(file) {
+		workspace := file.Workspaces[name]
 		if !identifier.MatchString(name) {
 			continue // checkNames reports it
 		}
-		if workspace.Git == nil {
-			if workspace.Mode != "" {
-				p.addf("workspace %q: mode only applies to git workspaces", name)
-			}
-			if workspace.Path != "" {
-				p.addf("workspace %q: path only applies to git workspaces", name)
-			}
-			resolved[name] = ResolvedWorkspace{}
-			continue
+		if workspace.Mode != "" {
+			p.addf("workspace %q: mode is gone: every agent gets a worktree of the repository's base clone", name)
 		}
-
-		checkGit(name, workspace.Git, p)
-		mode := workspace.Mode
-		if mode == "" {
-			mode = "clone"
-		}
-		if !gitModes[mode] {
-			p.addf("workspace %q: unknown mode %q (use clone, worktree or shared)", name, mode)
+		if workspace.Git != nil {
+			checkGit(name, workspace.Git, p)
 		}
 		path := workspace.Path
 		switch {
 		case path == "":
-			path = filepath.Join(dir, ".egzo", "workspaces", name)
+			path = filepath.Join(dir, "workspaces", name)
 		case !filepath.IsAbs(path):
 			path = filepath.Join(dir, path)
 		}
-		resolved[name] = ResolvedWorkspace{Git: workspace.Git, Mode: mode, Path: filepath.Clean(path)}
+		path = filepath.Clean(path)
+		if other, taken := owners[path]; taken {
+			p.addf("workspace %q: path %s is also the path of workspace %q", name, path, other)
+		}
+		owners[path] = name
+		resolved[name] = ResolvedWorkspace{Git: workspace.Git, Path: path}
 	}
+	checkPaths(resolved, dir, p)
 	return resolved
 }
 
-type refKind int
+// checkPaths refuses paths that overlap: a workspace inside another would be exposed to every agent that lists the
+// outer one, and an instance's worktree directory (<path>/<instance>) could land on a directory somebody else owns.
+// It also refuses the root and egzo's own state.
+func checkPaths(resolved map[string]ResolvedWorkspace, dir string, p *problems) {
+	names := make([]string, 0, len(resolved))
+	for name := range resolved {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	inside := func(path, parent string) bool {
+		return path == parent || strings.HasPrefix(path, parent+string(filepath.Separator))
+	}
+	for _, name := range names {
+		path := resolved[name].Path
+		switch {
+		case path == "/":
+			p.addf("workspace %q: path / is the whole filesystem root", name)
+		case inside(path, filepath.Join(dir, ".egzo")):
+			p.addf("workspace %q: path %s is inside .egzo, where egzo keeps its own state", name, path)
+		}
+		for _, other := range names {
+			if other == name {
+				continue
+			}
+			if o := resolved[other].Path; o != path && inside(path, o) {
+				p.addf("workspace %q: path %s is inside the path of workspace %q (%s): a workspace cannot contain another", name, path, other, o)
+			}
+		}
+	}
+}
 
-const (
-	refWorkspace refKind = iota
-	refHost
-)
+func sortedWorkspaceNames(file *File) []string {
+	names := make([]string, 0, len(file.Workspaces))
+	for name := range file.Workspaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
 
-// ref is a parsed entry of an agent's workspaces list: name[:ro] or ./path[:ro].
+// ref is a parsed entry of an agent's workspaces list: name[:ro].
 type ref struct {
 	raw      string
-	kind     refKind
 	target   string
 	readOnly bool
 }
@@ -91,18 +116,10 @@ func parseRef(raw string) (ref, bool) {
 	case strings.HasSuffix(rest, ":rw"):
 		rest = strings.TrimSuffix(rest, ":rw")
 	}
-	if rest == "" || strings.Contains(rest, ":") {
+	if rest == "" || strings.ContainsAny(rest, ":/") {
 		return parsed, false
 	}
 	parsed.target = rest
-	switch {
-	case strings.HasPrefix(rest, "./"), strings.HasPrefix(rest, "../"), strings.HasPrefix(rest, "/"):
-		parsed.kind = refHost
-	case strings.Contains(rest, "/"):
-		return parsed, false
-	default:
-		parsed.kind = refWorkspace
-	}
 	return parsed, true
 }
 
@@ -113,7 +130,12 @@ func agentRefs(file *File, p *problems) map[string][]ref {
 		for _, raw := range agent.Workspaces {
 			parsed, ok := parseRef(raw)
 			if !ok {
-				p.addf("agent %q: unsupported workspace reference %q (use name, name:ro, ./path or /abs/path; a template cannot mount another agent's checkout)", name, raw)
+				if strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") || strings.HasPrefix(raw, "/") {
+					p.addf("agent %q: workspace %q is a path, and an agent lists only declared workspaces: declare it once under workspaces: "+
+						"(for example `docs: {path: %s}`) and list its name", name, raw, strings.TrimSuffix(strings.TrimSuffix(raw, ":ro"), ":rw"))
+				} else {
+					p.addf("agent %q: unsupported workspace reference %q (use name or name:ro; a template cannot mount another agent's worktree)", name, raw)
+				}
 				continue
 			}
 			refs[name] = append(refs[name], parsed)
@@ -122,61 +144,45 @@ func agentRefs(file *File, p *problems) map[string][]ref {
 	return refs
 }
 
-// resolveMounts turns an agent's references into mounts and its working directory.
+// resolveMounts turns an agent's references into mounts and its working directory. A directory workspace
+// is mounted from its path; a git workspace is mounted per instance (its worktree and the base), which is
+// decided when the instance is made, so its mount carries no host path.
 func resolveMounts(
-	file *File, name string, agent Agent, dir string,
-	workspaces map[string]ResolvedWorkspace, refs map[string][]ref, p *problems,
+	name string, agent Agent, workspaces map[string]ResolvedWorkspace, refs map[string][]ref, p *problems,
 ) ([]Mount, string) {
 	mounts := []Mount{}
 	seen := map[string]bool{}
-	add := func(m Mount) {
-		if seen[m.Mount] {
-			p.addf("agent %q: two workspaces mount at %s", name, m.Mount)
-			return
-		}
-		seen[m.Mount] = true
-		mounts = append(mounts, m)
-	}
-
 	for _, r := range refs[name] {
 		mode := "rw"
 		if r.readOnly {
 			mode = "ro"
 		}
-		switch r.kind {
-		case refWorkspace:
-			declared, ok := workspaces[r.target]
-			if !ok {
-				p.addf("agent %q: workspace %q is not declared under workspaces:", name, r.target)
-				continue
-			}
-			if declared.Git != nil && r.readOnly {
-				p.addf("agent %q: workspace %q is a git workspace and cannot be read-only because git needs write access; "+
-					"use a host path (./path:ro) or a shared workspace for read access", name, r.target)
-				continue
-			}
-			add(Mount{Name: r.target, Mount: workspaceRoot + "/" + r.target, Mode: mode})
-
-		case refHost:
-			path := r.target
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(dir, path)
-			}
-			path = filepath.Clean(path)
-			if path == "/" {
-				p.addf("agent %q: workspace %q would mount the whole filesystem root", name, r.raw)
-				continue
-			}
-			if info, err := os.Stat(path); err != nil || !info.IsDir() {
-				p.addf("agent %q: workspace %q is not an existing directory (%s)", name, r.raw, path)
-				continue
-			}
-			base := filepath.Base(path)
-			add(Mount{Name: base, Mount: workspaceRoot + "/" + base, Mode: mode, HostPath: path})
-
+		declared, ok := workspaces[r.target]
+		if !ok {
+			p.addf("agent %q: workspace %q is not declared under workspaces:", name, r.target)
+			continue
 		}
+		mount := Mount{Name: r.target, Mount: workspaceRoot + "/" + r.target, Mode: mode}
+		if declared.Git != nil {
+			if r.readOnly {
+				p.addf("agent %q: workspace %q is a git workspace and cannot be read-only because git needs write access; "+
+					"declare a directory workspace (no git:) and list it as :ro for read access", name, r.target)
+				continue
+			}
+		} else {
+			if declared.Path == "/" {
+				p.addf("agent %q: workspace %q would mount the whole filesystem root", name, r.target)
+				continue
+			}
+			mount.HostPath = declared.Path
+		}
+		if seen[mount.Mount] {
+			p.addf("agent %q: two workspaces mount at %s", name, mount.Mount)
+			continue
+		}
+		seen[mount.Mount] = true
+		mounts = append(mounts, mount)
 	}
-
 	return mounts, workdir(name, agent, mounts, p)
 }
 

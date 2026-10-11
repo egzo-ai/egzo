@@ -158,7 +158,7 @@ injected only for the hosts of declared services. Use it for a trusted template,
 
 ## What the sandbox does not allow
 
-- **Raw TCP, UDP, ssh, ping, DNS to other servers.** Only HTTPS through the proxy. A git remote must be HTTPS. ssh
+- **Raw TCP, UDP, ssh, ping, DNS to other servers.** Only HTTPS through the proxy. A git remote must be HTTPS: the base clone (`egzo up`) and the fetch before each worktree (`egzo spawn`) run in short-lived prep containers on a network the proxy serves, so they need the git host in `allow` and, for a private repository, the `github` service. ssh
   from an agent is an idea in [`roadmap/ssh-access.md`](../roadmap/ssh-access.md), not built.
 - **Pinned-certificate clients.** A host with an injected credential is intercepted with the project CA; a client that
   pins certificates will fail on it.

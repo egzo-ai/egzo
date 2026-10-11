@@ -1,8 +1,8 @@
-# Git workspaces
+# Workspaces
 
-A git workspace is a repository the agents work in. The short version is in [the project file](project-file.md); for the egress side of cloning see
-[sandboxing](sandboxing.md);
-this page is how the pieces behave.
+A workspace is something the agents work in. It is declared once, at the top of the project file, and belongs to the
+project: any number of agents may list it. There are two kinds. The short version is in
+[the project file](project-file.md); for the egress side of cloning see [sandboxing](sandboxing.md).
 
 ```yaml
 vaults:
@@ -10,50 +10,59 @@ vaults:
 egress:
   default: { services: { github: main/GITHUB_TOKEN } }
 workspaces:
-  repo:
+  shop:                                  # a git repository
     git: { url: https://github.com/acme/shop.git, branch: main }
-    mode: clone
+  docs: { path: ./docs }                 # a directory of yours
+  scratch: {}                            # a directory egzo keeps: ./workspaces/scratch
+agents:
+  coder: { harness: claude-code, workspaces: [shop, "docs:ro", scratch] }
 ```
 
-## Who clones, and with what credential
+An agent lists declared names only (`name` or `name:ro`); a path in an agent's list is an error that says to declare
+it. Every workspace has a `path`, resolved against the project directory (`egzo config` prints it); without one it is
+`./workspaces/<name>`. Everything is a plain directory on the host, in the project, so you can open it in your editor.
+Keep `workspaces/` out of git: `egzo init` adds it to `.gitignore` and `egzo doctor` warns if it is missing.
 
-Agents hold no git credential. When you `spawn`, a short-lived **prep container** (with git 2.47 or later, run as
-your uid) makes the checkout, on the new instance's own network, so the clone goes through the proxy and the proxy
-adds the token. The `github` service injects it for `github.com`. Pushes work the same way: the agent runs plain
-`git push` and the proxy authenticates it. Only HTTPS URLs are accepted. A repository on your disk is not a git
-source; mount it as a directory (`./path`).
+## Directory workspaces
 
-Without a service for the host, a private repository fails to clone, and a public one needs the host in `allow`.
+No `git`: the directory at `path` is mounted at `/workspace/<name>` in every agent that lists it, all of them seeing
+the same files. `up` and `spawn` create it, empty, when it is missing. egzo never deletes it, and never looks inside:
+it is yours (`:ro` makes it read-only for an agent).
 
-## The three modes
+## Git workspaces
 
-| mode | what an instance gets | when to use |
-|---|---|---|
-| `clone` (default) | its own independent clone | the safe default: one agent cannot damage another's `.git` |
-| `worktree` | a git worktree of one shared base clone, on its own branch `egzo/<instance>` | many agents on a big repo; faster and smaller |
-| `shared` | the same checkout as every other instance that lists it | agents that must see each other's files |
+`path` holds the repository, laid out for agents that work side by side:
 
-Notes:
-- With `worktree`, the base `.git` is mounted writable into every agent that uses it, so one agent could damage
-  what the others share. It is an accepted trade, which is why `clone` is the default.
-- `clone` and `worktree` checkouts belong to the instance and are named after it; `shared` ones belong to the project.
-- To see another agent's work, fetch what it pushed. There is no way to mount another agent's checkout.
-- A git workspace cannot be `:ro`; git needs to write. For read-only files, use a host directory (`./docs:ro`).
-- Changing `mode` does not convert existing checkouts: `up` reports the mismatch and refuses until you remove them.
-
-## Where the files are
-
-`.egzo/workspaces/<name>/<instance>/` in the project directory (`path:` changes the location). Keep `.egzo/` in
-`.gitignore`; `egzo init` adds it and `egzo doctor` warns if it is missing. You can open these directories in your
-editor while the agent works. Inside containers a checkout is always `/workspace/<name>`.
-
-## Keeping work safe
-
-`egzo rm` and `egzo down` never delete checkouts, because they hold work that exists nowhere else. To delete them:
-
-```console
-$ egzo down --workspaces      # looks in each for uncommitted files and unpushed commits, refuses if it finds any
-$ egzo down --workspaces --force --yes
+```
+workspaces/shop/.base          the base clone, made by `egzo up`, with no files checked out
+workspaces/shop/coder-1        a worktree for the instance coder-1, made by `egzo spawn`
+workspaces/shop/coder-2
 ```
 
-See [managing projects](managing-projects.md) for `rm` and `down`. Tell agents in their prompt to commit and push their branch when done; `egzo rm` is safe after that.
+Inside an agent the names are kept: it sees its own worktree at `/workspace/shop/coder-1` (its working directory when
+it lists only that workspace) and the base at `/workspace/shop/.base`, never another agent's worktree. The links git
+keeps between a worktree and its base are relative, so `git status` works on the host in `workspaces/shop/coder-1` too
+(git 2.48 or later on the host).
+
+- **`up`** clones the base last, through the proxy, as the egress profile of the first template that lists the
+  workspace. A clone that fails (the host is not allowed, the repository is private and no service has its token) is
+  a warning, not an error: `up` finishes, and `spawn` tries again. A base that is already there is left as it is, with
+  a warning when its url is not the one in the file.
+- **`spawn`** fetches the configured branch into the base through the proxy, as the new instance, and makes the
+  worktree on a branch of its own, `egzo/<instance>`, starting at what was fetched. A fetch that fails only warns and
+  the worktree starts from the base as it is; `--no-fetch` skips it. A base that is missing is cloned first.
+- **Credentials.** Agents hold none. The `github` service injects the token for `github.com`, so `git push` works
+  from inside the agent. Only HTTPS URLs are accepted. A repository on your disk is not a git source: use a directory
+  workspace.
+- **Removing** an instance (`egzo rm`, `prune`, `down`) deletes its worktree, with no check. What the agent committed
+  stays on its branch in the base clone, `egzo/<instance>`. Tell agents to commit and push when they are done. The
+  base clone is never deleted: remove `workspaces/<name>` yourself.
+- **Spawning a name again** fails while its worktree directory or its branch is still there. `egzo spawn --reuse`
+  continues with them (the branch is checked out again in a fresh worktree). A name egzo picks itself
+  (`coder-2`) skips the names that left a worktree or a branch behind.
+- A git workspace cannot be `:ro`; git needs to write. For read-only files, use a directory workspace.
+- **The base is trusted by every agent that lists the workspace.** Its `.git` is writable by all of them, so one agent
+  could damage what the others share, or plant a git setting (a filter, a credential helper) that runs the next time
+  git works in the base, in a later spawn's prep container, with that instance's proxy identity, or on your host.
+  egzo never runs the base's hooks or file-system monitor, but it cannot stop every setting. It is an accepted
+  trade; list a git workspace only for agents that you trust with each other's work.

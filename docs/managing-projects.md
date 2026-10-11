@@ -10,7 +10,7 @@ and `answer`, and [troubleshooting](troubleshooting.md). `egzo --help` lists eve
   and **publishes the templates**. It starts no agent, and it never removes or recreates a running instance.
 - `egzo spawn` makes an **instance** from a template. Spawning needs no edit of `egzo.yaml`.
 - An instance is named by you (`issue-412`) or by egzo (`coder-1`). A template can be spawned as often as you like;
-  each instance has its own container, network, home volume and, for `clone`/`worktree` workspaces, its own checkout.
+  each instance has its own container, network, home volume and, for each git workspace it lists, its own worktree.
 
 ## The daily loop
 
@@ -41,11 +41,10 @@ sidecars.
 ## Tearing down
 
 ```console
-$ egzo rm NAME...          # an instance: container, network, home volume. Checkouts are kept
+$ egzo rm NAME...          # an instance: container, network, home volume, worktrees (committed work stays on its branch)
 $ egzo prune --stale       # remove instances matching a filter (see --help)
 $ egzo down                # the whole project: instances, sidecars, networks
 $ egzo down --volumes      # also the named volumes
-$ egzo down --workspaces   # also the git checkouts, after checking for unpushed work (see workspaces.md)
 ```
 
 ## Looking around

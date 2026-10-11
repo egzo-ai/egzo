@@ -12,7 +12,8 @@ Start with `egzo doctor` ([installing](install.md)), then `egzo ps`, then `egzo 
 | a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo down` the other. |
 | image cannot be pulled | the error names the image and the `image:` override. `make images`, or set `EGZO_HARNESS_PREFIX` ([installing](install.md), [images](images.md)). |
 | `runtime` refused on Podman | by design: Podman cannot apply or verify a runtime. Use Docker for gVisor. |
-| a workspace checkout exists in another mode | remove the directory; modes are not converted. |
+| `spawn` says a worktree or a branch exists | an earlier instance of that name left it: `egzo spawn --reuse` continues with it, or remove the directory (and `git branch -D egzo/NAME` in `workspaces/<name>/.base`). |
+| a git workspace has no base clone | `egzo up` could not clone it (it printed why): allow the host and give the profile the `github` service, then `egzo up` again. |
 
 ## The agent cannot reach something
 

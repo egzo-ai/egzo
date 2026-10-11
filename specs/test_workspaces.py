@@ -146,7 +146,6 @@ def test_a_workspace_without_a_source_is_a_host_directory_and_not_a_volume(proje
         mount = mounts(resolved, name)["/workspace/scratch"]
         assert mount["host_path"] == str(project.root / "workspaces" / "scratch")
         assert mount["mode"] == "rw"
-        assert "name" not in mount  # a volume was named; a directory is a host path
 
 
 def test_ro_makes_a_directory_workspace_read_only(project):
@@ -172,6 +171,21 @@ def test_two_workspaces_cannot_share_a_path(project):
     result = project.config(spec(workspaces={"a": {"path": "./data"}, "b": {"path": "./data"}}))
     assert result.returncode != 0
     assert "data" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        {"outer": {"path": "./data"}, "inner": {"path": "./data/inner"}},
+        {"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": "./workspaces"}, "foo": {}},
+        {"state": {"path": "./.egzo/state"}},
+        {"root": {"path": "/"}},
+    ],
+)
+def test_overlapping_or_dangerous_paths_are_refused(project, declared):
+    result = project.config(spec(workspaces=declared))
+    assert result.returncode != 0
+    assert "path" in result.stderr
 
 
 def test_nothing_is_mounted_from_the_host_unless_a_workspace_is_listed(project):

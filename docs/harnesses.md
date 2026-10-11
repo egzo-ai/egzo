@@ -74,7 +74,7 @@ $ egzo spawn open   -m "Add pagination to the orders endpoint"
 $ egzo ps
 ```
 
-Each gets its own clone (or worktree), so the two results can be compared as branches.
+Each gets its own worktree, so the two results can be compared as branches.
 
 ## Images
 

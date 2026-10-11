@@ -104,10 +104,12 @@ def test_a_workspace_without_a_source_is_a_directory_in_the_project_and_survives
 def test_a_workspace_directory_is_created_empty_when_it_is_missing_at_spawn_and_never_deleted(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
     directory = live_project.root / "data"
+    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert directory.is_dir(), "rm never deletes a directory workspace"
     directory.rmdir()
     assert live_project.spawn("coder") == "coder-1"
     assert directory.is_dir() and list(directory.iterdir()) == []
-    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert live_project.run("down").returncode == 0
     assert directory.is_dir()
 
 

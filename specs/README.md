@@ -86,7 +86,7 @@ when the file is invalid. The specs read these keys:
 ```yaml
 name: <project>
 workspaces:
-  <name>: { mode: clone|worktree|shared, path: <abs host dir> }   # git workspaces
+  <name>: { path: <abs host dir>, git: {url: ...} }   # git workspaces: the directory of .base and the worktrees
 agents:
   <agent>:
     workdir: /workspace/<name> | /workspace
@@ -121,7 +121,7 @@ do not change the exit code. Changing this contract means changing these specs f
 | `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
 | `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
 | `test_browser.py` | the Chromium and Playwright MCP server built into both harness images: registered with the harness, browsing through the proxy, a form login with a placeholder |
-| `test_git_workspaces.py` | the prep container at spawn: clone, shared, worktree, `down --workspaces` and `rm --workspaces` safety (clones from github.com) |
+| `test_git_workspaces.py` | the base clone at `up`, a worktree per instance at spawn, fetch, `--reuse`, removal with the instance (clones from github.com) |
 | `test_operations.py` | `doctor`, `diff`, `ca rotate`, `up` taking no agent, `proxy rules` |
 | `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
 

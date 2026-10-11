@@ -71,6 +71,15 @@ def test_doctor_warns_when_the_egzo_directory_is_not_git_ignored(project, engine
     assert not re.search(r"warn\s+.*\.egzo", project.run("doctor", env=engine.env).stdout)
 
 
+def test_doctor_warns_when_the_workspaces_directory_is_not_git_ignored(project, engine):
+    subprocess.run(["git", "init", "-q"], cwd=project.root, check=True)
+    project.write(spec())
+    (project.root / ".gitignore").write_text(".egzo/\n")
+    assert re.search(r"warn\s+.*workspaces", project.run("doctor", env=engine.env).stdout)
+    (project.root / ".gitignore").write_text(".egzo/\nworkspaces/\n")
+    assert not re.search(r"warn\s+.*workspaces", project.run("doctor", env=engine.env).stdout)
+
+
 # --- diff -------------------------------------------------------------------------------------------------
 
 

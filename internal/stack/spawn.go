@@ -23,6 +23,10 @@ type SpawnRequest struct {
 	Name string
 	// Actor is who asks: "operator" for the CLI, "user:<id>" or "service:<name>" for another tool.
 	Actor string
+	// NoFetch makes the worktrees from the base clones as they are, without fetching first.
+	NoFetch bool
+	// Reuse continues with a worktree or a branch an earlier instance of the name left, instead of refusing it.
+	Reuse bool
 }
 
 var actorName = regexp.MustCompile(`^(operator|(user|service):[A-Za-z0-9][A-Za-z0-9._@-]{0,62})$`)
@@ -59,7 +63,7 @@ func (e *NotUpError) Error() string {
 
 // Spawn makes an instance from a template `up` published. It never reads the project file and never
 // reads a secret: the proxy already holds the profiles, and the instance is only bound to one. A spawn
-// that fails removes what it created, and never a checkout.
+// that fails removes what it created, and never a worktree that holds work.
 func Spawn(ctx context.Context, c *engine.Client, project, dir string, req SpawnRequest, out io.Writer) (Spawned, error) {
 	observed, err := Observe(ctx, c, project)
 	if err != nil {
@@ -93,7 +97,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	}
 	name := req.Name
 	if name == "" {
-		name = freeName(observed, req.Template)
+		name = freeName(observed, req.Template, template.Workspaces)
 	}
 	if err := config.CheckInstanceName(name, published.Names(), published.WorkspaceNames); err != nil {
 		return Spawned{}, err
@@ -133,8 +137,8 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if err != nil {
 		return Spawned{}, err
 	}
-	checkouts, err := PlanGit(view)
-	if err != nil {
+	checkouts := PlanWorktrees(view, name)
+	if err := CheckWorktrees(checkouts, req.Reuse); err != nil {
 		return Spawned{}, err
 	}
 	homeExisted := observed.find("volume", homeVolume(project, name)) != nil
@@ -143,7 +147,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
 	plan := spawnPlan{
 		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
-		checkouts: checkouts, homeExisted: homeExisted,
+		checkouts: checkouts, homeExisted: homeExisted, worktrees: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
 		container: func(tokens map[string]string) (ContainerSpec, error) {
 			full, err := DesireInstance(view, dir, published.inputs(instances, tokens, nil), name, identity)
 			if err != nil {
@@ -175,6 +179,7 @@ type spawnPlan struct {
 	template           Template
 	resources          Desired // the network, the home volume and the attachments
 	checkouts          []Checkout
+	worktrees          WorktreeOptions
 	homeExisted        bool
 	// container builds the container once the instance's token is known.
 	container func(tokens map[string]string) (ContainerSpec, error)
@@ -238,22 +243,17 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	}
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
 
-	if len(p.checkouts) > 0 || len(InstanceGitDirs(p.view, p.name)) > 0 {
-		// Recorded before the clone starts: what a failed clone leaves is egzo's, and `down --workspaces`
-		// can offer to remove it. A checkout that exists already (one a removed instance of the name left)
-		// is recorded too.
-		if err := recordCheckouts(p.view, p.name); err != nil {
-			return err
-		}
-	}
 	if len(p.checkouts) > 0 {
-		// The clones go through the proxy as the instance, so its network and its binding come first. They
-		// are never undone: a checkout holds work.
-		if err := RunGitPreps(ctx, c, p.view, p.dir, p.published.Image, p.published.User, tokens, p.checkouts, out); err != nil {
+		// The base is cloned and fetched through the proxy as the instance, so its network and its binding come
+		// first. A worktree is never undone: it holds work.
+		if err := RunWorktreePreps(ctx, c, p.view, p.dir, p.published.Image, p.published.User, tokens, p.checkouts, p.worktrees, out); err != nil {
 			return err
 		}
 	}
 
+	if err := ensureMountDirectories(p.view.Agents[p.name]); err != nil {
+		return err
+	}
 	spec, err := p.container(tokens)
 	if err != nil {
 		return err
@@ -276,15 +276,16 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	return nil
 }
 
-// freeName is `<template>-<n>` for the first n no instance has.
-func freeName(observed Observed, template string) string {
+// freeName is `<template>-<n>` for the first n that no instance has and that no worktree or branch of an earlier
+// instance is left under.
+func freeName(observed Observed, template string, workspaces map[string]config.ResolvedWorkspace) string {
 	taken := map[string]bool{}
 	for _, name := range observed.InstanceNames() {
 		taken[name] = true
 	}
 	for n := 1; ; n++ {
 		name := fmt.Sprintf("%s-%d", template, n)
-		if !taken[name] {
+		if !taken[name] && !leftOver(workspaces, name) {
 			return name
 		}
 	}

@@ -121,10 +121,12 @@ func checkProject(opts *options, report func(level, format string, a ...any)) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		if _, err := exec.LookPath("git"); err == nil {
-			ignored := exec.Command("git", "check-ignore", "-q", ".egzo/probe")
-			ignored.Dir = dir
-			if ignored.Run() != nil {
-				report("warn", ".egzo/ is not git-ignored: add `.egzo/` to .gitignore, it holds clones and state that must not be committed")
+			for _, entry := range ignored {
+				check := exec.Command("git", "check-ignore", "-q", entry+"probe")
+				check.Dir = dir
+				if check.Run() != nil {
+					report("warn", "%s is not git-ignored: add `%s` to .gitignore, it holds egzo's state and the clones and worktrees of your workspaces, which must not be committed", entry, entry)
+				}
 			}
 		}
 	}

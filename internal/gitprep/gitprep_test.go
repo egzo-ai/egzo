@@ -39,17 +39,20 @@ func origin(t *testing.T) string {
 	return bare
 }
 
-func TestCloneChecksOutTheBranch(t *testing.T) {
+func TestCloneChecksNothingOut(t *testing.T) {
 	url := origin(t)
 	dir := filepath.Join(t.TempDir(), "clone")
 	if err := Clone(url, "side", dir); err != nil {
 		t.Fatal(err)
 	}
-	if branch, _ := Git(dir, "branch", "--show-current"); branch != "side" {
-		t.Errorf("branch = %q", branch)
+	if _, err := os.Stat(filepath.Join(dir, "README")); err == nil {
+		t.Error("the base clone has working files")
 	}
 	if remote, _ := Git(dir, "remote", "get-url", "origin"); remote != url {
 		t.Errorf("origin = %q", remote)
+	}
+	if _, err := Git(dir, "rev-parse", "--verify", "refs/remotes/origin/side"); err != nil {
+		t.Errorf("the branch asked for is not there: %v", err)
 	}
 }
 
@@ -71,142 +74,172 @@ func TestCloneFailureSaysWhy(t *testing.T) {
 	}
 }
 
+// layout is how a git workspace sits on the host: the base and the worktrees side by side.
+func layout(t *testing.T) (root, base string) {
+	root = t.TempDir()
+	return root, filepath.Join(root, ".base")
+}
+
+func worktree(t *testing.T, url, branch, base, root, agent string, mutate ...func(*WorktreeOptions)) ([]string, error) {
+	options := WorktreeOptions{URL: url, Branch: branch, Base: base, Dir: filepath.Join(root, agent), Agent: agent}
+	for _, m := range mutate {
+		m(&options)
+	}
+	return Worktree(options)
+}
+
 func TestWorktreesShareOneBaseAndEachHasItsOwnBranch(t *testing.T) {
 	url := origin(t)
-	root := t.TempDir()
-	base := filepath.Join(root, "base")
-	one, two := filepath.Join(root, "one"), filepath.Join(root, "two")
-	if err := Worktree(url, "", base, one, "coder"); err != nil {
-		t.Fatal(err)
-	}
-	if err := Worktree(url, "", base, two, "reviewer"); err != nil {
-		t.Fatal(err)
-	}
-	for dir, want := range map[string]string{one: "egzo/coder", two: "egzo/reviewer"} {
-		if branch, _ := Git(dir, "branch", "--show-current"); branch != want {
-			t.Errorf("%s is on %q, want %q", dir, branch, want)
+	root, base := layout(t)
+	for _, agent := range []string{"coder", "reviewer"} {
+		if _, err := worktree(t, url, "", base, root, agent); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(one, "README")); err != nil {
+	for agent, want := range map[string]string{"coder": "egzo/coder", "reviewer": "egzo/reviewer"} {
+		if branch, _ := Git(filepath.Join(root, agent), "branch", "--show-current"); branch != want {
+			t.Errorf("%s is on %q, want %q", agent, branch, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "coder", "README")); err != nil {
 		t.Error("the worktree has no files")
+	}
+	if _, err := os.Stat(filepath.Join(base, "README")); err == nil {
+		t.Error("the base has working files")
 	}
 	if list, _ := Git(base, "worktree", "list"); strings.Count(list, "\n") != 2 {
 		t.Errorf("worktrees = %s", list)
 	}
 }
 
-func TestInspectReportsUncommittedAndUnpushedWork(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "c")
-	if err := Clone(origin(t), "", dir); err != nil {
+func TestTheWorktreeLinksAreRelative(t *testing.T) {
+	root, base := layout(t)
+	if _, err := worktree(t, origin(t), "", base, root, "coder"); err != nil {
 		t.Fatal(err)
 	}
-	if findings, err := Inspect(dir); err != nil || !findings.Clean() {
-		t.Fatalf("a fresh clone is not clean: %+v, %v", findings, err)
+	link, _ := os.ReadFile(filepath.Join(root, "coder", ".git"))
+	if got := strings.TrimSpace(string(link)); got != "gitdir: ../.base/.git/worktrees/coder" {
+		t.Errorf("worktree link = %q", got)
 	}
-	os.WriteFile(filepath.Join(dir, "wip"), []byte("x"), 0o644)
-	if findings, _ := Inspect(dir); findings.Uncommitted != 1 || findings.Unpushed != 0 {
-		t.Errorf("findings = %+v", findings)
-	}
-	Git(dir, "add", ".")
-	Git(dir, "commit", "-qm", "local")
-	if findings, _ := Inspect(dir); findings.Uncommitted != 0 || findings.Unpushed != 1 {
-		t.Errorf("findings = %+v", findings)
+	back, _ := os.ReadFile(filepath.Join(base, ".git", "worktrees", "coder", "gitdir"))
+	if got := strings.TrimSpace(string(back)); got != "../../../../coder/.git" {
+		t.Errorf("base link = %q", got)
 	}
 }
 
-func TestASecondWorktreeMayUseAPathAnotherAgentsWorktreeIsRegisteredAt(t *testing.T) {
-	// In the containers every agent sees its worktree at the same path, and in a prep container the
-	// other agents' directories are not mounted, so git finds that path registered and missing.
+func TestTheWorktreeStartsAtTheConfiguredBranch(t *testing.T) {
 	url := origin(t)
-	root := t.TempDir()
-	base := filepath.Join(root, "base")
-	path := filepath.Join(root, "workspace")
-	if err := Worktree(url, "", base, path, "coder"); err != nil {
+	root, base := layout(t)
+	if _, err := worktree(t, url, "side", base, root, "coder"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(path); err != nil {
+	if subject, _ := Git(filepath.Join(root, "coder"), "log", "-1", "--format=%s"); subject != "on side" {
+		t.Errorf("the worktree is at %q", subject)
+	}
+}
+
+func TestAFetchBringsInWhatWasPushedAfterTheClone(t *testing.T) {
+	url := origin(t)
+	root, base := layout(t)
+	if _, err := worktree(t, url, "", base, root, "first"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Worktree(url, "", base, path, "reviewer"); err != nil {
-		t.Errorf("err = %v", err)
+	pusher := filepath.Join(t.TempDir(), "pusher")
+	if out, err := exec.Command("git", "clone", "-q", url, pusher).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
 	}
-	if branch, _ := Git(path, "branch", "--show-current"); branch != "egzo/reviewer" {
+	for _, args := range [][]string{{"commit", "-q", "--allow-empty", "-m", "newer"}, {"push", "-q", "origin", "main"}} {
+		if _, err := Git(pusher, append([]string{"-c", "user.name=a", "-c", "user.email=a@b.c"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := worktree(t, url, "", base, root, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if subject, _ := Git(filepath.Join(root, "second"), "log", "-1", "--format=%s"); subject != "newer" {
+		t.Errorf("the worktree is at %q, want the commit pushed after the clone", subject)
+	}
+	if _, err := worktree(t, url, "", base, root, "third", func(o *WorktreeOptions) { o.NoFetch = true }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAFailedFetchIsAWarningAndTheWorktreeIsMadeFromTheBase(t *testing.T) {
+	url := origin(t)
+	root, base := layout(t)
+	if _, err := worktree(t, url, "", base, root, "first"); err != nil {
+		t.Fatal(err)
+	}
+	warnings, err := worktree(t, filepath.Join(t.TempDir(), "gone.git"), "", base, root, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "could not fetch") || !strings.Contains(warnings[0], "gone.git") {
+		t.Errorf("warnings = %q", warnings)
+	}
+	if _, err := os.Stat(filepath.Join(root, "second", "README")); err != nil {
+		t.Error("the worktree has no files")
+	}
+}
+
+func TestTheFetchUsesTheGivenURLAndNotTheRemoteOfTheBase(t *testing.T) {
+	url := origin(t)
+	root, base := layout(t)
+	if _, err := worktree(t, url, "", base, root, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Git(base, "remote", "set-url", "origin", "ssh://nowhere.invalid/x.git"); err != nil {
+		t.Fatal(err)
+	}
+	warnings, err := worktree(t, url, "", base, root, "second")
+	if err != nil || len(warnings) != 0 {
+		t.Errorf("warnings = %q, err = %v", warnings, err)
+	}
+}
+
+func TestAnExistingBranchOrWorktreeIsRefusedUnlessReused(t *testing.T) {
+	url := origin(t)
+	root, base := layout(t)
+	if _, err := worktree(t, url, "", base, root, "coder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree(t, url, "", base, root, "coder"); err == nil || !strings.Contains(err.Error(), "--reuse") {
+		t.Errorf("a worktree that exists was accepted: %v", err)
+	}
+	if _, err := worktree(t, url, "", base, root, "coder", func(o *WorktreeOptions) { o.Reuse = true }); err != nil {
+		t.Errorf("reuse of a worktree that exists: %v", err)
+	}
+	// the worktree goes, its branch stays
+	if err := os.RemoveAll(filepath.Join(root, "coder")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(base, ".git", "worktrees")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree(t, url, "", base, root, "coder"); err == nil || !strings.Contains(err.Error(), "egzo/coder") || !strings.Contains(err.Error(), "--reuse") {
+		t.Errorf("a branch that exists was accepted: %v", err)
+	}
+	if _, err := worktree(t, url, "", base, root, "coder", func(o *WorktreeOptions) { o.Reuse = true }); err != nil {
+		t.Errorf("reuse of a branch that exists: %v", err)
+	}
+	if branch, _ := Git(filepath.Join(root, "coder"), "branch", "--show-current"); branch != "egzo/coder" {
 		t.Errorf("branch = %q", branch)
 	}
 }
 
-func cloned(t *testing.T) string {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), "c")
-	if err := Clone(origin(t), "", dir); err != nil {
-		t.Fatal(err)
-	}
-	return dir
-}
-
-func TestInspectSeesStashedWork(t *testing.T) {
-	dir := cloned(t)
-	os.WriteFile(filepath.Join(dir, "README"), []byte("changed\n"), 0o644)
-	if _, err := Git(dir, "stash"); err != nil {
-		t.Fatal(err)
-	}
-	findings, err := Inspect(dir)
-	if err != nil || findings.Stashes != 1 || findings.Uncommitted != 0 || findings.Clean() {
-		t.Errorf("findings = %+v, %v: a stash is work that exists nowhere else", findings, err)
-	}
-}
-
-func TestInspectSeesCommitsOnADetachedHead(t *testing.T) {
-	dir := cloned(t)
-	Git(dir, "checkout", "-q", "--detach")
-	if _, err := Git(dir, "commit", "-q", "--allow-empty", "-m", "on no branch"); err != nil {
-		t.Fatal(err)
-	}
-	if findings, _ := Inspect(dir); findings.Unpushed != 1 {
-		t.Errorf("findings = %+v: a commit on no branch is not on any remote either", findings)
-	}
-	Git(dir, "checkout", "-q", "main")
-	if findings, _ := Inspect(dir); findings.Unpushed != 1 {
-		t.Logf("after leaving the detached head its commit is unreachable but still counted by reflog only: %+v", findings)
-	}
-}
-
-func TestInspectCountsIgnoredFilesSeparately(t *testing.T) {
-	dir := cloned(t)
-	os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte("*.secret\nbuild/\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "notes.secret"), []byte("x"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "build"), 0o755)
-	os.WriteFile(filepath.Join(dir, "build", "out"), []byte("x"), 0o644)
-	findings, err := Inspect(dir)
-	if err != nil || findings.Ignored != 2 || findings.Uncommitted != 0 || !findings.Clean() {
-		t.Errorf("findings = %+v, %v: ignored files are reported but are not unsaved work", findings, err)
-	}
-}
-
 func TestAHookInTheRepositoryIsNeverRun(t *testing.T) {
-	base := filepath.Join(t.TempDir(), "base")
-	if err := Clone(origin(t), "", base); err != nil {
+	root, base := layout(t)
+	url := origin(t)
+	if err := Clone(url, "", base); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "ran")
 	hook := filepath.Join(base, ".git", "hooks", "post-checkout")
 	os.WriteFile(hook, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755)
-	if err := Worktree("unused", "", base, filepath.Join(t.TempDir(), "wt"), "coder"); err != nil {
+	if _, err := worktree(t, url, "", base, root, "coder", func(o *WorktreeOptions) { o.NoFetch = true }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("a hook planted in the base repository ran while a worktree was prepared")
-	}
-}
-
-func TestAFileSystemMonitorInTheRepositoryConfigIsNeverRun(t *testing.T) {
-	dir := cloned(t)
-	marker := filepath.Join(t.TempDir(), "ran")
-	script := filepath.Join(t.TempDir(), "monitor.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755)
-	exec.Command("git", "-C", dir, "config", "core.fsmonitor", script).Run()
-	Inspect(dir)
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("core.fsmonitor from the repository's own config ran during the inspection")
 	}
 }

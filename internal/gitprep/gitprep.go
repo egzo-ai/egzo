@@ -39,12 +39,14 @@ func Git(dir string, args ...string) (string, error) {
 	return text, nil
 }
 
-// Clone clones url into dir (which must be empty or not exist), at branch when one is given.
+// Clone clones url into dir (which must be empty or not exist), at branch when one is given. Nothing is
+// checked out: the base clone holds no working files, so no branch is checked out in it and every worktree
+// is free to take any branch.
 func Clone(url, branch, dir string) error {
 	if err := requireEmpty(dir); err != nil {
 		return err
 	}
-	args := []string{"clone", "--quiet"}
+	args := []string{"clone", "--quiet", "--no-checkout"}
 	if branch != "" {
 		args = append(args, "--branch", branch)
 	}
@@ -53,26 +55,80 @@ func Clone(url, branch, dir string) error {
 	return err
 }
 
-// Worktree makes dir a worktree of the base clone in base, cloning the base first when it is not
-// there. Each worktree gets a branch of its own, because git does not check one branch out twice.
-func Worktree(url, branch, base, dir, agent string) error {
-	if _, err := os.Stat(filepath.Join(base, ".git")); errors.Is(err, os.ErrNotExist) {
-		if err := Clone(url, branch, base); err != nil {
-			return err
+// fetched is where Worktree keeps what it fetched: a ref of its own, so a base that is somebody's own
+// clone keeps its branches and its remote as they are.
+const fetched = "refs/egzo/fetched"
+
+// WorktreeOptions says what Worktree makes.
+type WorktreeOptions struct {
+	URL, Branch string
+	Base, Dir   string
+	Agent       string
+	NoFetch     bool // skip the fetch: the worktree starts from the base as it is
+	Reuse       bool // continue an existing branch or an existing worktree instead of refusing it
+}
+
+// Branch is the branch of a worktree: one per instance, never checked out in two places.
+func Branch(agent string) string { return "egzo/" + agent }
+
+// Worktree makes Dir a worktree of the base clone in Base, on a branch of its own that starts at the head of
+// the configured branch. It clones the base first when it is not there, and fetches first unless told not
+// to; a fetch that fails is a warning, and the worktree starts from the base as it is. The links between the
+// worktree and the base are relative, so they resolve wherever the two sit side by side.
+func Worktree(o WorktreeOptions) (warnings []string, err error) {
+	if _, statErr := os.Stat(filepath.Join(o.Base, ".git")); errors.Is(statErr, os.ErrNotExist) {
+		if err := Clone(o.URL, o.Branch, o.Base); err != nil {
+			return nil, err
+		}
+	} else if !o.NoFetch {
+		refspec := "+HEAD:" + fetched
+		if o.Branch != "" {
+			refspec = "+refs/heads/" + o.Branch + ":" + fetched
+		}
+		// The URL of the file, not the remote of the base: the base may be someone's own clone, whose
+		// remote may be one the proxy cannot serve.
+		if _, fetchErr := Git(o.Base, "fetch", "--quiet", "--no-tags", "--", o.URL, refspec); fetchErr != nil {
+			warnings = append(warnings, fmt.Sprintf("could not fetch %s: %s; the worktree starts from the base as it is", o.URL, firstLine(fetchErr.Error())))
 		}
 	}
-	if err := requireEmpty(dir); err != nil {
-		return err
+
+	branch := Branch(o.Agent)
+	if _, statErr := os.Stat(filepath.Join(o.Dir, ".git")); statErr == nil {
+		if !o.Reuse {
+			return warnings, fmt.Errorf("%s is a worktree already: use --reuse to continue with it", o.Dir)
+		}
+		return warnings, nil
 	}
-	start := branch
-	if start == "" {
-		start = "HEAD"
+	if err := requireEmpty(o.Dir); err != nil {
+		return warnings, err
 	}
-	// --force: every agent sees its worktree at the same path (/workspace/<name>), so the base
-	// already has another agent's worktree registered there; git calls that "missing" because that
-	// agent's directory is not mounted in this container.
-	_, err := Git(base, "worktree", "add", "--force", "--quiet", "-b", "egzo/"+agent, dir, start)
-	return err
+	_, existsErr := Git(o.Base, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	switch {
+	case existsErr == nil && !o.Reuse:
+		return warnings, fmt.Errorf("the branch %s already exists in the base clone: use --reuse to continue it", branch)
+	case existsErr == nil:
+		// --force: the base may still have this worktree registered at a path that is gone
+		_, err = Git(o.Base, "worktree", "add", "--relative-paths", "--force", "--quiet", o.Dir, branch)
+	default:
+		_, err = Git(o.Base, "worktree", "add", "--relative-paths", "--quiet", "-b", branch, o.Dir, o.startPoint())
+	}
+	return warnings, err
+}
+
+// startPoint is the commit a new branch starts from: what was fetched, else what the clone saw.
+func (o WorktreeOptions) startPoint() string {
+	if _, err := Git(o.Base, "rev-parse", "--verify", "--quiet", fetched); err == nil {
+		return fetched
+	}
+	if o.Branch != "" {
+		return "refs/remotes/origin/" + o.Branch
+	}
+	return "refs/remotes/origin/HEAD"
+}
+
+func firstLine(text string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	return line
 }
 
 func requireEmpty(dir string) error {
@@ -87,58 +143,4 @@ func requireEmpty(dir string) error {
 		return fmt.Errorf("%s is not empty", dir)
 	}
 	return nil
-}
-
-// Findings are the reasons a checkout must not be thrown away.
-type Findings struct {
-	Uncommitted int // files with changes, staged or not, and untracked files
-	Unpushed    int // commits on a local branch that no remote branch has, or that are on no branch at all
-	Stashes     int // entries of the stash
-	Ignored     int // files and directories git ignores: in no commit, so nothing else holds them
-}
-
-func (f Findings) Clean() bool { return f.Uncommitted == 0 && f.Unpushed == 0 && f.Stashes == 0 }
-
-func lines(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(strings.Split(text, "\n"))
-}
-
-// Inspect looks for work in dir that exists nowhere else.
-func Inspect(dir string) (Findings, error) {
-	var findings Findings
-	status, err := Git(dir, "status", "--porcelain", "--ignored=traditional")
-	if err != nil {
-		return findings, err
-	}
-	for _, line := range strings.Split(status, "\n") {
-		switch {
-		case line == "":
-		case strings.HasPrefix(line, "!! "):
-			findings.Ignored++
-		default:
-			findings.Uncommitted++
-		}
-	}
-	unpushed, err := Git(dir, "log", "--branches", "--not", "--remotes", "--oneline")
-	if err != nil {
-		return findings, err
-	}
-	findings.Unpushed = lines(unpushed)
-	// Commits made on a detached HEAD are on no branch, so the query above cannot see them.
-	if head, err := Git(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && head == "HEAD" {
-		detached, err := Git(dir, "log", "HEAD", "--not", "--branches", "--remotes", "--oneline")
-		if err != nil {
-			return findings, err
-		}
-		findings.Unpushed += lines(detached)
-	}
-	stash, err := Git(dir, "stash", "list")
-	if err != nil {
-		return findings, err
-	}
-	findings.Stashes = lines(stash)
-	return findings, nil
 }

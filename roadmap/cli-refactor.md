@@ -24,7 +24,7 @@ top level      ps, logs, start, stop, restart, exec, events, proxy, version, com
 | `up` | `project up` | Also clones the git workspaces, last, non-fatal on failure. Still starts no agent. |
 | `up --dry-run`, `--recreate` | `project up --dry-run`, `--recreate` | `--dry-run` takes over `diff` (exit 1 when something would change). |
 | `diff` | removed | `project up --dry-run`. |
-| `down` | `project down` | **Blocks while agents run**; `--force` removes them first (container, network, home volume, worktrees). Deletes nothing on the host. No `--volumes`, `--workspaces`, `--yes`. |
+| `down` | `project down` | **Blocks while agents run**; `--force` removes them first (container, network, home volume, worktrees). Deletes the worktrees of the agents it removes, nothing else on the host. No `--volumes`, `--workspaces`, `--yes`. |
 | `config` | `project check --resolved` | Merged. |
 | `secrets ls` | `project check` | Merged, no command of its own. |
 | `doctor` | `system check` | Engine and isolation, plus git (below). Needs no project file. |

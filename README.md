@@ -38,14 +38,14 @@ See [`docs/`](docs/README.md).
 - **Claude Code and OpenCode.** More harnesses planned.
 - **Real TUIs, in sandboxes.** The standard coding agent interface you are used to. `egzo attach` connects, `Ctrl-]` detaches.
 - **Templates and instances.** Declare agents once in `egzo.yaml`, then `egzo spawn` as many instances as you need,
-  each with its own container, network, home and checkout. `rm`, `prune`, `diff` and `down` clean up.
+  each with its own container, network, home and worktree. `rm`, `prune`, `diff` and `down` clean up.
 - **Isolation by default.** Restricted internet and file access, all capabilities are dropped, memory and process limits.
 - **gVisor and rootless podman.** Fully tested with hardened container runtimes for additional security.
 - **Egress policy.** Allow internet access using a whitelist, or start simple by allowing all domains. Everything remains audited.
 - **Credential injection.** API keys and tokens can be injected live by the built-in proxy, so your agents never need to see any secrets,
   greatly reducing consequences of prompt injections and risks of secrets leaking.
 - **Password manager integration.** Fetch api keys and secrets directly from your password manager.
-- **Git worktrees.** Clone, worktree or shared checkouts made through the proxy, so agents hold no git credentials.
+- **Git worktrees.** A base clone per repository, a worktree per agent, made through the proxy, so agents hold no git credentials.
 - **Messaging.** Send messages or tasks to agents without opening their full UI, opening the door for quick work or automated jobs.
 - **Built-in browser.** Chromium and the Playwright MCP just works out of the box; ([docs/browser.md](docs/browser.md)).
 - **Your own tools.** Extend a harness image with extra software, or run any image with the `custom` harness.
@@ -71,7 +71,6 @@ egress:
 workspaces:
   repo:
     git: { url: https://github.com/egzo-ai/egzo.git, branch: main }
-    mode: worktree                   # git worktree support to save disk space
 
 agents:
   architect:

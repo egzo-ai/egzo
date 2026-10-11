@@ -27,6 +27,8 @@ type Options struct {
 	Image    string
 	// HarnessPrefix overrides where harness images are pulled from (EGZO_HARNESS_PREFIX).
 	HarnessPrefix string
+	// Warnings is where what went wrong without failing `up` is written (a base clone that could not be made).
+	Warnings io.Writer
 }
 
 // AgentUser is who agents run as: the invoking user, so files they write on the host are theirs.
@@ -141,6 +143,17 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	}
 	if len(plan) == 0 && !pushed && !stored && !published2 {
 		fmt.Fprintln(out, "nothing to do")
+	}
+	if !opts.DryRun {
+		if err := EnsureDirectories(project); err != nil {
+			return err
+		}
+		// Last, and never fatal: a repository that cannot be reached must not keep the project down.
+		warnings := opts.Warnings
+		if warnings == nil {
+			warnings = io.Discard
+		}
+		CloneBases(ctx, c, project, dir, opts.Image, AgentUser(c), out, warnings)
 	}
 	return nil
 }

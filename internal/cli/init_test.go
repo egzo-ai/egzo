@@ -168,16 +168,17 @@ func TestIgnoreWorkspaceData(t *testing.T) {
 	cases := []struct {
 		name      string
 		existing  *string // nil: no .gitignore
-		wantAdded bool
+		wantAdded int
 		want      string
 	}{
-		{"creates the file", nil, true, ".egzo/\n"},
-		{"appends to an existing file", ptr("node_modules/\n"), true, "node_modules/\n.egzo/\n"},
-		{"adds the missing newline first", ptr("node_modules/"), true, "node_modules/\n.egzo/\n"},
-		{"is idempotent", ptr(".egzo/\n"), false, ".egzo/\n"},
-		{"accepts the form without a slash", ptr("bin\n.egzo\n"), false, "bin\n.egzo\n"},
-		{"ignores surrounding whitespace", ptr("  .egzo/  \n"), false, "  .egzo/  \n"},
-		{"is not fooled by a similar entry", ptr(".egzo-cache/\n"), true, ".egzo-cache/\n.egzo/\n"},
+		{"creates the file", nil, 2, ".egzo/\nworkspaces/\n"},
+		{"appends to an existing file", ptr("node_modules/\n"), 2, "node_modules/\n.egzo/\nworkspaces/\n"},
+		{"adds the missing newline first", ptr("node_modules/"), 2, "node_modules/\n.egzo/\nworkspaces/\n"},
+		{"is idempotent", ptr(".egzo/\nworkspaces/\n"), 0, ".egzo/\nworkspaces/\n"},
+		{"adds only what is missing", ptr(".egzo/\n"), 1, ".egzo/\nworkspaces/\n"},
+		{"accepts the form without a slash", ptr("bin\n.egzo\nworkspaces\n"), 0, "bin\n.egzo\nworkspaces\n"},
+		{"ignores surrounding whitespace", ptr("  .egzo/  \n  workspaces/\n"), 0, "  .egzo/  \n  workspaces/\n"},
+		{"is not fooled by a similar entry", ptr(".egzo-cache/\nworkspaces-old/\n"), 2, ".egzo-cache/\nworkspaces-old/\n.egzo/\nworkspaces/\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -195,8 +196,8 @@ func TestIgnoreWorkspaceData(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if added != c.wantAdded {
-				t.Errorf("added = %v, want %v", added, c.wantAdded)
+			if len(added) != c.wantAdded {
+				t.Errorf("added = %v, want %d entries", added, c.wantAdded)
 			}
 			if got, _ := os.ReadFile(path); string(got) != c.want {
 				t.Errorf(".gitignore = %q, want %q", got, c.want)
@@ -207,7 +208,7 @@ func TestIgnoreWorkspaceData(t *testing.T) {
 	t.Run("outside a repository nothing happens", func(t *testing.T) {
 		dir := t.TempDir()
 		added, err := ignoreWorkspaceData(dir)
-		if err != nil || added {
+		if err != nil || len(added) != 0 {
 			t.Errorf("added = %v, err = %v", added, err)
 		}
 	})
@@ -220,7 +221,7 @@ func TestInitInAGitRepositoryIgnoresTheWorkspaceData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "added .egzo/ to .gitignore") {
+	if !strings.Contains(out, "added .egzo/ and workspaces/ to .gitignore") {
 		t.Errorf("output = %q", out)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, config.FileName))

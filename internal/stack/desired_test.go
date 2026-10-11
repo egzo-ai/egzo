@@ -15,13 +15,13 @@ import (
 func desireProject() *config.Resolved {
 	return &config.Resolved{
 		Name:       "proj",
-		Workspaces: map[string]config.ResolvedWorkspace{"shared": {}},
+		Workspaces: map[string]config.ResolvedWorkspace{"shared": {Path: "/proj/workspaces/shared"}},
 		Agents: map[string]config.ResolvedAgent{
 			"coder": {
 				Harness:    "claude-code",
 				Workdir:    "/workspace/shared",
 				Egress:     "default",
-				Workspaces: []config.Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw"}},
+				Workspaces: []config.Mount{{Name: "shared", Mount: "/workspace/shared", Mode: "rw", HostPath: "/proj/workspaces/shared"}},
 				Env:        map[string]string{"LOG": "debug"},
 			},
 			"review": {
@@ -115,7 +115,7 @@ func TestDesireLayout(t *testing.T) {
 	for _, v := range d.Volumes {
 		volumes = append(volumes, v.Name)
 	}
-	if want := []string{"proj_control", "proj_shared", "proj_ca-private", "proj_ca", "proj_coder-home"}; !slices.Equal(volumes, want) {
+	if want := []string{"proj_control", "proj_ca-private", "proj_ca", "proj_coder-home"}; !slices.Equal(volumes, want) {
 		t.Errorf("volumes = %v, want %v", volumes, want)
 	}
 }
@@ -203,7 +203,7 @@ func TestDesireAgentContainer(t *testing.T) {
 	wantMounts := []MountSpec{
 		{Source: "proj_coder-home", Target: "/home/agent"},
 		{Source: "proj_ca", Target: "/etc/egzo/ca", ReadOnly: true},
-		{Source: "proj_shared", Target: "/workspace/shared"},
+		{Bind: true, Source: "/proj/workspaces/shared", Target: "/workspace/shared"},
 	}
 	if !slices.Equal(coder.Mounts, wantMounts) {
 		t.Errorf("mounts = %+v, want %+v", coder.Mounts, wantMounts)
@@ -296,8 +296,8 @@ func TestDesireIdentityAndLabels(t *testing.T) {
 		t.Errorf("control kind = %q", kind)
 	}
 	for _, v := range d.Volumes {
-		if v.Name == "proj_shared" && v.Identity.Kind != "workspace" {
-			t.Errorf("workspace volume kind = %q", v.Identity.Kind)
+		if v.Name == "proj_shared" {
+			t.Errorf("a workspace is a directory on the host, not a volume: %s", v.Name)
 		}
 		if v.Identity.ConfigHash == "" {
 			t.Errorf("volume %s has no config hash", v.Name)
@@ -377,7 +377,7 @@ func TestSortedKeys(t *testing.T) {
 	}
 }
 
-func TestAgentsRunAsTheGivenUserAndNewWorkspaceVolumesAreHandedToIt(t *testing.T) {
+func TestAgentsRunAsTheGivenUserAndTheirHomeIsHandedToIt(t *testing.T) {
 	in := desireInputs
 	in.User = "1234:5678"
 	d, err := desireErr(desireProject(), "/dir", in)
@@ -390,7 +390,7 @@ func TestAgentsRunAsTheGivenUserAndNewWorkspaceVolumesAreHandedToIt(t *testing.T
 	if findContainer(t, d, "proj-control-1").User != sidecarUser || findContainer(t, d, "proj-proxy-1").User != sidecarUser {
 		t.Error("the sidecars must keep their own user")
 	}
-	if got := findContainer(t, d, "proj-coder").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home", "proj_shared"}) {
+	if got := findContainer(t, d, "proj-coder").OwnedVolumes; !slices.Equal(got, []string{"proj_coder-home"}) {
 		t.Errorf("volumes handed to the agent = %v", got)
 	}
 	if got := findContainer(t, d, "proj-review").OwnedVolumes; len(got) != 0 {

@@ -229,7 +229,7 @@ func resolveAgent(
 			}
 		}
 	}
-	mounts, workdir := resolveMounts(file, name, agent, dir, resolved.Workspaces, refs, p)
+	mounts, workdir := resolveMounts(name, agent, resolved.Workspaces, refs, p)
 	for _, mount := range mounts {
 		if mount.HostPath != "" {
 			if reason := socketWarning(mount.HostPath); reason != "" {

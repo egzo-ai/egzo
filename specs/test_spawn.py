@@ -227,7 +227,7 @@ def test_an_invalid_instance_name_is_refused(live_project, engine, agent_image, 
     assert engine.instances(live_project.name) == []
 
 
-@pytest.mark.parametrize("name", ["coder", "reviewer", "control", "proxy", "prep", "shared", "control-1", "proxy-1"])
+@pytest.mark.parametrize("name", ["coder", "reviewer", "control", "proxy", "prep", "control-1", "proxy-1"])
 def test_a_reserved_name_or_a_template_name_is_refused(live_project, engine, agent_image, name):
     project_with(live_project, agent_image, coder=custom(agent_image), reviewer=custom(agent_image))
     result = live_project.run("spawn", "coder", name)

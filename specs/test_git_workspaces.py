@@ -261,15 +261,15 @@ def test_a_missing_base_that_cannot_be_cloned_stops_spawn_with_a_clear_error(liv
 def test_the_fetch_goes_through_the_proxy_with_the_instances_identity(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project, "coder", "issue-9")
-    allowed = [e for e in audit(live_project) if e["host"] == "github.com" and e["action"] == "allow"]
-    assert "issue-9" in {e["agent"] for e in allowed}
+    allowed = [e for e in audit(live_project) if e.get("host") == "github.com" and e.get("action") == "allow"]
+    assert "issue-9" in {e.get("agent") for e in allowed}
 
 
 def test_no_fetch_does_not_touch_the_network(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project, "coder", "quiet", "--no-fetch")
     assert (worktree_of(live_project, "quiet") / "README").exists()
-    assert "quiet" not in {e["agent"] for e in audit(live_project) if e["host"] == "github.com"}
+    assert "quiet" not in {e.get("agent") for e in audit(live_project) if e.get("host") == "github.com"}
 
 
 def test_a_fetch_that_fails_warns_and_the_worktree_is_made_from_the_base_as_it_is(live_project, engine, agent_image):
@@ -286,7 +286,7 @@ def test_the_fetch_uses_the_url_of_the_file_and_not_the_remote_of_the_base(live_
     up_ok(live_project, project_spec(agent_image))
     git(base_of(live_project), "remote", "set-url", "origin", "ssh://git@github.com/octocat/Hello-World.git")
     spawn_ok(live_project, "coder", "issue-3")
-    assert "issue-3" in {e["agent"] for e in audit(live_project) if e["host"] == "github.com" and e["action"] == "allow"}
+    assert "issue-3" in {e.get("agent") for e in audit(live_project) if e.get("host") == "github.com" and e.get("action") == "allow"}
     assert (worktree_of(live_project, "issue-3") / "README").exists()
 
 

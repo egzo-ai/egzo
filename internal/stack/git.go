@@ -4,91 +4,134 @@
 package stack
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/gitprep"
 )
 
-// Git workspaces live on the host so work survives agents and projects. The CLI decides the layout;
-// the git work itself runs in short-lived prep containers on the agent's own network, so the clone
-// goes through the project's proxy under the agent's egress profile and no credential is ever the
-// CLI's or the agent's.
+// A git workspace is a directory on the host, in the project: a base clone and one worktree per instance.
 //
-//	clone     <path>/<instance>   one independent clone per instance
-//	shared    <path>/shared       one checkout used by every instance that lists it
-//	worktree  <path>/<instance>   a worktree of the base clone <path>/.base
+//	<path>/.base          the base clone, made by `up`, with no files checked out
+//	<path>/<instance>     the instance's worktree, on the branch egzo/<instance>, made by `spawn`
 //
-// Inside every container the checkout is /workspace/<name> and, for a worktree, the base is
-// /.egzo/base/<name>: prep and agent see the same paths, so the absolute links git writes between a
-// worktree and its base are valid in both. (From the host those links do not resolve.)
+// Inside a container the names are kept, /workspace/<name>/.base and /workspace/<name>/<instance>, so the
+// relative links between a worktree and its base resolve on the host and in the container alike. The git
+// work itself runs in short-lived prep containers, on a network of an identity the proxy knows, so the
+// clone and the fetch go through the project's proxy under that identity's egress profile and no
+// credential is ever the CLI's or the agent's.
 
-const baseMount = "/.egzo/base"
+const baseName = ".base"
 
-func baseMountPath(workspace string) string { return baseMount + "/" + workspace }
+// prepIdentity is the name the base clones of `up` are made under: reserved, so no instance has it.
+const prepIdentity = "prep"
 
-// CheckoutDir is the host directory of workspace ws for agent.
-func CheckoutDir(ws config.ResolvedWorkspace, agent string) string {
-	if ws.Mode == "shared" {
-		return filepath.Join(ws.Path, "shared")
-	}
-	return filepath.Join(ws.Path, agent)
+// BaseDir is the host directory of a git workspace's base clone.
+func BaseDir(ws config.ResolvedWorkspace) string { return filepath.Join(ws.Path, baseName) }
+
+// WorktreeDir is the host directory of the worktree of instance.
+func WorktreeDir(ws config.ResolvedWorkspace, instance string) string {
+	return filepath.Join(ws.Path, instance)
 }
 
-// BaseDir is the host directory of a worktree workspace's base clone.
-func BaseDir(ws config.ResolvedWorkspace) string { return filepath.Join(ws.Path, ".base") }
+func containerBase(workspace string) string { return workspaceRoot + "/" + workspace + "/" + baseName }
+
+func containerWorktree(workspace, instance string) string {
+	return workspaceRoot + "/" + workspace + "/" + instance
+}
+
+// worktreeMounts are what a container needs of a git workspace: the instance's own worktree and the base.
+func worktreeMounts(workspace string, ws config.ResolvedWorkspace, instance string) []MountSpec {
+	return []MountSpec{
+		{Bind: true, Source: WorktreeDir(ws, instance), Target: containerWorktree(workspace, instance)},
+		{Bind: true, Source: BaseDir(ws), Target: containerBase(workspace)},
+	}
+}
+
+// instanceWorkdir moves a working directory that is inside a git workspace into the instance's worktree:
+// /workspace/<name> is the directory that holds the base and every worktree, and the agent works in its own.
+func instanceWorkdir(project *config.Resolved, agent config.ResolvedAgent, instance string) string {
+	for _, mount := range agent.Workspaces {
+		ws, ok := project.Workspaces[mount.Name]
+		if !ok || ws.Git == nil {
+			continue
+		}
+		if agent.Workdir == mount.Mount || strings.HasPrefix(agent.Workdir, mount.Mount+"/") {
+			return containerWorktree(mount.Name, instance) + strings.TrimPrefix(agent.Workdir, mount.Mount)
+		}
+	}
+	return agent.Workdir
+}
 
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-// Checkout is one directory a git workspace needs for an agent.
+// Checkout is the worktree a git workspace needs for an instance.
 type Checkout struct {
 	Workspace string
-	Agent     string // the agent whose network and identity the clone uses
-	Mode      string
-	Dir       string
-	Base      string // worktree only
+	Instance  string
+	Dir       string // the worktree
+	Base      string
 	URL       string
 	Branch    string
 }
 
 func (c Checkout) String() string {
-	return fmt.Sprintf("workspace %s for %s into %s", c.Workspace, c.Agent, c.Dir)
+	return fmt.Sprintf("workspace %s for %s into %s", c.Workspace, c.Instance, c.Dir)
 }
 
-// existingMode says how the checkouts already under a git workspace's path were made, or "" when
-// there are none.
-func existingMode(ws config.ResolvedWorkspace) string {
-	switch {
-	case exists(filepath.Join(ws.Path, "shared", ".git")):
-		return "shared"
-	case exists(filepath.Join(BaseDir(ws), ".git")):
-		return "worktree"
-	}
-	entries, _ := os.ReadDir(ws.Path)
-	for _, entry := range entries {
-		if entry.IsDir() && entry.Name() != "shared" && !strings.HasPrefix(entry.Name(), ".") && exists(filepath.Join(ws.Path, entry.Name(), ".git")) {
-			return "clone"
+// EnsureDirectories makes the directory workspaces that are missing, empty and as the invoking user (the engine
+// would make a missing bind mount as root). Directories that exist are left as they are.
+func EnsureDirectories(project *config.Resolved) error {
+	for _, name := range sortedKeys(project.Workspaces) {
+		if ws := project.Workspaces[name]; ws.Git == nil {
+			if err := os.MkdirAll(ws.Path, 0o755); err != nil {
+				return fmt.Errorf("create the directory of workspace %q: %w", name, err)
+			}
 		}
 	}
-	return ""
+	return nil
 }
 
-// agentsListing returns the agents that list a git workspace directly, sorted.
-func agentsListing(project *config.Resolved, workspace string) []string {
+// ensureMountDirectories is EnsureDirectories for the host directories one agent mounts.
+func ensureMountDirectories(agent config.ResolvedAgent) error {
+	for _, mount := range agent.Workspaces {
+		if mount.HostPath != "" {
+			if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
+				return fmt.Errorf("create %s: %w", mount.HostPath, err)
+			}
+		}
+	}
+	return nil
+}
+
+// leftOver says whether a name has left a worktree or a branch in one of the git workspaces: such a name is not
+// free for an automatic name, which would fail on it.
+func leftOver(workspaces map[string]config.ResolvedWorkspace, name string) bool {
+	for _, ws := range workspaces {
+		if ws.Git != nil && (exists(WorktreeDir(ws, name)) || branchExists(BaseDir(ws), gitprep.Branch(name))) {
+			return true
+		}
+	}
+	return false
+}
+
+// listing returns the agents that list a git workspace, sorted.
+func listing(project *config.Resolved, workspace string) []string {
 	var agents []string
 	for name, agent := range project.Agents {
 		for _, mount := range agent.Workspaces {
@@ -102,40 +145,61 @@ func agentsListing(project *config.Resolved, workspace string) []string {
 	return agents
 }
 
-// PlanGit lists the checkouts that do not exist yet. It refuses a workspace whose existing
-// checkouts were made in another mode: they are never converted, because they hold work.
-func PlanGit(project *config.Resolved) ([]Checkout, error) {
+// PlanWorktrees lists the worktrees instance needs, one per git workspace it lists.
+func PlanWorktrees(project *config.Resolved, instance string) []Checkout {
 	var plan []Checkout
-	for _, name := range sortedKeys(project.Workspaces) {
-		ws := project.Workspaces[name]
-		if ws.Git == nil {
+	agent, ok := project.Agents[instance]
+	if !ok {
+		return nil
+	}
+	for _, mount := range agent.Workspaces {
+		ws, ok := project.Workspaces[mount.Name]
+		if !ok || ws.Git == nil || mount.HostPath != "" {
 			continue
 		}
-		agents := agentsListing(project, name)
-		if len(agents) == 0 {
-			continue
+		plan = append(plan, Checkout{
+			Workspace: mount.Name, Instance: instance, Dir: WorktreeDir(ws, instance), Base: BaseDir(ws),
+			URL: ws.Git.URL, Branch: ws.Git.Branch,
+		})
+	}
+	return plan
+}
+
+// CheckWorktrees refuses a plan that would take over what is already there: a worktree directory, or the
+// branch of the instance in the base. Both are somebody's work, so only reuse continues with them.
+func CheckWorktrees(plan []Checkout, reuse bool) error {
+	if reuse {
+		return nil
+	}
+	for _, checkout := range plan {
+		if exists(checkout.Dir) {
+			return fmt.Errorf("%s already exists: it is the worktree of %q in workspace %q; pass --reuse to continue with it, or remove it",
+				checkout.Dir, checkout.Instance, checkout.Workspace)
 		}
-		if have := existingMode(ws); have != "" && have != ws.Mode {
-			return nil, fmt.Errorf("workspace %q is configured with mode %s, but %s holds %s checkouts: "+
-				"egzo never converts an existing checkout because it may hold unpushed work; "+
-				"restore the mode, or remove the directory (egzo down --workspaces checks for unsaved work first)", name, ws.Mode, ws.Path, have)
-		}
-		for _, agent := range agents {
-			dir := CheckoutDir(ws, agent)
-			if exists(filepath.Join(dir, ".git")) {
-				continue
-			}
-			if ws.Mode == "shared" && len(plan) > 0 && plan[len(plan)-1].Workspace == name {
-				continue // one checkout for everyone, made through the first agent
-			}
-			checkout := Checkout{Workspace: name, Agent: agent, Mode: ws.Mode, Dir: dir, URL: ws.Git.URL, Branch: ws.Git.Branch}
-			if ws.Mode == "worktree" {
-				checkout.Base = BaseDir(ws)
-			}
-			plan = append(plan, checkout)
+		if branch := gitprep.Branch(checkout.Instance); branchExists(checkout.Base, branch) {
+			return fmt.Errorf("the branch %s already exists in the base clone %s, left by an earlier instance of that name: "+
+				"pass --reuse to continue it, or pick another name", branch, checkout.Base)
 		}
 	}
-	return plan, nil
+	return nil
+}
+
+// branchExists reads the base's refs on the host: nothing runs git there.
+func branchExists(base, branch string) bool {
+	git := filepath.Join(base, ".git")
+	if exists(filepath.Join(git, "refs", "heads", filepath.FromSlash(branch))) {
+		return true
+	}
+	packed, err := os.ReadFile(filepath.Join(git, "packed-refs"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(packed), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[1] == "refs/heads/"+branch {
+			return true
+		}
+	}
+	return false
 }
 
 // proxyEnv is how an agent, or a prep container acting for it, reaches the world: only through the
@@ -159,9 +223,18 @@ func envList(env map[string]string) []string {
 	return out
 }
 
-// RunGitPreps makes the checkouts, one at a time: worktrees share a base clone, and a few clones
-// are not worth the complexity of locking.
-func RunGitPreps(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string, tokens map[string]string, plan []Checkout, out io.Writer) error {
+// WorktreeOptions are what `spawn` may say about the worktrees it makes.
+type WorktreeOptions struct {
+	NoFetch bool
+	Reuse   bool
+}
+
+// warningPrefix starts a line of a git job's output that is a warning for the person, not an answer.
+const warningPrefix = "egzo-warning: "
+
+// RunWorktreePreps makes the worktrees of an instance, one at a time, on the instance's own network, so the
+// base is cloned (when it is missing) and fetched through the proxy under the instance's identity.
+func RunWorktreePreps(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string, tokens map[string]string, plan []Checkout, options WorktreeOptions, out io.Writer) error {
 	if len(plan) == 0 {
 		return nil
 	}
@@ -169,396 +242,243 @@ func RunGitPreps(ctx context.Context, c *engine.Client, project *config.Resolved
 		return err
 	}
 	for _, checkout := range plan {
-		fmt.Fprintf(out, "clone %s\n", checkout)
-		dirs := []string{checkout.Dir}
-		if checkout.Base != "" {
-			dirs = append(dirs, checkout.Base)
-		}
-		for _, d := range dirs {
+		fmt.Fprintf(out, "worktree %s\n", checkout)
+		madeBase, madeDir := !exists(checkout.Base), !exists(checkout.Dir)
+		for _, d := range []string{checkout.Base, checkout.Dir} {
 			if err := os.MkdirAll(d, 0o755); err != nil {
 				return fmt.Errorf("create %s: %w", d, err)
 			}
 		}
-		target := workspaceRoot + "/" + checkout.Workspace
-		cmd := []string{"/egzo", "prep", "git"}
-		switch checkout.Mode {
-		case "worktree":
-			cmd = append(cmd, "worktree", "--url", checkout.URL, "--base", baseMountPath(checkout.Workspace), "--agent", checkout.Agent)
-		default:
-			cmd = append(cmd, "clone", "--url", checkout.URL)
-		}
+		cmd := []string{"/egzo", "prep", "git", "worktree", "--url", checkout.URL,
+			"--base", containerBase(checkout.Workspace), "--agent", checkout.Instance}
 		if checkout.Branch != "" {
 			cmd = append(cmd, "--branch", checkout.Branch)
 		}
-		cmd = append(cmd, target)
-
-		env := proxyEnv(project.Name, checkout.Agent, tokens[checkout.Agent])
-		env["HOME"] = "/tmp"
-		mounts := []MountSpec{
-			{Source: project.Name + "_ca", Target: caAgentDir, ReadOnly: true},
-			{Bind: true, Source: checkout.Dir, Target: target},
+		if options.NoFetch {
+			cmd = append(cmd, "--no-fetch")
 		}
-		if checkout.Base != "" {
-			mounts = append(mounts, MountSpec{Bind: true, Source: checkout.Base, Target: baseMountPath(checkout.Workspace)})
+		if options.Reuse {
+			cmd = append(cmd, "--reuse")
 		}
-		_, err := RunPrep(ctx, c, PrepSpec{
-			Image:    image,
-			Cmd:      cmd,
-			User:     user,
-			Env:      envList(env),
-			Mounts:   mounts,
-			Network:  project.Name + "_" + checkout.Agent,
-			Identity: engine.Identity{Project: project.Name, Service: "prep", Kind: "prep", ProjectDir: dir},
-		})
+		cmd = append(cmd, containerWorktree(checkout.Workspace, checkout.Instance))
+		ws := project.Workspaces[checkout.Workspace]
+		stdout, err := runGit(ctx, c, project, dir, image, user, checkout.Instance, tokens[checkout.Instance],
+			InstanceNetwork(project.Name, checkout.Instance), cmd, worktreeMounts(checkout.Workspace, ws, checkout.Instance))
 		if err != nil {
-			// leave nothing half-made behind: an empty directory is not a checkout, but a failed
-			// clone must not look like one on the next run
-			os.Remove(checkout.Dir)
-			host := checkout.URL
-			if parsed, perr := url.Parse(checkout.URL); perr == nil {
-				host = parsed.Hostname()
+			// leave nothing half-made behind: an empty directory made for this job is not a worktree
+			if madeDir {
+				os.Remove(checkout.Dir)
 			}
-			profile := project.Agents[checkout.Agent].Egress
-			return fmt.Errorf("agent %q: could not prepare git workspace %q from %s: %w\n"+
-				"the agent's egress profile %q must allow %s", checkout.Agent, checkout.Workspace, checkout.URL, err, profile, host)
+			if madeBase {
+				os.Remove(checkout.Base)
+			}
+			return gitFailure(project, checkout.Instance, checkout.Workspace, checkout.URL, err)
 		}
-		names := []string{filepath.Base(checkout.Dir)}
-		if checkout.Base != "" {
-			names = append(names, filepath.Base(checkout.Base))
-		}
-		if err := markCheckouts(filepath.Dir(checkout.Dir), names...); err != nil {
-			return fmt.Errorf("record the checkout %s: %w", checkout.Dir, err)
+		for _, line := range strings.Split(stdout, "\n") {
+			if warning, ok := strings.CutPrefix(line, warningPrefix); ok {
+				fmt.Fprintf(out, "warning: workspace %s: %s\n", checkout.Workspace, warning)
+			}
 		}
 	}
 	return nil
 }
 
-// checkoutRegistry is the file in a git workspace's path that names the checkouts egzo made there. A
-// workspace path may hold other things (a path of `./repos` next to the user's own clones), and
-// `down --workspaces` must only offer to remove what egzo made.
-const checkoutRegistry = ".egzo-checkouts"
+// runGit runs one git job in a prep container on a network the proxy serves, as agent.
+func runGit(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user, agent, token, network string, cmd []string, mounts []MountSpec) (string, error) {
+	env := proxyEnv(project.Name, agent, token)
+	env["HOME"] = "/tmp"
+	all := append([]MountSpec{{Source: project.Name + "_ca", Target: caAgentDir, ReadOnly: true}}, mounts...)
+	return RunPrep(ctx, c, PrepSpec{
+		Image:    image,
+		Cmd:      cmd,
+		User:     user,
+		Env:      envList(env),
+		Mounts:   all,
+		Network:  network,
+		Identity: engine.Identity{Project: project.Name, Service: "prep", Kind: "prep", ProjectDir: dir},
+	})
+}
 
-// markCheckouts records directories under path as made by egzo.
-func markCheckouts(path string, names ...string) error {
-	known := managedCheckouts(path)
-	var added []string
-	for _, name := range names {
-		if !known[name] {
-			known[name] = true
-			added = append(added, name)
+func gitFailure(project *config.Resolved, agent, workspace, rawURL string, err error) error {
+	host := rawURL
+	if parsed, perr := url.Parse(rawURL); perr == nil {
+		host = parsed.Hostname()
+	}
+	profile := project.Agents[agent].Egress
+	return fmt.Errorf("agent %q: could not prepare git workspace %q from %s: %w\n"+
+		"the agent's egress profile %q must allow %s", agent, workspace, rawURL, err, profile, host)
+}
+
+// CloneBases makes the base clone of every git workspace an agent lists and that has none yet, as `up`'s last
+// step. A failure is not fatal: it is written to warn, and the next `spawn` (or `egzo workspace fetch`) tries again.
+// The clone goes through the proxy under the egress profile of the first template that lists the workspace.
+func CloneBases(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string, out, warn io.Writer) {
+	for _, name := range sortedKeys(project.Workspaces) {
+		ws := project.Workspaces[name]
+		agents := listing(project, name)
+		if ws.Git == nil || len(agents) == 0 {
+			continue
+		}
+		if exists(filepath.Join(BaseDir(ws), ".git")) {
+			if have := baseURL(BaseDir(ws)); have != "" && have != ws.Git.URL {
+				fmt.Fprintf(warn, "warning: workspace %q: the base clone %s has the url %s, but egzo.yaml says %s: it is left as it is "+
+					"(remove the directory to clone again)\n", name, BaseDir(ws), have, ws.Git.URL)
+			}
+			continue
+		}
+		fmt.Fprintf(out, "clone workspace %s into %s\n", name, BaseDir(ws))
+		if err := cloneBase(ctx, c, project, dir, image, user, name, ws, agents[0]); err != nil {
+			fmt.Fprintf(warn, "warning: workspace %q was not cloned: %v\n", name, err)
 		}
 	}
-	if len(added) == 0 {
-		return nil
+}
+
+func cloneBase(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user, name string, ws config.ResolvedWorkspace, agent string) error {
+	profile := project.Agents[agent].Egress
+	if err := ensureImage(ctx, c, image); err != nil {
+		return err
 	}
-	file, err := os.OpenFile(filepath.Join(path, checkoutRegistry), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	madeBase := !exists(BaseDir(ws))
+	if err := os.MkdirAll(BaseDir(ws), 0o755); err != nil {
+		return err
+	}
+	cmd := []string{"/egzo", "prep", "git", "clone", "--url", ws.Git.URL}
+	if ws.Git.Branch != "" {
+		cmd = append(cmd, "--branch", ws.Git.Branch)
+	}
+	cmd = append(cmd, containerBase(name))
+	err := withPrepIdentity(ctx, c, project, dir, profile, func(network, token string) error {
+		_, err := runGit(ctx, c, project, dir, image, user, prepIdentity, token, network, cmd,
+			[]MountSpec{{Bind: true, Source: BaseDir(ws), Target: containerBase(name)}})
+		return err
+	})
+	if err != nil {
+		if madeBase {
+			os.Remove(BaseDir(ws))
+		}
+		return gitFailure(project, agent, name, ws.Git.URL, err)
+	}
+	return nil
+}
+
+// withPrepIdentity gives fn a network the proxy serves and a token that is bound to profile, then takes both
+// away again. It is how a job that belongs to no instance reaches the world: through the proxy, like an agent.
+func withPrepIdentity(ctx context.Context, c *engine.Client, project *config.Resolved, dir, profile string, fn func(network, token string) error) (err error) {
+	net := InstanceNetwork(project.Name, prepIdentity)
+	control, proxy := project.Name+"-control-1", project.Name+"-proxy-1"
+	// a network left by a run that was killed
+	_ = c.API.NetworkRemove(ctx, net)
+	identity := engine.Identity{Project: project.Name, Service: "prep", Kind: "prep", ProjectDir: dir}
+	if _, err := c.API.NetworkCreate(ctx, net, network.CreateOptions{Driver: "bridge", Internal: true, Labels: identity.Labels()}); err != nil {
+		return fmt.Errorf("create network %s: %w", net, err)
+	}
+	cleanup := context.WithoutCancel(ctx)
+	defer func() {
+		unbindProxy(cleanup, c, project.Name, prepIdentity)
+		unregisterControl(cleanup, c, project.Name, prepIdentity)
+		c.API.NetworkDisconnect(cleanup, net, control, true)
+		c.API.NetworkDisconnect(cleanup, net, proxy, true)
+		c.API.NetworkRemove(cleanup, net)
+	}()
+	for _, peer := range []struct{ container, alias string }{{control, "control"}, {proxy, "proxy"}} {
+		if err := c.API.NetworkConnect(ctx, net, peer.container, &network.EndpointSettings{Aliases: []string{peer.alias}}); err != nil {
+			return fmt.Errorf("connect %s to %s: %w", peer.container, net, err)
+		}
+	}
+	unregisterControl(ctx, c, project.Name, prepIdentity)
+	if err := registerControl(ctx, c, project.Name, prepIdentity); err != nil {
+		return fmt.Errorf("register %s with the control sidecar: %w", prepIdentity, err)
+	}
+	tokens, err := fetchTokens(ctx, c, control, []string{prepIdentity})
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	_, err = file.WriteString(strings.Join(added, "\n") + "\n")
-	return err
+	if err := bindProxy(ctx, c, project.Name, prepIdentity, tokens[prepIdentity], profile); err != nil {
+		return err
+	}
+	return fn(net, tokens[prepIdentity])
 }
 
-// recordCheckouts records, for each git workspace an instance lists, the directories it uses: its own
-// clone or worktree, the shared checkout, and a worktree workspace's base.
-func recordCheckouts(view *config.Resolved, instance string) error {
-	agent, ok := view.Agents[instance]
-	if !ok {
-		return nil
-	}
-	for _, mount := range agent.Workspaces {
-		ws, ok := view.Workspaces[mount.Name]
-		if mount.HostPath != "" || !ok || ws.Git == nil {
-			continue
-		}
-		if err := os.MkdirAll(ws.Path, 0o755); err != nil {
-			return err
-		}
-		names := []string{filepath.Base(CheckoutDir(ws, instance))}
-		if ws.Mode == "worktree" {
-			names = append(names, filepath.Base(BaseDir(ws)))
-		}
-		if err := markCheckouts(ws.Path, names...); err != nil {
-			return fmt.Errorf("record the checkouts of %s: %w", instance, err)
-		}
-	}
-	return nil
-}
-
-// managedCheckouts reads the names markCheckouts wrote.
-func managedCheckouts(path string) map[string]bool {
-	known := map[string]bool{}
-	data, err := os.ReadFile(filepath.Join(path, checkoutRegistry))
+// baseURL reads the url of the origin of a base clone from its config, or "" when it has none. Nothing runs
+// git on the host.
+func baseURL(base string) string {
+	data, err := os.ReadFile(filepath.Join(base, ".git", "config"))
 	if err != nil {
-		return known
+		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if line = strings.TrimSpace(line); line != "" && !strings.ContainsAny(line, "/\\") && line != ".." && line != "." {
-			known[line] = true
+	inOrigin := false
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		text := strings.TrimSpace(string(line))
+		switch {
+		case strings.HasPrefix(text, "["):
+			inOrigin = text == `[remote "origin"]`
+		case inOrigin && strings.HasPrefix(text, "url"):
+			if _, value, ok := strings.Cut(text, "="); ok {
+				return strings.TrimSpace(value)
+			}
 		}
 	}
-	return known
+	return ""
 }
 
-// GitDirs lists the host directories that hold git checkouts egzo made for the project's workspaces,
-// whether or not an instance still exists for them: what `down --workspaces` may remove. They are found
-// on disk, so work left by an instance that was removed is found too. A symbolic link egzo recorded is
-// listed only so that removing it can be refused.
-func GitDirs(project *config.Resolved) []string {
-	var dirs []string
+// RemoveWorktrees deletes the worktrees of the given instances, in every git workspace, and what the base
+// keeps about them. A worktree is the instance's own: it goes with the instance, unchecked. The branch stays
+// in the base, so what was committed outlives the instance.
+func RemoveWorktrees(project *config.Resolved, instances []string, out io.Writer) error {
+	var errs []error
 	for _, name := range sortedKeys(project.Workspaces) {
 		ws := project.Workspaces[name]
 		if ws.Git == nil {
 			continue
 		}
-		managed := managedCheckouts(ws.Path)
-		entries, err := os.ReadDir(ws.Path)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			path := filepath.Join(ws.Path, entry.Name())
-			if !managed[entry.Name()] {
+		for _, instance := range instances {
+			dir := WorktreeDir(ws, instance)
+			info, err := os.Lstat(dir)
+			if err != nil {
+				forgetWorktree(BaseDir(ws), dir) // removed by hand: what the base keeps about it would block the name
 				continue
 			}
-			if entry.Type()&os.ModeSymlink != 0 || entry.Name() == ".base" || (entry.IsDir() && exists(filepath.Join(path, ".git"))) {
-				dirs = append(dirs, path)
+			if !info.IsDir() || !isWorktree(dir) {
+				continue // not a worktree: never delete anything else
 			}
-		}
-	}
-	return dirs
-}
-
-// InstanceGitDirs lists the checkouts that belong to one instance alone: the clone or worktree of each
-// git workspace it lists. A shared checkout and a worktree base belong to the project.
-func InstanceGitDirs(project *config.Resolved, instance string) []string {
-	var dirs []string
-	agent, ok := project.Agents[instance]
-	if !ok {
-		return nil
-	}
-	for _, mount := range agent.Workspaces {
-		if mount.HostPath != "" {
-			continue
-		}
-		ws, ok := project.Workspaces[mount.Name]
-		if !ok || ws.Git == nil || ws.Mode == "shared" {
-			continue
-		}
-		dirs = append(dirs, CheckoutDir(ws, instance))
-	}
-	return dirs
-}
-
-// WorkspaceRoots are the parent directories of GitDirs, which go when they are left empty.
-func WorkspaceRoots(project *config.Resolved) []string {
-	var roots []string
-	for _, name := range sortedKeys(project.Workspaces) {
-		if ws := project.Workspaces[name]; ws.Git != nil {
-			roots = append(roots, ws.Path)
-		}
-	}
-	return roots
-}
-
-// Unsaved describes what a checkout holds that exists nowhere else.
-type Unsaved struct {
-	Dir         string
-	Uncommitted int
-	Unpushed    int // commits on a branch no remote has, or on no branch at all
-	Stashes     int
-	Ignored     int // files and directories git ignores: not in any commit, so lost with the checkout
-}
-
-// Blocks reports whether removing the checkout would lose work. Ignored files only inform: a build
-// directory is ignored too, and refusing for it would make every removal need --force.
-func (u Unsaved) Blocks() bool { return u.Uncommitted > 0 || u.Unpushed > 0 || u.Stashes > 0 }
-
-var inspection = regexp.MustCompile(`^(\S+) uncommitted=(\d+) unpushed=(\d+) stashes=(\d+) ignored=(\d+)$`)
-
-// parseInspection reads the answer of `egzo prep git status` about one directory. Anything else, no line,
-// a line about another directory, or more than one, is an error: an answer that cannot be read must stop
-// the removal, never pass for "clean".
-func parseInspection(target, stdout string) (Unsaved, error) {
-	var found []Unsaved
-	for _, line := range strings.Split(stdout, "\n") {
-		m := inspection.FindStringSubmatch(strings.TrimSpace(line))
-		if m == nil {
-			continue
-		}
-		if m[1] != target {
-			return Unsaved{}, fmt.Errorf("the inspection of %s answered about %s", target, m[1])
-		}
-		var u Unsaved
-		fmt.Sscan(m[2], &u.Uncommitted)
-		fmt.Sscan(m[3], &u.Unpushed)
-		fmt.Sscan(m[4], &u.Stashes)
-		fmt.Sscan(m[5], &u.Ignored)
-		found = append(found, u)
-	}
-	if len(found) != 1 {
-		return Unsaved{}, fmt.Errorf("the inspection of %s gave %d answers, want exactly one", target, len(found))
-	}
-	return found[0], nil
-}
-
-// InspectCheckouts asks what each existing checkout holds, each in a prep container of its own (no
-// network, no credentials, only that checkout mounted read-only): what a checkout's own git
-// configuration can run then sees nothing of any other agent's work.
-func InspectCheckouts(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string) ([]Unsaved, error) {
-	return InspectDirs(ctx, c, project.Name, GitDirs(project), dir, image, user)
-}
-
-// InspectDirs is InspectCheckouts for the given directories; those that are not checkouts are left out.
-func InspectDirs(ctx context.Context, c *engine.Client, projectName string, dirs []string, dir, image, user string) ([]Unsaved, error) {
-	var existing []string
-	for _, d := range dirs {
-		if exists(filepath.Join(d, ".git")) {
-			existing = append(existing, d)
-		}
-	}
-	if len(existing) == 0 {
-		return nil, nil
-	}
-	if err := ensureImage(ctx, c, image); err != nil {
-		return nil, err
-	}
-	results := make([]Unsaved, len(existing))
-	errs := make([]error, len(existing))
-	slots := make(chan struct{}, 4)
-	var wg sync.WaitGroup
-	for i, d := range existing {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			slots <- struct{}{}
-			defer func() { <-slots }()
-			const target = "/check"
-			mounts := []MountSpec{{Bind: true, Source: d, Target: target, ReadOnly: true}}
-			if base, ok := worktreeBaseMount(d); ok {
-				mounts = append(mounts, base)
+			fmt.Fprintf(out, "remove worktree %s\n", dir)
+			if err := os.RemoveAll(dir); err != nil {
+				errs = append(errs, err)
+				continue
 			}
-			stdout, err := RunPrep(ctx, c, PrepSpec{
-				Image: image, Cmd: []string{"/egzo", "prep", "git", "status", target}, User: user,
-				Mounts:   mounts,
-				Env:      []string{"HOME=/tmp", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*"},
-				Identity: engine.Identity{Project: projectName, Service: "prep", Kind: "prep", ProjectDir: dir},
-			})
-			if err == nil {
-				results[i], err = parseInspection(target, stdout)
-			}
-			results[i].Dir = d
-			errs[i] = err
-		}()
-	}
-	wg.Wait()
-	for i, err := range errs {
-		if err != nil {
-			return nil, fmt.Errorf("inspect %s: %w", existing[i], err)
+			forgetWorktree(BaseDir(ws), dir)
 		}
 	}
-	var found []Unsaved
-	for _, u := range results {
-		if u.Blocks() || u.Ignored > 0 {
-			found = append(found, u)
-		}
-	}
-	return found, nil
+	return errors.Join(errs...)
 }
 
-// worktreeBaseMount is the mount a worktree needs to be read: its .git is a file that points into the base
-// clone at the path the base has inside every container (/.egzo/base/<workspace>), so an inspection that
-// mounts only the worktree finds no repository. The base is read-only: status takes no lock it must have.
-func worktreeBaseMount(dir string) (MountSpec, bool) {
+// isWorktree says whether dir is a linked worktree: its .git is a file that points at a gitdir, where a repository
+// of its own has a .git directory.
+func isWorktree(dir string) bool {
 	data, err := os.ReadFile(filepath.Join(dir, ".git"))
-	if err != nil {
-		return MountSpec{}, false
-	}
-	target, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
-	if !ok {
-		return MountSpec{}, false
-	}
-	rest, ok := strings.CutPrefix(target, baseMount+"/")
-	if !ok || rest == "" {
-		return MountSpec{}, false
-	}
-	workspace, _, _ := strings.Cut(rest, "/")
-	if workspace == "" || workspace == "." || workspace == ".." {
-		return MountSpec{}, false
-	}
-	return MountSpec{Bind: true, Source: filepath.Join(filepath.Dir(dir), ".base"), Target: baseMountPath(workspace), ReadOnly: true}, true
+	return err == nil && strings.HasPrefix(string(data), "gitdir:")
 }
 
-func (u Unsaved) String() string {
-	var parts []string
-	if u.Uncommitted > 0 {
-		parts = append(parts, fmt.Sprintf("%d uncommitted file(s)", u.Uncommitted))
-	}
-	if u.Unpushed > 0 {
-		parts = append(parts, fmt.Sprintf("%d unpushed commit(s)", u.Unpushed))
-	}
-	if u.Stashes > 0 {
-		parts = append(parts, fmt.Sprintf("%d stash(es)", u.Stashes))
-	}
-	if u.Ignored > 0 {
-		parts = append(parts, fmt.Sprintf("%d ignored file(s) or director(ies) that are in no commit", u.Ignored))
-	}
-	return fmt.Sprintf("%s: %s", u.Dir, strings.Join(parts, ", "))
-}
-
-// RemovalProblem says why dir must not be removed as a checkout, or nil when it may be: it has to be a
-// real git checkout (not a symlink, not any directory that happens to bear an agent's name), and not the
-// project directory, one of its parents, the home directory or the root.
-func RemovalProblem(dir, projectDir string) error {
-	info, err := os.Lstat(dir)
+// forgetWorktree removes what the base keeps about the worktree at dir: the directory git prunes once the
+// worktree is gone. Only that worktree's: another instance's is not mounted where this runs, and a prune
+// would take it for gone.
+func forgetWorktree(base, dir string) {
+	entries, err := os.ReadDir(filepath.Join(base, ".git", "worktrees"))
 	if err != nil {
-		return err
+		return
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symbolic link", dir)
-	}
-	if !exists(filepath.Join(dir, ".git")) {
-		return fmt.Errorf("%s is not a git checkout (no .git in it)", dir)
-	}
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return err
-	}
-	project, err := filepath.EvalSymlinks(projectDir)
-	if err != nil {
-		project = projectDir
-	}
-	home, _ := os.UserHomeDir()
-	switch {
-	case real == "/" || real == filepath.Clean(home) || real == project:
-		return fmt.Errorf("%s is the project directory, the home directory or the root", dir)
-	case strings.HasPrefix(project+"/", real+"/"):
-		return fmt.Errorf("%s contains the project directory", dir)
-	}
-	return nil
-}
-
-// StopAgents stops the running agent containers and returns them, so a refused removal can start them
-// again. Nothing may write to a checkout while it is inspected and while the person decides.
-func StopAgents(ctx context.Context, c *engine.Client, observed Observed) ([]Resource, error) {
-	var stopped []Resource
-	timeout := stopTimeoutSeconds
-	for _, r := range observed.Resources {
-		if r.Type == "container" && r.Kind == kindAgent && r.State == "running" {
-			if err := c.API.ContainerStop(ctx, r.ID, container.StopOptions{Timeout: &timeout}); err != nil {
-				StartAgents(ctx, c, stopped)
-				return nil, fmt.Errorf("stop %s: %w", r.Instance, err)
-			}
-			stopped = append(stopped, r)
+	for _, entry := range entries {
+		meta := filepath.Join(base, ".git", "worktrees", entry.Name())
+		data, err := os.ReadFile(filepath.Join(meta, "gitdir"))
+		if err != nil {
+			continue
 		}
-	}
-	return stopped, nil
-}
-
-// StartAgents starts containers StopAgents stopped.
-func StartAgents(ctx context.Context, c *engine.Client, stopped []Resource) {
-	for _, r := range stopped {
-		_ = c.API.ContainerStart(context.WithoutCancel(ctx), r.ID, container.StartOptions{})
+		target := strings.TrimSpace(string(data))
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(meta, target)
+		}
+		if filepath.Clean(target) == filepath.Join(dir, ".git") {
+			os.RemoveAll(meta)
+		}
 	}
 }

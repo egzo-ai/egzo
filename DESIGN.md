@@ -170,13 +170,12 @@ egress:                        # named profiles; an agent links to one (omitted 
         secret: main/sites/example/password
         placeholder: EXAMPLE_PASSWORD
 
-workspaces:                    # declared like compose volumes; referenced by name from agents
+workspaces:                    # project-scoped; referenced by name from agents
   repo:
-    git: { url: https://github.com/me/repo.git, branch: main }   # https only
-    # path: ./.egzo/workspaces/repo   # where clones/worktrees live on the host (default shown)
-    # mode: clone              # git only: clone (default, one independent clone per agent)
-                               #   | worktree (optimization, see Workspaces) | shared (one checkout)
-  scratch: {}                  # no source: a shared system volume
+    git: { url: https://github.com/me/repo.git, branch: main }   # https only: a base clone, a worktree per agent
+    # path: ./workspaces/repo  # where it lives on the host (default shown): .base and one worktree per instance
+  scratch: {}                  # a directory: ./workspaces/scratch
+  docs: { path: ./docs }       # a directory of yours
 
 agents:                        # templates: nothing runs until `egzo spawn <name>`
   coder:
@@ -194,7 +193,7 @@ agents:                        # templates: nothing runs until `egzo spawn <name
 
   reviewer:
     harness: opencode
-    workspaces: [./docs:ro]    # host dir, read-only (a git workspace cannot be :ro)
+    workspaces: ["docs:ro"]   # a directory workspace, read-only (a git workspace cannot be :ro)
 
 control: {}                    # orchestrator MCP + status sidecar (always present); no settings yet
 
@@ -245,59 +244,50 @@ control: {}                    # orchestrator MCP + status sidecar (always prese
 - Reuse from v1 (the abandoned first attempt): harness adapter Render logic (pure, golden-tested), proxy/gate
   lessons (todos/0002), Claude onboarding/trust seeding in ~/.claude.json.
 
-## Workspaces (decided)
-- Declared at top level, Compose-style; an agent references them in `workspaces:` as a list of
-  `name[:ro]`. An undeclared bare name is an error (as in Compose). Declared with no source = a
-  shared system volume (`<project>_<name>`), shared by every agent that lists it.
-- Inline host paths, Compose short-syntax style: `./path[:ro]` (relative to the egzo.yaml
-  directory) and `/abs/path[:ro]`. These are host-bound: the hub warns on remote engines.
-  Nothing is ever mounted from the host unless the file says so.
-- Mount point is uniform for all agents: `/workspace/<name>` (declared name; basename for inline
-  paths, collision = error).
-- Working directory: exactly one workspace => that workspace's directory; two or more => `/workspace`.
-  `workdir:` on the agent overrides (a workspace name or a path). Agents with none: nothing mounted.
-- Git workspaces (`git: {url, branch}`) have `mode`: `clone` (default; each agent gets its own
-  independent clone, so one agent cannot corrupt another's `.git`), `worktree` (optional
-  optimization: per-agent worktrees of a shared base repo; the base `.git` is then mounted
-  read-write into agents, so shared-`.git` risk is accepted explicitly), `shared` (one checkout used
-  by every agent that lists it).
-- `:ro` on a git-defined workspace is a validation error: git needs write access. For read access to
-  files use a host path (`./path:ro`) or a `shared` workspace; to see another agent's work, fetch what it pushed.
-- Whose a workspace is follows its mode (see "Templates and instances"): `clone` and `worktree` belong to the
-  instance; `shared`, system volumes and host paths belong to the project. There is no way to mount another
-  agent's checkout: a template cannot name an instance that does not exist yet, and agents share only what a
-  workspace declares shared. Workspaces outlive agents; `down --volumes` removes volumes, never host binds.
-- Git sources are HTTPS only (like Scion): `git: {url, branch}` with an `https://` URL; ssh and
-  local paths are validation errors. A local repository on the host is not a git source: it is just
-  a directory, mounted with the inline `./path` form (no clone, no git semantics).
-- Location: each git workspace has an optional `path:` (relative to the egzo.yaml directory, or
-  absolute) = the host directory under which egzo creates `<agent>/` (clone or worktree) or
-  `shared/`. Default: `.egzo/workspaces/<name>` inside the project directory, so work lives with
-  the project. `path:` is host-bound (the hub warns on remote engines). When the project directory
-  is itself a git repo, `.egzo/` must be git-ignored (`egzo init` scaffolds that; `egzo doctor`
-  warns).
-- Who clones: the CLI decides layout and policy (resolves paths, decides which agents need which
-  clone, skips what exists); a short-lived **prep container** (pinned image with git >= 2.47, run
-  with the agent uid, the target directories bind-mounted, egress via the project proxy only) does
-  the git work. The CLI creates it through the engine API and removes it afterwards. Reasons: no
-  host git or version dependency, correct file ownership under rootless engines, same behaviour
-  for local and remote engines, and no credentials on the CLI: the proxy injects the HTTPS token
-  (the `github` service bound to a vault secret). Agents push the same way, so no agent holds
-  a git credential. Finished work is pushed by the agent itself, as in Scion.
-- When: during `egzo up`, before creating an agent that needs it, only if its target does not
-  exist. Idempotent; an existing clone is never modified. `mode` changes do not convert existing
-  clones (`up` reports the mismatch and refuses until the directory is removed).
-- Modes in detail: `clone` = `<path>/<agent>/`, one independent clone per agent (optimization
-  later: a same-filesystem base mirror + `git clone --local`, which hardlinks objects, keeps objects
-  independent and avoids alternates path coupling). `worktree` = one base clone plus a worktree per
-  agent created with `git worktree add --relative-paths` (needs git >= 2.47); the agent mounts only
-  its own worktree and the base, in a layout that keeps the relative link valid (never the whole
-  workspace directory, which would expose every agent's worktree). `shared` = `<path>/shared/`.
-- Safety: `down` never deletes workspace directories (they hold unpushed work). Removal is explicit
-  (`down --workspaces`, with confirmation) and first checks each clone for uncommitted or
-  unpushed work using the prep container.
-- Harness integrations map extra workspaces to the harness (e.g. Claude Code additional
-  directories) and seed workspace trust for each directory.
+## Workspaces (decided, rewritten)
+- Declared at top level and **project-scoped**: one workspace is shared by every template that lists it. An agent
+  references them in `workspaces:` as a list of `name[:ro]`; a name that is not declared is an error, and so is a
+  path (`./docs`, `/srv/data`), with a message that says to declare it. Nothing is ever mounted from the host unless
+  the file says so.
+- Two kinds, both **plain directories on the host, in the project**. Engine volumes are not used for workspaces.
+  - **Directory** (no `git`): `path` (relative to the egzo.yaml directory, or absolute; default
+    `./workspaces/<name>`) is mounted at `/workspace/<name>` in every agent that lists it. `up` and `spawn` create it
+    (empty, as the invoking user) when missing; egzo never deletes it and never looks inside.
+  - **Git** (`git: {url, branch}`): `path` holds `.base`, the base clone (`up` makes it, last, with no files checked
+    out), and one worktree per instance (`<path>/<instance>`, made by `spawn` on the branch `egzo/<instance>`).
+- The resolver fills in the missing `path`, so `egzo config` prints it.
+- Mount point: `/workspace/<name>` for a directory. For a git workspace the container sees
+  `/workspace/<name>/<instance>` (the instance's own worktree, its working directory when it is the only workspace)
+  and `/workspace/<name>/.base`, the same names as on the host. Never another instance's worktree: a template cannot
+  name an instance that does not exist yet, and one agent cannot reach another's work except by what it pushed.
+- Working directory: exactly one workspace => its directory (a git workspace: the instance's worktree); two or more
+  => `/workspace`. `workdir:` overrides (a workspace name or a path).
+- `:ro` on a git workspace is a validation error: git needs write access. For read access use a directory workspace.
+- `mode` (`clone`, `worktree`, `shared`) is gone: every instance gets a worktree. It is read only to refuse it.
+- Git sources are HTTPS only: ssh and local paths are validation errors. A local repository on the host is a
+  directory workspace, with no git semantics.
+- Two workspaces cannot share a path; the names `control`, `ca`, `ca-private` and `egress` stay reserved.
+- Who does the git: a short-lived **prep container** (git >= 2.48, run with the agent uid, the directories
+  bind-mounted, egress via the project proxy only). The CLI creates it through the engine API and removes it
+  afterwards. Reasons: no host git, correct ownership under rootless engines, the same behaviour for local and remote
+  engines, and no credentials on the CLI: the proxy injects the HTTPS token (the `github` service). Agents push the
+  same way, so no agent holds a git credential.
+- **`up`** clones each base that an agent lists and that is missing, last and never fatally (a failure is a warning;
+  `spawn` tries again). The clone has no instance to speak as, so it runs on a network of its own under the reserved
+  identity `prep`, bound in the proxy to the egress profile of the first template that lists the workspace. A base
+  that exists is left alone, with a warning when its origin url is not the one in the file.
+- **`spawn`** fetches the configured branch (the url of the file, never the base's remote, which may be one the proxy
+  cannot serve) into a ref of its own, as the instance, and runs `git worktree add --relative-paths -b egzo/<name>`
+  from it. A failed fetch warns and uses the base as it is (`--no-fetch` skips it); a missing base is cloned first.
+  It refuses a worktree directory or a branch that is already there; `--reuse` continues with them.
+- **Relative links.** Git writes the links between a worktree and its base as relative paths, `../.base/.git/...` and
+  back, which resolve identically on the host and in every container because the names are kept. So `git status`
+  works in the editor on the host too (git 2.48 or later there).
+- **Removal.** An instance's worktree is its own: `rm`, `prune` and `down` delete it with the instance, with no check
+  for unsaved work (there is none yet; a check and a confirmation can come later). The branch `egzo/<name>` stays in
+  the base, so what was committed outlives the instance. The base clone and directory workspaces are never deleted.
+- Harness integrations map extra workspaces to the harness (e.g. Claude Code additional directories) and seed
+  workspace trust for each directory.
 
 ## Templates and instances (decided, built)
 
@@ -321,7 +311,7 @@ operation (an importable package, not CLI code).
     egzo spawn reviewer pr-88 -m "Review PR 88" --wait [--timeout D]   # exit codes as `send --wait`
     egzo ps                                       # instances, with TEMPLATE, ACTOR, AGE, STALE
     egzo attach issue-412 | send | logs | exec | start | stop | restart   # by instance name
-    egzo rm issue-412 [--workspaces] [--force]
+    egzo rm issue-412 [--force]
     egzo prune [--stopped] [--stale] [--older-than D] [--dry-run] [--yes]
 
 There are no parameters: an instance is a template, a name and an optional first message. What differs per task is
@@ -339,18 +329,17 @@ said in the message. Anything else per instance belongs in another template.
 - **Spawn needs the infrastructure** (`up` was run and proxy and control run): otherwise it fails and says so.
   It never starts the infrastructure, and never creates an instance outside what a template says.
 - **What spawn does** is the per-agent half of `up`: the instance's network (control and proxy join it), token,
-  home volume, workspace preparation (a clone or worktree of its own, named after the instance), the container,
+  home volume, workspace preparation (a worktree of each git workspace, named after the instance), the container,
   and two registrations: control learns the agent (one verb to add and one to remove an agent, never a whole
   list) and the proxy binds the instance's token to the template's egress profile. **Spawn never reads a
   secret**: `up` loads the egress profiles, with their secret values, into the proxy; the binding carries only
   the token and the profile's name. That is what lets the hub, which never touches secrets, spawn. Spawn with
   `-m` then sends the message; it waits in the queue until the harness is ready, as every message does.
-  A spawn that fails halfway removes what it created, and never a checkout.
-- **`rm`** removes the instance's container, network and volumes, never the checkouts. With `--workspaces` it
-  also removes them, after the same inspection `down --workspaces` does (unpushed commits, stashes, detached
-  work), and refuses without `--force` when something would be lost. A running instance needs `--force`.
-- **`down`** removes every instance, like every other resource of the project, and leaves workspace
-  directories alone.
+  A spawn that fails halfway removes what it created, and never a worktree that holds work.
+- **`rm`** removes the instance's container, network, home volume and worktrees (the branch stays in the base).
+  A running instance needs `--force`.
+- **`down`** removes every instance, like every other resource of the project, and their worktrees. It never
+  deletes a base clone or a directory workspace.
 - **Stale.** An instance whose template changed since it was spawned, or whose template no longer exists, is
   **stale**: its `ai.egzo.template-hash` differs from the hash of the template in `egzo.yaml` (the hash covers
   everything that went into the instance: the agent, its egress profile, the workspaces it lists, its prompt's
@@ -359,14 +348,13 @@ said in the message. Anything else per instance belongs in another template.
   `up` refuses while one exists, naming them, so the user stops them first. `up --dry-run` prints `stale: NAME`
   for each and says it would refuse.
 - **Reaping.** egzo has no reaper. `prune` removes stopped, stale or old instances (age is the container's
-  creation time); `ps --json` gives a script or a timer what it needs to decide. `prune` asks first, as
-  `down --workspaces` does, unless `--yes`; `--dry-run` lists and changes nothing.
+  creation time); `ps --json` gives a script or a timer what it needs to decide. `prune` asks first, unless `--yes`; `--dry-run` lists and changes nothing.
 - **Labels.** `ai.egzo.service=<template key>` (so `ps` groups by it), `ai.egzo.instance=<name>`,
   `ai.egzo.actor=<who>` (`operator` from the CLI; `user:<id>` or a service from another tool) and
   `ai.egzo.template-hash=<hash>` on the instance's container, network and home volume.
-- **Workspaces follow their mode.** `clone` and `worktree` checkouts belong to the instance (a directory
-  named after it); `shared` checkouts, system volumes and host paths belong to the project and are shared by
-  every instance that lists them.
+- **Workspaces belong to the project; worktrees to the instance.** A worktree is a directory named after the
+  instance in a git workspace's path; the base clone and every directory workspace are shared by every instance that
+  lists them.
 
 ### For other tools (hub, broker, scripts)
 `spawn`, `ps`, `rm` and `prune` take `--json`. The hub calls the same package; a broker can run the CLI against
@@ -730,7 +718,7 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
       test_meta.py         # the status model itself
       test_schema.py       # egzo.yaml validation, no users in files, no secrets in output
       test_project_name.py # name resolution, same-name-other-directory refusal
-      test_workspaces.py   # mounts, workdir rule, https git, modes, paths, cross-agent refs
+      test_workspaces.py   # mounts, workdir rule, https git, paths and defaults, cross-agent refs
       test_egress.py       # profiles, services, built-ins, extend, placeholders, reachability warnings
       test_secrets.py      # vaults, the env and pass backends, `egzo secrets`
       test_init.py         # egzo init
@@ -745,7 +733,7 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
     test_session.py      # attach and the session fidelity matrix (P0 rows block release)
     test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
     test_harnesses.py    # Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, real TUIs
-    test_git_workspaces.py # prep container: clone/shared/worktree, idempotency, down --workspaces safety
+    test_git_workspaces.py # prep container: base clone at up, worktree per instance, fetch, reuse, removal
     test_operations.py   # doctor, diff, ca rotate, proxy rules
     test_spawn.py        # spawn: templates, names, exit code 17, first message, --wait, labels, errors
     test_instances.py    # ps, rm, prune, stale instances, down, registration in control and proxy
@@ -758,7 +746,7 @@ agent env, agent filesystem, or logs; assert direct egress fails.
 
 Built and covered by specs (Docker is the engine the specs run against now; Podman works through its
 compatible socket but is not exercised by the current suite): `init`, `config`, `up` (`--dry-run`,
-`--recreate`), `spawn`, `rm`, `prune`, `diff`, `down` (`--volumes`, `--workspaces`), `ps` (`--json`), `logs`, `exec`, `attach`, `start|stop|restart`,
+`--recreate`), `spawn`, `rm`, `prune`, `diff`, `down` (`--volumes`), `ps` (`--json`), `logs`, `exec`, `attach`, `start|stop|restart`,
 `send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls`, `proxy log|rules`, `ca rotate`,
 `doctor`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
 `egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
@@ -771,8 +759,8 @@ Decisions taken while building (reversible; each is covered by specs):
   missing secret never leaves half a project behind. `up` leaves the instances alone (it never removes or
   recreates one), re-attaches a recreated sidecar to the networks of the instances, and refuses while one is stale.
   Spawn creates the instance's network and home volume, attaches control and proxy to the network, registers
-  the instance with control and binds it in the proxy, makes its git checkouts (through the proxy, as the
-  instance), then creates the container. If any step fails it removes what it made, in reverse, and never a checkout.
+  the instance with control and binds it in the proxy, makes its worktrees (through the proxy, as the
+  instance), then creates the container. If any step fails it removes what it made, in reverse, and never a worktree that holds work.
 - **Staleness is judged against what `up` would publish from `egzo.yaml`.** `up` refuses before it publishes,
   so comparing with the last published templates would never find a stale instance. `ps` and `prune --stale`
   compute the hashes from the file. A caller without the file (the hub) compares with the published templates.
@@ -793,9 +781,6 @@ Decisions taken while building (reversible; each is covered by specs):
   `prune` and a second spawn of the name see it, and removing it clears its registrations too. `down` unregisters
   every instance from control before it removes anything, because the control volume outlives the project unless
   `--volumes` is given.
-- **Only what egzo made is offered by `down --workspaces`.** Cloning records each checkout's directory name in
-  `<workspace path>/.egzo-checkouts`; a path shared with the user's own clones is safe. Checkouts made before the
-  registry existed are never offered (they are left alone, not removed).
 - **An agent must be registered to be heard**, not only hold a valid token: a removed instance that is still
   running, and a name nobody spawned, are refused by the agent API. Tokens are still the HMAC of the name, so a
   token leaked into a shared workspace stays valid for any future instance of that name until the control volume
@@ -860,17 +845,16 @@ Decisions taken while building (reversible; each is covered by specs):
   times in all, then `unconfirmed`. Harnesses without hooks (`inject.idle_signal: quiescence`, the default for
   `custom`) are idle when their output has been quiet for `inject.quiescence`. `egzo ps` shows ACTIVITY, OPEN
   and WAITING next to the reported status.
-- **Git workspaces** (`internal/stack/git.go`, `internal/gitprep`): the CLI decides the layout (`clone`:
-  `<path>/<agent>`, `shared`: `<path>/shared`, `worktree`: `<path>/<agent>` plus the base `<path>/.base`) and a
-  prep container does the git, on the agent's own network so the clone goes through the proxy as that agent. In
-  every container a checkout is `/workspace/<name>` and a worktree's base `/.egzo/base/<name>`, so the absolute
-  links git writes between them are valid in prep and agent containers (from the host they do not resolve;
-  worktrees are registered with `--force` for that reason, each on its own branch `egzo/<agent>`). An existing
-  checkout is never touched; one made in another mode is refused. `down --workspaces` inspects every checkout
-  in a prep container first and refuses when any holds uncommitted files or unpushed commits (`--force`).
-- **Sidecar image** (`Dockerfile`) is the static binary on Alpine with CA roots and git >= 2.47.
-- **Label kinds** in use: `control`, `proxy`, `agent`, `workspace` (declared volumes without a source), and
-  `prep` (short-lived containers, which never outlive the command).
+- **Git workspaces** (`internal/stack/git.go`, `internal/gitprep`): the CLI decides the layout (`<path>/.base` and
+  `<path>/<instance>`) and a prep container does the git, on the instance's own network so the clone and the fetch
+  go through the proxy as that instance (`up`'s base clone, which has no instance, uses a network and a binding of its
+  own under the reserved name `prep`). The names are the same on the host and in every container, so the relative
+  links `git worktree add --relative-paths` writes resolve in both. Removing an instance deletes its worktree and the
+  entry the base keeps about it (only that one: a `git worktree prune` would take the other instances' worktrees,
+  which are not mounted there, for gone).
+- **Sidecar image** (`Dockerfile`) is the static binary on Alpine with CA roots and git >= 2.48.
+- **Label kinds** in use: `control`, `proxy`, `agent` and `prep` (short-lived containers and the network of `up`'s
+  base clones, which never outlive the command).
 - **Messaging contract** (control sidecar). Agent API on `http://control:7777` (HTTP basic: agent name and
   its token, in `EGZO_CONTROL_URL`, `EGZO_AGENT` and `EGZO_TOKEN`): `GET|POST /v1/messages`,
   `GET /v1/messages/{id}`, `POST /v1/messages/{id}/resolve|update|ask`, `GET /v1/agents`, `POST /v1/status`,
@@ -907,15 +891,12 @@ separate `egzo-hub` deliverable (see `roadmap/hub-and-web-ui.md`). What that mea
 ## Hardening decisions (code review of the first implementation)
 
 - **Names.** Agents, workspaces: 1 to 63 of `[a-z0-9_-]`, starting with a letter or digit. Reserved: agents
-  `control`, `proxy`, `prep`, `shared`; workspaces `control`, `ca`, `ca-private`, `egress` and `<agent>-home`, which
+  `control`, `proxy`, `prep`; workspaces `control`, `ca`, `ca-private`, `egress` and `<agent>-home`, which
   would otherwise be egzo's own volumes (a workspace named `control` would hand an agent the key every token
   derives from). Instance names follow the same rule and may not be a template name, `control-1` or `proxy-1`, or end in `-home`. Settings that would do nothing (`proxy.audit`, `control.tools`,
   `agent.tools`) are not in the schema.
 - **Git sources** carry no credentials in the URL (the proxy injects them) and a real branch name. Git run by egzo
-  ignores hooks and file-system monitors of the repository it works in. `down --workspaces` stops the agents, inspects
-  each checkout in a container of its own, counts uncommitted files, unpushed commits (also on a detached HEAD) and
-  stashes (which block), lists ignored files (which only inform), removes only real checkouts, and starts the agents
-  again if it is refused.
+  ignores hooks and file-system monitors of the repository it works in, which every agent that lists the workspace can write.
 - **Proxy.** It connects only to public addresses (checked on the address a name resolved to), caps connections per agent
   and in all, closes idle connections, terminates Encrypted Client Hello instead of tunneling it, keeps bytes sent right behind CONNECT, truncates
   logged values, logs bytes and duration of a tunnel, bounds its certificate cache, and answers 503 "run `egzo up`" when
