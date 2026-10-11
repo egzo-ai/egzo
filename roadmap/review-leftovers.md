@@ -12,7 +12,7 @@ covered by specs and unit tests.
   `mcp.NewServer` is created per request (not checked).
 - **Stack unit tests** (T-06): a fake of `client.APIClient` was not built; `Up`, `Apply`, `Down` and `RunPrep` are
   covered by specs only.
-- **CLI unit tests** (T-07): the `down --workspaces` flow and `send --wait` exit codes are covered by specs only.
+- **CLI unit tests** (T-07): `message send --wait` exit codes are covered by specs only.
 - **Moby client migration** (T-12): blocked upstream; `govulncheck` flags GO-2026-4887 (server side, no fix).
 - **`errcheck` sweep**: unchecked `Close` and `Write` returns (for example `session/client.go`) were not worked
   through; `staticcheck` is clean and `make lint` runs it with `govulncheck`.

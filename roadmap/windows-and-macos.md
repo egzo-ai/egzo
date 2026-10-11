@@ -26,14 +26,14 @@ real.
 The rules to document and check:
 - **Keep the project in the WSL filesystem** (`~/src/shop`), not under `/mnt/c`. Bind-mounting from `/mnt/c` goes
   through the Windows file-sharing layer: slow, with odd ownership and permissions, and git behaves differently.
-  `egzo doctor` should warn when the project directory is under `/mnt/`.
-- **Docker Desktop's WSL integration** must be enabled for the distro (Settings, Resources, WSL integration). `doctor`
+  `egzo project check` should warn when the project directory is under `/mnt/`.
+- **Docker Desktop's WSL integration** must be enabled for the distro (Settings, Resources, WSL integration). `system check`
   should say so when it finds no engine socket in a WSL distro.
 - **Docker Engine installed inside the distro** (instead of Desktop) is just the Linux case, and could register
   gVisor. Worth stating as the alternative.
 - gVisor is not available on Docker Desktop; `runtime:` is refused as it is on Podman.
 
-Work: document it, run the quick start and the specs on a real WSL2 distro with Docker Desktop, add the two `doctor`
+Work: document it, run the quick start and the specs on a real WSL2 distro with Docker Desktop, add the two `system check`
 hints, and decide how the platform is named in the matrix. Likely small.
 
 ## macOS
@@ -43,7 +43,7 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 **1. Engine connection** (`internal/engine`)
 - The socket is often `~/.docker/run/docker.sock` or comes from a Docker context, not `/var/run/docker.sock`. Read the
   active Docker context as well as `DOCKER_HOST`.
-- `egzo doctor` should report what it found (Desktop, Colima, OrbStack).
+- `egzo system check` should report what it found (Desktop, Colima, OrbStack).
 
 **2. Files the CLI writes and mounts**
 - **Host paths** (`./docs:ro`, `path:` for checkouts, `.egzo/workspaces`) are bind-mounted through the VM's file
@@ -72,7 +72,7 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 **5. Isolation differences to document**
 - On Docker Desktop the engine's "host" is a VM: an extra boundary, but shared by all your containers. The
   rootless-engine advice in [`docs/security.md`](../docs/security.md) does not map directly.
-- Internal networks must work on Desktop (`egzo doctor` already tests that the engine makes them).
+- Internal networks must work on Desktop (`egzo system check` already tests that the engine makes them).
 - Egzo never mounts the engine socket into an agent, and that stays so.
 
 ## Testing
@@ -89,7 +89,7 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 ## Work to do
 
 - [ ] WSL2: try the quick start and the specs on WSL2 with Docker Desktop; document the setup and the `/mnt/c` rule;
-      add the two `doctor` hints.
+      add the two `system check` hints.
 - [ ] macOS: cross-compile for `darwin`; engine discovery through Docker contexts and Desktop sockets.
 - [ ] Decide the uid/gid and ownership story on Desktop, and the default workspace storage (host bind vs named volume),
       after measuring on both macOS and WSL2.

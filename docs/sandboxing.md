@@ -39,7 +39,7 @@ egress:
 | `anthropic-oauth` | `api.anthropic.com` | `Authorization: Bearer <token>` (a Claude subscription token from `claude setup-token`) |
 | `github` | `github.com`, `api.github.com` | `Authorization: Basic base64(x-access-token:<secret>)` (git over HTTPS refuses a bearer token) |
 
-Binding a token to the wrong one of the two Anthropic services is refused at `up`. Claude Code also needs
+Binding a token to the wrong one of the two Anthropic services is refused at `egzo project up`. Claude Code also needs
 `platform.claude.com` in `allow`; it needs no credential.
 
 ## Your own services
@@ -72,7 +72,7 @@ Rules are by host: a service cannot be limited to a path or a method.
 
 Service `hosts` take the patterns `allow` takes (`host`, `*.domain`, `*`), **but only for a service without a secret**: a
 secret binds to exact hosts, because a wildcard would hand it to every subdomain, including ones somebody else controls.
-`inject` or `placeholder` with a wildcard host is an error at `egzo project check --resolved` and `up`. A wildcard service is an allowlist
+`inject` or `placeholder` with a wildcard host is an error at `egzo project check --resolved` and `egzo project up`. A wildcard service is an allowlist
 entry too: it lets the agent reach every host it covers. `*.example.com` covers the names below `example.com`, not
 `example.com` itself. A service has no setting that weakens TLS: unknown keys are errors.
 

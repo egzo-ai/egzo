@@ -37,7 +37,7 @@ agents:
 ## Vaults and secrets
 
 A vault is one secret store: a `backend` and the names of the secrets to read from it. The CLI reads them on your
-machine at `up` time. There are two backends.
+machine at `egzo project up` time. There are two backends.
 
 **`pass`** ([the standard unix password manager](https://www.passwordstore.org/)) is the one to use. egzo runs `pass show <name>`, so
 unlocking is whatever your `pass` and gpg-agent already do, and the first line of the entry is the secret. Names

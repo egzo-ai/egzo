@@ -43,17 +43,17 @@ them. Known places to fix:
 - [ ] `docs/install.md`: the download instructions name a releases page and a binary that do not exist yet. Check the
       real asset names, `chmod`/`PATH` steps and checksum instructions, remove the "not released yet" note, and state
       which image tags exist (a version, `latest`?). Update it again when the install wrapper lands.
-- [ ] `docs/intro.md`: the first run (`egzo init`, `up`, `spawn --attach`) should be run end to end from the
+- [ ] `docs/intro.md`: the first run (`egzo project init`, `project up`, `agent spawn --attach`) should be run end to end from the
       published binary and images, and its `Requirements` and `Status` sections updated.
 - [ ] `docs/images.md`: the `FROM ghcr.io/egzo-ai/egzo-harness-claude-code:latest` example must name a tag that
       exists; check the advice to match the tag to `egzo version`, and the derived-image rules (entrypoint, uid, no
-      `CMD`) against a real build and `spawn`.
+      `CMD`) against a real build and `agent spawn`.
 - [ ] `docs/harnesses.md`: the "Images" section (default name, `EGZO_HARNESS_PREFIX`, the error for an image that
       cannot be pulled) should be checked against the registry as published.
 - [ ] `docs/troubleshooting.md`: the pull-failure row, and the "Known problems" list, against what is still true.
 - [ ] Every command and flag in the docs against `egzo --help` of the released build, and every YAML example run
-      through `egzo config`. The examples were written from the design and the code, and were not all executed.
-- [ ] Unverified claims to confirm or remove: that `attach` works for a `custom` harness image; that sidecars run
+      through `egzo project check --resolved`. The examples were written from the design and the code, and were not all executed.
+- [ ] Unverified claims to confirm or remove: that `agent attach` works for a `custom` harness image; that sidecars run
       as a non-root uid (`docs/security.md`); the exact placeholder credentials each harness receives.
 - [ ] Dead links: `docs/` links to `../README.md`, `roadmap/` and `known-issues/` by path.
 - [ ] The top-level `README.md` status paragraph and "Requirements" section, which says images come from

@@ -11,7 +11,7 @@ and [messaging](messaging.md).
 - **The only way out is the proxy**, which allows only HTTPS to the hosts of the agent's egress profile, refuses
   private and internal addresses (cloud metadata, your network, other agents' networks), limits connections and
   logs every decision. Nothing is allowed unless the profile says so.
-- **No secrets in the agent.** Credentials sit in the proxy, loaded by `up`, and are added to requests to the hosts
+- **No secrets in the agent.** Credentials sit in the proxy, loaded by `egzo project up`, and are added to requests to the hosts
   of declared services. They are not in the agent's environment, in labels, in `docker inspect` or in any image.
   The harness gets a placeholder value.
 - **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits, bounded logs,
@@ -35,8 +35,7 @@ Be clear about these before running agents on something you care about.
 - **Prompt injection.** Text the agent reads (an issue, a web page, a file) can steer it. The sandbox limits what
   steering can do; it does not stop the agent from being steered.
 - **The workspace is writable.** Agents can delete or corrupt what you mount read-write. Use `:ro` for directories and git for
-  code. Every agent has its own worktree, but the base clone's `.git` is writable by all of them, so one agent could damage
-  what the others share.
+  code. Every agent has its own worktree.
 - **Host paths** you mount are as exposed as you make them.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
   that is root-equivalent. Prefer a rootless engine.

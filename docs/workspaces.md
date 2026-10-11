@@ -26,7 +26,7 @@ Keep `workspaces/` out of git: `egzo project init` adds it to `.gitignore` and `
 ## Directory workspaces
 
 No `git`: the directory at `path` is mounted at `/workspace/<name>` in every agent that lists it, all of them seeing
-the same files. `up` and `spawn` create it, empty, when it is missing. egzo never deletes it, and never looks inside:
+the same files. `egzo project up` and `egzo agent spawn` create it, empty, when it is missing. egzo never deletes it, and never looks inside:
 it is yours (`:ro` makes it read-only for an agent).
 
 ## Git workspaces
@@ -44,11 +44,11 @@ it lists only that workspace) and the base at `/workspace/shop/.base`, never ano
 keeps between a worktree and its base are relative, so `git status` works on the host in `workspaces/shop/coder-1` too
 (git 2.48 or later on the host).
 
-- **`up`** clones the base last, through the proxy, as the egress profile of the first template that lists the
+- **`egzo project up`** clones the base last, through the proxy, as the egress profile of the first template that lists the
   workspace. A clone that fails (the host is not allowed, the repository is private and no service has its token) is
-  a warning, not an error: `up` finishes, and `spawn` tries again. A base that is already there is left as it is, with
+  a warning, not an error: `up` finishes, and `agent spawn` tries again. A base that is already there is left as it is, with
   a warning when its url is not the one in the file.
-- **`spawn`** fetches the configured branch into the base through the proxy, as the new instance, and makes the
+- **`egzo agent spawn`** fetches the configured branch into the base through the proxy, as the new instance, and makes the
   worktree on a branch of its own, `egzo/<instance>`, starting at what was fetched. A fetch that fails only warns and
   the worktree starts from the base as it is; `--no-fetch` skips it. A base that is missing is cloned first.
 - **Credentials.** Agents hold none. The `github` service injects the token for `github.com`, so `git push` works
@@ -61,8 +61,3 @@ keeps between a worktree and its base are relative, so `git status` works on the
   continues with them (the branch is checked out again in a fresh worktree). A name egzo picks itself
   (`coder-2`) skips the names that left a worktree or a branch behind.
 - A git workspace cannot be `:ro`; git needs to write. For read-only files, use a directory workspace.
-- **The base is trusted by every agent that lists the workspace.** Its `.git` is writable by all of them, so one agent
-  could damage what the others share, or plant a git setting (a filter, a credential helper) that runs the next time
-  git works in the base, in a later spawn's prep container, with that instance's proxy identity, or on your host.
-  egzo never runs the base's hooks or file-system monitor, but it cannot stop every setting. It is an accepted
-  trade; list a git workspace only for agents that you trust with each other's work.

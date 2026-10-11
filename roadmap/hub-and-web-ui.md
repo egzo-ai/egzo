@@ -12,7 +12,7 @@ Moved out of DESIGN.md. Core implements none of this; what core guarantees for i
 - Multi-project (like a docker UI shows all compose projects) and multi-user. **Users are global
   to the hub instance** and live only in the hub database.
 - **Observe and operate only.** The project YAML + CLI is the one and only way to create or change
-  a project (`up`, `down`, recreate, edit). The hub never writes YAML and never applies config.
+  a project (`project up`, `project down`, recreate, edit). The hub never writes YAML and never applies config.
   - Observe: dashboard, status, event timeline, logs, proxy audit, read-only view of the spec.
   - Operate: spawn instances of declared templates, start/stop/restart/remove instances, interrupt,
     attach, send messages, answer questions agents ask of people.
@@ -46,7 +46,7 @@ without a hub (accepted). A hub-less bridge could later be a separate tool on th
    harness, workspace) with no exec; the redacted resolved-spec snapshot on the control volume
    (read via exec) gives the detailed view while control is running.
 5. Shared Go packages (list, inspect, read-spec, start/stop, attach, send) reused by the hub.
-6. Messaging contract for any client (CLI, web, chat): `send` + queue API (to an agent); typed
+6. Messaging contract for any client (CLI, web, chat): `message send` + queue API (to an agent); typed
    event stream (message sent, announced, fetched, resolved; status change; question asked and answered); questions (`ask`) with a
    stable message id so they can be answered later from anywhere; actor on every message/answer.
 
@@ -63,4 +63,4 @@ without a hub (accepted). A hub-less bridge could later be a separate tool on th
 ## Hub risks to track
 Privileged socket access (rootless + later label-scoped proxy); engine credentials for remote
 engines (ssh/TLS) stored by the hub; many exec streams (engine events + on-demand sidecar streams);
-CLI `up` recreating containers while users are attached (hub must handle disconnects cleanly).
+CLI `project up` recreating containers while users are attached (hub must handle disconnects cleanly).

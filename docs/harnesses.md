@@ -79,6 +79,6 @@ Each gets its own worktree, so the two results can be compared as branches.
 ## Images
 
 Each harness has an image, `ghcr.io/egzo-ai/egzo-harness-<name>:<egzo version>`. Build them from the repository with
-`make images`, or point egzo at another registry with `EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `spawn`
+`make images`, or point egzo at another registry with `EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `egzo agent spawn`
 stops and names the image and the `image:` override. See [Overriding base images](images.md), and [installing](install.md)
 for building them. `pi` waits on MCP support: `known-issues/mcp-support-is-required.md`.

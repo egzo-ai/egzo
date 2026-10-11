@@ -2,17 +2,17 @@
 
 Start with `egzo system check` ([installing](install.md)), then `egzo ps`, then `egzo proxy log`.
 
-## `up` or `spawn` refuses
+## `project up` or `agent spawn` refuses
 
 | message or symptom | what to do |
 |---|---|
 | a secret is missing | `egzo project check`; with `pass`, check that `pass show NAME` works in your shell; with `env`, export the variable. Secrets are read before anything is created, so nothing is half-made. |
-| "stale" instances block `up` | their template changed. `egzo agent rm --stale` (or `egzo agent rm NAME`), `egzo project up`, spawn again. `egzo project up --dry-run` shows the change. |
-| the name is taken (exit 17) | `egzo agent rm NAME`, or pick another. A leftover network or home volume counts as an instance; `rm` clears it. |
+| "stale" instances block `project up` | their template changed. `egzo agent rm --stale` (or `egzo agent rm NAME`), `egzo project up`, spawn again. `egzo project up --dry-run` shows the change. |
+| the name is taken (exit 17) | `egzo agent rm NAME`, or pick another. A leftover network or home volume counts as an instance; `agent rm` clears it. |
 | a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo project down` the other. |
 | image cannot be pulled | the error names the image and the `image:` override. `make images`, or set `EGZO_HARNESS_PREFIX` ([installing](install.md), [images](images.md)). |
 | `runtime` refused on Podman | by design: Podman cannot apply or verify a runtime. Use Docker for gVisor. |
-| `spawn` says a worktree or a branch exists | an earlier instance of that name left it: `egzo agent spawn --reuse` continues with it, or remove the directory (and `git branch -D egzo/NAME` in `workspaces/<name>/.base`). |
+| `agent spawn` says a worktree or a branch exists | an earlier instance of that name left it: `egzo agent spawn --reuse` continues with it, or remove the directory (and `git branch -D egzo/NAME` in `workspaces/<name>/.base`). |
 | a git workspace has no base clone | `egzo project up` could not clone it (it printed why): allow the host and give the profile the `github` service, then `egzo project up` again. |
 
 ## The agent cannot reach something

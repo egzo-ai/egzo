@@ -22,10 +22,10 @@ $ egzo version
 ```
 
 That is all the CLI needs. It talks to your container engine, and pulls the images it uses the first time you
-`up` or `spawn`: the sidecar image `ghcr.io/egzo-ai/egzo:<version>` and the harness image
+`egzo project up` or `egzo agent spawn`: the sidecar image `ghcr.io/egzo-ai/egzo:<version>` and the harness image
 `ghcr.io/egzo-ai/egzo-harness-<name>:<version>` for each harness you use. The CLI always uses the images tagged with its
 own version, so the CLI and the sidecars cannot drift. To pull from another registry (a mirror), set
-`EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `spawn` says which image and how to override it.
+`EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `egzo agent spawn` says which image and how to override it.
 
 > Egzo has not been released yet, so there is nothing to download today; until it is, build from source (below). The
 > release and an install script are tracked in [`roadmap/initial-release.md`](../roadmap/initial-release.md).
@@ -51,7 +51,7 @@ $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 
 gVisor on Docker: install `runsc`, add it under `"runtimes"` in `/etc/docker/daemon.json`, restart Docker, then
 `runtime: runsc` on an agent. Podman's API cannot select or verify a runtime, so a project that asks for one there
-fails at `up` instead of silently starting in the default runtime.
+fails at `egzo project up` instead of silently starting in the default runtime.
 
 Agents run as your uid and gid, and egzo never mounts the engine socket into an agent. Anything that can reach the
 engine socket is root-equivalent on a rootful engine, so a rootless engine is the safer host.

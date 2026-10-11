@@ -9,7 +9,7 @@ Options considered:
   names no destination host, so no per-host policy, and a compromised agent can sign while the sidecar runs.
   Still needs raw TCP to port 22 through the proxy.
 - **B. The proxy terminates ssh and re-originates it (preferred).** The ssh analogue of TLS `inject`. The agent
-  ssh's to a proxy listener, authenticated by a per-instance identity key that `spawn` generates and binds in the
+  ssh's to a proxy listener, authenticated by a per-instance identity key that `agent spawn` generates and binds in the
   policy (an identity, not a secret). The proxy dials the real server with the vault key and a **pinned host key**
   (required, no trust on first use) and relays channels (shell, exec, sftp). Port and agent forwarding refused.
   Key never leaves the proxy, per-host policy, audit of sessions and exec commands, no default route, no CONNECT

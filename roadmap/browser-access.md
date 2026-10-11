@@ -64,14 +64,14 @@ Service `hosts` accept the same patterns as `allow`: a host, `*.domain`, or `*`.
 | Config | Result |
 |---|---|
 | wildcard host, no `inject`, no `placeholder` | accepted. It is an allowlist entry (a wildcard service **is** an allow: it counts for reachability) and, with `inspect: true`, every request to a covered host is audited (method, path, status; never the query or a body) |
-| wildcard host with `inject` or `placeholder` | **refused at `egzo config` / `up`**: a secret binds to exact hosts. `*.example.com` would hand it to every subdomain, including attacker-controlled ones |
+| wildcard host with `inject` or `placeholder` | **refused at `egzo project check --resolved` / `project up`**: a secret binds to exact hosts. `*.example.com` would hand it to every subdomain, including attacker-controlled ones |
 | a secret bound (string form, from `extend` or a child) to a wildcard service | refused, for the same reason (such a service has neither `inject` nor `placeholder`) |
 | a wildcard no-secret service next to an exact injecting service on a covered host | accepted: the exact one injects, `inspect` still applies, so `browse: { hosts: ["*"], inspect: true }` coexists with `anthropic` |
 | two services that disagree on injection for the same host | refused, as before |
 | unknown service keys (`insecure`, `skip_verify`, `ech`, ...) | refused, as before. egzo has no knob that weakens TLS verification or the ECH rule, and will not get one |
 
 Host names stay case-insensitive and a trailing dot is ignored, wildcards included. `allow: ["*"]` stays legal and
-silent (it is a documented, deliberate choice; a warning on every `up` would only be noise).
+silent (it is a documented, deliberate choice; a warning on every `project up` would only be noise).
 
 ### 3. The browser in the harness images
 
@@ -127,7 +127,7 @@ refusals, wildcard `inspect` and injection side by side), `test_egress.py` (wild
 
 ## Related ideas (not Chrome-specific)
 
-- **`build:` on an agent** (Compose style): egzo builds the user's Dockerfile on `up` or `spawn`, tags it by content hash,
+- **`build:` on an agent** (Compose style): egzo builds the user's Dockerfile on `project up` or `agent spawn`, tags it by content hash,
   records it in the template hash so a changed Dockerfile shows as a stale instance, and passes the harness image as a
   build arg.
 - **Authenticating agents by source address** on their own network, so a client needs no proxy credentials (the Playwright
@@ -135,6 +135,6 @@ refusals, wildcard `inspect` and injection side by side), `test_egress.py` (wild
 - **Image contract** (for `custom` or from-scratch images): the `egzo` binary at `/usr/local/bin/egzo`, entrypoint
   `egzo agent run -- <cmd>`, `HOME=/home/agent`, writable `/workspace` for any uid, `git`, `ca-certificates`,
   `procps`, the CA bundle path, and the `PATH` entries that switch on integrations such as the browser. Maybe
-  `egzo doctor --image X` to check it.
+  `egzo system check --image X` to check it.
 - **General per-template sidecars**: only if something needs a separate runtime or limits, never one feature per tool.
 - Rejected: declarative `packages:` or `setup:` (egzo would become a package manager).

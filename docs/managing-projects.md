@@ -64,10 +64,10 @@ $ egzo workspace fetch           # clone or refresh the git bases
 ```
 
 Everything that creates or removes things takes `--json` where a script would want it (`agent spawn`, `agent ls`, `agent rm`, `ps`),
-and `spawn` prints the instance name on stdout.
+and `agent spawn` prints the instance name on stdout.
 
 ## Exit codes worth knowing
 
-`spawn` with a name that is taken fails with 17 and changes nothing. `send --wait` and `spawn --wait` exit 0 when the
+`agent spawn` with a name that is taken fails with 17 and changes nothing. `message send --wait` and `agent spawn --wait` exit 0 when the
 request is done, 3 when the agent declined it, 4 when it failed (for example, the instance was removed) and 5 when
 `--timeout` passes (the message stays open).

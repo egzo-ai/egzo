@@ -60,13 +60,13 @@ $ egzo agent spawn claude --attach          # the real Claude Code, in a sandbox
 ```
 
 Detach with `Ctrl-]`; `egzo agent attach <name>` comes back. `egzo project init` fills the repository URL from your git `origin`;
-check the generated file before `up` (it leaves `TODO` comments where it had to guess). Next: [the project
+check the generated file before `egzo project up` (it leaves `TODO` comments where it had to guess). Next: [the project
 file](project-file.md), then [managing projects](managing-projects.md) and [sandboxing agents](sandboxing.md). If
 something misbehaves, see [troubleshooting](troubleshooting.md).
 
 ## Status
 
-Working on Docker: validation, `up` / `spawn` / `rm` / `down`, templates and instances, the egress proxy with
+Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
 credential injection, git workspaces, Claude Code and OpenCode, message delivery, and the operator commands. Not yet:
 the `pi` harness, and the Podman and gVisor spec runs. A separate hub and web UI is planned ([`roadmap/`](../roadmap/hub-and-web-ui.md)), not part
 of the CLI. Published images and a release are still to come ([`roadmap/initial-release.md`](../roadmap/initial-release.md)).

@@ -41,7 +41,7 @@ linux/arm64 from the same Dockerfile, but the browser has only been tried on amd
 Rules for a derived image:
 
 - **Keep the entrypoint.** Do not set your own `ENTRYPOINT`. It starts the session holder, which is what makes
-  `attach`, messages and status work. Do not set `CMD` either.
+  `agent attach`, messages and status work. Do not set `CMD` either.
 - **Install as root, run as nobody in particular.** Egzo runs the agent as your uid and gid, whatever `USER` says,
   so tools must be world-readable and executable, and anything the agent writes must go to the workspace, `/tmp` or
   its home. `/home/agent` and `/workspace` are writable by everyone.
