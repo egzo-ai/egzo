@@ -185,7 +185,7 @@ func newDownCommand(opts *options) *cobra.Command {
 					strings.Join(running, ", "))
 			}
 			instances := s.observed.InstanceNames()
-			if err := stack.Down(ctx, s.engine, s.observed, true, cmd.OutOrStdout()); err != nil {
+			if err := stack.Down(ctx, s.engine, s.observed, cmd.OutOrStdout()); err != nil {
 				// the instances that did go take their worktrees with them; the ones that are still there keep theirs
 				if again, observeErr := stack.Observe(ctx, s.engine, s.Resolved.Name); observeErr == nil {
 					still := map[string]bool{}

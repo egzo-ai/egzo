@@ -80,8 +80,8 @@ func exists(path string) bool {
 	return err == nil
 }
 
-// Checkout is the worktree a git workspace needs for an instance.
-type Checkout struct {
+// Worktree is the worktree a git workspace needs for an instance.
+type Worktree struct {
 	Workspace string
 	Instance  string
 	Dir       string // the worktree
@@ -90,7 +90,7 @@ type Checkout struct {
 	Branch    string
 }
 
-func (c Checkout) String() string {
+func (c Worktree) String() string {
 	return fmt.Sprintf("workspace %s for %s into %s", c.Workspace, c.Instance, c.Dir)
 }
 
@@ -146,8 +146,8 @@ func listing(project *config.Resolved, workspace string) []string {
 }
 
 // PlanWorktrees lists the worktrees instance needs, one per git workspace it lists.
-func PlanWorktrees(project *config.Resolved, instance string) []Checkout {
-	var plan []Checkout
+func PlanWorktrees(project *config.Resolved, instance string) []Worktree {
+	var plan []Worktree
 	agent, ok := project.Agents[instance]
 	if !ok {
 		return nil
@@ -157,7 +157,7 @@ func PlanWorktrees(project *config.Resolved, instance string) []Checkout {
 		if !ok || ws.Git == nil || mount.HostPath != "" {
 			continue
 		}
-		plan = append(plan, Checkout{
+		plan = append(plan, Worktree{
 			Workspace: mount.Name, Instance: instance, Dir: WorktreeDir(ws, instance), Base: BaseDir(ws),
 			URL: ws.Git.URL, Branch: ws.Git.Branch,
 		})
@@ -167,18 +167,18 @@ func PlanWorktrees(project *config.Resolved, instance string) []Checkout {
 
 // CheckWorktrees refuses a plan that would take over what is already there: a worktree directory, or the
 // branch of the instance in the base. Both are somebody's work, so only reuse continues with them.
-func CheckWorktrees(plan []Checkout, reuse bool) error {
+func CheckWorktrees(plan []Worktree, reuse bool) error {
 	if reuse {
 		return nil
 	}
-	for _, checkout := range plan {
-		if exists(checkout.Dir) {
+	for _, worktree := range plan {
+		if exists(worktree.Dir) {
 			return fmt.Errorf("%s already exists: it is the worktree of %q in workspace %q; pass --reuse to continue with it, or remove it",
-				checkout.Dir, checkout.Instance, checkout.Workspace)
+				worktree.Dir, worktree.Instance, worktree.Workspace)
 		}
-		if branch := gitprep.Branch(checkout.Instance); branchExists(checkout.Base, branch) {
+		if branch := gitprep.Branch(worktree.Instance); branchExists(worktree.Base, branch) {
 			return fmt.Errorf("the branch %s already exists in the base clone %s, left by an earlier instance of that name: "+
-				"pass --reuse to continue it, or pick another name", branch, checkout.Base)
+				"pass --reuse to continue it, or pick another name", branch, worktree.Base)
 		}
 	}
 	return nil
@@ -234,25 +234,25 @@ const warningPrefix = "egzo-warning: "
 
 // RunWorktreePreps makes the worktrees of an instance, one at a time, on the instance's own network, so the
 // base is cloned (when it is missing) and fetched through the proxy under the instance's identity.
-func RunWorktreePreps(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string, tokens map[string]string, plan []Checkout, options WorktreeOptions, out io.Writer) error {
+func RunWorktreePreps(ctx context.Context, c *engine.Client, project *config.Resolved, dir, image, user string, tokens map[string]string, plan []Worktree, options WorktreeOptions, out io.Writer) error {
 	if len(plan) == 0 {
 		return nil
 	}
 	if err := ensureImage(ctx, c, image); err != nil {
 		return err
 	}
-	for _, checkout := range plan {
-		fmt.Fprintf(out, "worktree %s\n", checkout)
-		madeBase, madeDir := !exists(checkout.Base), !exists(checkout.Dir)
-		for _, d := range []string{checkout.Base, checkout.Dir} {
+	for _, worktree := range plan {
+		fmt.Fprintf(out, "worktree %s\n", worktree)
+		madeBase, madeDir := !exists(worktree.Base), !exists(worktree.Dir)
+		for _, d := range []string{worktree.Base, worktree.Dir} {
 			if err := os.MkdirAll(d, 0o755); err != nil {
 				return fmt.Errorf("create %s: %w", d, err)
 			}
 		}
-		cmd := []string{"/egzo", "prep", "git", "worktree", "--url", checkout.URL,
-			"--base", containerBase(checkout.Workspace), "--agent", checkout.Instance}
-		if checkout.Branch != "" {
-			cmd = append(cmd, "--branch", checkout.Branch)
+		cmd := []string{"/egzo", "prep", "git", "worktree", "--url", worktree.URL,
+			"--base", containerBase(worktree.Workspace), "--agent", worktree.Instance}
+		if worktree.Branch != "" {
+			cmd = append(cmd, "--branch", worktree.Branch)
 		}
 		if options.NoFetch {
 			cmd = append(cmd, "--no-fetch")
@@ -260,23 +260,23 @@ func RunWorktreePreps(ctx context.Context, c *engine.Client, project *config.Res
 		if options.Reuse {
 			cmd = append(cmd, "--reuse")
 		}
-		cmd = append(cmd, containerWorktree(checkout.Workspace, checkout.Instance))
-		ws := project.Workspaces[checkout.Workspace]
-		stdout, err := runGit(ctx, c, project, dir, image, user, checkout.Instance, tokens[checkout.Instance],
-			InstanceNetwork(project.Name, checkout.Instance), cmd, worktreeMounts(checkout.Workspace, ws, checkout.Instance))
+		cmd = append(cmd, containerWorktree(worktree.Workspace, worktree.Instance))
+		ws := project.Workspaces[worktree.Workspace]
+		stdout, err := runGit(ctx, c, project, dir, image, user, worktree.Instance, tokens[worktree.Instance],
+			InstanceNetwork(project.Name, worktree.Instance), cmd, worktreeMounts(worktree.Workspace, ws, worktree.Instance))
 		if err != nil {
 			// leave nothing half-made behind: an empty directory made for this job is not a worktree
 			if madeDir {
-				os.Remove(checkout.Dir)
+				os.Remove(worktree.Dir)
 			}
 			if madeBase {
-				os.Remove(checkout.Base)
+				os.Remove(worktree.Base)
 			}
-			return gitFailure(project, checkout.Instance, checkout.Workspace, checkout.URL, err)
+			return gitFailure(project, worktree.Instance, worktree.Workspace, worktree.URL, err)
 		}
 		for _, line := range strings.Split(stdout, "\n") {
 			if warning, ok := strings.CutPrefix(line, warningPrefix); ok {
-				fmt.Fprintf(out, "warning: workspace %s: %s\n", checkout.Workspace, warning)
+				fmt.Fprintf(out, "warning: workspace %s: %s\n", worktree.Workspace, warning)
 			}
 		}
 	}
@@ -396,7 +396,7 @@ func FetchBase(ctx context.Context, c *engine.Client, project *config.Resolved, 
 	return nil
 }
 
-// EnsureMountDirectories makes the host directories one agent's template mounts, when they are missing.
+// EnsureMountDirectories makes the host directories one agent's template mounts, when they are missing (`agent start`).
 func EnsureMountDirectories(agent config.ResolvedAgent) error { return ensureMountDirectories(agent) }
 
 // withPrepIdentity gives fn a network the proxy serves and a token that is bound to profile, then takes both

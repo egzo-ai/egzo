@@ -20,10 +20,6 @@ var identifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 // reservedAgents are names egzo gives to its own containers, networks, DNS aliases or directories.
 var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": true}
 
-// reservedWorkspaces are volumes egzo creates for itself: a workspace with one of these names would hand
-// an agent the control volume (which holds the key every token derives from) or the CA the agents trust.
-var reservedWorkspaces = map[string]bool{"control": true, "ca": true, "ca-private": true, "egress": true}
-
 // CheckInstanceName reports why name cannot be the name of an instance, or nil. An instance is addressed
 // by its name alone, so the name must be a plain identifier, must not be one of the project's templates
 // and must not make a container, network or directory that egzo already uses for something else.
@@ -62,16 +58,8 @@ func checkNames(file *File, p *problems) {
 			p.addf("agent %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
 		}
 	}
-	workspaces := make([]string, 0, len(file.Workspaces))
-	for name := range file.Workspaces {
-		workspaces = append(workspaces, name)
-	}
-	sort.Strings(workspaces)
-	for _, name := range workspaces {
-		switch {
-		case reservedWorkspaces[name]:
-			p.addf("workspace %q: %q is reserved for egzo's own use", name, name)
-		case !identifier.MatchString(name):
+	for _, name := range sortedWorkspaceNames(file) {
+		if !identifier.MatchString(name) {
 			p.addf("workspace %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
 		}
 	}

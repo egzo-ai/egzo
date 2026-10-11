@@ -38,10 +38,9 @@ const (
 	promptPath     = "/etc/egzo/prompt.md"
 	proxyPort      = "3128"
 
-	kindControl   = "control"
-	kindProxy     = "proxy"
-	kindAgent     = "agent"
-	kindWorkspace = "workspace"
+	kindControl = "control"
+	kindProxy   = "proxy"
+	kindAgent   = "agent"
 )
 
 type NetworkSpec struct {

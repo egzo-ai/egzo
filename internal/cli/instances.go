@@ -235,7 +235,7 @@ func newAgentRmCommand(opts *options) *cobra.Command {
 			case olderThan < 0:
 				return fmt.Errorf("--older-than must be a positive duration like 24h")
 			case filtered:
-				return pruneInstances(cmd, opts, stopped, stale, olderThan, dryRun, yes, asJSON)
+				return removeMatching(cmd, opts, stopped, stale, olderThan, dryRun, yes, asJSON)
 			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
@@ -265,19 +265,19 @@ func newAgentRmCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-// pruneFilters are the filters of `egzo agent rm`: an instance matches when it matches any of them.
-type pruneFilters struct {
+// removeFilters are the filters of `egzo agent rm`: an instance matches when it matches any of them.
+type removeFilters struct {
 	stopped, stale bool
 	olderThan      time.Duration
 }
 
-// pruneCandidate is an instance prune would remove, and why.
-type pruneCandidate struct{ Name, Reason string }
+// removalCandidate is an instance a filter would remove, and why.
+type removalCandidate struct{ Name, Reason string }
 
-// pruneCandidates picks the instances that match any filter. current is the templates the file defines,
+// removalCandidates picks the instances that match any filter. current is the templates the file defines,
 // which stale is judged against.
-func pruneCandidates(instances []stack.Instance, filters pruneFilters, current stack.Published, now time.Time) []pruneCandidate {
-	var candidates []pruneCandidate
+func removalCandidates(instances []stack.Instance, filters removeFilters, current stack.Published, now time.Time) []removalCandidate {
+	var candidates []removalCandidate
 	for _, instance := range instances {
 		var reasons []string
 		if filters.stopped && instance.State != "running" {
@@ -290,14 +290,14 @@ func pruneCandidates(instances []stack.Instance, filters pruneFilters, current s
 			reasons = append(reasons, "older than "+filters.olderThan.String())
 		}
 		if len(reasons) > 0 {
-			candidates = append(candidates, pruneCandidate{instance.Name, strings.Join(reasons, ", ")})
+			candidates = append(candidates, removalCandidate{instance.Name, strings.Join(reasons, ", ")})
 		}
 	}
 	return candidates
 }
 
-// pruneInstances removes the instances that match any filter, after listing them and asking.
-func pruneInstances(cmd *cobra.Command, opts *options, stopped, stale bool, olderThan time.Duration, dryRun, yes, asJSON bool) error {
+// removeMatching removes the instances that match any filter, after listing them and asking.
+func removeMatching(cmd *cobra.Command, opts *options, stopped, stale bool, olderThan time.Duration, dryRun, yes, asJSON bool) error {
 	ctx, stop := commandContext(cmd)
 	defer stop()
 	s, err := openSession(ctx, opts)
@@ -311,7 +311,7 @@ func pruneInstances(cmd *cobra.Command, opts *options, stopped, stale bool, olde
 			return err
 		}
 	}
-	candidates := pruneCandidates(s.observed.Instances(), pruneFilters{stopped: stopped, stale: stale, olderThan: olderThan}, current, time.Now())
+	candidates := removalCandidates(s.observed.Instances(), removeFilters{stopped: stopped, stale: stale, olderThan: olderThan}, current, time.Now())
 	names := make([]string, len(candidates))
 	for i, c := range candidates {
 		names[i] = c.Name
@@ -327,7 +327,7 @@ func pruneInstances(cmd *cobra.Command, opts *options, stopped, stale bool, olde
 		return nil
 	}
 	if len(candidates) == 0 {
-		fmt.Fprintln(cmd.ErrOrStderr(), "nothing to prune")
+		fmt.Fprintln(cmd.ErrOrStderr(), "nothing to remove")
 		if asJSON {
 			data, _ := json.Marshal(map[string][]string{"removed": []string{}})
 			fmt.Fprintln(cmd.OutOrStdout(), string(data))
@@ -361,7 +361,7 @@ func pruneInstances(cmd *cobra.Command, opts *options, stopped, stale bool, olde
 		confirmed[name] = true
 	}
 	var still []string
-	for _, c := range pruneCandidates(observed.Instances(), pruneFilters{stopped: stopped, stale: stale, olderThan: olderThan}, current, time.Now()) {
+	for _, c := range removalCandidates(observed.Instances(), removeFilters{stopped: stopped, stale: stale, olderThan: olderThan}, current, time.Now()) {
 		if confirmed[c.Name] {
 			still = append(still, c.Name)
 		}

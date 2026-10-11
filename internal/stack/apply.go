@@ -356,9 +356,9 @@ func registryAuth(ref string, configJSON []byte) string {
 	return ""
 }
 
-// Down removes a project's containers and networks, and its volumes when volumes is true.
-// Workspace directories on the host are never touched.
-func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool, out io.Writer) error {
+// Down removes everything egzo made for a project: its containers, then their networks, then its volumes (the
+// control state, the CA and the homes). Workspace directories on the host are never touched.
+func Down(ctx context.Context, c *engine.Client, observed Observed, out io.Writer) error {
 	out = &lockedWriter{w: out}
 	// The control volume outlives the project never: the agents registered in it must
 	// not, or the next `up` would accept messages for instances that do not exist.
@@ -373,9 +373,6 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, volumes bool
 	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
 	// depends on anything, and stopping containers is where the time goes, so do it together.
 	for _, kind := range []string{"container", "network", "volume"} {
-		if kind == "volume" && !volumes {
-			continue
-		}
 		var actions []Action
 		for _, r := range observed.Resources {
 			if r.Type == kind {

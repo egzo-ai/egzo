@@ -307,8 +307,7 @@ func TestWhatIsLeftOfAnInstanceWithoutItsContainerIsStillAnInstanceToRemove(t *t
 		{Type: "network", Name: "proj_b", Kind: kindAgent, Service: "coder", Instance: "b", Actor: "operator"},
 		{Type: "volume", Name: "proj_b-home", Kind: kindAgent, Service: "coder", Instance: "b"},
 		{Type: "network", Name: "proj_c", Kind: kindAgent, Service: "review", Instance: "c"},
-		{Type: "volume", Name: "proj_kept-home", Kind: kindAgent, Service: "coder", Instance: "kept"}, // kept by `down`: not an instance
-		{Type: "volume", Name: "proj_shared", Kind: kindWorkspace, Service: "shared"},
+		{Type: "volume", Name: "proj_kept-home", Kind: kindAgent, Service: "coder", Instance: "kept"}, // no container, no network: not an instance
 	}}
 	got := observed.Instances()
 	if len(got) != 3 || got[0].Name != "a" || got[1].Name != "b" || got[2].Name != "c" {

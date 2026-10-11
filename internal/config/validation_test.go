@@ -17,10 +17,6 @@ func TestReservedAndMalformedNames(t *testing.T) {
 		{"agent with a space", "agents:\n  'my agent': " + custom + "\n", "lowercase"},
 		{"agent in capitals", "agents:\n  Coder: " + custom + "\n", "lowercase"},
 		{"agent too long", "agents:\n  " + strings.Repeat("a", 64) + ": " + custom + "\n", "lowercase"},
-		{"workspace control", "workspaces:\n  control: {}\n", "reserved"},
-		{"workspace ca", "workspaces:\n  ca: {}\n", "reserved"},
-		{"workspace ca-private", "workspaces:\n  ca-private: {}\n", "reserved"},
-		{"workspace egress", "workspaces:\n  egress: {}\n", "reserved"},
 		{"workspace dotdot", "workspaces:\n  '..': {}\n", "lowercase"},
 	}
 	for _, c := range cases {

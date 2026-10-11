@@ -113,6 +113,16 @@ def test_a_workspace_directory_is_created_empty_when_it_is_missing_at_spawn_and_
     assert directory.is_dir()
 
 
+def test_agent_start_creates_a_missing_directory_workspace(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
+    assert live_project.run("agent", "stop", "coder-1").returncode == 0
+    (live_project.root / "data").rmdir()
+    started = live_project.run("agent", "start", "coder-1")
+    assert started.returncode == 0, started.stderr
+    assert (live_project.root / "data").is_dir()
+    assert engine.instance(live_project.name, "coder-1").raw["State"]["Running"] is True
+
+
 def test_a_read_only_host_directory_cannot_be_written(live_project, engine, agent_image):
     docs = live_project.mkdir("docs")
     (docs / "readme.txt").write_text("from the host")

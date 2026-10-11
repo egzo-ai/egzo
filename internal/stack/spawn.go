@@ -112,7 +112,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 			return Spawned{}, fmt.Errorf("the name %q is taken: the %s %s already exists", name, taken.kind, r.Name)
 		}
 	}
-	// The home of an instance that went away with `down` is kept, and a spawn of the name takes it up again;
+	// The home of an instance whose removal did not finish is taken up again by a spawn of the name;
 	// a volume of that name that is not an instance's home is something else's.
 	if r := observed.find("volume", homeVolume(project, name)); r != nil && r.Instance != name {
 		return Spawned{}, fmt.Errorf("the name %q is taken: the volume %s already exists", name, r.Name)
@@ -137,8 +137,8 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if err != nil {
 		return Spawned{}, err
 	}
-	checkouts := PlanWorktrees(view, name)
-	if err := CheckWorktrees(checkouts, req.Reuse); err != nil {
+	worktrees := PlanWorktrees(view, name)
+	if err := CheckWorktrees(worktrees, req.Reuse); err != nil {
 		return Spawned{}, err
 	}
 	homeExisted := observed.find("volume", homeVolume(project, name)) != nil
@@ -147,7 +147,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
 	plan := spawnPlan{
 		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
-		checkouts: checkouts, homeExisted: homeExisted, worktrees: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
+		worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
 		container: func(tokens map[string]string) (ContainerSpec, error) {
 			full, err := DesireInstance(view, dir, published.inputs(instances, tokens, nil), name, identity)
 			if err != nil {
@@ -178,8 +178,8 @@ type spawnPlan struct {
 	view               *config.Resolved
 	template           Template
 	resources          Desired // the network, the home volume and the attachments
-	checkouts          []Checkout
-	worktrees          WorktreeOptions
+	worktrees          []Worktree
+	options            WorktreeOptions
 	homeExisted        bool
 	// container builds the container once the instance's token is known.
 	container func(tokens map[string]string) (ContainerSpec, error)
@@ -212,7 +212,7 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	undo.add(func(ctx context.Context) { c.API.NetworkRemove(ctx, network.Name) })
 	for _, volume := range p.resources.Volumes {
 		if p.homeExisted {
-			fmt.Fprintf(out, "reuse volume %s\n", volume.Name) // kept by `down`: the instance's home
+			fmt.Fprintf(out, "reuse volume %s\n", volume.Name) // the instance's home, left by a removal that did not finish
 			continue
 		}
 		if err := do(Action{Verb: "create", Type: "volume", Name: volume.Name}); err != nil {
@@ -243,10 +243,10 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	}
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
 
-	if len(p.checkouts) > 0 {
+	if len(p.worktrees) > 0 {
 		// The base is cloned and fetched through the proxy as the instance, so its network and its binding come
 		// first. A worktree is never undone: it holds work.
-		if err := RunWorktreePreps(ctx, c, p.view, p.dir, p.published.Image, p.published.User, tokens, p.checkouts, p.worktrees, out); err != nil {
+		if err := RunWorktreePreps(ctx, c, p.view, p.dir, p.published.Image, p.published.User, tokens, p.worktrees, p.options, out); err != nil {
 			return err
 		}
 	}

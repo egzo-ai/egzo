@@ -51,9 +51,6 @@ type Published struct {
 	// User is the "uid:gid" instances run as: the user who ran `up`.
 	User      string
 	Templates map[string]Template
-	// WorkspaceNames are all the workspaces the file declares, so an instance's name cannot collide with
-	// one of their volumes.
-	WorkspaceNames []string
 }
 
 // Publish resolves the templates of a project. It reads the prompt files, since an instance mounts
@@ -69,7 +66,6 @@ func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user strin
 		return Published{}, err
 	}
 	published := Published{Version: publishedVersion, Project: project.Name, Dir: dir, Image: image, User: user, Templates: map[string]Template{}}
-	published.WorkspaceNames = sortedKeys(project.Workspaces)
 	for _, name := range sortedKeys(project.Agents) {
 		agent := project.Agents[name]
 		template := Template{

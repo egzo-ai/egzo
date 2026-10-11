@@ -90,16 +90,6 @@ def test_an_agent_cannot_take_the_name_of_a_sidecar_or_egzos_own_identity(projec
     assert name in result.stderr and "reserved" in result.stderr
 
 
-@pytest.mark.parametrize("name", ["control", "ca", "ca-private", "egress"])
-def test_a_workspace_cannot_take_the_name_of_a_resource_egzo_owns(project, name):
-    """A workspace called `control` would hand the agent the control volume, which holds the key every token derives from."""
-    result = project.config(
-        spec(workspaces={name: {}}, agents={"coder": agent(harness="custom", image="alpine", workspaces=[name])})
-    )
-    assert result.returncode != 0
-    assert name in result.stderr and "reserved" in result.stderr
-
-
 @pytest.mark.parametrize("name", ["my agent", "Coder", "-dash", "a/b", "a:b", "ünï", ".hidden", "a" * 64])
 def test_an_agent_name_is_a_plain_lowercase_name(project, name):
     result = project.config(spec(agents={name: agent(harness="custom", image="alpine")}))
