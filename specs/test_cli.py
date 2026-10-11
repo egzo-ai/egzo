@@ -125,7 +125,7 @@ def test_check_resolved_prints_the_configuration_and_does_not_read_secrets(proje
     project.write(spec(vaults=secret_vault("TOKEN"), workspaces={"foo": {}}))
     result = project.run("project", "check", "--resolved", env={})
     assert result.returncode == 0, result.stderr
-    assert result.yaml()["workspaces"]["foo"]["path"].endswith("workspaces/foo")
+    assert "path" not in result.yaml()["workspaces"]["foo"]
 
 
 def test_drift_is_shown_but_is_not_an_error(live_project, engine, agent_image):
@@ -146,9 +146,9 @@ def test_system_check_needs_no_project_file(tmp_path, engine, egzo):
     assert any(line.startswith("ok") and "engine" in line for line in result.stdout.splitlines())
 
 
-def test_system_check_says_what_it_found_about_git(tmp_path, engine, egzo):
+def test_system_check_says_what_it_found_about_git_in_the_image_and_asks_nothing_of_the_host(tmp_path, engine, egzo):
     out = egzo.run("system", "check", cwd=tmp_path, env=engine.env).stdout
-    assert re.search(r"^(ok|warn|fail)\s+git.*host", out, re.M), out
+    assert not re.search(r"^(ok|warn|fail)\s+git.*host", out, re.M), out
     assert re.search(r"^(ok|warn|fail)\s+git.*(image|prep)", out, re.M), out
 
 
