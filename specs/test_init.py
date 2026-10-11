@@ -49,14 +49,16 @@ def test_init_mounts_nothing_from_the_directory(project):
 def test_init_in_a_git_repository_ignores_the_workspace_data(project):
     git(project, "init", "-q")
     assert project.run("init").returncode == 0
-    assert ".egzo/" in (project.root / ".gitignore").read_text().splitlines()
+    lines = (project.root / ".gitignore").read_text().splitlines()
+    assert ".egzo/" in lines and "workspaces/" in lines
 
 
 def test_init_does_not_duplicate_the_ignore_entry(project):
     git(project, "init", "-q")
-    (project.root / ".gitignore").write_text("node_modules/\n.egzo/\n")
+    (project.root / ".gitignore").write_text("node_modules/\n.egzo/\nworkspaces/\n")
     assert project.run("init").returncode == 0
-    assert (project.root / ".gitignore").read_text().splitlines().count(".egzo/") == 1
+    lines = (project.root / ".gitignore").read_text().splitlines()
+    assert lines.count(".egzo/") == 1 and lines.count("workspaces/") == 1
 
 
 def test_init_outside_a_git_repository_leaves_gitignore_alone(project):

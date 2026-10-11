@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""Workspaces: declaration, references, mounts, working directory and git sources."""
+"""Workspaces: declaration, defaults, references, mounts and working directory.
+
+A workspace is declared once, at the top of the project file, and belongs to the project. It is a directory on the
+host (`path`, `./workspaces/<name>` by default) or a git repository (`git`, whose `path` holds the base clone and one
+worktree per agent). An agent lists declared names only.
+"""
 
 from pathlib import Path
 
@@ -14,6 +19,10 @@ def workspaces(**declared):
     return {**GIT_WORKSPACE, **declared}
 
 
+def path_of(resolved, name):
+    return Path(resolved["workspaces"][name]["path"])
+
+
 def test_an_undeclared_workspace_is_an_error(project):
     result = project.config(spec(agents={"coder": agent(workspaces=["nope"])}))
     assert result.returncode != 0
@@ -21,9 +30,9 @@ def test_an_undeclared_workspace_is_an_error(project):
 
 
 def test_a_single_workspace_is_the_working_directory(project):
-    resolved = project.resolved(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
-    assert resolved["agents"]["coder"]["workdir"] == "/workspace/repo"
-    assert "/workspace/repo" in mounts(resolved, "coder")
+    resolved = project.resolved(spec(workspaces={"docs": {}}, agents={"coder": agent(workspaces=["docs"])}))
+    assert resolved["agents"]["coder"]["workdir"] == "/workspace/docs"
+    assert "/workspace/docs" in mounts(resolved, "coder")
 
 
 def test_two_workspaces_make_workspace_the_working_directory(project):
@@ -38,10 +47,10 @@ def test_workdir_overrides_the_default(project):
     resolved = project.resolved(
         spec(
             workspaces=workspaces(scratch={}),
-            agents={"coder": agent(workspaces=["repo", "scratch"], workdir="repo")},
+            agents={"coder": agent(workspaces=["repo", "scratch"], workdir="scratch")},
         )
     )
-    assert resolved["agents"]["coder"]["workdir"] == "/workspace/repo"
+    assert resolved["agents"]["coder"]["workdir"] == "/workspace/scratch"
 
 
 def test_an_agent_without_workspaces_mounts_nothing(project):
@@ -49,69 +58,135 @@ def test_an_agent_without_workspaces_mounts_nothing(project):
     assert resolved["agents"]["coder"]["workspaces"] == []
 
 
-def test_a_declared_workspace_without_a_source_is_a_shared_volume(project):
-    resolved = project.resolved(
-        spec(workspaces={"scratch": {}}, agents={"a": agent(workspaces=["scratch"]), "b": agent(workspaces=["scratch"])})
-    )
-    assert mounts(resolved, "a")["/workspace/scratch"]["name"] == "scratch"
-    assert mounts(resolved, "b")["/workspace/scratch"]["name"] == "scratch"
-    assert mounts(resolved, "a")["/workspace/scratch"]["mode"] == "rw"
+# --- the path of a workspace -------------------------------------------------------------------------------
 
 
-def test_an_inline_host_path_is_mounted_by_its_basename(project):
-    docs = project.mkdir("docs")
-    resolved = project.resolved(spec(agents={"coder": agent(workspaces=["./docs"])}))
+def test_a_workspace_without_a_path_lives_under_workspaces_in_the_project_directory(project):
+    resolved = project.resolved(spec(workspaces={"foo": {}}))
+    assert path_of(resolved, "foo") == project.root / "workspaces" / "foo"
+
+
+def test_an_empty_workspace_is_the_same_as_one_with_its_default_path(project):
+    implicit = project.resolved(spec(workspaces={"foo": {}}))["workspaces"]["foo"]
+    explicit = project.resolved(spec(workspaces={"foo": {"path": "./workspaces/foo"}}))["workspaces"]["foo"]
+    assert implicit == explicit
+
+
+def test_a_git_workspace_without_a_path_lives_under_workspaces_too(project):
+    assert path_of(project.resolved(spec(workspaces=workspaces())), "repo") == project.root / "workspaces" / "repo"
+
+
+def test_path_relocates_a_workspace_and_is_relative_to_the_project_directory(project):
+    resolved = project.resolved(spec(workspaces={"docs": {"path": "./docs"}}))
+    assert path_of(resolved, "docs") == project.root / "docs"
+
+
+def test_path_may_be_absolute(project, tmp_path):
+    target = tmp_path / "elsewhere"
+    assert path_of(project.resolved(spec(workspaces={"docs": {"path": str(target)}})), "docs") == target
+
+
+def test_path_relocates_a_git_workspace(project):
+    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": "./clones/repo"}})
+    assert path_of(project.resolved(document), "repo") == project.root / "clones" / "repo"
+
+
+def test_the_path_is_relative_to_the_project_directory_when_run_from_a_subdirectory(project):
+    project.mkdir("docs")
+    project.mkdir("src/deep/docs")  # a ./docs next to the shell must not be mistaken for the project's
+    project.write(spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": agent(workspaces=["docs"])}))
+    result = project.egzo.run("config", cwd=project.root / "src" / "deep")
+    assert result.returncode == 0, result.stderr
+    assert path_of(result.yaml(), "docs") == project.root / "docs"
+    assert result.yaml()["name"] == project.name
+
+
+def test_the_path_is_relative_to_the_project_directory_when_run_from_outside_it(project, tmp_path):
+    outside = tmp_path / "elsewhere"
+    (outside / "docs").mkdir(parents=True)  # again, not the project's ./docs
+    project.write(spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": agent(workspaces=["docs"])}))
+    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=outside)
+    assert result.returncode == 0, result.stderr
+    assert path_of(result.yaml(), "docs") == project.root / "docs"
+    assert result.yaml()["name"] == project.name
+
+
+def test_the_default_path_is_the_project_directorys_when_run_from_outside_it(project, tmp_path):
+    project.write(spec(workspaces={"foo": {}}))
+    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert path_of(result.yaml(), "foo") == project.root / "workspaces" / "foo"
+
+
+def test_a_project_reached_through_a_symlink_is_the_same_project(project, tmp_path):
+    """Project identity is the directory: through a symlink it must resolve to the same real paths."""
+    project.write(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
+    link = tmp_path / "link"
+    link.symlink_to(project.root)
+    direct = project.run("config").yaml()["workspaces"]["repo"]["path"]
+    through = project.egzo.run("-f", link / "egzo.yaml", "config", cwd=tmp_path).yaml()["workspaces"]["repo"]["path"]
+    assert through == direct
+
+
+# --- directory workspaces ----------------------------------------------------------------------------------
+
+
+def test_a_directory_workspace_is_mounted_from_its_path(project):
+    resolved = project.resolved(spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": agent(workspaces=["docs"])}))
     mount = mounts(resolved, "coder")["/workspace/docs"]
-    assert mount["host_path"] == str(docs)
+    assert mount["host_path"] == str(project.root / "docs")
     assert mount["mode"] == "rw"
 
 
-def test_a_relative_host_path_is_relative_to_the_project_directory_when_run_from_a_subdirectory(project):
-    docs = project.mkdir("docs")
-    project.mkdir("src/deep/docs")  # a ./docs next to the shell must not be mistaken for the project's
-    project.write(spec(agents={"coder": agent(workspaces=["./docs"])}))
-    result = project.egzo.run("config", cwd=project.root / "src" / "deep")
-    assert result.returncode == 0, result.stderr
-    assert mounts(result.yaml(), "coder")["/workspace/docs"]["host_path"] == str(docs)
-    assert result.yaml()["name"] == project.name
+def test_a_workspace_without_a_source_is_a_host_directory_and_not_a_volume(project):
+    resolved = project.resolved(
+        spec(workspaces={"scratch": {}}, agents={"a": agent(workspaces=["scratch"]), "b": agent(workspaces=["scratch"])})
+    )
+    for name in ("a", "b"):
+        mount = mounts(resolved, name)["/workspace/scratch"]
+        assert mount["host_path"] == str(project.root / "workspaces" / "scratch")
+        assert mount["mode"] == "rw"
+        assert "name" not in mount  # a volume was named; a directory is a host path
 
 
-def test_a_relative_host_path_is_relative_to_the_project_directory_when_run_from_outside_it(project, tmp_path):
-    docs = project.mkdir("docs")
-    outside = tmp_path / "elsewhere"
-    (outside / "docs").mkdir(parents=True)  # again, not the project's ./docs
-    project.write(spec(agents={"coder": agent(workspaces=["./docs"])}))
-    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=outside)
-    assert result.returncode == 0, result.stderr
-    assert mounts(result.yaml(), "coder")["/workspace/docs"]["host_path"] == str(docs)
-    assert result.yaml()["name"] == project.name
-
-
-def test_a_git_workspace_path_is_relative_to_the_project_directory_when_run_from_outside_it(project, tmp_path):
-    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": "./clones/repo"}})
-    project.write(document)
-    result = project.egzo.run("-f", project.root / "egzo.yaml", "config", cwd=tmp_path)
-    assert result.returncode == 0, result.stderr
-    assert Path(result.yaml()["workspaces"]["repo"]["path"]) == project.root / "clones" / "repo"
-
-
-def test_ro_makes_a_host_path_read_only(project):
-    project.mkdir("docs")
-    resolved = project.resolved(spec(agents={"coder": agent(workspaces=["./docs:ro"])}))
+def test_ro_makes_a_directory_workspace_read_only(project):
+    resolved = project.resolved(spec(workspaces={"docs": {}}, agents={"coder": agent(workspaces=["docs:ro"])}))
     assert mounts(resolved, "coder")["/workspace/docs"]["mode"] == "ro"
 
 
-def test_inline_paths_with_the_same_basename_collide(project):
-    project.mkdir("a/docs")
-    project.mkdir("b/docs")
-    result = project.config(spec(agents={"coder": agent(workspaces=["./a/docs", "./b/docs"])}))
+def test_an_inline_host_path_is_not_a_workspace(project):
+    """Paths are declared once, at the top: an agent names a workspace, not a directory."""
+    project.mkdir("docs")
+    result = project.config(spec(agents={"coder": agent(workspaces=["./docs"])}))
     assert result.returncode != 0
-    assert "docs" in result.stderr
+    assert "./docs" in result.stderr and "workspaces" in result.stderr
 
 
-def test_nothing_is_mounted_from_the_host_unless_the_file_says_so(project):
+def test_an_absolute_inline_path_is_not_a_workspace_either(project):
+    result = project.config(spec(agents={"coder": agent(workspaces=["/srv/data:ro"])}))
+    assert result.returncode != 0
+    assert "/srv/data" in result.stderr
+
+
+def test_two_workspaces_cannot_share_a_path(project):
+    result = project.config(spec(workspaces={"a": {"path": "./data"}, "b": {"path": "./data"}}))
+    assert result.returncode != 0
+    assert "data" in result.stderr
+
+
+def test_nothing_is_mounted_from_the_host_unless_a_workspace_is_listed(project):
+    resolved = project.resolved(spec(workspaces={"docs": {}, **workspaces()}, agents={"coder": agent()}))
+    assert resolved["agents"]["coder"]["workspaces"] == []
+
+
+# --- git workspaces ----------------------------------------------------------------------------------------
+
+
+def test_a_git_workspace_is_mounted_as_a_worktree_of_its_base(project):
     resolved = project.resolved(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
-    assert all("host_path" not in m for m in resolved["agents"]["coder"]["workspaces"])
+    mount = mounts(resolved, "coder")["/workspace/repo"]
+    assert mount["mode"] == "rw"
+    assert "host_path" not in mount  # the container gets the base and its own worktree, not the directory
 
 
 def test_ro_on_a_git_workspace_is_an_error_that_explains_why(project):
@@ -121,10 +196,10 @@ def test_ro_on_a_git_workspace_is_an_error_that_explains_why(project):
     assert "git" in result.stderr.lower()
 
 
-def test_the_ro_error_offers_a_host_path_or_a_shared_workspace_and_no_cross_agent_reference(project):
+def test_the_ro_error_offers_a_directory_workspace_and_no_cross_agent_reference(project):
     result = project.config(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo:ro"])}))
     assert result.returncode != 0
-    assert "./path:ro" in result.stderr and "shared" in result.stderr
+    assert "directory" in result.stderr
     assert "cross-agent" not in result.stderr.lower() and "<agent>" not in result.stderr
 
 
@@ -140,42 +215,25 @@ def test_https_git_sources_are_accepted(project):
     assert result.returncode == 0, result.stderr
 
 
-def test_the_default_git_mode_is_a_clone_per_agent(project):
-    assert project.resolved(spec(workspaces=workspaces()))["workspaces"]["repo"]["mode"] == "clone"
-
-
 @pytest.mark.parametrize("mode", ["clone", "worktree", "shared"])
-def test_git_modes_are_accepted(project, mode):
+def test_the_mode_key_is_gone_and_the_error_says_so(project, mode):
+    """Every agent gets a worktree of the base, always: there is nothing left to choose."""
     document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "mode": mode}})
-    assert project.resolved(document)["workspaces"]["repo"]["mode"] == mode
-
-
-def test_an_unknown_git_mode_is_rejected(project):
-    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "mode": "bind"}})
     result = project.config(document)
     assert result.returncode != 0
-    assert "bind" in result.stderr
+    assert "mode" in result.stderr and "worktree" in result.stderr
 
 
-def test_git_workspaces_live_in_the_project_directory_by_default(project):
-    resolved = project.resolved(spec(workspaces=workspaces()))
-    assert Path(resolved["workspaces"]["repo"]["path"]) == project.root / ".egzo" / "workspaces" / "repo"
-
-
-def test_path_relocates_a_git_workspace(project):
-    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": "./clones/repo"}})
-    assert Path(project.resolved(document)["workspaces"]["repo"]["path"]) == project.root / "clones" / "repo"
-
-
-def test_path_may_be_absolute(project, tmp_path):
-    target = tmp_path / "elsewhere"
-    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "path": str(target)}})
-    assert Path(project.resolved(document)["workspaces"]["repo"]["path"]) == target
+def test_a_workspace_cannot_be_both_a_git_repository_and_a_directory_source(project):
+    document = spec(workspaces={"repo": {"git": {"url": "https://github.com/acme/shop.git"}, "source": "./repo"}})
+    result = project.config(document)
+    assert result.returncode != 0
+    assert "source" in result.stderr
 
 
 @pytest.mark.parametrize("reference", ["coder/repo:ro", "coder/repo", "ghost/repo:ro"])
 def test_a_cross_agent_reference_is_not_a_workspace(project, reference):
-    """A template cannot name an instance that does not exist yet, so one agent cannot mount another's checkout."""
+    """A template cannot name an instance that does not exist yet, so one agent cannot mount another's worktree."""
     result = project.config(
         spec(
             workspaces=workspaces(),
@@ -218,13 +276,3 @@ def test_ordinary_branch_names_are_accepted(project, branch):
     git = {"url": "https://github.com/acme/shop.git", "branch": branch}
     result = project.config(spec(workspaces={"repo": {"git": git}}, agents={"coder": agent(workspaces=["repo"])}))
     assert result.returncode == 0, result.stderr
-
-
-def test_a_project_reached_through_a_symlink_is_the_same_project(project, tmp_path):
-    """Project identity is the directory: through a symlink it must resolve to the same real paths."""
-    project.write(spec(workspaces=workspaces(), agents={"coder": agent(workspaces=["repo"])}))
-    link = tmp_path / "link"
-    link.symlink_to(project.root)
-    direct = project.run("config").yaml()["workspaces"]["repo"]["path"]
-    through = project.egzo.run("-f", link / "egzo.yaml", "config", cwd=tmp_path).yaml()["workspaces"]["repo"]["path"]
-    assert through == direct

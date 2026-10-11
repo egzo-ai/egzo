@@ -91,18 +91,30 @@ def test_down_removes_the_agent_networks_too(live_project, engine, agent_image):
     assert not [r for r in engine.resources(live_project.name) if r.kind in ("container", "network")]
 
 
-def test_workspace_volumes_are_labelled_and_survive_down(live_project, engine, agent_image):
+def test_a_workspace_without_a_source_is_a_directory_in_the_project_and_survives_down(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])}))
-    volume = [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
-    assert volume and volume[0].labels[f"{LABEL_PREFIX}project"] == live_project.name
+    directory = live_project.root / "workspaces" / "scratch"
+    assert directory.is_dir() and directory.stat().st_uid == __import__("os").getuid()
+    assert not [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
+    assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo kept > /workspace/scratch/note").returncode == 0
     assert live_project.run("down").returncode == 0
-    assert [r for r in engine.resources(live_project.name) if r.kind == "volume" and r.name.endswith("_scratch")]
+    assert (directory / "note").read_text() == "kept\n"
+
+
+def test_a_workspace_directory_is_created_empty_when_it_is_missing_at_spawn_and_never_deleted(live_project, engine, agent_image):
+    up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
+    directory = live_project.root / "data"
+    directory.rmdir()
+    assert live_project.spawn("coder") == "coder-1"
+    assert directory.is_dir() and list(directory.iterdir()) == []
+    assert live_project.run("rm", "--force", "coder-1").returncode == 0
+    assert directory.is_dir()
 
 
 def test_a_read_only_host_directory_cannot_be_written(live_project, engine, agent_image):
     docs = live_project.mkdir("docs")
     (docs / "readme.txt").write_text("from the host")
-    up(live_project, spec(agents={"coder": custom(agent_image, workspaces=["./docs:ro"])}))
+    up(live_project, spec(workspaces={"docs": {"path": "./docs"}}, agents={"coder": custom(agent_image, workspaces=["docs:ro"])}))
     name = container(engine, live_project, "coder-1").name
     assert engine.exec(name, "cat", "/workspace/docs/readme.txt").stdout.strip() == "from the host"
     assert engine.exec(name, "touch", "/workspace/docs/new-file").returncode != 0
@@ -198,14 +210,14 @@ def test_an_agent_writes_a_host_directory_workspace_as_the_invoking_user(live_pr
     import os
 
     shared = live_project.mkdir("data")
-    up(live_project, spec(agents={"coder": custom(agent_image, workspaces=["./data"])}))
+    up(live_project, spec(workspaces={"data": {"path": "./data"}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
     written = exec_as(engine, live_project, "coder-1", "sh", "-c", "echo hi > /workspace/data/from-agent && ls -ln /workspace/data/from-agent")
     assert written.returncode == 0, written.stderr
     assert (shared / "from-agent").read_text() == "hi\n"
     assert (shared / "from-agent").stat().st_uid == os.getuid()
 
 
-def test_two_agents_share_a_declared_volume_workspace_both_writable(live_project, engine, agent_image):
+def test_two_agents_share_a_declared_workspace_both_writable(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"scratch": {}}, agents={
         "coder": custom(agent_image, workspaces=["scratch"]),
         "reviewer": custom(agent_image, workspaces=["scratch"]),

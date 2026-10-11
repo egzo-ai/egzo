@@ -194,11 +194,11 @@ def test_a_workdir_cannot_climb_out_of_its_workspace(project):
 
 
 def test_a_host_directory_holding_the_engine_socket_is_warned_about(project):
-    result = project.config(spec(agents={"coder": agent(harness="custom", image="alpine", workspaces=["/var/run"])}))
+    result = project.config(spec(workspaces={"run": {"path": "/var/run"}}, agents={"coder": agent(harness="custom", image="alpine", workspaces=["run"])}))
     assert result.returncode == 0
     assert "docker.sock" in result.stderr
 
 
 def test_mounting_the_filesystem_root_is_rejected(project):
-    result = project.config(spec(agents={"coder": agent(harness="custom", image="alpine", workspaces=["/"])}))
+    result = project.config(spec(workspaces={"root": {"path": "/"}}, agents={"coder": agent(harness="custom", image="alpine", workspaces=["root"])}))
     assert result.returncode != 0
