@@ -1,0 +1,39 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .Title}}{{.Title}} · {{end}}egzo hub</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="hud">
+  <a class="brand" href="/">egzo hub</a>
+  {{if .User}}
+  <nav aria-label="Engines" class="engines">
+    {{if .Multi}}{{range .Engines}}<a class="engine {{if .Up}}up{{else}}down{{end}}" href="/?engine={{.Name}}" title="{{if .Up}}reachable{{else}}unreachable: {{.Err}}{{end}}"><span class="dot"></span>{{.Name}}</a>{{end}}{{end}}
+    {{if .User.IsOperator}}<a href="/engines">Engines</a>{{end}}
+  </nav>
+  <div class="who">
+    <span class="user" data-testid="signed-in-as">{{.User.DisplayName}}{{if .User.IsOperator}} <span class="badge">operator</span>{{end}}</span>
+    <form method="post" action="/logout"><button class="link" type="submit">Sign out</button></form>
+  </div>
+  {{end}}
+</header>
+<main>
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
+{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{template "content" .}}
+</main>
+<script src="/static/app.js" defer></script>
+</body>
+</html>{{end}}
+{{define "fragment"}}{{template "live" .}}{{end}}
+{{define "live"}}{{end}}
+{{define "timeline"}}
+{{if .}}
+<ol class="timeline" data-testid="timeline">
+{{range .}}<li><time>{{.Time}}</time> <span class="badge">{{.Type}}</span> {{if .Agent}}<strong>{{.Agent}}</strong>{{end}} {{if .Actor}}<span class="muted">by {{.Actor}}</span>{{end}} {{.Text}}</li>{{end}}
+</ol>
+{{else}}<p class="muted">Nothing has happened yet.</p>{{end}}
+{{end}}

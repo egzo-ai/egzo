@@ -1,0 +1,59 @@
+{{define "content"}}
+<p class="crumbs"><a href="/">Projects</a></p>
+<h1>{{.Data.View.Project.Name}} {{if .Multi}}<span class="badge engine-badge">{{.Data.View.Engine}}</span>{{end}}</h1>
+<p class="sub">Your role: <strong>{{.Data.View.Role}}</strong>
+  · <a href="{{.Data.Base}}/spec">Spec</a>
+  {{if .Data.Admin}}· <a href="{{.Data.Base}}/audit">Audit log</a>{{end}}
+  {{if .Data.View.CanManage}}· <a href="{{.Data.Base}}/members">Members</a>{{end}}</p>
+<div id="live" data-refresh="{{.Data.Base}}?fragment=1">{{template "live" .}}</div>
+{{if .Data.View.CanSpawn}}
+<section>
+  <h2>Spawn an agent</h2>
+  {{if .Data.View.Project.Templates}}
+  <form method="post" action="{{.Data.Base}}/spawn" class="inline">
+    <label>Template <select name="template">{{range .Data.View.Project.Templates}}<option>{{.}}</option>{{end}}</select></label>
+    <label>Name <input name="name" placeholder="(automatic)" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" maxlength="63"></label>
+    <button class="primary" type="submit">Spawn</button>
+  </form>
+  {{else}}<p class="muted">The project has published no template. Run <code>egzo project up</code> on the project.</p>{{end}}
+</section>
+{{end}}
+{{end}}
+{{define "live"}}
+{{with .Data}}
+{{if not .View.Project.Up}}<p class="error" role="alert">The project's control or proxy sidecar is not running, so agents cannot be spawned. Run <code>egzo project up</code>.</p>{{end}}
+<section>
+<h2>Agents</h2>
+{{if .Rows}}
+<table class="list" data-testid="agents">
+<thead><tr><th>Agent</th><th>Activity</th><th>Status</th><th>Spawned by</th><th></th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr data-agent="{{.Name}}">
+  <td><a href="{{.URL}}">{{.Name}}</a> <span class="muted">{{.Template}}</span>{{if .Stale}} <span class="badge warn" title="the template changed after this agent was made">stale</span>{{end}}</td>
+  <td><span class="badge state-{{.Activity}}">{{.Activity}}</span>{{if .Waiting}} <span class="badge ask">waiting for an answer</span>{{end}}{{if .Writer}} <span class="badge" title="holds the terminal">{{.Writer}} typing</span>{{end}}{{if .Viewers}} <span class="badge">{{.Viewers}} watching</span>{{end}}</td>
+  <td class="status">{{.Status}}</td>
+  <td>{{.Creator}}</td>
+  <td class="actions">
+    {{if .CanOperate}}
+      {{if .Running}}<form method="post" action="{{.URL}}/stop"><button type="submit">Stop</button></form>
+      {{else}}<form method="post" action="{{.URL}}/start"><button type="submit">Start</button></form>{{end}}
+      <form method="post" action="{{.URL}}/rm" data-confirm="Remove {{.Name}} and its workspace?"><button class="danger" type="submit">Remove</button></form>
+    {{end}}
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="muted">No agent yet.</p>{{end}}
+</section>
+<section>
+<h2>Services</h2>
+<p>{{range .View.Project.Services}}<span class="badge state-{{.State}}">{{.Name}}: {{.State}}</span> {{end}}</p>
+</section>
+<section>
+<h2>Timeline</h2>
+{{template "timeline" .Events}}
+</section>
+{{end}}
+{{end}}

@@ -1,0 +1,45 @@
+{{define "content"}}
+<p class="crumbs"><a href="/">Projects</a> / <a href="{{.Data.Base}}">{{.Data.View.Project.Name}}</a></p>
+<h1>{{.Data.Agent.Name}}</h1>
+<link rel="stylesheet" href="/static/xterm/xterm.css">
+<div id="live" data-refresh="{{.Data.Self}}?fragment=1">{{template "live" .}}</div>
+<section>
+  <h2>Terminal</h2>
+  {{if .Data.Agent.Running}}
+  <div class="terminal-bar">
+    <button id="terminal-open" class="primary" type="button" data-url="{{.Data.Self}}/terminal">Open terminal</button>
+    <button id="terminal-close" type="button" hidden>Disconnect</button>
+    <span id="terminal-mode" class="badge" hidden></span>
+  </div>
+  <div id="terminal" class="terminal" hidden></div>
+  <p id="terminal-note" class="muted">Detach with Ctrl-] . One person types at a time; others who open it watch.</p>
+  {{else}}<p class="muted">The agent is {{.Data.Agent.State}}. Start it to open its terminal.</p>{{end}}
+</section>
+<script src="/static/xterm/xterm.js" defer></script>
+<script src="/static/xterm/addon-fit.js" defer></script>
+<script src="/static/terminal.js" defer></script>
+{{end}}
+{{define "live"}}
+{{with .Data}}
+<p class="sub">
+  <span class="badge state-{{.Agent.Activity}}" data-testid="activity">{{.Agent.Activity}}</span>
+  {{if .Agent.Waiting}}<span class="badge ask" data-testid="waiting">waiting for an answer</span>{{end}}
+  from template <strong>{{.Agent.Template}}</strong> · spawned by {{.Creator}}{{if .Agent.Stale}} · <span class="badge warn">stale</span>{{end}}
+</p>
+{{if .Agent.Status}}<p class="status" data-testid="status">{{.Agent.Status}}</p>{{end}}
+<p>
+{{if .Agent.CanOperate}}
+  {{if .Agent.Running}}<form class="inline" method="post" action="{{.Self}}/stop"><button type="submit">Stop</button></form>
+  {{else}}<form class="inline" method="post" action="{{.Self}}/start"><button type="submit">Start</button></form>{{end}}
+  <form class="inline" method="post" action="{{.Self}}/rm" data-confirm="Remove {{.Agent.Name}} and its workspace?"><button class="danger" type="submit">Remove</button></form>
+{{end}}
+<a class="button" href="{{.Self}}/logs">Logs</a>
+</p>
+{{if .Viewers}}
+<p data-testid="presence">At the terminal:
+{{range .Viewers}}<span class="badge">{{.Name}}{{if .ReadOnly}} (watching){{else}} (typing){{end}}</span> {{end}}</p>
+{{end}}
+<h2>Timeline</h2>
+{{template "timeline" .Events}}
+{{end}}
+{{end}}

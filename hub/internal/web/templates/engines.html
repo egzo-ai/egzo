@@ -1,0 +1,40 @@
+{{define "content"}}
+<h1>Engines</h1>
+<p>The container engines the hub manages. Credentials are encrypted, never shown again, and left unchanged when a field is blank.</p>
+<table class="list" data-testid="engines">
+<thead><tr><th>Name</th><th>Address</th><th>State</th><th></th></tr></thead>
+<tbody>
+{{range .Data.List}}
+<tr><td>{{.Name}}</td><td><code>{{.Host}}</code></td>
+<td>{{if .Up}}<span class="badge state-running">reachable</span>{{else}}<span class="badge warn">unreachable</span> <span class="muted">{{.Err}}</span>{{end}}</td>
+<td><form method="post" action="/engines/{{.Name}}/remove" data-confirm="Forget engine {{.Name}} and the roles on its projects? Nothing on the engine is touched."><button class="danger" type="submit">Remove</button></form></td></tr>
+{{end}}
+</tbody>
+</table>
+{{if .Data.Pending}}
+<section class="confirm" data-testid="hostkey">
+  <h2>Confirm the host key</h2>
+  <p>The server <code>{{.Data.Pending.Input.Host}}</code> presented this ssh host key. If it is the one you expect, pin it: a different key will be refused from now on.</p>
+  <p><code data-testid="fingerprint">{{.Data.Pending.Fingerprint}}</code></p>
+  <form method="post" action="/engines/confirm"><input type="hidden" name="token" value="{{.Data.Token}}"><button class="primary" type="submit">Pin this key and save</button></form>
+</section>
+{{else}}
+<section>
+<h2>Add or change an engine</h2>
+<form method="post" action="/engines" class="stack">
+  <label>Name <input name="name" value="{{.Data.Form.Name}}" required pattern="[a-z0-9][a-z0-9_\-]*" maxlength="31" placeholder="lab"></label>
+  <label>Address <input name="host" value="{{.Data.Form.Host}}" required placeholder="unix:///var/run/docker.sock · tcp://host:2376 · ssh://user@host"></label>
+  <details><summary>TLS (tcp://)</summary>
+    <label>CA certificate (PEM) <textarea name="ca" rows="3" autocomplete="off"></textarea></label>
+    <label>Client certificate (PEM) <textarea name="cert" rows="3" autocomplete="off"></textarea></label>
+    <label>Client key (PEM) <textarea name="key" rows="3" autocomplete="off"></textarea></label>
+  </details>
+  <details><summary>ssh (ssh://)</summary>
+    <label>User, when not in the address <input name="ssh_user" value="{{.Data.Form.SSHUser}}"></label>
+    <label>Private key (PEM, no passphrase) <textarea name="ssh_key" rows="3" autocomplete="off"></textarea></label>
+  </details>
+  <p><button class="primary" type="submit">Test and save</button></p>
+</form>
+</section>
+{{end}}
+{{end}}

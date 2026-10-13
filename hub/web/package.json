@@ -1,0 +1,13 @@
+{
+  "name": "egzo-hub-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Front end of the egzo hub: a few scripts and a stylesheet, plus xterm.js. Built into ../internal/web/dist, which the hub embeds.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@xterm/xterm": "5.5.0",
+    "@xterm/addon-fit": "0.10.0"
+  }
+}

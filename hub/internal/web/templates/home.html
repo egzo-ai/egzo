@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>Projects</h1>
+{{range .Data.Down}}<p class="error" role="alert">Engine <strong>{{.Name}}</strong> is unreachable: {{.Err}}</p>{{end}}
+{{if .Data.Rows}}
+<table class="list">
+  <thead><tr><th>Project</th>{{if .Multi}}<th>Engine</th>{{end}}<th>Agents</th><th>Your role</th></tr></thead>
+  <tbody>
+  {{range .Data.Rows}}
+  <tr>
+    <td><a href="{{.URL}}">{{.Name}}</a>{{if not .Up}} <span class="badge warn" title="the project's sidecars are not running">down</span>{{end}}</td>
+    {{if $.Multi}}<td><span class="badge engine-badge">{{.Engine}}</span></td>{{end}}
+    <td>{{.Running}} running of {{.Agents}}</td>
+    <td>{{.Role}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<div class="empty">
+  <p><strong>Nothing to show yet.</strong></p>
+  <p>You have no role on any project. Projects appear here when an owner grants you a role. Ask them, then reload this page.
+  Projects are created from the command line with <code>egzo project up</code>.</p>
+</div>
+{{end}}
+{{if .Data.Filter}}<p><a href="/">Show all engines</a></p>{{end}}
+{{end}}
