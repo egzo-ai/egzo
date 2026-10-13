@@ -93,7 +93,8 @@ func TestAnUnreachableProviderIsReportedAndRetried(t *testing.T) {
 }
 
 func TestRandomTokensDiffer(t *testing.T) {
-	if auth.Random() == auth.Random() || len(auth.Random()) < 32 {
+	a, b := auth.Random(), auth.Random()
+	if a == b || len(a) < 32 {
 		t.Error("tokens repeat or are short")
 	}
 }

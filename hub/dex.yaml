@@ -1,0 +1,42 @@
+# Dex, the login provider the hub speaks OpenID Connect to. The hub knows no identity provider: connect yours here, with Dex's
+# own documentation (https://dexidp.io/docs/connectors/): GitHub, GitLab, Google, LDAP, SAML, any OIDC provider...
+#
+# Copy this file next to compose.yaml, set the issuer to the address people reach Dex at, and change the secrets.
+# The hub and the browser must both reach this address. For a first try on one machine add "127.0.0.1 dex" to /etc/hosts.
+issuer: http://dex:5556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true   # the hub is the only client: no "Grant access" page
+
+staticClients:
+  - id: egzo-hub
+    name: egzo hub
+    secretEnv: EGZO_OIDC_CLIENT_SECRET   # set in .env, shared with the hub
+    redirectURIs:
+      - http://localhost:8080/auth/callback
+
+# For a first try only: one local account (password: password). Replace it with a real connector.
+enablePasswordDB: true
+staticPasswords:
+  - email: admin@example.com
+    # bcrypt of "password"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: admin
+    userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+
+# connectors:
+#   - type: github
+#     id: github
+#     name: GitHub
+#     config:
+#       clientID: $GITHUB_CLIENT_ID
+#       clientSecret: $GITHUB_CLIENT_SECRET
+#       redirectURI: http://localhost:5556/dex/callback

@@ -68,4 +68,10 @@ dl.roles { color: var(--muted); }
 dl.roles dt { font-weight: 600; float: left; clear: left; width: 8rem; }
 dl.roles dd { margin: 0 0 0.25rem 8rem; }
 details { margin: 0.25rem 0; }
-@media (max-width: 40rem) { table.list { font-size: 0.9rem; } .actions { flex-wrap: wrap; } }
+@media (max-width: 40rem) {
+  main { padding: 0.75rem; }
+  table.list { display: block; overflow-x: auto; font-size: 0.9rem; }
+  .actions { flex-wrap: wrap; }
+  .hud { gap: 0.5rem; }
+  .who { margin-left: 0; }
+}

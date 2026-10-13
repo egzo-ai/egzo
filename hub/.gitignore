@@ -1,3 +1,7 @@
 web/node_modules/
 internal/web/dist/*
 !internal/web/dist/.gitkeep
+e2e/server/egzo-hub-e2e
+e2e/.venv/
+e2e/__pycache__/
+.pytest_cache/

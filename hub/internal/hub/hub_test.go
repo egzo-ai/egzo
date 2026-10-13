@@ -23,8 +23,6 @@ type rig struct {
 	hub   *Hub
 	store *store.Store
 	fakes map[string]*fake.Engine
-	probe string
-	tests int
 	bad   map[string]error // engines whose connection test fails
 }
 

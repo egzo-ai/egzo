@@ -1,4 +1,7 @@
-# Roadmap: egzo-hub, web UI and messaging adapters (planning, not built)
+# Roadmap: egzo-hub, web UI and messaging adapters
+
+**Status.** The hub and its web UI are built (`hub/`, see [hub/docs/README.md](../hub/docs/README.md) and "Built" at the end of
+this page). The messaging adapters (NATS, `egzo-discord`) are designed here and not built.
 
 Replaces `hub-and-web-ui.md` and `web-ui-requirements.md`. Where the two disagreed, the web UI requirements won.
 Core implements none of this; what core guarantees for it is summarised in DESIGN.md, "Not in core".
@@ -120,13 +123,16 @@ Information model: engine → projects → agents, services.
 
 ## What core must still do for the hub
 
-- [ ] **An engine constructor that takes a host.** `engine.Connect` builds its client from `DOCKER_HOST`
-      (`client.FromEnv`), so a process opens one engine. The hub needs `Dial(host, credentials)` for unix, tcp+TLS
-      and ssh. This is the one change multi-engine requires of core.
-- [ ] **Version the operator API paths** (`/v1`). The agent-facing API already is.
-- [ ] **Check that every operation records its actor** (spawn, start, stop, rm, attach, answer), and that spawn
-      writes the creator the "own agents" rule reads.
-- [ ] Verify the shared packages take a client and a `PrepEnv` and read no host file.
+- [x] **An engine constructor that takes a host.** `engine.Dial(Target)`: a unix or tcp host, TLS material as PEM from
+      memory, and an optional dialer. ssh is a dialer the hub supplies (`hub/internal/engines/ssh.go`, with the host key
+      pinned), so core gains no ssh dependency. `Connect` is `Dial` with `DOCKER_HOST`.
+- [x] **Version the operator API paths** (`/v1`). `/healthz` stays unversioned. The agent-facing API already was.
+- [x] **Check that every operation records its actor.** Spawn writes the `actor` label (the hub passes `user:<id>`), and
+      messages and answers carry one. Start, stop, rm and attach change engine state only and leave no trace in core: the
+      hub writes its own audit log for them, with the signed-in user.
+- [x] Verify the shared packages take a client and a `PrepEnv` and read no host file. The hub calls `stack.Spawn`,
+      `RemoveInstances`, `Observe`, `ReadPublished` and the control requests from a process whose directory is not the
+      project's (`make hub-integration`).
 - Not needed in core: a roles/permissions vocabulary in YAML (dropped), and a fake of the engine client. A fake of the
   whole Docker API would drift from the real one, and the specs already test against real engines. The hub gets its
   own narrow interface instead (below).
@@ -268,3 +274,30 @@ One bot per guild. `/egzo register` is the link flow. Agents are exposed one at 
 
 None left. To verify while building: embed `nats-server` in the hub binary with JetStream on a volume (prototype first);
 test whether the Discord bot receives content for a role mention without the Message Content intent.
+
+## Built
+
+In `hub/`, with the decisions above unless listed under "Not yet".
+
+- The model: a separate module, multi-engine, observe and operate only, secrets never read, roles in the hub's database.
+- Login through OIDC (Dex in the compose stack); the first login is the operator and owns the orphan projects, again on every
+  scan. Roles user / administrator / owner per `(engine, project)`, "own agents" by the `actor` label, an owner cannot
+  remove or lower themselves. Every operation is audited, allowed or refused.
+- Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the
+  operator confirms its fingerprint); one engine down does not take the page down.
+- The web UI: projects (engine badge and filter only with several engines), project page (agents, spawn, start / stop /
+  remove, services, timeline, spec, audit log, members), agent page (status, timeline, logs, a terminal with one writer and
+  read-only watchers, presence). No messaging. A question an agent is waiting on is shown as a status.
+- Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
+  the terminal websocket.
+- Tests: Go unit tests with the engine seam faked; Playwright tests of the pages; `make hub-integration` (real engine, real
+  project) and `make hub-stack` (the compose stack: hub image, Dex, a real project, a real terminal).
+
+## Not yet
+
+- **The messaging adapters**: the embedded NATS, the hub API for link and expose, `egzo-discord`. Nothing in the hub depends on
+  them; the operator API and event stream they need are in core already.
+- Discovery runs on a timer only (`EGZO_SCAN_INTERVAL`), not on engine events.
+- `project down` (the owner's "destroy the project") is a permission in `rbac` but has no button: it needs the project file's
+  directory, which a hub does not have. Until then the CLI does it.
+- The proxy audit log, resource usage, and a way for an owner to remove a user from the hub altogether.

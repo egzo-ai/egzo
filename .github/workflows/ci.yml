@@ -23,3 +23,25 @@ jobs:
           go install honnef.co/go/tools/cmd/staticcheck@f1838cc308e5cfbb38d91cfc973355611845997e
           go install golang.org/x/vuln/cmd/govulncheck@latest
           make lint
+
+  # The hub is its own Go module (hub/); core's job above never sees it, and this one never changes core's checks.
+  hub:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make hub-web
+      - run: make hub-build
+      - run: make hub-test
+      - run: |
+          go install honnef.co/go/tools/cmd/staticcheck@f1838cc308e5cfbb38d91cfc973355611845997e
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          make hub-lint
+      - name: The Docker engine implementation against a real engine and project
+        run: make hub-integration
+      - name: Browser tests
+        run: make hub-e2e
+      - name: The whole stack (hub image, Dex, a real project)
+        run: make hub-stack
