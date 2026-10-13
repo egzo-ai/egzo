@@ -901,7 +901,7 @@ Open, in the order they matter:
 ## Not in core: hub, web UI, chat clients
 
 Egzo core does not implement a hub, a web UI or chat integrations (Discord and the like); they are planned as a
-separate `egzo-hub` deliverable (see `roadmap/hub-and-web-ui.md`). What that means for core:
+separate `egzo-hub` deliverable (see `roadmap/hub.md`). What that means for core:
 - The project YAML and the CLI are the only way to create or change a project. Nothing else writes config.
 - Secrets are CLI-only. No user identities live in YAML, ever; who may talk to agents is not declared there.
 - Core exposes what another client needs: the `ai.egzo.*` label schema, the control sidecar's operator API

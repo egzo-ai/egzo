@@ -4,7 +4,7 @@ Status: decided, to be built. The specs describe the target and fail until it la
 
 ## Why
 
-egzo core must be operable with **engine access alone**. The hub (`roadmap/hub-and-web-ui.md`) runs in a container, may
+egzo core must be operable with **engine access alone**. The hub (`roadmap/hub.md`) runs in a container, may
 sit on another machine than the project, and has no access to the project directory. Today `spawn`, `rm`, `down` and
 `agent start` still touch the host:
 
@@ -146,4 +146,4 @@ exit code 17; the branch `egzo/<instance>` outliving the instance; `--reuse` and
 4. gitprep + `egzo prep git info|forget`.
 5. cli: `workspace ls|put|get|rm`, `down --volumes`, `project unlock`; `init`/`system check` stop touching `.gitignore`.
 6. Docs (`workspaces.md`, `project-file.md`, `managing-projects.md`, `security.md`, `intro`, `DESIGN.md`, windows-and-macos),
-   and `hub-and-web-ui.md` (the "portable workspaces" requirement is now met).
+   and `hub.md` (the "portable workspaces" requirement is now met).

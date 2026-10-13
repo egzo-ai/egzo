@@ -68,5 +68,5 @@ something misbehaves, see [troubleshooting](troubleshooting.md).
 
 Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
 credential injection, git workspaces, Claude Code and OpenCode, message delivery, and the operator commands. Not yet:
-the `pi` harness, and the Podman and gVisor spec runs. A separate hub and web UI is planned ([`roadmap/`](../roadmap/hub-and-web-ui.md)), not part
+the `pi` harness, and the Podman and gVisor spec runs. A separate hub and web UI is planned ([`roadmap/`](../roadmap/hub.md)), not part
 of the CLI. Published images and a release are still to come ([`roadmap/initial-release.md`](../roadmap/initial-release.md)).

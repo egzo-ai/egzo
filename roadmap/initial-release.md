@@ -61,5 +61,5 @@ them. Known places to fix:
 
 ## Later
 
-The other roadmap items are separate: [hub and web UI](hub-and-web-ui.md), [ssh access for
+The other roadmap items are separate: [hub, web UI and Discord](hub.md), [ssh access for
 agents](ssh-access.md), [review leftovers](review-leftovers.md), [CI test matrix](ci-test-matrix.md), [macOS and Windows (WSL2) hosts](windows-and-macos.md).
