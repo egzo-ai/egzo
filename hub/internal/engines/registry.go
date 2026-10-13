@@ -91,6 +91,7 @@ type Registry struct {
 	store      *store.Store
 	box        *secretbox.Box
 	connect    Connector
+	probeSSH   func(ctx context.Context, cfg Config) (string, error)
 	retryAfter time.Duration
 	now        func() time.Time
 
@@ -108,7 +109,7 @@ type entry struct {
 
 // NewRegistry builds the registry over the database; connect is DockerConnector except in tests.
 func NewRegistry(s *store.Store, box *secretbox.Box, connect Connector) *Registry {
-	return &Registry{store: s, box: box, connect: connect, retryAfter: 5 * time.Second, now: time.Now, entries: map[string]*entry{}}
+	return &Registry{store: s, box: box, connect: connect, probeSSH: ProbeSSH, retryAfter: 5 * time.Second, now: time.Now, entries: map[string]*entry{}}
 }
 
 // Seal encrypts credentials for the database.
@@ -237,4 +238,36 @@ func (r *Registry) Close() {
 		}
 	}
 	r.entries = map[string]*entry{}
+}
+
+// Test connects with cfg, which is not saved, and closes again: it is how the UI checks an engine before it keeps it.
+func (r *Registry) Test(ctx context.Context, cfg Config) error {
+	e, err := r.connect(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	return e.Close()
+}
+
+// Probe reads the ssh host key an engine presents, for the operator to confirm before it is pinned.
+func (r *Registry) Probe(ctx context.Context, cfg Config) (string, error) {
+	return r.probeSSH(ctx, cfg)
+}
+
+// Open decrypts the credentials of a stored engine.
+func (r *Registry) Open(row store.EngineRow) (Credentials, error) {
+	var creds Credentials
+	if len(row.Credentials) == 0 {
+		return creds, nil
+	}
+	plain, err := r.box.Open("engine:"+row.Name, row.Credentials)
+	if err != nil {
+		return creds, fmt.Errorf("engine %s: %w", row.Name, err)
+	}
+	return creds, json.Unmarshal(plain, &creds)
+}
+
+// SetProbe replaces how an ssh host key is read; tests use it.
+func (r *Registry) SetProbe(probe func(ctx context.Context, cfg Config) (string, error)) {
+	r.probeSSH = probe
 }
