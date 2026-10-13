@@ -39,6 +39,8 @@ agents:
 A vault is one secret store: a `backend` and the names of the secrets to read from it. The CLI reads them on your
 machine at `egzo project up` time. There are two backends.
 
+### pass
+
 **`pass`** ([the standard unix password manager](https://www.passwordstore.org/)) is the one to use. egzo runs `pass show <name>`, so
 unlocking is whatever your `pass` and gpg-agent already do, and the first line of the entry is the secret. Names
 are the entry names, slashes included:
@@ -56,6 +58,8 @@ A secret is referred to as `<vault>/<name>`: `main/anthropic/api-key`, `main/com
 project file cannot configure pass. To use another store, set `PASSWORD_STORE_DIR` (or `GNUPGHOME`, ...) in your shell,
 as you would for pass itself. egzo only reads secrets: create and change them with `pass insert` (or whatever manages
 your store).
+
+### env
 
 **`env`** reads the environment variable of the same name from your shell. It works, and egzo warns each time
 (`Using ENV var based secret backend is not recommended.`): any process of yours can read an environment

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ type rig struct {
 	fakes    map[string]*fake.Engine
 	fail     map[string]error
 	seen     engines.Config
+	mu       sync.Mutex
 }
 
 func newRig(t *testing.T) *rig {
@@ -34,6 +36,8 @@ func newRig(t *testing.T) *rig {
 	box, _ := secretbox.New("0123456789abcdef-secret")
 	r := &rig{store: s, box: box, opened: map[string]int{}, fakes: map[string]*fake.Engine{}, fail: map[string]error{}}
 	r.registry = engines.NewRegistry(s, box, func(ctx context.Context, cfg engines.Config) (engines.Engine, error) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.seen = cfg
 		if err := r.fail[cfg.Name]; err != nil {
 			return nil, err

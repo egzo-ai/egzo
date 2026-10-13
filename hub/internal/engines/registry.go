@@ -218,8 +218,10 @@ func (r *Registry) Statuses(ctx context.Context) ([]Status, error) {
 			if _, err := r.Get(ctx, row.Name); err != nil {
 				s.Err = err.Error()
 			} else {
-				s.Up = true
-				s.Since = r.entry(row.Name).since
+				e := r.entry(row.Name)
+				e.mu.Lock()
+				s.Up, s.Since = true, e.since
+				e.mu.Unlock()
 			}
 			statuses[i] = s
 		}()
