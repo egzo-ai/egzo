@@ -23,6 +23,8 @@ host; it does not ask egzo for anything. See `specs/README.md`.
 
 ## Other rules
 
+- The specs-first model is for **core**. The hub and the adapters (`hub/`) are tested with ordinary Go unit tests.
+  Core never imports anything from `hub/`; the hub imports core. See `roadmap/hub.md`, "Code layout and rules".
 - Docker is the engine to run the specs against day to day; do not run the whole suite more than needed
   (about 7 minutes).
 - Commit when something meaningful works.

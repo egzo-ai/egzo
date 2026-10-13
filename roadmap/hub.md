@@ -6,8 +6,8 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
 ## Model
 
 - The hub + web UI is a **separate deliverable** (`egzo-hub`, own binary and image), shipped as a docker-compose
-  stack and allowed its own database. It lives in the same git repository as core and shares code through
-  `internal/` (one Go module); it is not part of the `egzo` CLI.
+  stack and allowed its own database. It lives in the same git repository as core, in `hub/` (its own Go module),
+  and imports core packages, never the reverse (see "Code layout and rules"); it is not part of the `egzo` CLI.
 - The hub connects to **engines** (docker/podman: unix socket, tcp+TLS, ssh; local or remote) and manages egzo
   projects and agents running on them. **Multi-engine from day one**: the key of everything is `(engine, project)`.
 - Multi-project and multi-user. **Users are global to the hub** and live only in the hub database.
@@ -73,6 +73,34 @@ Information model: engine → projects → agents, services.
 - **No messaging in the web UI.** Messages and questions are not shown, sent or answered here. Talking to an agent is
   the terminal, or a messaging adapter. The agent page can show that an agent is waiting on a question, from its
   status, so a person knows to go answer it elsewhere.
+
+## Code layout and rules
+
+**hub -> core, never core -> hub.** Any file is identifiable as hub or core by its path alone.
+
+    cmd/egzo/, internal/, specs/   core (unchanged)
+    hub/go.mod                     the hub module: github.com/egzo-ai/egzo/hub
+    hub/cmd/egzo-hub/              the hub binary
+    hub/cmd/egzo-discord/          the Discord adapter binary (each adapter: hub/cmd/egzo-<platform>/)
+    hub/internal/...               hub and adapter code (all of it: nothing importable outside hub/)
+    hub/web/                       the web UI source (frontend toolchain stays inside hub/)
+    hub/docs/, hub/Dockerfile*, hub/compose.yaml   hub documentation, images, the compose stack
+
+- **A separate Go module** (`hub/go.mod`). Core's `go.mod`, `staticcheck` and `govulncheck` never see NATS, OIDC,
+  the frontend or Discord libraries. The hub requires core with `replace github.com/egzo-ai/egzo => ../`. Go's
+  `internal` rule is path-based, so the hub can import core's `internal/...` packages. To confirm with the first
+  build.
+- **The compiler enforces the direction.** Code under `hub/internal/` can be imported only from `hub/`, and
+  `hub/cmd/` packages are `main`. So nothing hub-side is importable by core. Never put hub code in a non-`internal`
+  package under `hub/`.
+- **A lint check** (`make lint`) also fails if any core package depends on a path containing `/hub/`, as a guard
+  against a future move.
+- **The web UI lives in `hub/web/`**, built in the image build and embedded in the hub binary (`go:embed`); build
+  output is not committed.
+- **Tests**: hub and adapters do **not** use the `specs/` first model. They use plain Go unit tests and other best
+  practices (the engine seam faked, an embedded NATS, `httptest`), and a separate CI job. `specs/` stays core only.
+- `make lint`, `make test` and the images get hub targets that run inside `hub/`; core's targets do not touch it.
+- Core docs and roadmap stay in `docs/` and `roadmap/`; hub documentation goes in `hub/docs/`.
 
 ## Core ↔ hub contract (public API; version it)
 
@@ -230,6 +258,8 @@ One bot per guild. `/egzo register` is the link flow. Agents are exposed one at 
 - Discord: enable the privileged Message Content intent. Without it content is empty except for messages that mention
   the bot, DMs, the bot's own messages and replies to the bot's messages; the docs do not say whether a role mention
   counts, so the role design cannot rely on it. Self-hosted bots in under 100 guilds need no verification (to re-check).
+- Hub code lives in `hub/`, a separate Go module; hub imports core, never the reverse; hub and adapters are
+  unit-tested, not spec-driven (see "Code layout and rules").
 - An adapter is an optional service of the compose stack, in this repository, with its own binary and image.
 - Adapter credentials come from the environment: one secret per adapter (`EGZO_ADAPTERS=discord:<secret>`), from which the
   hub derives the NATS user (static permissions) and the HTTP API token. Prototype the embedded NATS first.
