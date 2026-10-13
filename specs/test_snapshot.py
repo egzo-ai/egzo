@@ -23,7 +23,7 @@ def control_request(engine, project, *request):
 
 
 def snapshots(engine, project):
-    return control_request(engine, project, "GET", "/specs").stdout.split()
+    return control_request(engine, project, "GET", "/v1/specs").stdout.split()
 
 
 def up(project, document, **env):
@@ -36,7 +36,7 @@ def up(project, document, **env):
 def test_up_stores_the_resolved_project_on_the_control_volume(live_project, engine):
     up(live_project, spec())
     [name] = snapshots(engine, live_project)
-    stored = yaml.safe_load(control_request(engine, live_project, "GET", f"/specs/{name}").stdout)
+    stored = yaml.safe_load(control_request(engine, live_project, "GET", f"/v1/specs/{name}").stdout)
     assert stored["config"] == live_project.run("project", "check", "--resolved").yaml()
     assert stored["spec-version"] == "1"
     assert stored["created-by"].startswith("egzo/")
@@ -45,7 +45,7 @@ def test_up_stores_the_resolved_project_on_the_control_volume(live_project, engi
 def test_the_snapshot_records_the_config_hash_of_every_container(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
     [name] = snapshots(engine, live_project)
-    stored = yaml.safe_load(control_request(engine, live_project, "GET", f"/specs/{name}").stdout)
+    stored = yaml.safe_load(control_request(engine, live_project, "GET", f"/v1/specs/{name}").stdout)
     for resource in engine.containers(live_project.name):
         assert stored["config-hashes"][resource.name] == resource.labels[f"{LABEL_PREFIX}config-hash"]
 
@@ -57,7 +57,7 @@ def test_the_snapshot_never_holds_a_secret_value(live_project, engine, agent_ima
     )
     up(live_project, document, ANTHROPIC_API_KEY=SECRET)
     [name] = snapshots(engine, live_project)
-    text = control_request(engine, live_project, "GET", f"/specs/{name}").stdout
+    text = control_request(engine, live_project, "GET", f"/v1/specs/{name}").stdout
     assert SECRET not in text
     assert "main/ANTHROPIC_API_KEY" in text  # the reference is kept
 
@@ -88,6 +88,6 @@ def test_down_removes_the_snapshots_with_the_control_state(live_project, engine)
 
 def test_snapshot_names_are_validated(live_project, engine):
     up(live_project, spec())
-    refused = control_request(engine, live_project, "PUT", "/specs/..%2F..%2Fetc")
+    refused = control_request(engine, live_project, "PUT", "/v1/specs/..%2F..%2Fetc")
     assert refused.returncode != 0
     assert json.dumps(snapshots(engine, live_project))
