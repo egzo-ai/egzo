@@ -250,7 +250,7 @@ func TestAnInterruptIsHandedOverOnceAndMarksTheAgentIdle(t *testing.T) {
 	r := newRig(t)
 	r.project("coder")
 	r.hook("coder", "UserPromptSubmit", `{"prompt":"long job"}`)
-	response := r.asOperator("POST", "/messages", `{"to":"agent:coder","text":"change of plan","interrupt":true}`)
+	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","text":"change of plan","interrupt":true}`)
 	response.Body.Close()
 	got := r.claim("coder", time.Minute)
 	if !got.Interrupt || got.Line != "" {
@@ -283,7 +283,7 @@ func TestAgentsAreListedWithActivityAndStatus(t *testing.T) {
 	r.project("coder", "reviewer")
 	r.asAgent("coder", "POST", "/v1/status", `{"text":"parsing"}`).Body.Close()
 	r.hook("coder", "UserPromptSubmit", `{"prompt":"x"}`)
-	response := r.asOperator("GET", "/agents", "")
+	response := r.asOperator("GET", "/v1/agents", "")
 	var agents []AgentStatus
 	decode(t, response, &agents)
 	if len(agents) != 2 || agents[0].Agent != "coder" || agents[0].Status != "parsing" || agents[0].Activity != "working" || agents[1].Agent != "reviewer" {

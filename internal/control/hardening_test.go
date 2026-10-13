@@ -133,7 +133,7 @@ func TestCompactionKeepsAnInterruptThatIsStillPending(t *testing.T) {
 	r := newRig(t)
 	r.project("coder")
 	r.srv.events.maxLogBytes = 10 << 10
-	r.asOperator("POST", "/messages", `{"to":"agent:coder","text":"stop","interrupt":true}`).Body.Close()
+	r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","text":"stop","interrupt":true}`).Body.Close()
 	appendMany(t, r.srv.events, 300, Event{Type: "hook", Agent: "other", Text: "PostToolUse"})
 	if !r.srv.events.interruptPending("coder") {
 		t.Error("a pending interrupt was dropped by compaction")
@@ -276,7 +276,7 @@ func TestAMalformedKeyFileIsAnErrorAndIsNeverReplaced(t *testing.T) {
 
 func httpGetToken(srv *server, agent string) int {
 	recorder := newRecorder()
-	srv.handler().ServeHTTP(recorder, mustRequest("GET", "/tokens/"+agent, nil))
+	srv.handler().ServeHTTP(recorder, mustRequest("GET", "/v1/tokens/"+agent, nil))
 	return recorder.Code
 }
 
@@ -317,13 +317,13 @@ func hashOf(body string) string { return sha256Hex([]byte(body)) }
 func TestASnapshotMustMatchItsHashAndIsStoredExactly(t *testing.T) {
 	r := newRig(t)
 	body := "name: demo\n"
-	if response := r.asOperator("PUT", "/specs/"+hashOf(body), body); response.StatusCode != http.StatusNoContent {
+	if response := r.asOperator("PUT", "/v1/specs/"+hashOf(body), body); response.StatusCode != http.StatusNoContent {
 		t.Fatalf("put: %d", response.StatusCode)
 	}
-	if response := r.asOperator("PUT", "/specs/"+hashOf("other"), body); response.StatusCode != http.StatusBadRequest {
+	if response := r.asOperator("PUT", "/v1/specs/"+hashOf("other"), body); response.StatusCode != http.StatusBadRequest {
 		t.Errorf("a body that is not the hash: %d", response.StatusCode)
 	}
-	got := r.asOperator("GET", "/specs/"+hashOf(body), "")
+	got := r.asOperator("GET", "/v1/specs/"+hashOf(body), "")
 	var out bytes.Buffer
 	out.ReadFrom(got.Body)
 	if out.String() != body {
@@ -334,11 +334,11 @@ func TestASnapshotMustMatchItsHashAndIsStoredExactly(t *testing.T) {
 func TestAnOversizedSnapshotIsRefusedNotTruncated(t *testing.T) {
 	r := newRig(t)
 	body := strings.Repeat("x", maxSpecSize+1)
-	response := r.asOperator("PUT", "/specs/"+hashOf(body), body)
+	response := r.asOperator("PUT", "/v1/specs/"+hashOf(body), body)
 	if response.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want 413", response.StatusCode)
 	}
-	if response := r.asOperator("GET", "/specs/"+hashOf(body), ""); response.StatusCode != http.StatusNotFound {
+	if response := r.asOperator("GET", "/v1/specs/"+hashOf(body), ""); response.StatusCode != http.StatusNotFound {
 		t.Errorf("a truncated snapshot was stored (%d)", response.StatusCode)
 	}
 }
@@ -347,7 +347,7 @@ func TestOldSnapshotsAreRetiredAndNoTemporaryFileIsLeft(t *testing.T) {
 	r := newRig(t)
 	for i := 0; i < maxSpecs+20; i++ {
 		body := fmt.Sprintf("version: %d\n", i)
-		r.asOperator("PUT", "/specs/"+hashOf(body), body).Body.Close()
+		r.asOperator("PUT", "/v1/specs/"+hashOf(body), body).Body.Close()
 		time.Sleep(2 * time.Millisecond) // distinct modification times
 	}
 	entries, _ := os.ReadDir(filepath.Join(r.srv.dir, "specs"))
@@ -355,7 +355,7 @@ func TestOldSnapshotsAreRetiredAndNoTemporaryFileIsLeft(t *testing.T) {
 		t.Errorf("%d snapshots kept, want %d", len(entries), maxSpecs)
 	}
 	newest := fmt.Sprintf("version: %d\n", maxSpecs+19)
-	if response := r.asOperator("GET", "/specs/"+hashOf(newest), ""); response.StatusCode != http.StatusOK {
+	if response := r.asOperator("GET", "/v1/specs/"+hashOf(newest), ""); response.StatusCode != http.StatusOK {
 		t.Error("the newest snapshot was retired")
 	}
 	for _, e := range entries {

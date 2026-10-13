@@ -15,9 +15,9 @@ import (
 func placeholderCall(t *testing.T, s *server, method, body string) map[string]string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	s.handler().ServeHTTP(rec, httptest.NewRequest(method, "/placeholders", strings.NewReader(body)))
+	s.handler().ServeHTTP(rec, httptest.NewRequest(method, "/v1/placeholders", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("%s /placeholders = %d %s", method, rec.Code, rec.Body)
+		t.Fatalf("%s /v1/placeholders = %d %s", method, rec.Code, rec.Body)
 	}
 	out := map[string]string{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {

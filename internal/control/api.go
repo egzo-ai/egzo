@@ -56,8 +56,11 @@ func newServer(dir string) (*server, error) {
 func ensureState(dir string) error { return os.MkdirAll(dir, 0o755) }
 
 func (s *server) handler() http.Handler {
+	root := http.NewServeMux()
+	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	// Everything else is versioned: the hub and the CLI may be built from different releases.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	root.Handle("/v1/", http.StripPrefix("/v1", mux))
 	mux.HandleFunc("GET /tokens/{agent}", s.token)
 	mux.HandleFunc("PUT /specs/{hash}", s.putSpec)
 	mux.HandleFunc("GET /specs/{hash}", s.getSpec)
@@ -74,7 +77,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /templates", s.getTemplates)
 	mux.HandleFunc("GET /placeholders", s.getPlaceholders)
 	mux.HandleFunc("POST /placeholders", s.postPlaceholders)
-	return mux
+	return root
 }
 
 // projectKey is a random key created on first use. Per-agent tokens are derived from it, so they

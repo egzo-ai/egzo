@@ -17,11 +17,11 @@ func TestAnAgentIsKnownOnlyOnceRegisteredAndRegisteringTwiceIsFine(t *testing.T)
 	if r.srv.knownAgent("issue-1") {
 		t.Fatal("an agent nobody registered is known")
 	}
-	if response := r.asOperator("POST", "/messages", `{"to":"agent:issue-1","text":"x"}`); response.StatusCode != http.StatusNotFound {
+	if response := r.asOperator("POST", "/v1/messages", `{"to":"agent:issue-1","text":"x"}`); response.StatusCode != http.StatusNotFound {
 		t.Errorf("sending to an unregistered agent: status %d, want 404", response.StatusCode)
 	}
 	for i := 0; i < 2; i++ {
-		if response := r.asOperator("PUT", "/agents/issue-1", ""); response.StatusCode != http.StatusNoContent {
+		if response := r.asOperator("PUT", "/v1/agents/issue-1", ""); response.StatusCode != http.StatusNoContent {
 			t.Fatalf("register #%d: status %d", i+1, response.StatusCode)
 		}
 	}
@@ -35,7 +35,7 @@ func TestOnlyPlainNamesCanBeRegisteredOrUnregistered(t *testing.T) {
 	r := newRig(t)
 	for _, name := range []string{"..", "a%2Fb", "a%20b", "%2e%2e", strings.Repeat("a", 129), ".hidden"} {
 		for _, method := range []string{"PUT", "DELETE"} {
-			if response := r.asOperator(method, "/agents/"+name, ""); response.StatusCode < 400 {
+			if response := r.asOperator(method, "/v1/agents/"+name, ""); response.StatusCode < 400 {
 				t.Errorf("%s %q: status %d", method, name, response.StatusCode)
 			}
 		}
@@ -52,7 +52,7 @@ func TestRegisteringManyAgentsAtOnceLosesNone(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.asOperator("PUT", fmt.Sprintf("/agents/w-%d", i), "").Body.Close()
+			r.asOperator("PUT", fmt.Sprintf("/v1/agents/w-%d", i), "").Body.Close()
 		}()
 	}
 	wg.Wait()
@@ -71,7 +71,7 @@ func TestUnregisteringClosesWhatWasAskedOfTheAgentAndForgetsItsStatus(t *testing
 	if err := r.srv.reportStatus("coder", "busy"); err != nil {
 		t.Fatal(err)
 	}
-	if response := r.asOperator("DELETE", "/agents/coder", ""); response.StatusCode != http.StatusNoContent {
+	if response := r.asOperator("DELETE", "/v1/agents/coder", ""); response.StatusCode != http.StatusNoContent {
 		t.Fatalf("unregister: status %d", response.StatusCode)
 	}
 	if r.srv.knownAgent("coder") {
@@ -85,11 +85,11 @@ func TestUnregisteringClosesWhatWasAskedOfTheAgentAndForgetsItsStatus(t *testing
 	}
 	// The sender can read why.
 	var open []Message
-	decode(t, r.asOperator("GET", "/messages?all=1&kind=resolution", ""), &open)
+	decode(t, r.asOperator("GET", "/v1/messages?all=1&kind=resolution", ""), &open)
 	if len(open) != 2 || !strings.Contains(open[0].Text, "removed") {
 		t.Errorf("resolutions = %+v", open)
 	}
-	if response := r.asOperator("POST", "/messages", `{"to":"agent:coder","text":"x"}`); response.StatusCode != http.StatusNotFound {
+	if response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","text":"x"}`); response.StatusCode != http.StatusNotFound {
 		t.Errorf("sending to a removed agent: status %d", response.StatusCode)
 	}
 	// A new agent with the same name starts clean.
@@ -100,7 +100,7 @@ func TestUnregisteringClosesWhatWasAskedOfTheAgentAndForgetsItsStatus(t *testing
 		}
 	}
 	// Unregistering what is not registered is fine.
-	if response := r.asOperator("DELETE", "/agents/ghost", ""); response.StatusCode != http.StatusNoContent {
+	if response := r.asOperator("DELETE", "/v1/agents/ghost", ""); response.StatusCode != http.StatusNoContent {
 		t.Errorf("unregister an unknown agent: status %d", response.StatusCode)
 	}
 }
@@ -110,7 +110,7 @@ func TestTheForgottenStatusStaysForgottenAfterARestart(t *testing.T) {
 	if err := r.srv.reportStatus("coder", "busy"); err != nil {
 		t.Fatal(err)
 	}
-	r.asOperator("DELETE", "/agents/coder", "").Body.Close()
+	r.asOperator("DELETE", "/v1/agents/coder", "").Body.Close()
 	reopened, err := newServer(r.srv.dir)
 	if err != nil {
 		t.Fatal(err)
@@ -124,26 +124,26 @@ func TestTheForgottenStatusStaysForgottenAfterARestart(t *testing.T) {
 
 func TestTemplatesAreStoredWholeAndRefusedWhenOversizedOrEmpty(t *testing.T) {
 	r := newRig(t)
-	if response := r.asOperator("GET", "/templates", ""); response.StatusCode != http.StatusNotFound {
+	if response := r.asOperator("GET", "/v1/templates", ""); response.StatusCode != http.StatusNotFound {
 		t.Errorf("templates before any were published: status %d", response.StatusCode)
 	}
-	if response := r.asOperator("PUT", "/templates", ""); response.StatusCode != http.StatusBadRequest {
+	if response := r.asOperator("PUT", "/v1/templates", ""); response.StatusCode != http.StatusBadRequest {
 		t.Errorf("empty templates: status %d", response.StatusCode)
 	}
-	if response := r.asOperator("PUT", "/templates", strings.Repeat("x", maxTemplates+1)); response.StatusCode != http.StatusRequestEntityTooLarge {
+	if response := r.asOperator("PUT", "/v1/templates", strings.Repeat("x", maxTemplates+1)); response.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized templates: status %d", response.StatusCode)
 	}
-	if response := r.asOperator("PUT", "/templates", `{"one":1}`); response.StatusCode != http.StatusNoContent {
+	if response := r.asOperator("PUT", "/v1/templates", `{"one":1}`); response.StatusCode != http.StatusNoContent {
 		t.Fatalf("put: status %d", response.StatusCode)
 	}
-	r.asOperator("PUT", "/templates", `{"two":2}`).Body.Close()
-	if got := body(t, r.asOperator("GET", "/templates", "")); got != `{"two":2}` {
+	r.asOperator("PUT", "/v1/templates", `{"two":2}`).Body.Close()
+	if got := body(t, r.asOperator("GET", "/v1/templates", "")); got != `{"two":2}` {
 		t.Errorf("templates = %q", got)
 	}
 	// they survive a restart: they are a file on the volume
 	reopened, _ := newServer(r.srv.dir)
 	recorder := newRecorder()
-	reopened.handler().ServeHTTP(recorder, mustRequest("GET", "/templates", nil))
+	reopened.handler().ServeHTTP(recorder, mustRequest("GET", "/v1/templates", nil))
 	if recorder.Body.String() != `{"two":2}` {
 		t.Errorf("after a restart: %q", recorder.Body.String())
 	}
@@ -175,7 +175,7 @@ func TestWhatAnAgentAskedAndWhatWasOnItsWayToItDiesWithIt(t *testing.T) {
 		t.Fatal("setup: the question is not waiting")
 	}
 
-	r.asOperator("DELETE", "/agents/coder", "").Body.Close()
+	r.asOperator("DELETE", "/v1/agents/coder", "").Body.Close()
 	r.register("coder")
 
 	if _, waiting := r.srv.overlay("coder"); waiting {
@@ -199,7 +199,7 @@ func TestAnAgentThatIsNotRegisteredCannotReportEvenWithAValidToken(t *testing.T)
 	if response := r.asAgent("ghost", "POST", "/v1/status", `{"text":"hi"}`); response.StatusCode >= 300 {
 		t.Errorf("a registered agent was refused: status %d", response.StatusCode)
 	}
-	r.asOperator("DELETE", "/agents/ghost", "").Body.Close()
+	r.asOperator("DELETE", "/v1/agents/ghost", "").Body.Close()
 	if response := r.asAgent("ghost", "POST", "/v1/status", `{"text":"again"}`); response.StatusCode != http.StatusUnauthorized {
 		t.Errorf("a removed agent still reports: status %d", response.StatusCode)
 	}
@@ -217,9 +217,9 @@ func TestASendAndAnUnregisterAtTheSameTimeLeaveNothingOpenForTheRemovedAgent(t *
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			r.asOperator("POST", "/messages", `{"to":"agent:racer","text":"x"}`).Body.Close()
+			r.asOperator("POST", "/v1/messages", `{"to":"agent:racer","text":"x"}`).Body.Close()
 		}()
-		r.asOperator("DELETE", "/agents/racer", "").Body.Close()
+		r.asOperator("DELETE", "/v1/agents/racer", "").Body.Close()
 		<-done
 		for _, m := range r.srv.events.messagesOf("agent:racer", func(m Message) bool { return m.To == "agent:racer" && m.State != stateResolved }) {
 			t.Fatalf("round %d: a message stays open for the removed agent: %+v", i, m)
@@ -230,7 +230,7 @@ func TestASendAndAnUnregisterAtTheSameTimeLeaveNothingOpenForTheRemovedAgent(t *
 func TestACompactedLogReplaysARetirementBetweenTwoStatuses(t *testing.T) {
 	r := newRig(t)
 	r.srv.reportStatus("coder", "before")
-	r.asOperator("DELETE", "/agents/coder", "").Body.Close()
+	r.asOperator("DELETE", "/v1/agents/coder", "").Body.Close()
 	r.register("coder")
 	r.srv.reportStatus("coder", "after")
 	r.srv.events.mu.Lock()
@@ -256,7 +256,7 @@ func TestATokenDoesNotOutliveTheInstanceItWasIssuedFor(t *testing.T) {
 	if r.token("issue-1") != old {
 		t.Fatal("registering twice changed the token")
 	}
-	r.asOperator("DELETE", "/agents/issue-1", "").Body.Close()
+	r.asOperator("DELETE", "/v1/agents/issue-1", "").Body.Close()
 	r.register("issue-1")
 	if fresh := r.token("issue-1"); fresh == old {
 		t.Fatal("a new instance of the name got the old token: whatever leaked from the old one opens the new one")
@@ -280,10 +280,10 @@ func TestATokenDoesNotOutliveTheInstanceItWasIssuedFor(t *testing.T) {
 
 func TestOnlyARegisteredAgentCanBeGivenAToken(t *testing.T) {
 	r := newRig(t)
-	if response := r.asOperator("GET", "/tokens/stranger", ""); response.StatusCode != http.StatusNotFound {
+	if response := r.asOperator("GET", "/v1/tokens/stranger", ""); response.StatusCode != http.StatusNotFound {
 		t.Errorf("a token for an agent nobody registered: status %d", response.StatusCode)
 	}
-	if response := r.asOperator("GET", "/tokens/coder", ""); response.StatusCode != http.StatusOK {
+	if response := r.asOperator("GET", "/v1/tokens/coder", ""); response.StatusCode != http.StatusOK {
 		t.Errorf("a token for a registered agent: status %d", response.StatusCode)
 	}
 }
@@ -311,9 +311,9 @@ func TestRetiringWhileMessagesAreFetchedClaimedAndSentLeavesNothingOpenOrNegativ
 		}()
 		go func() {
 			defer wg.Done()
-			r.asOperator("POST", "/messages", `{"to":"agent:racer","text":"late"}`).Body.Close()
+			r.asOperator("POST", "/v1/messages", `{"to":"agent:racer","text":"late"}`).Body.Close()
 		}()
-		r.asOperator("DELETE", "/agents/racer", "").Body.Close()
+		r.asOperator("DELETE", "/v1/agents/racer", "").Body.Close()
 		wg.Wait()
 		for _, m := range r.srv.events.messagesOf("agent:racer", func(m Message) bool { return m.To == "agent:racer" && !terminal(&m) }) {
 			// a message that was sent after the agent went away is refused, so none is left open

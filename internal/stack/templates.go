@@ -176,7 +176,7 @@ var ErrNotPublished = errors.New("no templates are published: run `egzo project 
 
 // ReadPublished asks the control sidecar for the templates `up` last published.
 func ReadPublished(ctx context.Context, c *engine.Client, project string) (Published, error) {
-	data, err := ControlRequest(ctx, c, project, "GET", "/templates", nil)
+	data, err := ControlRequest(ctx, c, project, "GET", "/v1/templates", nil)
 	if err != nil {
 		if strings.Contains(err.Error(), "no templates published") {
 			return Published{}, ErrNotPublished
@@ -193,7 +193,7 @@ func publishTemplates(ctx context.Context, c *engine.Client, p Published, contro
 		return false, err
 	}
 	if !fresh {
-		current, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/templates"}, nil)
+		current, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/v1/templates"}, nil)
 		if err != nil {
 			return false, fmt.Errorf("check the published templates: %w", err)
 		}
@@ -201,7 +201,7 @@ func publishTemplates(ctx context.Context, c *engine.Client, p Published, contro
 			return false, nil
 		}
 	}
-	result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "PUT", "/templates"}, bytes.NewReader(data))
+	result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "PUT", "/v1/templates"}, bytes.NewReader(data))
 	if err != nil {
 		return false, fmt.Errorf("publish the templates: %w", err)
 	}

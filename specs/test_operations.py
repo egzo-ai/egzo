@@ -4,6 +4,7 @@
 """The operator commands: system check, project up --dry-run, project rotate-ca, proxy rules. (Secrets are checked by `project check`: test_secrets.py.)"""
 
 import json
+import os
 import re
 import subprocess
 
@@ -262,3 +263,24 @@ def test_an_expired_lease_is_taken_over_and_its_holder_named(live_project, engin
     assert engine.run("create", "--name", f"{live_project.name}.lock", *labels, agent_image).returncode == 0
     assert live_project.spawn("coder", "taken") == "taken"
     assert lease(engine, live_project) is None
+
+
+# --- the operator API is versioned ---------------------------------------------------------------------------------------------------
+
+
+def control_request(engine, project, method, path):
+    done = subprocess.run(
+        [engine.cli, "exec", container(engine, project, "control").name, "/egzo", "control", "request", method, path],
+        text=True, capture_output=True, env={**os.environ, **engine.env},
+    )
+    return done
+
+
+def test_the_operator_api_lives_under_v1_and_the_unversioned_paths_are_gone(live_project, engine, agent_image):
+    live_project.up(spec(agents={"coder": custom(agent_image)}))
+    live_project.spawn("coder")
+    versioned = control_request(engine, live_project, "GET", "/v1/agents")
+    assert versioned.returncode == 0, versioned.stderr
+    assert "coder-1" in versioned.stdout
+    assert control_request(engine, live_project, "GET", "/agents").returncode != 0
+    assert control_request(engine, live_project, "GET", "/healthz").returncode == 0  # the healthcheck is not versioned

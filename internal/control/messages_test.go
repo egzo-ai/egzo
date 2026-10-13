@@ -21,7 +21,7 @@ func (r *rig) project(agents ...string) {
 // request is an operator request to an agent; it returns the message id.
 func (r *rig) request(to, text string) string {
 	r.t.Helper()
-	response := r.asOperator("POST", "/messages", `{"to":"agent:`+to+`","text":"`+text+`"}`)
+	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:`+to+`","text":"`+text+`"}`)
 	if response.StatusCode != 200 {
 		r.t.Fatalf("send: status %d", response.StatusCode)
 	}
@@ -369,7 +369,7 @@ func TestOperatorMessagesCanBeListedFilteredAndFetchedByID(t *testing.T) {
 	r.srv.resolve("coder", id, "done", "done")
 
 	list := func(query string) []Message {
-		response := r.asOperator("GET", "/messages?"+query, "")
+		response := r.asOperator("GET", "/v1/messages?"+query, "")
 		var messages []Message
 		decode(t, response, &messages)
 		return messages
@@ -386,13 +386,13 @@ func TestOperatorMessagesCanBeListedFilteredAndFetchedByID(t *testing.T) {
 	if kinds := list("all=1&kind=resolution"); len(kinds) != 1 || kinds[0].To != "operator" {
 		t.Errorf("resolutions = %+v", kinds)
 	}
-	response := r.asOperator("GET", "/messages/"+id, "")
+	response := r.asOperator("GET", "/v1/messages/"+id, "")
 	var one Message
 	decode(t, response, &one)
 	if one.ID != id || one.State != stateResolved {
 		t.Errorf("one = %+v", one)
 	}
-	if missing := r.asOperator("GET", "/messages/m"+strings.Repeat("0", 32), ""); missing.StatusCode != http.StatusNotFound {
+	if missing := r.asOperator("GET", "/v1/messages/m"+strings.Repeat("0", 32), ""); missing.StatusCode != http.StatusNotFound {
 		t.Errorf("missing = %d", missing.StatusCode)
 	}
 }
@@ -408,13 +408,13 @@ func TestTheOperatorAPIRefusesUnknownAgentsBadSendersAndAgentsAsSenders(t *testi
 		`{"to":"agent:coder","text":" "}`:                         400,
 		`not json`:                                                400,
 	} {
-		response := r.asOperator("POST", "/messages", body)
+		response := r.asOperator("POST", "/v1/messages", body)
 		response.Body.Close()
 		if response.StatusCode != want {
 			t.Errorf("%s: status %d, want %d", body, response.StatusCode, want)
 		}
 	}
-	response := r.asOperator("POST", "/messages", `{"to":"agent:coder","from":"user:alice","text":"hi"}`)
+	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","from":"user:alice","text":"hi"}`)
 	response.Body.Close()
 	if response.StatusCode != 200 {
 		t.Errorf("a user as sender: %d", response.StatusCode)

@@ -105,36 +105,36 @@ func TestTheHTTPVerbsRefuseWhatIsNotTheCallersOrNotWellFormed(t *testing.T) {
 func TestTheOperatorVerbs(t *testing.T) {
 	r := newRig(t)
 	r.project("coder")
-	token := body(t, r.asOperator("GET", "/tokens/coder", ""))
+	token := body(t, r.asOperator("GET", "/v1/tokens/coder", ""))
 	if token != r.token("coder") {
 		t.Error("the token endpoint does not give the agent's token")
 	}
-	if response := r.asOperator("GET", "/tokens/..%2Fx", ""); response.StatusCode == http.StatusOK {
+	if response := r.asOperator("GET", "/v1/tokens/..%2Fx", ""); response.StatusCode == http.StatusOK {
 		t.Error("an unsafe agent name was given a token")
 	}
 
 	// an agent asks the operator, the operator answers
 	r.srv.sendFromAgent("coder", "operator", "which one?", "")
 	var rows []Message
-	decode(t, r.asOperator("GET", "/messages?kind=request", ""), &rows)
+	decode(t, r.asOperator("GET", "/v1/messages?kind=request", ""), &rows)
 	if len(rows) != 1 {
 		t.Fatalf("messages = %+v", rows)
 	}
-	answer := r.asOperator("POST", "/messages/"+rows[0].ID+"/resolve", `{"text":"the first","outcome":"done"}`)
+	answer := r.asOperator("POST", "/v1/messages/"+rows[0].ID+"/resolve", `{"text":"the first","outcome":"done"}`)
 	if answer.StatusCode != http.StatusNoContent {
 		t.Errorf("resolve: %d %s", answer.StatusCode, body(t, answer))
 	}
-	if response := r.asOperator("POST", "/messages/"+rows[0].ID+"/resolve", `{"text":"again"}`); response.StatusCode != http.StatusConflict {
+	if response := r.asOperator("POST", "/v1/messages/"+rows[0].ID+"/resolve", `{"text":"again"}`); response.StatusCode != http.StatusConflict {
 		t.Errorf("resolving twice: %d", response.StatusCode)
 	}
-	if response := r.asOperator("POST", "/messages/nope/resolve", `{"text":"x"}`); response.StatusCode != http.StatusNotFound {
+	if response := r.asOperator("POST", "/v1/messages/nope/resolve", `{"text":"x"}`); response.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown id: %d", response.StatusCode)
 	}
-	if response := r.asOperator("POST", "/messages/"+rows[0].ID+"/resolve", `{"actor":"agent:coder","text":"x"}`); response.StatusCode != http.StatusBadRequest {
+	if response := r.asOperator("POST", "/v1/messages/"+rows[0].ID+"/resolve", `{"actor":"agent:coder","text":"x"}`); response.StatusCode != http.StatusBadRequest {
 		t.Errorf("an agent address as the actor of a person: %d", response.StatusCode)
 	}
 
-	if response := r.asOperator("PUT", "/agents/zzz", ""); response.StatusCode != http.StatusNoContent || !r.srv.knownAgent("zzz") {
+	if response := r.asOperator("PUT", "/v1/agents/zzz", ""); response.StatusCode != http.StatusNoContent || !r.srv.knownAgent("zzz") {
 		t.Errorf("register: %d", response.StatusCode)
 	}
 	if r.srv.knownAgent("never") || r.srv.knownAgent("../key") || r.srv.knownAgent("") {
@@ -145,9 +145,9 @@ func TestTheOperatorVerbs(t *testing.T) {
 func TestListSpecsAndTheHealthEndpoint(t *testing.T) {
 	r := newRig(t)
 	one, two := "a: 1\n", "b: 2\n"
-	r.asOperator("PUT", "/specs/"+hashOf(one), one).Body.Close()
-	r.asOperator("PUT", "/specs/"+hashOf(two), two).Body.Close()
-	names := strings.Fields(body(t, r.asOperator("GET", "/specs", "")))
+	r.asOperator("PUT", "/v1/specs/"+hashOf(one), one).Body.Close()
+	r.asOperator("PUT", "/v1/specs/"+hashOf(two), two).Body.Close()
+	names := strings.Fields(body(t, r.asOperator("GET", "/v1/specs", "")))
 	if len(names) != 2 || (names[0] != hashOf(one) && names[0] != hashOf(two)) {
 		t.Errorf("specs = %v", names)
 	}
@@ -155,7 +155,7 @@ func TestListSpecsAndTheHealthEndpoint(t *testing.T) {
 		t.Errorf("healthz = %d", response.StatusCode)
 	}
 	for _, bad := range []string{"..", "a%2F..", "x y"} {
-		if response := r.asOperator("GET", "/specs/"+bad, ""); response.StatusCode < 400 {
+		if response := r.asOperator("GET", "/v1/specs/"+bad, ""); response.StatusCode < 400 {
 			t.Errorf("spec %q: %d", bad, response.StatusCode)
 		}
 	}
@@ -167,7 +167,7 @@ func TestTheEventStreamHonoursAfterAndAgent(t *testing.T) {
 	r.asAgent("reviewer", "POST", "/v1/status", `{"text":"two"}`).Body.Close()
 	r.asAgent("coder", "POST", "/v1/status", `{"text":"three"}`).Body.Close()
 	var texts []string
-	for _, line := range strings.Split(strings.TrimSpace(body(t, r.asOperator("GET", "/events?agent=coder&after=1", ""))), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(body(t, r.asOperator("GET", "/v1/events?agent=coder&after=1", ""))), "\n") {
 		var e Event
 		json.Unmarshal([]byte(line), &e)
 		texts = append(texts, e.Text)

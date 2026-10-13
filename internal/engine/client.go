@@ -5,10 +5,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"time"
-
 	"github.com/docker/docker/client"
 )
 
@@ -29,28 +25,8 @@ func Connect(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	host := api.DaemonHost()
-	probe, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	if _, err := api.Ping(probe); err != nil {
-		api.Close()
-		return nil, fmt.Errorf("no container engine reachable at %s: %w\n"+
-			"egzo uses the engine DOCKER_HOST points at, like the docker CLI. For rootless Podman: "+
-			"systemctl --user enable --now podman.socket; export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock", host, err)
-	}
-	c := &Client{API: api, Host: host}
-	if info, err := api.Info(probe); err == nil {
-		for _, option := range info.SecurityOptions {
-			c.Rootless = c.Rootless || strings.Contains(option, "rootless")
-		}
-	}
-	if version, err := api.ServerVersion(probe); err == nil {
-		c.Podman = strings.Contains(strings.ToLower(version.Platform.Name), "podman")
-		for _, component := range version.Components {
-			c.Podman = c.Podman || strings.Contains(strings.ToLower(component.Name), "podman")
-		}
-	}
-	return c, nil
+	return probe(ctx, api, "\negzo uses the engine DOCKER_HOST points at, like the docker CLI. For rootless Podman: "+
+		"systemctl --user enable --now podman.socket; export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock")
 }
 
 func (c *Client) Close() error { return c.API.Close() }

@@ -165,7 +165,7 @@ func dryRunTemplates(ctx context.Context, c *engine.Client, controlName string, 
 	if err != nil {
 		return false
 	}
-	current, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/templates"}, nil)
+	current, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/v1/templates"}, nil)
 	if err == nil && current.ExitCode == 0 && bytes.Equal(bytes.TrimSpace(current.Stdout), data) {
 		return false
 	}
@@ -237,7 +237,7 @@ func fetchTokens(ctx context.Context, c *engine.Client, controlName string, name
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/tokens/" + name}, nil)
+			result, err := c.Exec(ctx, controlName, []string{"/egzo", "control", "request", "GET", "/v1/tokens/" + name}, nil)
 			switch {
 			case err != nil:
 				errs[i] = fmt.Errorf("token for agent %q: %w", name, err)
@@ -285,12 +285,12 @@ func unbindProxy(ctx context.Context, c *engine.Client, project, name string) er
 }
 
 func registerControl(ctx context.Context, c *engine.Client, project, name string) error {
-	_, err := ControlRequest(ctx, c, project, "PUT", "/agents/"+name, nil)
+	_, err := ControlRequest(ctx, c, project, "PUT", "/v1/agents/"+name, nil)
 	return err
 }
 
 func unregisterControl(ctx context.Context, c *engine.Client, project, name string) error {
-	_, err := ControlRequest(ctx, c, project, "DELETE", "/agents/"+name, nil)
+	_, err := ControlRequest(ctx, c, project, "DELETE", "/v1/agents/"+name, nil)
 	return err
 }
 

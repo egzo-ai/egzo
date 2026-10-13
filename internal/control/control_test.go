@@ -46,7 +46,7 @@ func newRig(t *testing.T) *rig {
 func (r *rig) register(name string) {
 	r.t.Helper()
 	response := httptest.NewRecorder()
-	r.srv.handler().ServeHTTP(response, httptest.NewRequest("PUT", "/agents/"+name, nil))
+	r.srv.handler().ServeHTTP(response, httptest.NewRequest("PUT", "/v1/agents/"+name, nil))
 	if response.Code != http.StatusNoContent {
 		r.t.Fatalf("register %s: status %d", name, response.Code)
 	}
@@ -137,7 +137,7 @@ func TestAgentsAuthenticateWithTheirOwnToken(t *testing.T) {
 
 func TestTheAgentPortServesNoOperatorVerbs(t *testing.T) {
 	r := newRig(t)
-	for _, path := range []string{"/events", "/queue", "/messages", "/questions", "/agents", "/specs", "/tokens/coder"} {
+	for _, path := range []string{"/events", "/queue", "/messages", "/questions", "/agents", "/specs", "/tokens/coder", "/v1/events", "/v1/specs", "/v1/tokens/coder"} {
 		response := r.asAgent("coder", "GET", path, "")
 		response.Body.Close()
 		if response.StatusCode != http.StatusNotFound && response.StatusCode != http.StatusMethodNotAllowed {
@@ -210,7 +210,7 @@ func TestFollowingTheStreamDeliversNewEventsAsTheyHappen(t *testing.T) {
 	r := newRig(t)
 	r.asAgent("coder", "POST", "/v1/status", `{"text":"old"}`).Body.Close()
 
-	response := r.asOperator("GET", "/events?follow=1", "")
+	response := r.asOperator("GET", "/v1/events?follow=1", "")
 	defer response.Body.Close()
 	lines := bufio.NewScanner(response.Body)
 	next := func() Event {
@@ -246,7 +246,7 @@ func TestEventsCanBeFilteredByAgentAndSequence(t *testing.T) {
 	r.asAgent("coder", "POST", "/v1/status", `{"text":"c"}`).Body.Close()
 
 	read := func(query string) []string {
-		response := r.asOperator("GET", "/events?"+query, "")
+		response := r.asOperator("GET", "/v1/events?"+query, "")
 		defer response.Body.Close()
 		var texts []string
 		scanner := bufio.NewScanner(response.Body)
@@ -332,5 +332,21 @@ func TestMCPRefusesAgentsWithoutValidCredentials(t *testing.T) {
 	if session, err := r.mcpSession("coder", r.token("reviewer")); err == nil {
 		session.Close()
 		t.Fatal("connected to MCP with another agent's token")
+	}
+}
+
+func TestTheOperatorAPIIsVersionedAndTheOldPathsAreGone(t *testing.T) {
+	r := newRig(t)
+	r.asOperator("PUT", "/v1/agents/coder", "").Body.Close()
+	if response := r.asOperator("GET", "/v1/agents", ""); response.StatusCode != http.StatusOK {
+		t.Errorf("GET /v1/agents = %d", response.StatusCode)
+	}
+	for _, path := range []string{"/agents", "/messages", "/events", "/specs", "/templates", "/placeholders", "/tokens/coder"} {
+		if response := r.asOperator("GET", path, ""); response.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404: the operator API is under /v1", path, response.StatusCode)
+		}
+	}
+	if response := r.asOperator("GET", "/healthz", ""); response.StatusCode != http.StatusOK {
+		t.Errorf("/healthz = %d: the healthcheck is not versioned", response.StatusCode)
 	}
 }

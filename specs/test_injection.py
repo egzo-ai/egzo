@@ -217,7 +217,7 @@ def test_a_person_other_than_the_operator_is_announced_with_the_same_line(run, e
     control = container(engine, project, "control").name
     body = json.dumps({"to": "agent:coder", "from": "user:cedric", "text": "from the hub"})
     done = subprocess.run(
-        [engine.cli, "exec", "-i", control, "/egzo", "control", "request", "POST", "/messages"],
+        [engine.cli, "exec", "-i", control, "/egzo", "control", "request", "POST", "/v1/messages"],
         input=body, text=True, capture_output=True, env={**os.environ, **engine.env},
     )
     assert done.returncode == 0, done.stderr

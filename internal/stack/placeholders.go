@@ -54,7 +54,7 @@ func ReadPlaceholders(ctx context.Context, c *engine.Client, project *config.Res
 		return nil
 	}
 	have := map[string]string{}
-	if result, err := c.Exec(ctx, project.Name+"-control-1", []string{"/egzo", "control", "request", "GET", "/placeholders"}, nil); err == nil && result.ExitCode == 0 {
+	if result, err := c.Exec(ctx, project.Name+"-control-1", []string{"/egzo", "control", "request", "GET", "/v1/placeholders"}, nil); err == nil && result.ExitCode == 0 {
 		_ = json.Unmarshal(result.Stdout, &have)
 	}
 	return withStandIns(refs, have)
@@ -68,7 +68,7 @@ func EnsurePlaceholders(ctx context.Context, c *engine.Client, project *config.R
 		return nil, nil
 	}
 	body, _ := json.Marshal(refs)
-	result, err := c.Exec(ctx, project.Name+"-control-1", []string{"/egzo", "control", "request", "POST", "/placeholders"}, bytes.NewReader(body))
+	result, err := c.Exec(ctx, project.Name+"-control-1", []string{"/egzo", "control", "request", "POST", "/v1/placeholders"}, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("get the placeholders: %w", err)
 	}

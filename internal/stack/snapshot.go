@@ -56,7 +56,7 @@ func pushSnapshot(ctx context.Context, c *engine.Client, project *config.Resolve
 	}
 	// A control volume this run just created holds no snapshot yet.
 	if !fresh {
-		probe, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "GET", "/specs/" + hash}, nil)
+		probe, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "GET", "/v1/specs/" + hash}, nil)
 		if err != nil {
 			return false, fmt.Errorf("check spec snapshot: %w", err)
 		}
@@ -64,7 +64,7 @@ func pushSnapshot(ctx context.Context, c *engine.Client, project *config.Resolve
 			return false, nil
 		}
 	}
-	result, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/specs/" + hash}, bytes.NewReader(data))
+	result, err := c.Exec(ctx, desired.Control, []string{"/egzo", "control", "request", "PUT", "/v1/specs/" + hash}, bytes.NewReader(data))
 	if err != nil {
 		return false, fmt.Errorf("store spec snapshot: %w", err)
 	}

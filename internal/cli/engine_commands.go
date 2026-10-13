@@ -243,7 +243,7 @@ func newPsCommand(opts *options) *cobra.Command {
 // effort: ps still works when the sidecar is not running.
 func reportedStatuses(ctx context.Context, s *session) map[string]stack.Report {
 	reported := map[string]stack.Report{}
-	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/agents", nil)
+	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/v1/agents", nil)
 	if err != nil {
 		return reported
 	}

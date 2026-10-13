@@ -793,7 +793,7 @@ Decisions taken while building (reversible; each is covered by specs):
   (hash-compared, in memory); `PUT /agents/{name}` binds an instance's token to a profile by name and
   `DELETE /agents/{name}` removes it, so spawn and rm never touch a secret and two spawns never race over a list.
   Loading a new policy keeps the bindings. `egzo restart proxy` loads the policy again and re-binds the instances.
-- **The control sidecar registers agents one at a time** (`PUT|DELETE /agents/{name}`, a file each under
+- **The control sidecar registers agents one at a time** (`PUT|DELETE /v1/agents/{name}`, a file each under
   `/state/agents`). Unregistering closes every request still open for the agent as failed (so `send --wait`
   returns 4) and forgets its status. Messages to an unregistered name are refused.
 - **What is left of an instance counts as the instance.** If its container was removed by hand, or a spawn could
@@ -883,7 +883,7 @@ Decisions taken while building (reversible; each is covered by specs):
   messages addressed to it (an unknown id and someone else's answer alike: "no such message"), and the agent port
   serves no operator verb. Operator API (unix socket, exec only): `GET /events?after=&agent=&follow=1`,
   `POST /messages` (`interrupt: true` asks for the current turn to be stopped), `GET /messages?agent=&kind=&all=1`,
-  `GET /messages/{id}`, `POST /messages/{id}/resolve`, `GET /agents`, `PUT|DELETE /agents/{name}`, `PUT|GET /templates`. Event types: `status`,
+  `GET /messages/{id}`, `POST /messages/{id}/resolve`, `GET /agents`, `PUT|DELETE /v1/agents/{name}`, `PUT|GET /templates`. Event types: `status`,
   `message` (with `data.to`, `kind`, `re`, `hops`), `announced`, `fetched`, `resolved` (with the resolution's text and
   `data.outcome`), `unconfirmed`, `interrupt`, `interrupted`, `activity`, `hook`, `retired` (an agent was unregistered: its status is forgotten).
 - **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,

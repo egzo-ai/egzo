@@ -77,7 +77,7 @@ func queueMessage(ctx context.Context, s *session, agent, text string, interrupt
 		return queued{}, fmt.Errorf("no instance %q in this project (instances: %s)", agent, strings.Join(s.observed.InstanceNames(), ", "))
 	}
 	body, _ := json.Marshal(map[string]any{"to": "agent:" + agent, "from": operatorActor, "text": text, "interrupt": interrupt})
-	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/messages", body)
+	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/v1/messages", body)
 	if err != nil {
 		return queued{}, err
 	}
@@ -129,7 +129,7 @@ func waitForResolution(ctx context.Context, cmd *cobra.Command, s *session, agen
 		}
 	}}
 	query := url.Values{"agent": {agent}, "follow": {"1"}, "after": {fmt.Sprint(seq - 1)}}
-	err := stack.ControlStream(streamCtx, s.engine, s.Resolved.Name, "GET", "/events?"+query.Encode(), watcher, cmd.ErrOrStderr())
+	err := stack.ControlStream(streamCtx, s.engine, s.Resolved.Name, "GET", "/v1/events?"+query.Encode(), watcher, cmd.ErrOrStderr())
 	switch outcome {
 	case "done":
 		return nil
@@ -192,7 +192,7 @@ func newEventsCommand(opts *options) *cobra.Command {
 			if follow {
 				query.Set("follow", "1")
 			}
-			return stack.ControlStream(ctx, s.engine, s.Resolved.Name, "GET", "/events?"+query.Encode(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return stack.ControlStream(ctx, s.engine, s.Resolved.Name, "GET", "/v1/events?"+query.Encode(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "keep the stream open for new events")
@@ -225,7 +225,7 @@ func fetchMessages(cmd *cobra.Command, opts *options, query url.Values) ([]messa
 		return nil, err
 	}
 	defer s.close()
-	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/messages?"+query.Encode(), nil)
+	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "GET", "/v1/messages?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +330,7 @@ func newMessageReplyCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 			body, _ := json.Marshal(map[string]string{"actor": operatorActor, "text": strings.Join(args[1:], " "), "outcome": outcome})
-			if _, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/messages/"+url.PathEscape(args[0])+"/resolve", body); err != nil {
+			if _, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/v1/messages/"+url.PathEscape(args[0])+"/resolve", body); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "answered %s\n", args[0])
