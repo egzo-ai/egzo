@@ -88,9 +88,8 @@ type Size struct{ Cols, Rows uint }
 
 // Terminal is the client side of an attach: what the user types, where the output goes, and the size.
 type Terminal struct {
-	In       io.Reader
-	Out      io.Writer
-	Size     Size
-	Resize   <-chan Size
-	ReadOnly bool
+	In     io.Reader
+	Out    io.Writer
+	Size   Size
+	Resize <-chan Size
 }

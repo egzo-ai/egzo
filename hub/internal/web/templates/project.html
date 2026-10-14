@@ -31,7 +31,7 @@
 {{range .Rows}}
 <tr data-agent="{{.Name}}">
   <td><a href="{{.URL}}">{{.Name}}</a> <span class="muted">{{.Template}}</span>{{if .Stale}} <span class="badge warn" title="the template changed after this agent was made">stale</span>{{end}}</td>
-  <td><span class="badge state-{{.Activity}}">{{.Activity}}</span>{{if .Waiting}} <span class="badge ask">waiting for an answer</span>{{end}}{{if .Writer}} <span class="badge" title="holds the terminal">{{.Writer}} typing</span>{{end}}{{if .Viewers}} <span class="badge">{{.Viewers}} watching</span>{{end}}</td>
+  <td><span class="badge state-{{.Activity}}">{{.Activity}}</span>{{if .Waiting}} <span class="badge ask">waiting for an answer</span>{{end}}{{if .Holder}} <span class="badge" title="holds the terminal">{{.Holder}} at the terminal</span>{{end}}</td>
   <td class="status">{{.Status}}</td>
   <td>{{.Creator}}</td>
   <td class="actions">

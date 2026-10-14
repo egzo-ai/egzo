@@ -219,7 +219,7 @@ func (e *Engine) Remove(ctx context.Context, project, agent string) error {
 	return nil
 }
 
-// Attach is a tiny shell: it greets, echoes what is typed line by line, and ends on "exit". A read-only terminal only watches.
+// Attach is a tiny shell: it greets, echoes what is typed line by line, and ends on "exit".
 func (e *Engine) Attach(ctx context.Context, project, agent string, term engines.Terminal) error {
 	e.mu.Lock()
 	a, err := e.agent(project, agent)
@@ -227,7 +227,7 @@ func (e *Engine) Attach(ctx context.Context, project, agent string, term engines
 		err = fmt.Errorf("agent %q is %s", agent, a.State)
 	}
 	if err == nil {
-		e.record("attach %s/%s readonly=%v", project, agent, term.ReadOnly)
+		e.record("attach %s/%s", project, agent)
 		e.attached[project+"/"+agent]++
 	}
 	e.mu.Unlock()
@@ -251,9 +251,6 @@ func (e *Engine) Attach(ctx context.Context, project, agent string, term engines
 			if err != nil {
 				done <- nil
 				return
-			}
-			if term.ReadOnly {
-				continue
 			}
 			switch b {
 			case '\r', '\n':

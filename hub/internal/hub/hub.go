@@ -32,7 +32,7 @@ type Hub struct {
 
 	mu       sync.RWMutex
 	scanned  map[string]*engineScan // by engine name
-	attached map[string][]*Viewer   // by "engine:project/agent"
+	attached map[string]*Attachment // who holds the terminal, by "engine:project/agent"
 }
 
 type engineScan struct {
@@ -46,7 +46,7 @@ func New(s *store.Store, r *engines.Registry, log *slog.Logger) *Hub {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Hub{store: s, registry: r, log: log, scanned: map[string]*engineScan{}, attached: map[string][]*Viewer{}}
+	return &Hub{store: s, registry: r, log: log, scanned: map[string]*engineScan{}, attached: map[string]*Attachment{}}
 }
 
 // Store gives the web layer the database for what is not an operation: login, sessions.
@@ -242,10 +242,8 @@ func hasRoleOnEngine(roles map[[2]string]rbac.Role, engine string) bool {
 type AgentView struct {
 	engines.Agent
 	CanOperate bool
-	// Writer is who holds the terminal, "" when nobody.
-	Writer string
-	// Viewers is how many are watching.
-	Viewers int
+	// Holder is who holds the terminal, "" when nobody.
+	Holder string
 }
 
 // ProjectView is the project page.
@@ -315,7 +313,7 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 		CanSpawn: rbac.Can(user.Subject(), role, rbac.Spawn, ""), CanManage: rbac.Can(user.Subject(), role, rbac.ManageRoles, "")}
 	for _, a := range project.Agents {
 		av := AgentView{Agent: a, CanOperate: rbac.Can(user.Subject(), role, rbac.Operate, a.Actor)}
-		av.Writer, av.Viewers = h.presence(engine, name, a.Name)
+		av.Holder = h.holder(engine, name, a.Name)
 		view.Agents = append(view.Agents, av)
 	}
 	return view, nil

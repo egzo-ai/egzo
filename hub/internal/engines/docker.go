@@ -249,9 +249,6 @@ func (d *Docker) Attach(ctx context.Context, project, agent string, term Termina
 		return fmt.Errorf("agent %q is %s", agent, target.State)
 	}
 	command := []string{"egzo", "agent", "attach", "--detach-keys", "ctrl-]"}
-	if term.ReadOnly {
-		command = append(command, "--read-only")
-	}
 	size := term.Size
 	resized := make(chan struct{}, 1)
 	stop := make(chan struct{})

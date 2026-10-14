@@ -12,31 +12,36 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/egzo-ai/egzo/hub/internal/engines"
+	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
-// control is a text frame: the browser tells the size of its terminal, the hub tells whether the keyboard is the user's.
+// control is a text frame: the browser tells the size of its terminal; the hub says when the terminal is in use by somebody else ("busy"),
+// was taken over ("taken") or failed ("error").
 type control struct {
-	Type     string `json:"type"`
-	Cols     uint   `json:"cols,omitempty"`
-	Rows     uint   `json:"rows,omitempty"`
-	ReadOnly bool   `json:"readOnly,omitempty"`
-	Message  string `json:"message,omitempty"`
+	Type    string `json:"type"`
+	Cols    uint   `json:"cols,omitempty"`
+	Rows    uint   `json:"rows,omitempty"`
+	Holder  string `json:"holder,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // terminal bridges a browser's xterm.js to an agent's session: binary frames are the terminal's bytes in both directions, text
 // frames are control messages.
 func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.User) {
 	engine, project, agent := r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent")
-	att, err := s.hub.Attach(r.Context(), user, engine, project, agent)
-	if err != nil {
+	att, err := s.hub.Attach(r.Context(), user, engine, project, agent, r.URL.Query().Get("takeover") == "1")
+	var inUse *hub.InUseError
+	if err != nil && !errors.As(err, &inUse) {
 		s.problem(w, r, err)
 		return
 	}
-	defer att.Close()
 	base, _ := url.Parse(s.urls.Base(r))
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{base.Host}})
 	if err != nil {
+		if att != nil {
+			att.Close()
+		}
 		return // Accept has answered
 	}
 	defer conn.CloseNow()
@@ -48,7 +53,12 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 		data, _ := json.Marshal(c)
 		_ = conn.Write(ctx, websocket.MessageText, data)
 	}
-	sendControl(control{Type: "mode", ReadOnly: att.ReadOnly})
+	if inUse != nil {
+		sendControl(control{Type: "busy", Holder: inUse.Holder})
+		conn.Close(websocket.StatusNormalClosure, "the terminal is in use")
+		return
+	}
+	defer att.Close()
 
 	input, inputWriter := io.Pipe()
 	resize := make(chan engines.Size, 8)
@@ -81,10 +91,8 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 				}
 				continue
 			}
-			if !att.ReadOnly {
-				if _, err := inputWriter.Write(data); err != nil {
-					return
-				}
+			if _, err := inputWriter.Write(data); err != nil {
+				return
 			}
 		}
 	}()
@@ -99,6 +107,13 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 
 	out := frameWriter{ctx: ctx, conn: conn}
 	err = att.Run(ctx, engines.Terminal{In: input, Out: out, Size: size, Resize: resize})
+	select {
+	case <-att.Taken():
+		sendControl(control{Type: "taken", Holder: att.TakenBy()})
+		conn.Close(websocket.StatusNormalClosure, "taken over")
+		return
+	default:
+	}
 	switch {
 	case err == nil || errors.Is(err, context.Canceled):
 		conn.Close(websocket.StatusNormalClosure, "the session ended")

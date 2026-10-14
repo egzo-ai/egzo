@@ -2,61 +2,62 @@ package hub
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/egzo-ai/egzo/hub/internal/engines"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
-// Viewer is somebody attached to an agent's terminal.
-type Viewer struct {
-	UserID, Name string
-	ReadOnly     bool
-}
+// InUseError is returned when somebody else holds the agent's terminal and the user did not ask to take it over.
+type InUseError struct{ Holder string }
+
+func (e *InUseError) Error() string { return fmt.Sprintf("the terminal is in use by %s", e.Holder) }
 
 func attachKey(engine, project, agent string) string { return engine + ":" + project + "/" + agent }
 
-// presence says who holds an agent's terminal and how many watch it.
-func (h *Hub) presence(engine, project, agent string) (writer string, viewers int) {
+// holder says who holds an agent's terminal, "" when nobody. Only the hub's own attaches count: a terminal opened with the CLI is not
+// seen (docs/README.md, "Known issues").
+func (h *Hub) holder(engine, project, agent string) string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for _, v := range h.attached[attachKey(engine, project, agent)] {
-		if v.ReadOnly {
-			viewers++
-		} else {
-			writer = v.Name
-		}
+	if a := h.attached[attachKey(engine, project, agent)]; a != nil {
+		return a.name
 	}
-	return writer, viewers
+	return ""
 }
 
-// Viewers lists who is attached to an agent.
-func (h *Hub) Viewers(ctx context.Context, user store.User, engine, project, agent string) ([]Viewer, error) {
+// Holder says who holds an agent's terminal, "" when nobody.
+func (h *Hub) Holder(ctx context.Context, user store.User, engine, project, agent string) (string, error) {
 	if _, err := h.access(ctx, user, engine, project); err != nil {
-		return nil, err
+		return "", err
 	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	var out []Viewer
-	for _, v := range h.attached[attachKey(engine, project, agent)] {
-		out = append(out, *v)
-	}
-	return out, nil
+	return h.holder(engine, project, agent), nil
 }
 
 // Attachment is a terminal the hub agreed to open.
 type Attachment struct {
-	// ReadOnly is true when the user may only watch: they may not operate the agent, or somebody else already holds the keyboard.
-	ReadOnly bool
-
 	hub                    *Hub
 	engine, project, agent string
-	viewer                 *Viewer
+	name                   string
+	taken                  chan struct{}
+	takenBy                string
 }
 
-// Attach decides whether the user writes or watches (one writer per agent, anybody with a role on the project may watch), registers them,
-// and returns the attachment to run. Close it when the terminal ends.
-func (h *Hub) Attach(ctx context.Context, user store.User, engine, project, agent string) (*Attachment, error) {
+// Taken is closed when somebody else took the terminal over.
+func (a *Attachment) Taken() <-chan struct{} { return a.taken }
+
+// TakenBy is who took the terminal over; it is only set once Taken is closed.
+func (a *Attachment) TakenBy() string {
+	a.hub.mu.RLock()
+	defer a.hub.mu.RUnlock()
+	return a.takenBy
+}
+
+// Attach gives the user the agent's terminal. One person holds it at a time: when somebody else does, it fails with an InUseError, unless
+// takeOver is set, which ends the other person's terminal. Whoever may operate the agent may attach. Close the attachment when the terminal ends.
+func (h *Hub) Attach(ctx context.Context, user store.User, engine, project, agent string, takeOver bool) (*Attachment, error) {
 	role, err := h.access(ctx, user, engine, project)
 	if err != nil {
 		return nil, err
@@ -65,53 +66,61 @@ func (h *Hub) Attach(ctx context.Context, user store.User, engine, project, agen
 	if err != nil {
 		return nil, err
 	}
-	canWrite := rbac.Can(user.Subject(), role, rbac.Operate, creator)
-
-	h.mu.Lock()
-	key := attachKey(engine, project, agent)
-	readOnly := true
-	if canWrite {
-		readOnly = false
-		for _, v := range h.attached[key] {
-			if !v.ReadOnly {
-				readOnly = true
-			}
-		}
+	if !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
+		return nil, ErrForbidden
 	}
-	viewer := &Viewer{UserID: user.ID, Name: user.DisplayName(), ReadOnly: readOnly}
-	h.attached[key] = append(h.attached[key], viewer)
+
+	att := &Attachment{hub: h, engine: engine, project: project, agent: agent, name: user.DisplayName(), taken: make(chan struct{})}
+	key := attachKey(engine, project, agent)
+	h.mu.Lock()
+	previous := h.attached[key]
+	if previous != nil && !takeOver {
+		h.mu.Unlock()
+		return nil, &InUseError{Holder: previous.name}
+	}
+	if previous != nil {
+		previous.takenBy = att.name
+		close(previous.taken)
+	}
+	h.attached[key] = att
 	h.mu.Unlock()
 
-	detail := "write"
-	switch {
-	case readOnly && canWrite:
-		detail = "read-only: another user holds the terminal"
-	case readOnly:
-		detail = "read-only"
+	detail := "open"
+	if previous != nil {
+		detail = "took over from " + previous.name
 	}
 	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "agent.attach", Engine: engine, Project: project, Agent: agent, Detail: detail, Allowed: true})
-	return &Attachment{ReadOnly: readOnly, hub: h, engine: engine, project: project, agent: agent, viewer: viewer}, nil
+	return att, nil
 }
 
-// Run connects the terminal until it ends.
+// Run connects the terminal until it ends or is taken over. A taken-over terminal ends without an error: check Taken.
 func (a *Attachment) Run(ctx context.Context, term engines.Terminal) error {
-	term.ReadOnly = a.ReadOnly
-	return a.hub.call(ctx, a.engine, func(e engines.Engine) error { return e.Attach(ctx, a.project, a.agent, term) })
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-a.taken:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	err := a.hub.call(ctx, a.engine, func(e engines.Engine) error { return e.Attach(ctx, a.project, a.agent, term) })
+	select {
+	case <-a.taken:
+		if errors.Is(err, context.Canceled) {
+			err = nil
+		}
+	default:
+	}
+	return err
 }
 
-// Close frees the seat.
+// Close frees the seat, unless somebody took it over already.
 func (a *Attachment) Close() {
 	a.hub.mu.Lock()
 	defer a.hub.mu.Unlock()
 	key := attachKey(a.engine, a.project, a.agent)
-	list := a.hub.attached[key]
-	for i, v := range list {
-		if v == a.viewer {
-			a.hub.attached[key] = append(list[:i:i], list[i+1:]...)
-			break
-		}
-	}
-	if len(a.hub.attached[key]) == 0 {
+	if a.hub.attached[key] == a {
 		delete(a.hub.attached, key)
 	}
 }

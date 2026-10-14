@@ -185,10 +185,10 @@ func (s *Server) agentPage(w http.ResponseWriter, r *http.Request, user store.Us
 	}
 	n := s.namer(r.Context())
 	events, _ := s.hub.Events(r.Context(), user, engine, project, name, 40)
-	viewers, _ := s.hub.Viewers(r.Context(), user, engine, project, name)
+	holder, _ := s.hub.Holder(r.Context(), user, engine, project, name)
 	s.render(w, r, http.StatusOK, "agent", map[string]any{
 		"Title": name, "View": view, "Agent": agent, "Creator": n.actor(agent.Actor), "Events": s.eventRows(events, n),
-		"Viewers": viewers, "Base": projectURL(engine, project), "Self": agentURL(engine, project, name),
+		"Holder": holder, "Base": projectURL(engine, project), "Self": agentURL(engine, project, name),
 		"Terminal": agent.Running(),
 	})
 }

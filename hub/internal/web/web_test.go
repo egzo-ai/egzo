@@ -544,9 +544,6 @@ func TestTheTerminalBridgesTheBrowserToTheAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer writer.CloseNow()
-	if m := readControl(t, writer); m["type"] != "mode" || m["readOnly"] == true {
-		t.Errorf("the first to attach should type: %v", m)
-	}
 	writer.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":100,"rows":30}`))
 	readUntil(t, writer, "attached to web/coder-1 (100x30)")
 	writer.Write(ctx, websocket.MessageBinary, []byte("hello\r"))
@@ -555,45 +552,34 @@ func TestTheTerminalBridgesTheBrowserToTheAgent(t *testing.T) {
 	readUntil(t, writer, "resized to 120x40")
 
 	// the page shows who is at the terminal
-	if _, page := root.get("/e/local/p/web/a/coder-1"); !strings.Contains(page, "root (typing)") {
+	if _, page := root.get("/e/local/p/web/a/coder-1"); !strings.Contains(page, `data-testid="presence"`) || !strings.Contains(page, "root") {
 		t.Errorf("presence missing:\n%s", page)
 	}
 
-	// a second person watches
-	r.store.SetRole(ctx, "local", "web", r.userID("root"), rbac.Owner)
+	// a second person is told it is in use, and may take it over
 	alice := r.browser()
 	alice.signIn("alice")
-	r.store.SetRole(ctx, "local", "web", r.userID("alice"), rbac.User)
-	watcher, err := alice.dial(path)
+	r.store.SetRole(ctx, "local", "web", r.userID("alice"), rbac.Administrator)
+	busy, err := alice.dial(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer watcher.CloseNow()
-	if m := readControl(t, watcher); m["readOnly"] != true {
-		t.Errorf("the second terminal should only watch: %v", m)
+	defer busy.CloseNow()
+	if m := readControl(t, busy); m["type"] != "busy" || m["holder"] != "root" {
+		t.Errorf("the second terminal should be refused: %v", m)
 	}
-	watcher.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":80,"rows":24}`))
-	readUntil(t, watcher, "attached to")
-	watcher.Write(ctx, websocket.MessageBinary, []byte("sneaky\r"))
-	time.Sleep(200 * time.Millisecond)
-	writer.Write(ctx, websocket.MessageBinary, []byte("exit\r"))
-	if _, data, err := func() (websocket.MessageType, []byte, error) {
-		c, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		for {
-			k, d, err := writer.Read(c)
-			if err != nil {
-				return k, d, err
-			}
-		}
-	}(); err == nil || len(data) > 0 {
-		_ = data
+	taker, err := alice.dial(path + "?takeover=1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, line := range r.fakes["local"].Calls() {
-		if strings.Contains(line, "sneaky") {
-			t.Error("a watcher typed")
-		}
+	defer taker.CloseNow()
+	taker.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":80,"rows":24}`))
+	readUntil(t, taker, "attached to web/coder-1 (80x24)")
+	if m := readControl(t, writer); m["type"] != "taken" || m["holder"] != "alice" {
+		t.Errorf("the first terminal should be told: %v", m)
 	}
+	taker.Write(ctx, websocket.MessageBinary, []byte("mine\r"))
+	readUntil(t, taker, "you said: mine")
 }
 
 func TestTheTerminalRefusesWhatThePagesRefuse(t *testing.T) {

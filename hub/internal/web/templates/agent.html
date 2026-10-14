@@ -5,15 +5,17 @@
 <div id="live" data-refresh="{{.Data.Self}}?fragment=1">{{template "live" .}}</div>
 <section>
   <h2>Terminal</h2>
-  {{if .Data.Agent.Running}}
+  {{if and .Data.Agent.Running .Data.Agent.CanOperate}}
   <div class="terminal-bar">
     <button id="terminal-open" class="primary" type="button" data-url="{{.Data.Self}}/terminal">Open terminal</button>
+    <button id="terminal-takeover" type="button" hidden>Take over</button>
     <button id="terminal-close" type="button" hidden>Disconnect</button>
     <span id="terminal-mode" class="badge" hidden></span>
   </div>
   <div id="terminal" class="terminal" hidden></div>
-  <p id="terminal-note" class="muted">Detach with Ctrl-] . One person types at a time; others who open it watch.</p>
-  {{else}}<p class="muted">The agent is {{.Data.Agent.State}}. Start it to open its terminal.</p>{{end}}
+  <p id="terminal-note" class="muted">Detach with Ctrl-] . One person holds the terminal at a time; opening it while somebody else does offers to take it over.</p>
+  {{else if .Data.Agent.CanOperate}}<p class="muted">The agent is {{.Data.Agent.State}}. Start it to open its terminal.</p>
+  {{else}}<p class="muted">Only the people who may operate this agent can open its terminal.</p>{{end}}
 </section>
 <script src="/static/xterm/xterm.js" defer></script>
 <script src="/static/xterm/addon-fit.js" defer></script>
@@ -35,10 +37,7 @@
 {{end}}
 <a class="button" href="{{.Self}}/logs">Logs</a>
 </p>
-{{if .Viewers}}
-<p data-testid="presence">At the terminal:
-{{range .Viewers}}<span class="badge">{{.Name}}{{if .ReadOnly}} (watching){{else}} (typing){{end}}</span> {{end}}</p>
-{{end}}
+{{if .Holder}}<p data-testid="presence">At the terminal: <span class="badge">{{.Holder}}</span></p>{{end}}
 <h2>Timeline</h2>
 {{template "timeline" .Events}}
 {{end}}

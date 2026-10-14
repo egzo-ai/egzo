@@ -130,33 +130,45 @@ def test_there_is_no_messaging_in_the_web_ui(single_hub, page):
     expect(page.get_by_role("button", name="Open terminal")).to_be_visible()
 
 
-def test_the_terminal_types_into_the_agent_and_a_second_person_only_watches(hub, page, new_person):
+def test_the_terminal_types_into_the_agent_and_a_second_person_can_take_it_over(hub, page, new_person):
     sign_in(page, hub, "root")
     page.goto(hub.url + "/e/local/p/web/a/coder-1")
     page.get_by_role("button", name="Open terminal").click()
-    expect(page.locator("#terminal-mode")).to_have_text("you are typing")
+    expect(page.locator("#terminal-mode")).to_have_text("connected")
     terminal = page.locator("#terminal")
     expect(terminal).to_contain_text("attached to web/coder-1")
     terminal.click()
     page.keyboard.type("hello egzo")
     page.keyboard.press("Enter")
     expect(terminal).to_contain_text("you said: hello egzo")
-    expect(page.get_by_test_id("presence")).to_contain_text("root (typing)", timeout=8000)
+    expect(page.get_by_test_id("presence")).to_contain_text("root", timeout=8000)
 
     alice = new_person("alice")
     hub.world("grant", engine="local", project="web", user="alice", role="administrator")
     alice.goto(hub.url + "/e/local/p/web/a/coder-1")
     alice.get_by_role("button", name="Open terminal").click()
-    expect(alice.locator("#terminal-mode")).to_contain_text("watching (read only)")
+    expect(alice.locator("#terminal-mode")).to_contain_text("in use by root")
+    expect(alice.locator("#terminal")).not_to_contain_text("attached to")
+    alice.get_by_role("button", name="Take over").click()
+    expect(alice.locator("#terminal")).to_contain_text("attached to web/coder-1")
+    expect(page.locator("#terminal-mode")).to_contain_text("taken over by alice")
     alice.locator("#terminal").click()
-    alice.keyboard.type("intruder")
+    alice.keyboard.type("mine")
     alice.keyboard.press("Enter")
-    page.wait_for_timeout(500)
-    expect(page.locator("#terminal")).not_to_contain_text("intruder")
-    expect(page.get_by_test_id("presence")).to_contain_text("alice (watching)", timeout=8000)
+    expect(alice.locator("#terminal")).to_contain_text("you said: mine")
+    expect(page.locator("#terminal")).not_to_contain_text("you said: mine")
 
-    page.get_by_role("button", name="Disconnect").click()
-    expect(page.locator("#terminal-mode")).to_have_text("disconnected")
+    alice.get_by_role("button", name="Disconnect").click()
+    expect(alice.locator("#terminal-mode")).to_have_text("disconnected")
+
+
+def test_a_user_who_may_not_operate_the_agent_has_no_terminal(hub, page, new_person):
+    sign_in(page, hub, "root")
+    bob = new_person("bob")
+    hub.world("grant", engine="local", project="web", user="bob", role="user")
+    bob.goto(hub.url + "/e/local/p/web/a/coder-1")
+    expect(bob.get_by_role("button", name="Open terminal")).to_have_count(0)
+    expect(bob.get_by_text("Only the people who may operate")).to_be_visible()
 
 
 def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person):

@@ -72,7 +72,8 @@ Information model: engine → projects → agents, services.
 - **Project page**: the agents, with Start / Stop / Remove / Attach, and a top action to spawn an agent.
   Observe: status, event timeline, logs, proxy audit, a read-only view of the spec.
 - **Agent page**: status, a terminal (tab or button; the hub bridges engine exec attach to xterm.js), resource usage
-  (later). One writer and read-only observers per agent (read-only attach), presence.
+  (later). One terminal per agent at a time, with presence and take-over (no read-only observers: one pty has one size; the CLI is
+  not managed, a documented known issue).
 - **No messaging in the web UI.** Messages and questions are not shown, sent or answered here. Talking to an agent is
   the terminal, or a messaging adapter. The agent page can show that an agent is waiting on a question, from its
   status, so a person knows to go answer it elsewhere.
@@ -286,8 +287,8 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 - Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the
   operator confirms its fingerprint); one engine down does not take the page down.
 - The web UI: projects (engine badge and filter only with several engines), project page (agents, spawn, start / stop /
-  remove, services, timeline, spec, audit log, members), agent page (status, timeline, logs, a terminal with one writer and
-  read-only watchers, presence). No messaging. A question an agent is waiting on is shown as a status.
+  remove, services, timeline, spec, audit log, members), agent page (status, timeline, logs, a terminal held by one person with
+  presence and take-over). No messaging. A question an agent is waiting on is shown as a status.
 - Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
   the terminal websocket.
 - Tests: Go unit tests with the engine seam faked; Playwright tests of the pages; `make hub-integration` (real engine, real

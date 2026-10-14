@@ -38,15 +38,26 @@ A role is held on one project of one engine. Roles live in the hub's database; t
 
 | Role | May |
 |---|---|
-| user | see the project; spawn agents; start, stop, remove and attach (type) to their own agents; watch the others' terminals |
+| user | see the project; spawn agents; start, stop, remove and open the terminal of their own agents |
 | administrator | the same on every agent of the project; read the audit log and the logs |
 | owner | an administrator who also grants and removes roles. An owner cannot remove or lower themselves |
 
 Agents started with the CLI belong to the operator. A project nobody owns (one made after the hub started, or by someone else)
 is owned by the operator, at the next scan. Every action, allowed or refused, is in the project's audit log.
 
-One person types in an agent's terminal at a time; anyone else who opens it watches. There is no messaging in the web UI: talk to
-an agent in its terminal.
+There is no messaging in the web UI: talk to an agent in its terminal.
+
+## The terminal
+
+Whoever may operate an agent can open its terminal; there is no read-only view. One person holds it at a time, and the agent page
+says who. Opening it while somebody else does offers **Take over**, which ends their terminal ("taken over by ...") and gives it to
+you. Anyone who may open it may take it over. The terminal is sized to the browser window that opens it.
+
+### Known issue: the CLI
+
+The hub only knows the terminals it opened. `egzo attach` goes straight to the agent's session and the hub neither sees it nor can
+end it. Attaching with the CLI to an agent that is open in the hub is risky: the session has one screen size, so each side's window
+resize changes it for the other, and what both type reaches the program. Avoid it. Nothing in the hub prevents it.
 
 ## Engines
 

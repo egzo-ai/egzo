@@ -286,7 +286,7 @@ func TestSpawnNeedsARoleAndATemplate(t *testing.T) {
 	}
 }
 
-func TestOneWriterPerAgentAndTheRestWatch(t *testing.T) {
+func TestOneHolderPerAgentAndAnyoneMayTakeOver(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
@@ -297,62 +297,73 @@ func TestOneWriterPerAgentAndTheRestWatch(t *testing.T) {
 	r.store.SetRole(ctx, "local", "web", bob.ID, rbac.User)
 	stranger := r.login("eve")
 
-	first, err := r.hub.Attach(ctx, op, "local", "web", "coder-1")
-	if err != nil || first.ReadOnly {
-		t.Fatalf("first attach: %+v %v", first, err)
+	first, err := r.hub.Attach(ctx, op, "local", "web", "coder-1", false)
+	if err != nil {
+		t.Fatalf("first attach: %v", err)
 	}
-	second, _ := r.hub.Attach(ctx, alice, "local", "web", "coder-1")
-	if !second.ReadOnly {
-		t.Error("two writers on one terminal")
+	var inUse *InUseError
+	if _, err := r.hub.Attach(ctx, alice, "local", "web", "coder-1", false); !errors.As(err, &inUse) || inUse.Holder != "root" {
+		t.Errorf("second attach: %v", err)
 	}
-	third, _ := r.hub.Attach(ctx, bob, "local", "web", "coder-1")
-	if !third.ReadOnly {
-		t.Error("a user who may not operate the agent got the keyboard")
+	if _, err := r.hub.Attach(ctx, bob, "local", "web", "coder-1", false); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a user who may not operate the agent attached: %v", err)
 	}
-	if _, err := r.hub.Attach(ctx, stranger, "local", "web", "coder-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := r.hub.Attach(ctx, stranger, "local", "web", "coder-1", false); !errors.Is(err, ErrNotFound) {
 		t.Errorf("attach without a role: %v", err)
 	}
-	writer, viewers := r.hub.presence("local", "web", "coder-1")
-	if writer != "root" || viewers != 2 {
-		t.Errorf("presence = %q, %d", writer, viewers)
+	if got, _ := r.hub.Holder(ctx, bob, "local", "web", "coder-1"); got != "root" {
+		t.Errorf("holder = %q", got)
 	}
-	list, _ := r.hub.Viewers(ctx, bob, "local", "web", "coder-1")
-	if len(list) != 3 {
-		t.Errorf("viewers = %+v", list)
+
+	second, err := r.hub.Attach(ctx, alice, "local", "web", "coder-1", true)
+	if err != nil {
+		t.Fatalf("take over: %v", err)
 	}
-	first.Close()
-	again, _ := r.hub.Attach(ctx, alice, "local", "web", "coder-1")
-	if again.ReadOnly {
-		t.Error("the keyboard was not freed when the writer left")
+	select {
+	case <-first.Taken():
+	default:
+		t.Error("the first terminal was not told it was taken over")
+	}
+	if first.TakenBy() != "alice" {
+		t.Errorf("taken by %q", first.TakenBy())
+	}
+	first.Close() // the old terminal ending must not free the new holder's seat
+	if got := r.hub.holder("local", "web", "coder-1"); got != "alice" {
+		t.Errorf("holder after the old terminal closed = %q", got)
 	}
 	second.Close()
-	third.Close()
-	again.Close()
-	if w, v := r.hub.presence("local", "web", "coder-1"); w != "" || v != 0 || len(r.hub.attached) != 0 {
-		t.Errorf("presence after everybody left: %q %d", w, v)
+	if got := r.hub.holder("local", "web", "coder-1"); got != "" || len(r.hub.attached) != 0 {
+		t.Errorf("holder after everybody left: %q", got)
 	}
+	again, err := r.hub.Attach(ctx, op, "local", "web", "coder-1", false)
+	if err != nil {
+		t.Errorf("the seat was not freed: %v", err)
+	}
+	again.Close()
 }
 
-func TestAttachmentRunsThroughTheEngineReadOnlyWhenItIsNotTheWriter(t *testing.T) {
+func TestATakenOverAttachmentEndsWithoutAnError(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	op := r.login("root")
 	r.scan()
-	a, _ := r.hub.Attach(ctx, op, "local", "web", "coder-1")
-	b, _ := r.hub.Attach(ctx, op, "local", "web", "coder-1")
-	defer a.Close()
-	defer b.Close()
-	cancelled, cancel := context.WithCancel(ctx)
-	cancel()
-	for _, att := range []*Attachment{a, b} {
-		if err := att.Run(cancelled, engines.Terminal{In: strings.NewReader(""), Out: io.Discard}); err != nil {
-			t.Fatal(err)
-		}
+	a, _ := r.hub.Attach(ctx, op, "local", "web", "coder-1", false)
+	done := make(chan error, 1)
+	in, _ := io.Pipe()
+	go func() { done <- a.Run(ctx, engines.Terminal{In: in, Out: io.Discard}) }()
+	b, err := r.hub.Attach(ctx, op, "local", "web", "coder-1", true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	calls := r.fakes["local"].Calls()
-	if calls[len(calls)-2] != "attach web/coder-1 readonly=false" || calls[len(calls)-1] != "attach web/coder-1 readonly=true" {
-		t.Errorf("calls = %v", calls)
+	defer b.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the taken-over terminal kept running")
 	}
 }
 
