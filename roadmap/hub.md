@@ -58,7 +58,7 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
 - Roles:
   - **user**: spawn, start, stop, attach and delete their own agents.
   - **administrator**: the same on every agent of the project.
-  - **owner**: administrator, plus granting and removing roles, plus destroying the project (`project down`).
+  - **owner**: administrator, plus granting and removing roles. Destroying a project (`project down`) is not a hub action, by design: the CLI does it.
 - An owner cannot remove themselves or drop their own permissions. An owner can remove other owners.
 - Chat from Discord needs no fourth permission: in a channel an agent was added to, any registered user with a role on
   the project may talk to it (see "Who decides what" in [messaging-adapters.md](messaging-adapters.md)). It is not shown in the web UI.
@@ -70,7 +70,7 @@ Information model: engine → projects → agents, services.
 - **HUD**: the signed-in user and the engine switcher (all configured engines, with their state).
 - **Welcome page**: the projects the user can see, across engines. Click one to open it.
 - **Project page**: the agents, with Start / Stop / Remove / Attach, and a top action to spawn an agent.
-  Observe: status, event timeline, logs, proxy audit, a read-only view of the spec.
+  Observe: status, event timeline, logs, a read-only view of the spec.
 - **Agent page**: status, a terminal (tab or button; the hub bridges engine exec attach to xterm.js), resource usage
   (later). One terminal per agent at a time, with presence and take-over (no read-only observers: one pty has one size; the CLI is
   not managed, a documented known issue).
@@ -142,7 +142,7 @@ Information model: engine → projects → agents, services.
 - **An `Engine` seam owned by the hub**: `Projects`, `Agents`, `Spawn`, `Start`, `Stop`, `Rm`, `Attach`, implemented by
   delegating to the core packages, and faked in the hub's tests. That covers what is the hub's own logic: discovery,
   orphan grants, RBAC, fan-out over N engines, an engine going down.
-- Discovery is by labels, per engine, on a timer and on engine events.
+- Discovery is by labels, per engine, on a timer (engine events: see [discovery.md](discovery.md)).
 - Risks to track: privileged socket access (rootless, later a label-scoped proxy); engine credentials for remote
   engines stored by the hub; many exec streams (engine events plus on-demand sidecar streams); `project up`
   recreating containers while users are attached (the hub must handle disconnects cleanly).
@@ -179,7 +179,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
-- Discovery runs on a timer only (`EGZO_SCAN_INTERVAL`), not on engine events.
-- `project down` (the owner's "destroy the project") is a permission in `rbac` but has no button: it needs the project file's
-  directory, which a hub does not have. Until then the CLI does it.
-- The proxy audit log, resource usage, and a way for an owner to remove a user from the hub altogether.
+- **Discovery beyond the timer**: see [discovery.md](discovery.md).
+- **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
+- Resource usage, and a way for an owner to remove a user from the hub altogether.

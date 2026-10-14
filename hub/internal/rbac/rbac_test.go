@@ -22,10 +22,8 @@ func TestWhatEachRoleMayDo(t *testing.T) {
 		{Administrator, Operate, "user:bob", true},
 		{Administrator, Operate, "operator", true},
 		{Administrator, ManageRoles, "", false},
-		{Administrator, DestroyProject, "", false},
 		{Owner, Operate, "user:bob", true},
 		{Owner, ManageRoles, "", true},
-		{Owner, DestroyProject, "", true},
 		{Owner, "something-new", "", false},
 	}
 	for _, c := range cases {

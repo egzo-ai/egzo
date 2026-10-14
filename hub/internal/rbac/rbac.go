@@ -43,7 +43,6 @@ const (
 	Spawn          Action = "spawn"           // make an agent
 	Operate        Action = "operate"         // start, stop, remove, attach (write) an agent
 	ManageRoles    Action = "manage-roles"    // grant and remove roles
-	DestroyProject Action = "destroy-project" // project down
 )
 
 // Operator is the actor string of the CLI and of agents spawned from it.
@@ -75,7 +74,7 @@ func Can(subject Subject, role Role, action Action, creator string) bool {
 			return true
 		}
 		return role == User && ownedBy(subject, creator)
-	case ManageRoles, DestroyProject:
+	case ManageRoles:
 		return role == Owner
 	}
 	return false
