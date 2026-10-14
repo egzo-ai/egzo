@@ -179,6 +179,7 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
+- **The web UI as a Svelte SPA on an API-first back-end**, with a new design: see [web-ui-spa.md](web-ui-spa.md).
 - **Discovery beyond the timer**: see [discovery.md](discovery.md).
 - **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

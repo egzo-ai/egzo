@@ -1,0 +1,1552 @@
+<title>egzo hub screens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Martian+Mono:wght@300;400;500&display=swap">
+<style>
+/* egzo hub · design tokens v1
+ * Dark-first. Every value is a CSS custom property; components use only these.
+ * Theme selection: no attribute = follow the OS; data-theme="light" | "dark" on <html> forces one.
+ * Fonts are self-hosted in the Go binary (no CDN): JetBrains Mono (UI + terminal), Martian Mono (display, sparingly).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── Surfaces: warm CRT black, each step a little lighter ─────────── */
+  --bg:            #0f0d0b;  /* page */
+  --surface-1:     #161310;  /* panels, tables, tab strip */
+  --surface-2:     #1e1a16;  /* hover, raised rows, inputs */
+  --surface-3:     #28221c;  /* selected, pressed, menus */
+  --overlay:       rgb(5 4 3 / 0.72);  /* behind dialogs */
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text:          #f1e5d1;  /* 15.6:1 on bg */
+  --text-2:        #c4b29a;  /* 9.4:1  secondary */
+  --text-3:        #9a8a75;  /* 5.8:1  muted, timestamps; still AA */
+  --text-invert:   #1b1200;
+
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --border:        #3a3128;  /* hairlines between rows (decorative) */
+  --border-strong: #75634f;  /* inputs, controls: ≥3:1 */
+
+  /* ── Accent: P3 amber phosphor ────────────────────────────────────── */
+  --accent:        #ffb000;  /* fills: primary buttons, active tab rule, cursor */
+  --accent-hover:  #ffc23d;
+  --accent-text:   #ffb000;  /* accent used as text/links on bg (10.6:1) */
+  --on-accent:     #1b1200;  /* text on accent fills (10.1:1) */
+  --accent-soft:   rgb(255 176 0 / 0.12);  /* selected row, active tab bg */
+  --accent-line:   rgb(255 176 0 / 0.45);
+  --focus:         #ffd27a;  /* focus ring, always 2px + 2px offset */
+  --brand:         #ffb000;  /* the logo is amber, the same phosphor as the UI */
+  --logo-front:    #ffb000;  /* front container */
+  --logo-prompt:   #0f0d0b;  /* the >_ knocked out of it */
+  --logo-line-1:   #7b5606;  /* back container outline */
+  --logo-line-2:   #c38703;  /* middle container outline */
+
+  /* ── Status (each paired with a glyph; never colour alone) ─────────── */
+  --status-running:      #7fd67f;  /* ● running / working */
+  --status-running-soft: rgb(127 214 127 / 0.12);
+  --status-waiting:      #5cc8ff;  /* ? waiting on a human answer */
+  --status-waiting-soft: rgb(92 200 255 / 0.13);
+  --status-stopped:      #9a8a75;  /* ■ stopped / exited */
+  --status-stopped-soft: rgb(154 138 117 / 0.12);
+  --status-error:        #ff6464;  /* ✕ error / unhealthy / refused */
+  --status-error-soft:   rgb(255 100 100 / 0.12);
+  --status-unreachable:  #b99cff;  /* ⌁ engine unreachable (dashed outline) */
+  --status-unreachable-soft: rgb(185 156 255 / 0.12);
+  --status-warn:         #f5d76e;  /* ! stale, project down */
+  --status-warn-soft:    rgb(245 215 110 / 0.12);
+
+  /* ── Terminal theme (xterm.js ITheme; read at runtime, see docs) ──── */
+  --term-bg:          #0b0907;
+  --term-fg:          #ecdfc9;
+  --term-cursor:      #ffb000;
+  --term-cursor-accent: #0b0907;
+  --term-selection:   rgb(255 176 0 / 0.28);
+  --term-black:       #1e1a16;  --term-bright-black:   #6b5d4d;
+  --term-red:         #ff6b5e;  --term-bright-red:     #ff9a8f;
+  --term-green:       #8fd18a;  --term-bright-green:   #b6e8a8;
+  --term-yellow:      #ffc53d;  --term-bright-yellow:  #ffdd85;
+  --term-blue:        #6fa8ff;  --term-bright-blue:    #9fc4ff;
+  --term-magenta:     #d39cff;  --term-bright-magenta: #e6c2ff;
+  --term-cyan:        #5cc8ff;  --term-bright-cyan:    #9edfff;
+  --term-white:       #d9cbb5;  --term-bright-white:   #fff6e6;
+
+  /* ── Phosphor glow on amber rules (dark only; set to none to disable) ─ */
+  --glow-accent:   0 0 6px rgb(255 176 0 / 0.45);
+
+  /* ── Elevation: borders, not shadows; one shadow for floating layers ─ */
+  --shadow-float:  0 10px 30px rgb(0 0 0 / 0.55), 0 0 0 1px var(--border);
+
+  /* ── Type ─────────────────────────────────────────────────────────── */
+  --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display:  "Martian Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-term:     var(--font-mono);
+
+  --text-2xs: 0.6875rem; /* 11px  key caps, counters */
+  --text-xs:  0.75rem;   /* 12px  labels, badges, meta */
+  --text-sm:  0.8125rem; /* 13px  body, tables (base) */
+  --text-md:  0.875rem;  /* 14px  emphasis, inputs */
+  --text-lg:  1rem;      /* 16px  section titles */
+  --text-xl:  1.25rem;   /* 20px  page titles (display face) */
+  --text-2xl: 1.75rem;   /* 28px  sign-in, empty states */
+  --leading-tight: 1.25;
+  --leading:       1.5;
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-bold:    700;
+  --tracking-label: 0.08em;  /* UPPERCASE labels only */
+  --term-font-size: 13px;
+  --term-line-height: 1.2;
+
+  /* ── Space (4px grid) ─────────────────────────────────────────────── */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ── Size ─────────────────────────────────────────────────────────── */
+  --control-h-sm: 24px;
+  --control-h:    28px;
+  --control-h-lg: 36px;
+  --row-h:        32px;   /* table rows */
+  --hud-h:        40px;   /* sidebar head, mobile bar */
+  --nav-w:        272px;  /* sidebar */
+  --nav-w-md:     232px;  /* sidebar at tablet widths */
+  --nav-w-rail:   52px;   /* collapsed sidebar */
+  --content-max:  1200px;
+
+  /* ── Shape: squared, like a monitor bezel ─────────────────────────── */
+  --radius-0: 0;
+  --radius-1: 2px;   /* badges, pills, keycaps */
+  --radius-2: 4px;   /* buttons, inputs, menus */
+  --radius-3: 6px;   /* dialogs, toasts */
+  --border-w: 1px;
+
+  /* ── Motion ───────────────────────────────────────────────────────── */
+  --dur-instant: 0ms;     /* tab switch, terminal focus: never animate */
+  --dur-fast:    90ms;    /* hover, press */
+  --dur-base:    150ms;   /* menus, toasts in */
+  --dur-slow:    240ms;   /* dialogs */
+  --ease-out:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in:     cubic-bezier(0.4, 0, 1, 1);
+  --blink:       1.06s steps(1, end) infinite;  /* cursor, connecting caret */
+
+  /* ── Layers ───────────────────────────────────────────────────────── */
+  --z-tabbar: 20;
+  --z-menu:   40;
+  --z-dialog: 60;
+  --z-toast:  70;
+  --z-hud:    80;   /* leader-key overlay */
+}
+
+/* ── Light: "printout" — warm paper grey, ink text, the same amber keys ── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f3f0ea; --surface-1: #fbfaf7; --surface-2: #ebe6dd; --surface-3: #e1d9cc;
+    --overlay: rgb(29 24 18 / 0.45);
+    --text: #1d1812; --text-2: #4b4135; --text-3: #6b5e4e; --text-invert: #fbfaf7;
+    --border: #d6cdbf; --border-strong: #968670;
+    --accent: #ffb000; --accent-hover: #f0a400; --accent-text: #8a5300; --on-accent: #1b1200;
+    --accent-soft: rgb(255 176 0 / 0.18); --accent-line: rgb(179 122 0 / 0.55);
+    --focus: #8a5300; --brand: #ffb000;
+    --logo-front: #1d1812; --logo-prompt: #ffb000; --logo-line-1: #d9b066; --logo-line-2: #b37a00;
+    --status-running: #27702b; --status-running-soft: rgb(39 112 43 / 0.10);
+    --status-waiting: #09649a; --status-waiting-soft: rgb(9 100 154 / 0.10);
+    --status-stopped: #6b5e4e; --status-stopped-soft: rgb(107 94 78 / 0.10);
+    --status-error: #b8242b;   --status-error-soft: rgb(184 36 43 / 0.09);
+    --status-unreachable: #6544b8; --status-unreachable-soft: rgb(101 68 184 / 0.09);
+    --status-warn: #7a5d00;    --status-warn-soft: rgb(196 150 0 / 0.14);
+    --term-bg: #fbf9f5; --term-fg: #1d1812; --term-cursor: #b37a00; --term-cursor-accent: #fbf9f5;
+    --term-selection: rgb(255 176 0 / 0.30);
+    --term-black: #1d1812; --term-bright-black: #6b5e4e;
+    --term-red: #b8242b; --term-bright-red: #d1453f;
+    --term-green: #27702b; --term-bright-green: #3a8a3c;
+    --term-yellow: #8a5300; --term-bright-yellow: #a86a00;
+    --term-blue: #1f5fbf; --term-bright-blue: #3b78d4;
+    --term-magenta: #8a3fb8; --term-bright-magenta: #a35ad0;
+    --term-cyan: #09649a; --term-bright-cyan: #1a7fb8;
+    --term-white: #d6cdbf; --term-bright-white: #fbfaf7;
+    --glow-accent: none;
+    --shadow-float: 0 10px 28px rgb(60 45 25 / 0.18), 0 0 0 1px var(--border);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f0ea; --surface-1: #fbfaf7; --surface-2: #ebe6dd; --surface-3: #e1d9cc;
+  --overlay: rgb(29 24 18 / 0.45);
+  --text: #1d1812; --text-2: #4b4135; --text-3: #6b5e4e; --text-invert: #fbfaf7;
+  --border: #d6cdbf; --border-strong: #968670;
+  --accent: #ffb000; --accent-hover: #f0a400; --accent-text: #8a5300; --on-accent: #1b1200;
+  --accent-soft: rgb(255 176 0 / 0.18); --accent-line: rgb(179 122 0 / 0.55);
+  --focus: #8a5300; --brand: #ffb000;
+  --logo-front: #1d1812; --logo-prompt: #ffb000; --logo-line-1: #d9b066; --logo-line-2: #b37a00;
+  --status-running: #27702b; --status-running-soft: rgb(39 112 43 / 0.10);
+  --status-waiting: #09649a; --status-waiting-soft: rgb(9 100 154 / 0.10);
+  --status-stopped: #6b5e4e; --status-stopped-soft: rgb(107 94 78 / 0.10);
+  --status-error: #b8242b;   --status-error-soft: rgb(184 36 43 / 0.09);
+  --status-unreachable: #6544b8; --status-unreachable-soft: rgb(101 68 184 / 0.09);
+  --status-warn: #7a5d00;    --status-warn-soft: rgb(196 150 0 / 0.14);
+  --term-bg: #fbf9f5; --term-fg: #1d1812; --term-cursor: #b37a00; --term-cursor-accent: #fbf9f5;
+  --term-selection: rgb(255 176 0 / 0.30);
+  --term-black: #1d1812; --term-bright-black: #6b5e4e;
+  --term-red: #b8242b; --term-bright-red: #d1453f;
+  --term-green: #27702b; --term-bright-green: #3a8a3c;
+  --term-yellow: #8a5300; --term-bright-yellow: #a86a00;
+  --term-blue: #1f5fbf; --term-bright-blue: #3b78d4;
+  --term-magenta: #8a3fb8; --term-bright-magenta: #a35ad0;
+  --term-cyan: #09649a; --term-bright-cyan: #1a7fb8;
+  --term-white: #d6cdbf; --term-bright-white: #fbfaf7;
+  --glow-accent: none;
+  --shadow-float: 0 10px 28px rgb(60 45 25 / 0.18), 0 0 0 1px var(--border);
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; --blink: none; }
+}
+
+/* egzo hub · components v1 — plain CSS on top of tokens.css. One class per component, modifiers via data-attributes. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--text); }
+body {
+  margin: 0; font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading);
+  font-variant-ligatures: none; -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent-text); text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
+a:hover { text-decoration-color: currentColor; }
+code, kbd, pre { font-family: var(--font-mono); }
+code { color: var(--text); background: var(--surface-2); padding: 0 var(--space-1); border-radius: var(--radius-1); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-1); }
+.muted { color: var(--text-3); }
+.dim { color: var(--text-2); }
+.label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-3); font-weight: var(--weight-medium); }
+.h-page { font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-regular); letter-spacing: -0.01em; margin: 0; line-height: var(--leading-tight); text-wrap: balance; }
+.h-section { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-2); font-weight: var(--weight-bold); margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter; vertical-align: -3px; }
+.icon[data-size="sm"] { width: 14px; height: 14px; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: var(--space-2); height: var(--control-h); padding: 0 var(--space-3);
+  font: inherit; font-size: var(--text-sm); color: var(--text); background: var(--surface-1);
+  border: var(--border-w) solid var(--border-strong); border-radius: var(--radius-2); cursor: pointer; white-space: nowrap;
+  text-decoration: none; transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.btn:hover { background: var(--surface-2); border-color: var(--text-3); }
+.btn:active { background: var(--surface-3); }
+.btn[disabled], .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.btn[data-variant="primary"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: var(--weight-bold); }
+.btn[data-variant="primary"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+:root[data-theme="light"] .btn[data-variant="primary"] { border-color: #b37a00; }
+.btn[data-variant="danger"] { color: var(--status-error); border-color: color-mix(in srgb, var(--status-error) 55%, transparent); background: transparent; }
+.btn[data-variant="danger"]:hover { background: var(--status-error-soft); border-color: var(--status-error); }
+.btn[data-variant="danger-solid"] { background: var(--status-error); color: var(--text-invert); border-color: var(--status-error); font-weight: var(--weight-bold); }
+:root:not([data-theme="light"]) .btn[data-variant="danger-solid"] { color: #1a0505; }
+.btn[data-variant="quiet"] { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn[data-variant="quiet"]:hover { background: var(--surface-2); color: var(--text); }
+.btn[data-size="sm"] { height: var(--control-h-sm); padding: 0 var(--space-2); font-size: var(--text-xs); gap: var(--space-1); }
+.btn[data-size="lg"] { height: var(--control-h-lg); padding: 0 var(--space-4); font-size: var(--text-md); }
+.btn[data-icon-only] { width: var(--control-h); padding: 0; justify-content: center; }
+.btn[data-size="sm"][data-icon-only] { width: var(--control-h-sm); }
+.btn .kbd { margin-left: var(--space-1); }
+.btn-group { display: inline-flex; gap: var(--space-1); flex-wrap: wrap; }
+
+/* ── Keycaps ─────────────────────────────────────────────────────────── */
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 var(--space-1);
+  font-size: var(--text-2xs); line-height: 1; color: var(--text-2); background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: var(--radius-1);
+}
+[data-variant="primary"] .kbd { background: rgb(0 0 0 / .12); color: var(--on-accent); border-color: rgb(0 0 0 / .3); }
+
+/* ── Status pills: glyph + word, colour is redundant ─────────────────── */
+.pill {
+  --c: var(--status-stopped); --c-soft: var(--status-stopped-soft);
+  display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 var(--space-2) 0 6px;
+  font-size: var(--text-xs); color: var(--c); background: var(--c-soft); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+  border-radius: var(--radius-1); white-space: nowrap; line-height: 1;
+}
+.pill::before { content: "■"; font-size: 9px; width: 10px; text-align: center; }
+.pill[data-s="running"]  { --c: var(--status-running); --c-soft: var(--status-running-soft); }
+.pill[data-s="running"]::before { content: "●"; }
+.pill[data-s="working"]  { --c: var(--status-running); --c-soft: var(--status-running-soft); }
+.pill[data-s="working"]::before { content: "▶"; font-size: 8px; animation: pulse 1.4s var(--ease-out) infinite; }
+.pill[data-s="idle"]     { --c: var(--status-running); --c-soft: transparent; }
+.pill[data-s="idle"]::before { content: "○"; }
+.pill[data-s="done"]     { --c: var(--status-running); --c-soft: transparent; }
+.pill[data-s="done"]::before { content: "✓"; font-size: 11px; }
+.pill[data-s="waiting"]  { --c: var(--status-waiting); --c-soft: var(--status-waiting-soft); font-weight: var(--weight-bold); }
+.pill[data-s="waiting"]::before { content: "?"; font-size: 11px; font-weight: 800; }
+.pill[data-s="starting"] { --c: var(--accent-text); --c-soft: var(--accent-soft); }
+.pill[data-s="starting"]::before { content: "◐"; animation: spin 1s steps(4) infinite; }
+.pill[data-s="stopped"]::before { content: "■"; }
+.pill[data-s="error"]    { --c: var(--status-error); --c-soft: var(--status-error-soft); }
+.pill[data-s="error"]::before { content: "✕"; font-size: 10px; }
+.pill[data-s="unreachable"] { --c: var(--status-unreachable); --c-soft: var(--status-unreachable-soft); border-style: dashed; }
+.pill[data-s="unreachable"]::before { content: "⌁"; font-size: 12px; }
+.pill[data-s="warn"]     { --c: var(--status-warn); --c-soft: var(--status-warn-soft); }
+.pill[data-s="warn"]::before { content: "!"; font-weight: 800; font-size: 11px; }
+.pill[data-s="neutral"]  { --c: var(--text-2); --c-soft: var(--surface-2); }
+.pill[data-s="neutral"]::before { content: none; }
+.pill[data-s="neutral"] { padding-left: var(--space-2); }
+@keyframes pulse { 50% { opacity: .35; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Status dot alone (tabs, dense lists). Always paired with an accessible name. */
+.dot { --c: var(--status-stopped); width: 8px; height: 8px; border-radius: 1px; background: var(--c); flex: none; display: inline-block; }
+.dot[data-s="running"], .dot[data-s="working"], .dot[data-s="idle"] { --c: var(--status-running); }
+.dot[data-s="idle"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
+.dot[data-s="waiting"] { --c: var(--status-waiting); }
+.dot[data-s="error"] { --c: var(--status-error); }
+.dot[data-s="unreachable"] { --c: var(--status-unreachable); background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); border-radius: 50%; }
+.dot[data-s="starting"] { --c: var(--accent); animation: blink var(--blink); }
+.dot[data-s="working"] { animation: pulse 1.4s infinite; }
+
+/* ── Badges: neutral metadata ───────────────────────────────────────── */
+.badge { display: inline-flex; align-items: center; gap: var(--space-1); height: 18px; padding: 0 6px; font-size: var(--text-2xs);
+  color: var(--text-2); border: 1px solid var(--border); border-radius: var(--radius-1); white-space: nowrap; background: var(--surface-1); }
+.badge[data-tone="accent"] { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-soft); }
+
+/* Engine badge: a "socket" prefix and the engine name. Down engines get the unreachable treatment. */
+.engine {
+  display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 6px 0 4px; font-size: var(--text-2xs);
+  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-1); white-space: nowrap;
+}
+.engine::before { content: ""; width: 6px; height: 6px; background: var(--status-running); border-radius: 1px; }
+.engine[data-down] { color: var(--status-unreachable); border-style: dashed; border-color: var(--status-unreachable); background: var(--status-unreachable-soft); }
+.engine[data-down]::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--status-unreachable); border-radius: 50%; }
+
+/* ── Filter chips (engine filter) ───────────────────────────────────── */
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: var(--control-h-sm); padding: 0 var(--space-2); font: inherit; font-size: var(--text-xs);
+  color: var(--text-2); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-1); cursor: pointer; }
+.chip:hover { border-color: var(--border-strong); color: var(--text); }
+.chip[aria-pressed="true"] { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-soft); }
+.chip .count { color: var(--text-3); }
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--surface-1); }
+.table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.table th { text-align: left; font-weight: var(--weight-medium); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-label);
+  color: var(--text-3); padding: 0 var(--space-3); height: 28px; border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--surface-1); }
+.table td { padding: 0 var(--space-3); height: var(--row-h); border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+.table tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover td { background: var(--surface-2); }
+.table tbody tr[aria-selected="true"] td { background: var(--accent-soft); }
+.table tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.table tbody tr[data-dim] td { color: var(--text-3); }
+.table td.num, .table th.num { text-align: right; }
+.table td.actions { text-align: right; width: 1%; }
+.table .row-actions { display: inline-flex; gap: var(--space-1); justify-content: flex-end; }
+.table .wrap { white-space: normal; }
+.table .name { color: var(--text); font-weight: var(--weight-medium); text-decoration: none; }
+.table .name:hover { color: var(--accent-text); text-decoration: underline; }
+
+/* ── Page tabs ──────────────────────────────────────────────────────── */
+.tabs { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.tab { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 var(--space-3); font: inherit; font-size: var(--text-sm);
+  color: var(--text-2); background: none; border: 0; cursor: pointer; white-space: nowrap; text-decoration: none; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); }
+.tab[aria-selected="true"]::after { content: ""; position: absolute; left: var(--space-2); right: var(--space-2); bottom: -1px; height: 2px; background: var(--accent); box-shadow: var(--glow-accent); }
+.tab .count { font-size: var(--text-2xs); color: var(--text-3); }
+.tab .key { font-size: var(--text-2xs); color: var(--text-3); }
+
+/* ── Forms ──────────────────────────────────────────────────────────── */
+.field { display: grid; gap: var(--space-1); min-width: 0; }
+.field > label, .field > .label-text { font-size: var(--text-xs); color: var(--text-2); font-weight: var(--weight-medium); }
+.input, .select, .textarea {
+  width: 100%; height: var(--control-h); padding: 0 var(--space-2); font: inherit; font-size: var(--text-sm); color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-2);
+}
+.textarea { height: auto; min-height: 72px; padding: var(--space-2); resize: vertical; line-height: var(--leading-tight); }
+.input::placeholder, .textarea::placeholder { color: var(--text-3); }
+.input:hover, .select:hover, .textarea:hover { border-color: var(--text-3); }
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.input[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--status-error); }
+.help { font-size: var(--text-xs); color: var(--text-3); }
+.field-error { font-size: var(--text-xs); color: var(--status-error); display: flex; gap: var(--space-1); }
+.field-error::before { content: "✕"; }
+.secret { display: flex; align-items: center; gap: var(--space-2); }
+.secret .state { font-size: var(--text-xs); color: var(--text-3); white-space: nowrap; }
+.secret .state::before { content: "● "; color: var(--status-running); }
+fieldset.group { border: 1px solid var(--border); border-radius: var(--radius-2); padding: var(--space-3); margin: 0; display: grid; gap: var(--space-3); min-width: 0; }
+fieldset.group legend { padding: 0 var(--space-1); font-size: var(--text-xs); color: var(--text-2); }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-2); overflow: hidden; }
+.seg button { font: inherit; font-size: var(--text-xs); height: var(--control-h-sm); padding: 0 var(--space-3); background: transparent; color: var(--text-2); border: 0; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border-strong); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+
+/* ── Banners (inline errors, page-level notices) ───────────────────── */
+.banner { --c: var(--status-error); --c-soft: var(--status-error-soft);
+  display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); border-left: 3px solid var(--c); background: var(--c-soft); border-radius: var(--radius-2); font-size: var(--text-sm); }
+.banner .tag { color: var(--c); font-weight: var(--weight-bold); white-space: nowrap; }
+.banner { flex-wrap: wrap; }
+.banner .body { flex: 1 1 26ch; min-width: 0; }
+.banner[data-tone="unreachable"] { --c: var(--status-unreachable); --c-soft: var(--status-unreachable-soft); border-style: dashed; border-left-style: solid; }
+.banner[data-tone="warn"] { --c: var(--status-warn); --c-soft: var(--status-warn-soft); }
+.banner[data-tone="info"] { --c: var(--accent-text); --c-soft: var(--accent-soft); }
+
+/* ── Toasts (bottom-right, stack, 5s; errors stay until dismissed) ──── */
+.toasts { position: fixed; right: max(var(--space-4), env(safe-area-inset-right, 0px)); bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px)); display: grid; gap: var(--space-2); z-index: var(--z-toast); width: min(380px, calc(100vw - 32px)); }
+.toast { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-3); background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-3); box-shadow: var(--shadow-float); font-size: var(--text-sm); animation: toast-in var(--dur-base) var(--ease-out); }
+.toast .glyph { width: 14px; text-align: center; }
+.toast[data-tone="ok"] .glyph { color: var(--status-running); }
+.toast[data-tone="error"] { border-color: var(--status-error); }
+.toast[data-tone="error"] .glyph { color: var(--status-error); }
+.toast .body { flex: 1; min-width: 0; }
+@keyframes toast-in { from { transform: translateY(6px); opacity: 0; } }
+
+/* ── Dialogs ────────────────────────────────────────────────────────── */
+.scrim { position: fixed; inset: 0; background: var(--overlay); z-index: var(--z-dialog); display: grid; place-items: center; padding: var(--space-4); }
+.dialog { width: min(480px, 100%); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-3); box-shadow: var(--shadow-float); animation: dlg-in var(--dur-slow) var(--ease-out); }
+.dialog > header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+.dialog > header h2 { font-size: var(--text-md); margin: 0; font-weight: var(--weight-bold); flex: 1; }
+.dialog .content { padding: var(--space-4); display: grid; gap: var(--space-3); }
+.dialog > footer { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); background: var(--bg); border-radius: 0 0 var(--radius-3) var(--radius-3); flex-wrap: wrap; }
+.dialog[data-tone="danger"] > header { box-shadow: inset 0 2px 0 var(--status-error); }
+.dialog[data-tone="danger"] > header h2::before { content: "✕ "; color: var(--status-error); }
+.consequence { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-1); font-size: var(--text-sm); color: var(--text-2); }
+.consequence li::before { content: "– "; color: var(--text-3); }
+@keyframes dlg-in { from { transform: translateY(8px) scale(.985); opacity: 0; } }
+
+/* ── Menus (row overflow, user menu, palette) ──────────────────────── */
+.menu { min-width: 200px; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-2); box-shadow: var(--shadow-float); padding: var(--space-1); display: grid; }
+.menu-item { display: flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-2); border-radius: var(--radius-1); color: var(--text); font-size: var(--text-sm); cursor: pointer; }
+.menu-item[aria-selected="true"], .menu-item:hover { background: var(--accent-soft); color: var(--accent-text); }
+.menu-item .kbd { margin-left: auto; }
+.menu-sep { height: 1px; background: var(--border); margin: var(--space-1) 0; }
+
+/* ── Presence: who holds a terminal ─────────────────────────────────── */
+.presence { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-2); }
+.avatar { width: 18px; height: 18px; display: inline-grid; place-items: center; font-size: 9px; font-weight: var(--weight-bold); border-radius: var(--radius-1);
+  background: var(--surface-3); color: var(--text); border: 1px solid var(--border-strong); text-transform: uppercase; flex: none; }
+.avatar[data-me] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.presence[data-live] .avatar { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--status-running); }
+
+/* ── Timeline / logs ────────────────────────────────────────────────── */
+.timeline { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
+.timeline li { display: grid; grid-template-columns: 9ch 12ch 1fr; gap: var(--space-3); padding: 6px var(--space-3); border-bottom: 1px solid var(--border); align-items: baseline; }
+.timeline li:last-child { border-bottom: 0; }
+.timeline time { color: var(--text-3); }
+.timeline .type { font-size: var(--text-xs); }
+.timeline .type[data-t="ask"] { color: var(--status-waiting); }
+.timeline .type[data-t="error"] { color: var(--status-error); }
+.timeline .type[data-t="attach"], .timeline .type[data-t="takeover"] { color: var(--accent-text); }
+.timeline .type[data-t="status"], .timeline .type[data-t="spawn"], .timeline .type[data-t="start"], .timeline .type[data-t="stop"] { color: var(--text-2); }
+.timeline .text { min-width: 0; overflow-wrap: anywhere; }
+.log { margin: 0; padding: var(--space-3); background: var(--term-bg); color: var(--term-fg); font-size: 12px; line-height: 1.45; overflow: auto; border-radius: var(--radius-2); border: 1px solid var(--border); white-space: pre; }
+.log .ts { color: var(--term-bright-black); }
+.log .err { color: var(--term-red); }
+.log .ok { color: var(--term-green); }
+
+/* ── Empty states ───────────────────────────────────────────────────── */
+.empty { display: grid; gap: var(--space-3); justify-items: start; padding: var(--space-6) var(--space-5); border: 1px dashed var(--border-strong); border-radius: var(--radius-2); max-width: 64ch; }
+.empty .art { font-size: var(--text-xs); line-height: 1.1; color: var(--text-3); margin: 0; white-space: pre; }
+.empty h2 { font-family: var(--font-display); font-weight: var(--weight-regular); font-size: var(--text-lg); margin: 0; }
+.empty p { margin: 0; color: var(--text-2); max-width: 60ch; }
+
+
+/* ═══ App shell ═════════════════════════════════════════════════════════
+   Layout: a left sidebar (open terminals, then projects, then account) and a stage.
+   Pages scroll inside the stage; terminal views fill it and stay mounted when hidden.
+   ≤720px the sidebar becomes the full-screen nav and the stage gets a one-line bar. */
+html, body { height: 100%; }
+.app { height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); min-height: 420px; display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); min-width: 0; }
+.app[data-rail] { grid-template-columns: var(--nav-w-rail) minmax(0, 1fr); }
+.app[data-fullscreen] { grid-template-columns: 0 minmax(0, 1fr); }
+.app[data-fullscreen] .side { overflow: hidden; border: 0; }
+
+.side { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0; background: var(--surface-1);
+  border-right: 1px solid var(--border); padding-left: env(safe-area-inset-left, 0px); z-index: var(--z-tabbar); }
+.side-head { display: flex; align-items: center; gap: var(--space-2); height: var(--hud-h); padding: 0 var(--space-2) 0 var(--space-3); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: var(--space-2); color: var(--text); text-decoration: none; flex: 1; min-width: 0; }
+.brand svg { width: 20px; height: 20px; flex: none; }
+.brand b { font-family: var(--font-display); font-weight: 400; font-size: var(--text-sm); letter-spacing: -0.02em; }
+.brand b span { color: var(--text-3); }
+.goto { margin: var(--space-2); display: flex; align-items: center; gap: var(--space-2); height: var(--control-h); padding: 0 var(--space-2); font: inherit; font-size: var(--text-xs);
+  color: var(--text-3); background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-2); cursor: pointer; text-align: left; }
+.goto:hover { color: var(--text-2); border-color: var(--text-3); }
+.goto span.t { flex: 1; }
+.side-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: var(--space-3); scrollbar-width: thin; }
+.side-h { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-1); }
+.side-h .label { flex: 1; }
+.side-h .count { font-size: var(--text-2xs); color: var(--text-3); }
+.side-list { display: grid; gap: 1px; padding: 0 var(--space-2); }
+
+.nav-item { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 0 var(--space-2); align-items: center; min-height: 28px; padding: 3px var(--space-2);
+  color: var(--text-2); text-decoration: none; border-radius: var(--radius-1); cursor: pointer; font-size: var(--text-sm); }
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item[aria-current="page"], .nav-item[aria-current="true"] { background: var(--accent-soft); color: var(--text); }
+.nav-item[aria-current="page"]::before, .nav-item[aria-current="true"]::before { content: ""; position: absolute; left: -8px; top: 4px; bottom: 4px; width: 2px; background: var(--accent); box-shadow: var(--glow-accent); }
+.nav-item .ic { display: grid; place-items: center; color: var(--text-3); }
+.nav-item .ini { display: none; }
+.app[data-rail] .nav-item.proj .ic { display: none; }
+.app[data-rail] .nav-item.proj .ini { display: grid; place-items: center; width: 24px; height: 20px; font-size: var(--text-2xs); text-transform: uppercase; border: 1px solid var(--border-strong); border-radius: var(--radius-1); color: var(--text-2); }
+.nav-item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-item .end { display: flex; gap: var(--space-1); align-items: center; }
+.nav-item .end .engine { height: 16px; }
+.nav-item .n { font-size: var(--text-2xs); color: var(--text-3); }
+.nav-sub { display: grid; gap: 1px; padding-left: 24px; margin: 1px 0 var(--space-1); }
+.nav-sub .nav-item { grid-template-columns: minmax(0, 1fr) auto; min-height: 24px; font-size: var(--text-xs); padding: 2px var(--space-2); }
+.nav-sub .nav-item[aria-current="page"]::before { left: -8px; }
+.qcount { font-size: 10px; font-weight: 800; color: var(--bg); background: var(--status-waiting); height: 14px; min-width: 14px; padding: 0 3px; display: grid; place-items: center; border-radius: var(--radius-1); }
+
+/* Terminal entries: three lines, so the list says what each agent is doing without opening it. */
+.term-item { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 0 var(--space-2); padding: 5px var(--space-2) 6px;
+  border-radius: var(--radius-1); cursor: pointer; color: var(--text-2); }
+.term-item:hover { background: var(--surface-2); }
+.term-item[aria-selected="true"] { background: var(--accent-soft); color: var(--text); }
+.term-item[aria-selected="true"]::before { content: ""; position: absolute; left: -8px; top: 5px; bottom: 5px; width: 2px; background: var(--accent); box-shadow: var(--glow-accent); }
+.term-item[data-visible]:not([aria-selected="true"])::before { content: ""; position: absolute; left: -8px; top: 5px; bottom: 5px; width: 2px; background: var(--accent-line); }
+.term-item .glyph { grid-row: 1; display: grid; place-items: center; height: 18px; color: var(--text-3); }
+.term-item .glyph .icon { width: 12px; height: 12px; }
+.term-item .glyph[data-g="error"] { color: var(--status-error); font-size: 11px; }
+.term-item .nm { grid-column: 2; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 18px; }
+.term-item[data-unread] .nm { font-weight: var(--weight-bold); }
+.term-item .end { grid-column: 3; grid-row: 1; display: flex; gap: var(--space-1); align-items: center; height: 18px; }
+.term-item .n { font-size: var(--text-2xs); color: var(--text-3); }
+.term-item .where { grid-column: 2 / 4; font-size: var(--text-2xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-item .what { grid-column: 2 / 4; font-size: var(--text-xs); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-item .what[data-t="waiting"] { color: var(--status-waiting); }
+.term-item .what[data-t="error"] { color: var(--status-error); }
+.term-item .what[data-t="busy"] { color: var(--accent-text); }
+.term-item .unread { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: var(--glow-accent); }
+.term-item .x { width: 18px; height: 18px; display: grid; place-items: center; border-radius: var(--radius-1); color: var(--text-3); opacity: 0; }
+.term-item:hover .x, .term-item[aria-selected="true"] .x, .term-item:focus-visible .x, .term-item:focus-within .x { opacity: 1; }
+.term-item .x:hover { background: var(--surface-3); color: var(--text); }
+.term-item:focus-visible { outline-offset: -2px; }
+.side-empty { margin: 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px dashed var(--border-strong); border-radius: var(--radius-2); font-size: var(--text-xs); color: var(--text-3); }
+.side-add { margin: var(--space-1) var(--space-2) 0; }
+
+.side-foot { border-top: 1px solid var(--border); padding: var(--space-2); display: grid; gap: var(--space-1); }
+.side-foot .row { display: flex; align-items: center; gap: var(--space-1); }
+.side-foot .row .grow { flex: 1; }
+.health { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 26px; padding: 0 var(--space-2); font: inherit; font-size: var(--text-xs); color: var(--text-2);
+  border: 1px solid transparent; background: none; border-radius: var(--radius-1); cursor: pointer; text-align: left; }
+.health:hover { background: var(--surface-2); }
+.health .t { flex: 1; }
+.health[data-down] .warn { color: var(--status-unreachable); }
+.me { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-1); background: none; border: 0; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; height: 28px; border-radius: var(--radius-2); min-width: 0; }
+.me:hover { background: var(--surface-2); }
+
+/* Rail: 52px, glyphs and numbers only; names in tooltips. */
+.app[data-rail] .side .brand b, .app[data-rail] .side .goto .t, .app[data-rail] .side .goto .kbd, .app[data-rail] .side-h .label, .app[data-rail] .side-h .count,
+.app[data-rail] .term-item .nm, .app[data-rail] .term-item .where, .app[data-rail] .term-item .what, .app[data-rail] .term-item .x, .app[data-rail] .nav-item .nm, .app[data-rail] .nav-item .end,
+.app[data-rail] .nav-sub, .app[data-rail] .side-empty, .app[data-rail] .side-add .t, .app[data-rail] .health .t, .app[data-rail] .me .t, .app[data-rail] .side-foot .hide-rail { display: none; }
+.app[data-rail] .term-item, .app[data-rail] .nav-item { grid-template-columns: 1fr; justify-items: center; padding: 6px 0; }
+.app[data-rail] .term-item .end { grid-column: 1; grid-row: 2; }
+.app[data-rail] .side-head { padding: 0; justify-content: center; flex-direction: column; height: auto; padding-block: var(--space-2); gap: var(--space-2); }
+.app[data-rail] .brand { flex: none; }
+.app[data-rail] .goto { justify-content: center; padding: 0; }
+.app[data-rail] .side-h { justify-content: center; padding: var(--space-2) 0 var(--space-1); }
+.app[data-rail] .side-h::after { content: ""; width: 20px; height: 1px; background: var(--border); }
+.app[data-rail] .side-add { display: flex; justify-content: center; }
+.app[data-rail] .side-foot .row { flex-direction: column; }
+.app[data-rail] .health { justify-content: center; padding: 0; }
+
+.stage { position: relative; min-height: 0; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.mbar { display: none; grid-row: 1; }
+.viewport { position: relative; min-height: 0; grid-row: 2; }
+.hubview { position: absolute; inset: 0; overflow: auto; }
+.termview { position: absolute; inset: 0; display: grid; gap: 1px; background: var(--border); }
+.termview[data-layout="1"] { grid-template-columns: 1fr; }
+.termview[data-layout="2"] { grid-template-columns: 1fr 1fr; }
+.termview[data-layout="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+/* ═══ Hub pages ═══ */
+.page { max-width: var(--content-max); margin: 0 auto; padding-block: var(--space-5) var(--space-8);
+  padding-left: max(var(--space-5), env(safe-area-inset-left, 0px)); padding-right: max(var(--space-5), env(safe-area-inset-right, 0px)); display: grid; gap: var(--space-4); align-content: start; }
+.page[data-narrow] { max-width: 760px; }
+.crumbs { font-size: var(--text-xs); color: var(--text-3); display: flex; gap: var(--space-1); flex-wrap: wrap; align-items: center; }
+.crumbs a { color: var(--text-2); text-decoration: none; }
+.crumbs a:hover { color: var(--accent-text); text-decoration: underline; }
+.phead { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.phead .grow { flex: 1; }
+.phead .h-page .sep { color: var(--text-3); }
+.metaline { display: flex; gap: var(--space-4); flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-2); align-items: center; }
+.metaline .k { color: var(--text-3); }
+.toolbar { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+.toolbar .grow { flex: 1; }
+.search { position: relative; width: min(260px, 100%); }
+.search .icon { position: absolute; left: 8px; top: 6px; color: var(--text-3); }
+.search .input { padding-left: 28px; padding-right: 28px; }
+.search .kbd { position: absolute; right: 6px; top: 5px; }
+.agentsbar { display: inline-flex; gap: 1px; height: 6px; width: 64px; vertical-align: middle; margin-right: var(--space-2); background: var(--surface-3); }
+.agentsbar i { display: block; height: 100%; }
+.agentsbar .r { background: var(--status-running); } .agentsbar .w { background: var(--status-waiting); } .agentsbar .s { background: var(--border-strong); }
+.twocol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); }
+.panel { border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--surface-1); min-width: 0; }
+.panel > header { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: 32px; border-bottom: 1px solid var(--border); }
+.panel > header .grow { flex: 1; }
+.panel > .pad { padding: var(--space-3); display: grid; gap: var(--space-3); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-4); margin: 0; font-size: var(--text-sm); }
+.kv dt { color: var(--text-3); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.statusline { font-size: var(--text-md); color: var(--text); padding: var(--space-3); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-2); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+.statusline .q { color: var(--status-waiting); }
+.termcard { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; padding: var(--space-3); border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-2); }
+.termcard .grow { flex: 1; min-width: 200px; }
+.spec { margin: 0; font-size: 12px; line-height: 1.55; background: var(--term-bg); color: var(--term-fg); border: 1px solid var(--border); border-radius: var(--radius-2); overflow: auto; counter-reset: ln; padding: var(--space-3) 0; }
+.spec span.l { display: block; padding-right: var(--space-4); white-space: pre; }
+.spec span.l::before { counter-increment: ln; content: counter(ln); display: inline-block; width: 4ch; margin-right: 2ch; text-align: right; color: var(--term-bright-black); }
+.spec .k { color: var(--term-yellow); } .spec .c { color: var(--term-bright-black); } .spec .s { color: var(--term-green); } .spec .v { color: var(--term-cyan); }
+.roles { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-4); font-size: var(--text-xs); color: var(--text-2); margin: 0; }
+.roles dt { color: var(--text); }
+.roles dd { margin: 0; }
+.drawer { border: 1px solid var(--border-strong); border-radius: var(--radius-2); background: var(--surface-1); display: grid; }
+.drawer > header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+.drawer > header h2 { margin: 0; font-size: var(--text-md); flex: 1; }
+.drawer .content { padding: var(--space-4); display: grid; gap: var(--space-4); }
+.drawer footer { display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); justify-content: flex-end; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.fp { font-size: var(--text-md); letter-spacing: .02em; padding: var(--space-3); background: var(--term-bg); color: var(--term-fg); border: 1px solid var(--border-strong); border-radius: var(--radius-2); overflow-wrap: anywhere; line-height: 1.6; }
+.fp .h { color: var(--accent-text); }
+
+/* Sign-in */
+.signin { min-height: 100%; display: grid; place-items: center; padding: var(--space-6) max(16px, env(safe-area-inset-left, 0px)); }
+.signin .box { width: min(440px, 100%); display: grid; gap: var(--space-5); }
+.signin .mark { display: flex; align-items: center; gap: var(--space-3); }
+.signin .mark svg { width: 44px; height: 44px; }
+.signin .mark b { font-family: var(--font-display); font-weight: 300; font-size: var(--text-2xl); letter-spacing: -0.03em; }
+.boot { margin: 0; font-size: var(--text-xs); color: var(--text-3); line-height: 1.7; white-space: pre-wrap; }
+.boot .ok { color: var(--status-running); }
+.boot .cur { display: inline-block; width: .6em; height: 1.1em; background: var(--accent); vertical-align: -2px; animation: blink var(--blink); box-shadow: var(--glow-accent); }
+
+/* ═══ Terminal panes ═══ */
+.tpane { display: grid; grid-template-rows: 30px minmax(0, 1fr) 22px; background: var(--term-bg); min-width: 0; min-height: 0; position: relative; outline: none; }
+.tpane::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px transparent; }
+.termview:not([data-layout="1"]) .tpane[data-focus]::after { box-shadow: inset 0 0 0 1px var(--accent); }
+.tpane:focus-visible::after { box-shadow: inset 0 0 0 2px var(--focus); }
+.thead { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-1) 0 var(--space-3); background: var(--surface-1); border-bottom: 1px solid var(--border); min-width: 0; font-size: var(--text-xs); }
+.thead .id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text-3); }
+.thead .id b { color: var(--text); font-weight: var(--weight-bold); }
+.thead .grow { flex: 1; }
+.thead .tools { display: flex; gap: 2px; flex: none; }
+.tbody { position: relative; overflow: hidden; min-height: 0; }
+.screen { margin: 0; padding: 6px 10px; font-family: var(--font-term); font-size: var(--term-font-size); line-height: var(--term-line-height); color: var(--term-fg); white-space: pre; height: 100%; overflow: hidden; }
+.tpane[data-state]:not([data-state="connected"]) .screen { opacity: .28; filter: saturate(.4); }
+.tpane[data-state="connecting"] .screen { opacity: 0; }
+.tfoot { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-3); font-size: var(--text-2xs); color: var(--text-3); background: var(--surface-1); border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+.tfoot .grow { flex: 1; }
+.tfoot .st { display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); }
+.cur { display: inline-block; width: .6em; background: var(--term-cursor); color: var(--term-cursor-accent); animation: blink var(--blink); }
+/* ANSI */
+.fg-r { color: var(--term-red); } .fg-g { color: var(--term-green); } .fg-y { color: var(--term-yellow); } .fg-b { color: var(--term-blue); }
+.fg-m { color: var(--term-magenta); } .fg-c { color: var(--term-cyan); } .fg-w { color: var(--term-white); } .fg-k { color: var(--term-bright-black); }
+.fg-R { color: var(--term-bright-red); } .fg-G { color: var(--term-bright-green); } .fg-W { color: var(--term-bright-white); } .fg-M { color: var(--term-bright-magenta); }
+.bg-g { background: color-mix(in srgb, var(--term-green) 18%, transparent); } .bg-r { background: color-mix(in srgb, var(--term-red) 18%, transparent); }
+.b { font-weight: 700; }
+.cell { display: inline-block; width: 1ch; text-align: center; overflow: visible; } .inv { background: var(--term-fg); color: var(--term-bg); }
+
+/* Terminal state overlay */
+.tstate { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-4); z-index: 2; }
+.tcard { width: min(520px, 100%); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-3); box-shadow: var(--shadow-float); display: grid; gap: var(--space-3); padding: var(--space-4); }
+.tcard h3 { margin: 0; font-size: var(--text-md); display: flex; gap: var(--space-2); align-items: center; }
+.tcard p { margin: 0; color: var(--text-2); font-size: var(--text-sm); }
+.tcard .acts { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.tcard[data-tone="error"] { border-color: var(--status-error); }
+.tcard[data-tone="error"] h3 { color: var(--status-error); }
+.tcard[data-tone="taken"] h3, .tcard[data-tone="busy"] h3 { color: var(--accent-text); }
+.connecting { font-size: var(--text-sm); color: var(--text-2); display: grid; gap: 4px; }
+.connecting .ok { color: var(--status-running); }
+.connecting .now { color: var(--accent-text); }
+.compact .tcard { padding: var(--space-3); gap: var(--space-2); }
+.compact .tcard p.more { display: none; }
+
+/* Leader HUD */
+.leader { position: fixed; left: 50%; bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: var(--z-hud);
+  width: min(640px, calc(100vw - 32px)); background: var(--surface-3); border: 1px solid var(--accent); border-radius: var(--radius-3); box-shadow: var(--shadow-float), var(--glow-accent); padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-3); }
+.leader header { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--accent-text); }
+.leader header .grow { flex: 1; }
+.leader .keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1) var(--space-4); font-size: var(--text-xs); }
+.leader .keys div { display: flex; gap: var(--space-2); align-items: center; color: var(--text-2); }
+.leader .keys .kbd { color: var(--text); }
+
+/* Command menu */
+.palette { position: fixed; left: 50%; top: 12vh; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); z-index: var(--z-dialog); background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-3); box-shadow: var(--shadow-float); overflow: hidden; }
+.palette .q { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: 40px; border-bottom: 1px solid var(--border); }
+.palette .q span { color: var(--accent-text); font-weight: 800; }
+.palette input { flex: 1; background: none; border: 0; color: var(--text); font: inherit; font-size: var(--text-md); outline: none; }
+.palette .list { max-height: 50vh; overflow: auto; padding: var(--space-1); display: grid; }
+.palette .grp { padding: var(--space-2) var(--space-2) 2px; }
+.palette .menu-item small { color: var(--text-3); }
+
+/* ═══ Prototype index (not part of the product) ═══ */
+.proto-btn { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(30px + env(safe-area-inset-bottom, 0px)); z-index: 90; display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 30px; padding: 0 var(--space-3); font: inherit; font-size: var(--text-xs); color: var(--text); background: var(--surface-3); border: 1px dashed var(--accent); border-radius: var(--radius-2); cursor: pointer; box-shadow: var(--shadow-float); }
+.proto { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(68px + env(safe-area-inset-bottom, 0px)); top: 12px; z-index: 90; width: min(300px, calc(100vw - 24px)); overflow: auto;
+  background: var(--surface-1); border: 1px dashed var(--accent); border-radius: var(--radius-3); box-shadow: var(--shadow-float); padding: var(--space-3); display: grid; gap: var(--space-3); align-content: start; }
+.proto h4 { margin: 0; }
+.proto .items { display: grid; gap: 2px; }
+.proto button.it { text-align: left; font: inherit; font-size: var(--text-xs); color: var(--text-2); background: none; border: 0; padding: 4px var(--space-2); border-radius: var(--radius-1); cursor: pointer; }
+.proto button.it:hover { background: var(--surface-2); color: var(--text); }
+.proto button.it[aria-current="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.toasts { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+.proto .note { font-size: var(--text-2xs); color: var(--text-3); margin: 0; }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 1024px) {
+  .app { grid-template-columns: var(--nav-w-md) minmax(0, 1fr); }
+  .termview[data-layout="4"] { grid-template-columns: 1fr 1fr; }
+  .hide-md { display: none; }
+  .twocol { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .app, .app[data-rail] { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+  .app[data-nav-open] .side { display: grid; position: fixed; inset: 0; z-index: var(--z-dialog); padding-right: env(safe-area-inset-right, 0px); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .app[data-nav-open] .side-head .close-nav { display: inline-flex; }
+  .app[data-nav-open] .side .collapse { display: none; }
+  .nav-item, .term-item { min-height: 40px; }
+  .mbar { display: flex; align-items: center; gap: var(--space-2); height: 44px; padding: 0 var(--space-2); background: var(--surface-1); border-bottom: 1px solid var(--border);
+    padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+  .mbar .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
+  .termview[data-layout="2"], .termview[data-layout="4"] { grid-template-columns: 1fr; grid-template-rows: none; }
+  .hide-sm { display: none; }
+  .grid2 { grid-template-columns: 1fr; }
+  .leader .keys { grid-template-columns: 1fr 1fr; }
+}
+.side-head .close-nav { display: none; }
+</style>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTpmMDEwNjM1YS00MmIzLTRjOGYtYmU2ZC1mMzMzZDg2MTc5NTkAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaK8U74iRD8KkM/9NfHrBarMAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDo3OWIxNjM5Yi0xZWE5LTQ3MzItOGMyOC05YjAzMzJhZTUxNjhscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNoR4cqONkUB8mIKmHEsCGLvgAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggSVvqVfSizIHST7MUkzIjGpQb2d++HBXwr3VrkZ4i5yikZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaIH9XI1GNt36rDI/jEr6KFQAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRNAAAAAAAAAAAAAAAAAGRoYXNoWCD1ju+ABmqU/UqB6vnCBuHarKIHOZBfCnSr+sZr6XYBCmRuYW1lbmp1bWJmIG1hbmlmZXN0amV4Y2x1c2lvbnOBomVzdGFydBh8Zmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOmYwMTA2MzVhLTQyYjMtNGM4Zi1iZTZkLWYzMzNkODYxNzk1OS9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjJkOTI1MjVhLWQ5YWUtNDVhOS1iMTBkLTc5NTRjMzYxZjNmYXJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCBJW+pV9KLMgdJPsxSTMiMalBvZ374cFfCvdWuRniLnKKJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFgg18sRdgfLW5xwBLJkIU7fH646tI5iTwbxV8//SMeL6siiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggAhC5umKSqbbl/UJ+LSnoCCBWlTaQ/4OK6zPdoHTfwmx0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQDMYr2qClG0CspcDmQvKt9RrZXJrn4eq1Z8S2DgWmimmM0VwVU6tgaOe9tjFABLPtAcnMrH/dMVCzG+ZXwtOotc=</c2pa:manifest></metadata>
+<!-- egzo hub icons: 16×16 grid, 1.5px stroke, square caps, mitred joins, no fills. Use: <svg class="icon"><use href="#i-term"/></svg> -->
+<symbol id="i-term" viewBox="0 0 16 16"><path d="M1.75 2.75h12.5v10.5H1.75z M4.5 6l2 2-2 2 M8.5 10.25h3"/></symbol>
+<symbol id="i-attach" viewBox="0 0 16 16"><path d="M1.75 8h7.5 M6.75 5l3 3-3 3 M10.75 2.75h3.5v10.5h-3.5"/></symbol>
+<symbol id="i-play" viewBox="0 0 16 16"><path d="M4.75 3v10l7.5-5z"/></symbol>
+<symbol id="i-stop" viewBox="0 0 16 16"><path d="M3.75 3.75h8.5v8.5h-8.5z"/></symbol>
+<symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.5 4.25h11 M6 4.25v-2h4v2 M3.75 4.25l.75 9.5h7l.75-9.5 M6.75 7v4 M9.25 7v4"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 2.75v10.5 M2.75 8h10.5"/></symbol>
+<symbol id="i-engine" viewBox="0 0 16 16"><path d="M1.75 2.25h12.5v4.5H1.75z M1.75 9.25h12.5v4.5H1.75z M4.25 4.5h1 M4.25 11.5h1 M8 4.5h3.75 M8 11.5h3.75"/></symbol>
+<symbol id="i-key" viewBox="0 0 16 16"><path d="M7.5 10.5a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0z M6.75 8.5l6.5-6.5 M10.5 4.75l1.75 1.75"/></symbol>
+<symbol id="i-users" viewBox="0 0 16 16"><path d="M8.5 5.25a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z M1.5 13.75c0-2.5 2-4.25 4.5-4.25s4.5 1.75 4.5 4.25 M10.75 3a2.25 2.25 0 0 1 0 4.5 M12.25 9.75c1.4.6 2.25 2 2.25 4"/></symbol>
+<symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.5l5.5 2v4.25c0 3.25-2.25 5.5-5.5 6.75-3.25-1.25-5.5-3.5-5.5-6.75V3.5z"/></symbol>
+<symbol id="i-list" viewBox="0 0 16 16"><path d="M2.25 4h1.5 M6 4h7.75 M2.25 8h1.5 M6 8h7.75 M2.25 12h1.5 M6 12h7.75"/></symbol>
+<symbol id="i-pulse" viewBox="0 0 16 16"><path d="M1.25 8.5h3l2-5 3 9 2-4h3.5"/></symbol>
+<symbol id="i-file" viewBox="0 0 16 16"><path d="M3.25 1.75h6l3.5 3.5v9h-9.5z M9.25 1.75v3.5h3.5 M5.5 8.5h5 M5.5 11h5"/></symbol>
+<symbol id="i-logs" viewBox="0 0 16 16"><path d="M2.25 3.25h11.5 M2.25 6.25h8 M2.25 9.25h11.5 M2.25 12.25h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 16 16"><path d="M11.25 6.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0z M10 10l4 4"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M3.75 3.75l8.5 8.5 M12.25 3.75l-8.5 8.5"/></symbol>
+<symbol id="i-split" viewBox="0 0 16 16"><path d="M1.75 2.75h12.5v10.5H1.75z M8 2.75v10.5"/></symbol>
+<symbol id="i-grid" viewBox="0 0 16 16"><path d="M1.75 2.75h12.5v10.5H1.75z M8 2.75v10.5 M1.75 8h12.5"/></symbol>
+<symbol id="i-single" viewBox="0 0 16 16"><path d="M1.75 2.75h12.5v10.5H1.75z"/></symbol>
+<symbol id="i-max" viewBox="0 0 16 16"><path d="M2.25 6V2.25H6 M10 2.25h3.75V6 M13.75 10v3.75H10 M6 13.75H2.25V10"/></symbol>
+<symbol id="i-popout" viewBox="0 0 16 16"><path d="M9.25 2.25h4.5v4.5 M13.75 2.25L8 8 M11.25 9.75v4H2.25v-9h4"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.25 2.75v3.75H9.5 M13 6.25A5.5 5.5 0 1 0 13.5 9.5"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path d="M2.75 8.5l3.25 3.25 7.25-7.5"/></symbol>
+<symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 1.75l6.5 12H1.5z M8 6.25v3.5 M8 11.5v1"/></symbol>
+<symbol id="i-lock" viewBox="0 0 16 16"><path d="M2.75 7.25h10.5v7H2.75z M5 7.25V5a3 3 0 0 1 6 0v2.25"/></symbol>
+<symbol id="i-ask" viewBox="0 0 16 16"><path d="M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0z M6.25 6.25a1.75 1.75 0 1 1 2.6 1.5c-.6.35-.85.7-.85 1.5 M8 11v1"/></symbol>
+<symbol id="i-more" viewBox="0 0 16 16"><path d="M3 8h1.5 M7.25 8h1.5 M11.5 8H13"/></symbol>
+<symbol id="i-signout" viewBox="0 0 16 16"><path d="M6.25 2.25h-4v11.5h4 M10 5l3 3-3 3 M13 8H5.75"/></symbol>
+<symbol id="i-moon" viewBox="0 0 16 16"><path d="M13.25 9.5A5.75 5.75 0 1 1 6.5 2.75a4.75 4.75 0 0 0 6.75 6.75z"/></symbol>
+<symbol id="i-sun" viewBox="0 0 16 16"><path d="M10.75 8a2.75 2.75 0 1 1-5.5 0 2.75 2.75 0 0 1 5.5 0z M8 1v1.75 M8 13.25V15 M1 8h1.75 M13.25 8H15 M3 3l1.25 1.25 M11.75 11.75L13 13 M3 13l1.25-1.25 M11.75 4.25L13 3"/></symbol>
+<symbol id="i-cmd" viewBox="0 0 16 16"><path d="M1.75 3.75h12.5v8.5H1.75z M4 6.5h1 M7.5 6.5h1 M11 6.5h1 M5 9.5h6"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><path d="M5.25 5.25h8.5v8.5h-8.5z M10.75 5.25v-3h-8.5v8.5h3"/></symbol>
+<symbol id="i-home" viewBox="0 0 16 16"><path d="M1.75 7.5L8 2l6.25 5.5 M3.5 6.25v7.5h9v-7.5"/></symbol>
+<symbol id="i-swap" viewBox="0 0 16 16"><path d="M2 5h11 M10 2l3 3-3 3 M14 11H3 M6 8l-3 3 3 3"/></symbol>
+<symbol id="i-plug-off" viewBox="0 0 16 16"><path d="M2 14l3-3 M5.5 6.5l4 4 M4.5 7.5l-.75.75a2.5 2.5 0 0 0 3.5 3.5l.75-.75 M10 2l-2 2 M14 6l-2 2 M7 5l1-1 3.5 3.5-1 1z M2 2l12 12"/></symbol>
+
+</svg>
+
+<div id="root"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+/* ---------- data (example content) ---------- */
+const P = {
+  cv: { name: 'Cedric Veilleux', i: 'CV', me: true, email: 'cedric@example.dev' },
+  mc: { name: 'Maria Chen', i: 'MC', email: 'maria@example.dev' },
+  so: { name: 'Sam Okafor', i: 'SO', email: 'sam@example.dev' },
+  pr: { name: 'Priya Raman', i: 'PR', email: 'priya@example.dev' },
+  jl: { name: 'Jonas Lind', i: 'JL', email: 'jonas@example.dev' },
+};
+const ENGINES = [
+  { name: 'lab', host: 'unix:///var/run/docker.sock', kind: 'local socket', up: true, projects: 3 },
+  { name: 'ci', host: 'tcp://ci.internal:2376', kind: 'tcp + TLS', up: true, projects: 2, tls: true },
+  { name: 'gpu-box', host: 'ssh://ops@gpu-box.lan', kind: 'ssh', up: false, ssh: true, err: 'ssh: connect to host gpu-box.lan port 22: connection refused', since: '14:02' },
+];
+const PROJECTS = [
+  { name: 'payments', engine: 'lab', role: 'administrator', r: 3, w: 1, t: 5, up: true },
+  { name: 'docs-site', engine: 'lab', role: 'user', r: 1, w: 0, t: 2, up: true },
+  { name: 'egzo', engine: 'lab', role: 'owner', r: 2, w: 0, t: 4, up: true },
+  { name: 'eval-harness', engine: 'ci', role: 'administrator', r: 3, w: 0, t: 3, up: true },
+  { name: 'infra-tf', engine: 'ci', role: 'user', r: 0, w: 0, t: 1, up: false },
+];
+const AGENTS = [
+  { name: 'fix-auth', tpl: 'claude', act: 'working', status: 'Running the auth test suite', holder: 'cv', by: 'cv', age: '42m', running: true },
+  { name: 'refund-api', tpl: 'claude', act: 'waiting', status: 'Keep POST /v1/refunds as a wrapper around v2?', holder: 'cv', by: 'mc', age: '1h 10m', running: true },
+  { name: 'flaky-tests', tpl: 'opencode', act: 'idle', status: 'Done: 3 of 3 suites pass', holder: 'mc', by: 'mc', age: '2h 05m', running: true },
+  { name: 'lint-sweep', tpl: 'claude', act: 'starting', status: '', holder: null, by: 'so', age: '12s', running: true },
+  { name: 'migrate-db', tpl: 'claude', act: 'stopped', status: 'Exited (0)', holder: null, by: 'so', age: '1d 3h', running: false, stale: true },
+];
+const SERVICES = [
+  { name: 'control', s: 'running', d: 'healthy · holds agent status and questions' },
+  { name: 'proxy', s: 'running', d: 'healthy · injects credentials, enforces egress' },
+  { name: 'browser', s: 'stopped', d: 'exited (0) · starts when an agent asks for it' },
+];
+const EVENTS = [
+  ['14:38:12', 'ask', 'refund-api', 'mc', 'Asked: keep POST /v1/refunds as a wrapper around v2?'],
+  ['14:36:50', 'attach', 'refund-api', 'cv', 'Attached to the terminal'],
+  ['14:31:07', 'status', 'fix-auth', null, 'Running the auth test suite'],
+  ['14:30:44', 'spawn', 'lint-sweep', 'so', 'Spawned from template claude'],
+  ['14:22:19', 'takeover', 'flaky-tests', 'mc', 'Took over the terminal from Sam Okafor'],
+  ['14:02:03', 'error', null, null, 'Engine gpu-box became unreachable'],
+  ['13:55:41', 'status', 'flaky-tests', null, 'Done: 3 of 3 suites pass'],
+  ['11:40:00', 'stop', 'migrate-db', 'so', 'Stopped (exit 0)'],
+];
+const AUDIT = [
+  ['2026-10-14 14:36:50', 'cv', 'attach', 'refund-api', '', true],
+  ['2026-10-14 14:30:44', 'so', 'spawn', 'lint-sweep', 'template claude', true],
+  ['2026-10-14 14:22:19', 'mc', 'takeover', 'flaky-tests', 'from Sam Okafor', true],
+  ['2026-10-14 14:20:02', 'jl', 'remove', 'flaky-tests', 'role user, not the creator', false],
+  ['2026-10-14 11:40:00', 'so', 'stop', 'migrate-db', '', true],
+  ['2026-10-13 17:12:45', 'cv', 'role', '', 'Priya Raman: user → administrator', true],
+];
+const MEMBERS = [['cv', 'owner'], ['mc', 'administrator'], ['pr', 'administrator'], ['so', 'user'], ['jl', 'user']];
+
+/* ---------- terminal screens (example output) ---------- */
+const box = (w, lines, cls = 'fg-k') => {
+  const top = `<span class="${cls}">╭${'─'.repeat(w)}╮</span>`, bot = `<span class="${cls}">╰${'─'.repeat(w)}╯</span>`;
+  const vis = (h) => [...h.replace(/<[^>]*>/g, '').replace(/&[a-z]+;/g, '_')].length;
+  return [top, ...lines.map(([html]) => `<span class="${cls}">│</span> ${html}${' '.repeat(Math.max(0, w - 1 - vis(html)))}<span class="${cls}">│</span>`), bot].join('\n');
+};
+// Non-ASCII glyphs get a fixed 1ch cell so fallback fonts can't break the grid (xterm does this natively).
+const cells = (h) => ('<span>' + h + '</span>').replace(/>([^<]*)</g, (m, t) => '>' + t.replace(/[^\x00-\x7F─│╭╮╰╯┃┗━]/g, (c) => `<span class="cell">${c}</span>`) + '<');
+const SCREENS = {
+  claude: () => `${box(58, [[`<span class="fg-y">✻</span> <span class="b">Welcome to Claude Code</span>`, 24], ['', 0], [`<span class="fg-k">cwd: /workspace/payments</span>`, 24]], 'fg-y')}
+
+<span class="fg-k">&gt;</span> <span>The session cookie isn't refreshed after the token rotates.</span>
+  <span>Fix it and add a regression test.</span>
+
+<span>⏺</span> I'll look at how sessions are refreshed first.
+
+<span class="fg-g">⏺</span> <span class="b">Read</span>(src/auth/session.ts)
+  <span class="fg-k">⎿  Read 142 lines</span>
+
+<span class="fg-g">⏺</span> <span class="b">Update</span>(src/auth/session.ts)
+  <span class="fg-k">⎿  Updated src/auth/session.ts with 6 additions and 1 removal</span>
+     <span class="fg-k">86</span>     const token = await store.get(id);
+     <span class="fg-k">87</span> <span class="bg-r"><span class="fg-r">-</span>   if (token.expiresAt &lt; now) return null;              </span>
+     <span class="fg-k">87</span> <span class="bg-g"><span class="fg-g">+</span>   if (token.expiresAt &lt; now) {                        </span>
+     <span class="fg-k">88</span> <span class="bg-g"><span class="fg-g">+</span>     const next = await rotate(token);                  </span>
+     <span class="fg-k">89</span> <span class="bg-g"><span class="fg-g">+</span>     res.cookie(SESSION, next.id, cookieOpts(next));   </span>
+     <span class="fg-k">90</span> <span class="bg-g"><span class="fg-g">+</span>     return next;                                       </span>
+     <span class="fg-k">91</span> <span class="bg-g"><span class="fg-g">+</span>   }                                                    </span>
+
+<span class="fg-g">⏺</span> <span class="b">Bash</span>(npm test -- auth)
+  <span class="fg-k">⎿  PASS  test/auth/session.test.ts (14 tests)</span>
+     <span class="fg-k">PASS  test/auth/rotate.test.ts (6 tests)</span>
+     <span class="fg-k">… running test/auth/cookie.test.ts</span>
+
+<span class="fg-y">✶</span> <span class="fg-y">Running tests…</span> <span class="fg-k">(31s · ↓ 1.4k tokens · esc to interrupt)</span>
+
+${box(58, [[`<span class="fg-k">&gt;</span> <span class="cur"> </span>`, 3]])}
+  <span class="fg-m">⏵⏵ bypass permissions on</span> <span class="fg-k">(shift+tab to cycle)</span>`,
+
+  ask: () => `<span>⏺</span> The v1 refund endpoint still gets traffic from the mobile app
+  (2.1k calls in the last 24h, from <span class="fg-c">payments-proxy</span> logs).
+
+<span class="fg-g">⏺</span> <span class="b">Read</span>(src/routes/refunds.v1.ts)
+  <span class="fg-k">⎿  Read 64 lines</span>
+
+${box(62, [[`<span class="fg-c b">☐ Keep v1 endpoint?</span>`, 20], ['', 0],
+  [`Should I keep POST /v1/refunds as a thin wrapper around v2?`, 59], ['', 0],
+  [`<span class="fg-c">❯ 1. Keep it as a wrapper</span>`, 25], [`  <span class="fg-k">  Mobile clients keep working; mark it deprecated.</span>`, 51],
+  [`  2. Remove it now`, 17], [`  <span class="fg-k">  Mobile app 4.12 and older will get 404s.</span>`, 43],
+  [`  3. Type something.`, 19]], 'fg-c')}
+  <span class="fg-k">Enter to select · ↑/↓ to navigate · Esc to cancel</span>`,
+
+  shell: () => `<span class="fg-g">agent@bench-runner</span>:<span class="fg-b">/workspace</span>$ make bench
+go test -run='^$' -bench=. -benchmem ./eval/...
+goos: linux
+goarch: amd64
+pkg: egzo.dev/eval/score
+cpu: AMD EPYC 7763 64-Core Processor
+BenchmarkParseTranscript-8      <span>  41209</span>    <span class="fg-y">28741 ns/op</span>    9216 B/op   112 allocs/op
+BenchmarkScoreRubric-8          <span> 189344</span>     <span class="fg-y">6302 ns/op</span>    1024 B/op    14 allocs/op
+BenchmarkDiffWorkspaces-8       <span>   3120</span>   <span class="fg-y">381900 ns/op</span>  210944 B/op  2048 allocs/op
+<span class="fg-g">PASS</span>
+ok      egzo.dev/eval/score     <span class="fg-k">14.212s</span>
+pkg: egzo.dev/eval/runner
+BenchmarkSpawnLoop-8            <span>    204</span>  <span class="fg-y">5873311 ns/op</span>   88412 B/op   903 allocs/op
+<span class="fg-g">PASS</span>
+ok      egzo.dev/eval/runner    <span class="fg-k">9.876s</span>
+<span class="fg-g">agent@bench-runner</span>:<span class="fg-b">/workspace</span>$ benchstat old.txt new.txt
+name               old time/op    new time/op    delta
+ParseTranscript-8    31.2µs ± 2%    28.7µs ± 1%   <span class="fg-g">-7.94%</span>  (p=0.000 n=10+10)
+ScoreRubric-8        6.29µs ± 1%    6.30µs ± 1%     ~     (p=0.684 n=10+10)
+DiffWorkspaces-8      402µs ± 3%     382µs ± 2%   <span class="fg-g">-4.99%</span>  (p=0.000 n=10+10)
+<span class="fg-g">agent@bench-runner</span>:<span class="fg-b">/workspace</span>$ <span class="cur"> </span>`,
+
+  opencode: () => `<span class="fg-k">┃</span> <span class="b">opencode</span> <span class="fg-k">v0.14 · anthropic/claude · flaky-tests</span>
+<span class="fg-k">┃</span>
+<span class="fg-k">┃</span> <span class="fg-c">user</span>   Find why test/ledger.spec.ts fails about 1 run in 20.
+<span class="fg-k">┃</span>
+<span class="fg-k">┃</span> <span class="fg-m">agent</span>  The ledger test shares a clock with the retry helper.
+<span class="fg-k">┃</span>        I froze time per test and re-ran each suite 50 times.
+<span class="fg-k">┃</span>        <span class="fg-g">✓</span> ledger.spec.ts   50/50
+<span class="fg-k">┃</span>        <span class="fg-g">✓</span> retry.spec.ts    50/50
+<span class="fg-k">┃</span>        <span class="fg-g">✓</span> webhook.spec.ts  50/50
+<span class="fg-k">┃</span>
+<span class="fg-k">┗━━</span> <span class="fg-k">&gt;</span> <span class="cur"> </span>`,
+
+  gpu: () => `<span class="fg-g">agent@finetune-7b</span>:<span class="fg-b">/workspace</span>$ python train.py --config lora.yaml
+step 1800/6000  loss 1.284  lr 1.8e-4  <span class="fg-k">42.1 it/s</span>
+step 1900/6000  loss 1.271  lr 1.8e-4  <span class="fg-k">42.0 it/s</span>
+step 2000/6000  loss 1.266  lr 1.7e-4  <span class="fg-k">41.8 it/s</span>
+<span class="fg-k">saving checkpoint ckpt/step-2000 …</span>`,
+
+  lint: () => `<span class="fg-k">starting harness claude-code …</span>`,
+};
+
+/* ---------- state ---------- */
+const S = {
+  screen: 'project', projTab: 'agents', multi: true, signinError: false, projectDown: false,
+  enginesForm: false, hostkey: false,
+  tabs: [
+    { id: 1, engine: 'lab', project: 'payments', agent: 'fix-auth', state: 'connected', act: 'working', scr: 'claude' },
+    { id: 2, engine: 'lab', project: 'payments', agent: 'refund-api', state: 'connected', act: 'waiting', scr: 'ask', unread: true },
+    { id: 3, engine: 'ci', project: 'eval-harness', agent: 'bench-runner', state: 'connected', act: 'working', scr: 'shell', unread: true, status: 'Comparing benchmarks with benchstat' },
+    { id: 4, engine: 'lab', project: 'payments', agent: 'flaky-tests', state: 'busy', act: 'idle', scr: 'opencode', holder: 'mc' },
+    { id: 5, engine: 'gpu-box', project: 'train', agent: 'finetune-7b', state: 'error', act: 'unknown', scr: 'gpu' },
+  ],
+  active: 0,          // 0 = Hub, otherwise a tab id
+  layout: 1, panes: [1], focusPane: 0,
+  fullscreen: false, leader: false, palette: false, paletteQ: '', paletteSel: 0,
+  dialog: null, proto: false, nextId: 6,
+};
+
+/* ---------- helpers ---------- */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ic = (n, a = '') => `<svg class="icon" aria-hidden="true" ${a}><use href="#i-${n}"/></svg>`;
+const av = (k, live) => `<span class="presence" ${live ? 'data-live' : ''}><span class="avatar" ${P[k].me ? 'data-me' : ''}>${P[k].i}</span>${P[k].me ? 'you' : esc(P[k].name)}</span>`;
+const pill = (s, t) => `<span class="pill" data-s="${s}">${t ?? s}</span>`;
+const eng = (n) => { const e = ENGINES.find((x) => x.name === n); return `<span class="engine" ${e && !e.up ? 'data-down' : ''} title="engine ${n}${e && !e.up ? ' (unreachable)' : ''}">${n}</span>`; };
+const actLabel = { working: 'working', idle: 'idle', waiting: 'waiting for you', starting: 'starting', stopped: 'stopped', unknown: 'unknown' };
+const tabById = (id) => S.tabs.find((t) => t.id === id);
+const tabFor = (agent, project = 'payments') => S.tabs.find((t) => t.agent === agent && t.project === project);
+const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true" class="logo-mark"><path d="M12 6V2h18v18h-4" fill="none" stroke="var(--logo-line-1)" stroke-width="2"/><path d="M7 11V7h18v18h-4" fill="none" stroke="var(--logo-line-2)" stroke-width="2"/><rect x="1" y="11" width="20" height="20" rx="1.5" fill="var(--logo-front)"/><path d="M6 16.5l4 4-4 4M12 25.5h5" fill="none" stroke="var(--logo-prompt)" stroke-width="2.5" stroke-linecap="square"/></svg>`;
+
+function toast(text, tone = 'ok') {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.dataset.tone = tone; el.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+  el.innerHTML = `<span class="glyph">${tone === 'error' ? '✕' : '✓'}</span><div class="body">${text}</div><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Dismiss">${ic('x')}</button>`;
+  el.querySelector('button').onclick = () => el.remove();
+  $('#toasts').append(el);
+  if (tone !== 'error') setTimeout(() => el.remove(), 5000);
+}
+
+/* ---------- sidebar ---------- */
+function tabGlyph(t) {
+  if (t.state === 'connecting') return `<span class="glyph"><span class="dot" data-s="starting"></span></span>`;
+  if (t.state === 'busy') return `<span class="glyph">${ic('lock')}</span>`;
+  if (t.state === 'taken') return `<span class="glyph">${ic('swap')}</span>`;
+  if (t.state === 'disconnected') return `<span class="glyph">${ic('plug-off')}</span>`;
+  if (t.state === 'error') return `<span class="glyph" data-g="error">✕</span>`;
+  if (t.state === 'stopped') return `<span class="glyph"><span class="dot" data-s="stopped"></span></span>`;
+  return `<span class="glyph"><span class="dot" data-s="${t.act}"></span></span>`;
+}
+const stateText = { connecting: 'connecting', connected: 'connected', busy: 'in use by someone else', taken: 'taken over', disconnected: 'disconnected', error: 'error', stopped: 'agent stopped' };
+const pageTitle = () => ({ home: 'Projects', 'home-empty': 'Projects', engines: 'Engines', project: 'payments', agent: 'payments / refund-api', 'agent-down': 'train / finetune-7b', forbidden: 'payments', notfound: 'Not found' }[S.screen] || 'Projects');
+const PSECT = [['agents', 'Agents', AGENTS.length], ['services', 'Services', SERVICES.length], ['timeline', 'Timeline'], ['spec', 'Spec'], ['audit', 'Audit log'], ['members', 'Members', MEMBERS.length]];
+function termWhat(t) {
+  const a = AGENTS.find((x) => x.name === t.agent && t.project === 'payments');
+  if (t.state === 'connecting') return ['', 'Connecting…'];
+  if (t.state === 'busy') return ['busy', `${P[t.holder || 'mc'].name} holds it`];
+  if (t.state === 'taken') return ['busy', `Taken over by ${P[t.holder || 'mc'].name}`];
+  if (t.state === 'disconnected') return ['', 'Disconnected, retrying'];
+  if (t.state === 'error') return ['error', `${t.engine} unreachable`];
+  if (t.state === 'stopped') return ['', 'Agent stopped (exit 0)'];
+  if (t.act === 'waiting') return ['waiting', '? ' + (a ? a.status : 'Waiting for an answer')];
+  return ['', a ? a.status : t.status || actLabel[t.act]];
+}
+
+function sidebar() {
+  const visible = S.active ? S.panes : [];
+  const terms = S.tabs.map((t, i) => {
+    const sel = S.active === t.id;
+    const [wt, what] = termWhat(t);
+    const lbl = `${t.agent}, ${t.project}${S.multi ? ' on ' + t.engine : ''}, ${stateText[t.state]}${t.state === 'connected' ? ', ' + actLabel[t.act] : ''}${t.unread ? ', new output' : ''}`;
+    return `<div role="option" tabindex="${sel || (!S.active && i === 0) ? 0 : -1}" class="term-item nav-focus" aria-selected="${sel}" aria-label="${esc(lbl)}" title="${t.engine}:${t.project}/${t.agent}" data-tab="${t.id}" ${t.unread && !sel ? 'data-unread' : ''} ${visible.includes(t.id) && !sel ? 'data-visible' : ''}>
+      ${tabGlyph(t)}<span class="nm">${t.agent}</span>
+      <span class="end">${t.act === 'waiting' && t.state === 'connected' && !sel ? '<span class="qcount" title="waiting for an answer">?</span>' : ''}${t.unread && !sel && t.act !== 'waiting' ? '<span class="unread" title="new output"></span>' : ''}<span class="n">${i + 1}</span><span class="x" role="button" aria-label="Close ${t.agent}" data-close="${t.id}">${ic('x', 'data-size="sm"')}</span></span>
+      <span class="where">${t.project}${S.multi ? ' · ' + t.engine : ''}</span>
+      <span class="what" data-t="${wt}">${esc(what)}</span>
+    </div>`;
+  }).join('');
+  const onPage = !S.active;
+  const projs = PROJECTS.filter((p) => S.multi || p.engine === 'lab').map((p) => {
+    const cur = onPage && p.name === 'payments' && ['project', 'agent', 'forbidden'].includes(S.screen);
+    const open = p.name === 'payments' && ['project', 'agent', 'forbidden'].includes(S.screen);
+    return `<a class="nav-item nav-focus proj" href="#" tabindex="-1" data-go="project" ${cur && S.screen !== 'project' ? '' : cur ? '' : ''} ${cur && S.screen === 'agent' ? '' : ''} title="${p.engine}:${p.name}">
+        <span class="ic">${ic(open ? 'chev-d' : 'chev-r', 'data-size="sm"')}</span><span class="ini" aria-hidden="true">${p.name.slice(0, 2)}</span><span class="nm">${p.name}</span>
+        <span class="end">${p.w ? `<span class="qcount" title="${p.w} question">${p.w}?</span>` : ''}${p.up ? '' : '<span class="pill" data-s="warn" style="height:16px;font-size:10px">down</span>'}${S.multi ? `<span class="engine">${p.engine}</span>` : ''}</span></a>
+      ${open ? `<div class="nav-sub">${PSECT.map(([k, l, c]) => `<a class="nav-item nav-focus" href="#" tabindex="-1" data-psect="${k}" ${onPage && S.screen === 'project' && S.projTab === k ? 'aria-current="page"' : ''}><span class="nm">${l}</span><span class="end"><span class="n">${c ?? ''}</span></span></a>`).join('')}
+        ${S.screen === 'agent' ? `<a class="nav-item nav-focus" href="#" tabindex="-1" data-go="agent" aria-current="page"><span class="nm">↳ refund-api</span><span class="end"><span class="dot" data-s="waiting"></span></span></a>` : ''}</div>` : ''}`;
+  }).join('');
+  const down = ENGINES.filter((e) => !e.up).length;
+  return `<nav class="side" aria-label="Main">
+    <div class="side-head"><a class="brand" href="#" data-go="home" aria-label="egzo hub, all projects">${LOGO}<b>egzo<span>/hub</span></b></a>
+      <button class="btn collapse" data-variant="quiet" data-size="sm" data-icon-only data-act="rail" aria-label="${S.rail ? 'Expand' : 'Collapse'} sidebar" title="${S.rail ? 'Expand' : 'Collapse'} sidebar (Ctrl+] b)">${ic(S.rail ? 'chev-r' : 'single', 'data-size="sm"')}</button>
+      <button class="btn close-nav" data-variant="quiet" data-size="sm" data-icon-only data-act="nav" aria-label="Close menu">${ic('x')}</button></div>
+    <button class="goto" data-act="palette" aria-label="Go to a project or agent">${ic('search', 'data-size="sm"')}<span class="t">Go to…</span><span class="kbd">:</span></button>
+    <div class="side-scroll">
+      <div class="side-h"><span class="label">Terminals</span><span class="count">${S.tabs.length || ''}</span></div>
+      <div class="side-list" role="listbox" aria-label="Open terminals">${terms || '<p class="side-empty">No terminal open. Use <b>Attach</b> on an agent; it opens here and stays open while you browse.</p>'}</div>
+      <div class="side-add"><button class="btn" data-variant="quiet" data-size="sm" data-act="palette" style="width:100%;justify-content:flex-start" aria-label="Attach an agent">${ic('plus', 'data-size="sm"')}<span class="t">Attach an agent</span></button></div>
+      <div class="side-h"><span class="label">Projects</span><span class="count">${S.multi ? PROJECTS.length : 3}</span></div>
+      <div class="side-list">
+        <a class="nav-item nav-focus" href="#" tabindex="0" data-go="home" ${onPage && S.screen.startsWith('home') ? 'aria-current="page"' : ''}><span class="ic">${ic('list', 'data-size="sm"')}</span><span class="nm">All projects</span><span class="end"><span class="qcount" title="1 question across projects">1?</span></span></a>
+        ${projs}
+      </div>
+    </div>
+    <div class="side-foot">
+      ${S.multi ? `<button class="health" ${down ? 'data-down' : ''} data-go="engines" aria-label="Engines: ${ENGINES.length - down} reachable, ${down} unreachable" ${onPage && S.screen === 'engines' ? 'aria-current="page"' : ''}>${ic('engine', 'data-size="sm"')}<span class="t">Engines <span class="muted">${ENGINES.length - down}/${ENGINES.length}</span></span>${down ? '<span class="warn hide-rail">⌁ 1 down</span>' : ''}</button>` : `<button class="health" data-go="engines">${ic('engine', 'data-size="sm"')}<span class="t">Engines</span></button>`}
+      <div class="row"><button class="me" aria-label="Account: Cedric Veilleux, operator"><span class="avatar" data-me>CV</span><span class="t">cedric · operator</span></button><span class="grow"></span>
+        <button class="btn hide-rail" data-variant="quiet" data-size="sm" data-icon-only data-act="theme" aria-label="Switch theme">${ic(document.documentElement.dataset.theme === 'light' ? 'moon' : 'sun')}</button></div>
+    </div>
+  </nav>`;
+}
+function mbar() {
+  const t = S.active && tabById(S.active);
+  return `<header class="mbar"><button class="btn" data-variant="quiet" data-icon-only data-act="nav" aria-label="Open menu">${ic('list')}</button>
+    <span class="t">${t ? `<b>${t.agent}</b> <span class="muted">${t.project}</span>` : pageTitle()}</span>
+    ${S.tabs.some((x) => x.act === 'waiting' && x.state === 'connected') ? '<span class="qcount">?</span>' : ''}
+    <button class="btn" data-variant="quiet" data-icon-only data-act="palette" aria-label="Go to">${ic('search')}</button></header>`;
+}
+
+/* ---------- pages ---------- */
+function pageHome(empty) {
+  const filter = S.homeFilter || 'all';
+  const rows = PROJECTS.filter((p) => filter === 'all' || p.engine === filter);
+  if (empty) return `<div class="page">
+    <div class="phead"><h1 class="h-page">Projects</h1></div>
+    <div class="empty">
+<pre class="art" aria-hidden="true">┌──────────────┐
+│  0 projects  │
+└──────────────┘</pre>
+      <h2>Nothing here yet</h2>
+      <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Send them the address you signed in with: <code>cedric@example.dev</code>.</p>
+      <p class="muted">Projects are created from the command line with <code>egzo project up</code>, not from the hub.</p>
+    </div></div>`;
+  const down = ENGINES.filter((e) => !e.up);
+  return `<div class="page">
+    <div class="phead"><h1 class="h-page">Projects</h1><span class="muted">${PROJECTS.length}</span><span class="grow"></span>
+      <div class="search"><label class="sr-only" for="q">Filter projects</label>${ic('search')}<input id="q" class="input" placeholder="Filter projects"><span class="kbd">/</span></div></div>
+    ${S.multi && down.length ? down.map((e) => `<div class="banner" data-tone="unreachable" role="alert"><span class="tag">⌁ ${e.name} unreachable</span><div class="body">Its projects are hidden until it answers again. Last reached at ${e.since}. <span class="muted">${esc(e.err)}</span></div><button class="btn" data-size="sm">${ic('refresh', 'data-size="sm"')}Retry</button></div>`).join('') : ''}
+    ${S.multi ? `<div class="toolbar"><span class="label">Engine</span><div class="chips" role="group" aria-label="Filter by engine">
+      <button class="chip" aria-pressed="${filter === 'all'}" data-filter="all">All <span class="count">${PROJECTS.length}</span></button>
+      ${ENGINES.map((e) => `<button class="chip" aria-pressed="${filter === e.name}" data-filter="${e.name}" ${e.up ? '' : 'disabled title="unreachable"'}><span class="dot" data-s="${e.up ? 'running' : 'unreachable'}"></span>${e.name} <span class="count">${e.up ? PROJECTS.filter((p) => p.engine === e.name).length : '—'}</span></button>`).join('')}
+    </div></div>` : ''}
+    <div class="table-wrap"><table class="table"><thead><tr><th>Project</th>${S.multi ? '<th>Engine</th>' : ''}<th>Agents</th><th>Needs you</th><th class="hide-sm">Your role</th></tr></thead><tbody>
+    ${rows.map((p) => `<tr>
+      <td><a class="name" href="#" data-go="project">${p.name}</a> ${p.up ? '' : pill('warn', 'sidecars down')}</td>
+      ${S.multi ? `<td>${eng(p.engine)}</td>` : ''}
+      <td><span class="agentsbar" aria-hidden="true"><i class="r" style="width:${(p.r - p.w) / p.t * 100}%"></i><i class="w" style="width:${p.w / p.t * 100}%"></i><i class="s" style="width:${(p.t - p.r) / p.t * 100}%"></i></span>${p.r} running <span class="muted">of ${p.t}</span></td>
+      <td>${p.w ? pill('waiting', p.w + ' question') : '<span class="muted">—</span>'}</td>
+      <td class="hide-sm dim">${p.role}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="muted" style="margin:0">Press <span class="kbd">:</span> to jump to any project or agent.</p>
+  </div>`;
+}
+
+function pageEngines() {
+  return `<div class="page" data-narrow>
+    <div class="crumbs"><span>Settings</span><span>/</span></div>
+    <div class="phead"><h1 class="h-page">Engines</h1><span class="badge" data-tone="accent">operator</span><span class="grow"></span>
+      <button class="btn" data-variant="primary" data-act="engine-add">${ic('plus')}Add engine</button></div>
+    <p class="dim" style="margin:0;max-width:70ch">The container engines this hub connects to. Credentials are encrypted at rest and never shown again; leave a credential blank to keep the stored one.</p>
+    <div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Address</th><th class="hide-sm">Kind</th><th>State</th><th class="num hide-sm">Projects</th><th></th></tr></thead><tbody>
+    ${ENGINES.map((e) => `<tr><td class="name">${e.name}</td><td><code>${e.host}</code></td><td class="hide-sm dim">${e.kind}</td>
+      <td>${e.up ? pill('running', 'reachable') : pill('unreachable', 'unreachable')}</td><td class="num hide-sm">${e.up ? e.projects : '—'}</td>
+      <td class="actions"><div class="row-actions"><button class="btn" data-size="sm" data-act="engine-edit">Edit</button><button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove ${e.name}" data-act="engine-rm" data-name="${e.name}">${ic('trash', 'data-size="sm"')}</button></div></td></tr>
+      ${e.up ? '' : `<tr data-dim><td></td><td colspan="5" class="wrap" style="height:auto;padding-bottom:8px"><span class="field-error" style="color:var(--status-unreachable)">${esc(e.err)} · since ${e.since}</span></td></tr>`}`).join('')}
+    </tbody></table></div>
+    ${S.enginesForm ? `<section class="drawer" aria-labelledby="eng-h"><header><h2 id="eng-h">Add engine</h2><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close" data-act="engine-close">${ic('x')}</button></header>
+      <div class="content">
+        <div class="grid2">
+          <div class="field"><label for="en">Name</label><input id="en" class="input" value="build-farm"><span class="help">Lowercase, used in URLs: <code>build-farm:project/agent</code></span></div>
+          <div class="field"><label for="ea">Address</label><input id="ea" class="input" value="ssh://ops@build-farm.lan"><span class="help">unix://… · tcp://host:2376 · ssh://user@host</span></div>
+        </div>
+        <fieldset class="group"><legend>ssh</legend>
+          <div class="field"><label for="eu">User, if not in the address</label><input id="eu" class="input" placeholder="ops"></div>
+          <div class="field"><span class="label-text">Private key (PEM, no passphrase)</span>
+            <div class="secret"><span class="state">Stored, 2026-09-30</span><button class="btn" data-size="sm">${ic('key', 'data-size="sm"')}Replace key</button></div>
+            <span class="help">Write-only. The hub never shows a stored key.</span></div>
+        </fieldset>
+        <fieldset class="group"><legend>TLS (tcp:// only)</legend>
+          <div class="field"><label for="eca">CA certificate (PEM)</label><textarea id="eca" class="textarea" placeholder="-----BEGIN CERTIFICATE-----" aria-invalid="true">-----BEGIN CERTIFICATE-----
+MIIBszCCAVmgAwIBAgIU…</textarea><span class="field-error">This doesn't end with -----END CERTIFICATE-----. Paste the whole file.</span></div>
+        </fieldset>
+      </div>
+      <footer><button class="btn" data-act="engine-close">Cancel</button><button class="btn" data-variant="primary" data-act="hostkey">Test and save</button></footer></section>` : ''}
+  </div>`;
+}
+
+function agentRows() {
+  return AGENTS.map((a, i) => {
+    const t = tabFor(a.name);
+    const attach = !a.running ? `<button class="btn" data-size="sm" disabled title="Start the agent to open its terminal">${ic('attach', 'data-size="sm"')}Attach</button>`
+      : t ? `<button class="btn" data-size="sm" data-open="${t.id}">${ic('term', 'data-size="sm"')}Tab ${S.tabs.indexOf(t) + 1}</button>`
+      : `<button class="btn" data-size="sm" data-attach="${a.name}">${ic('attach', 'data-size="sm"')}Attach</button>`;
+    return `<tr ${i === 0 ? 'aria-selected="true"' : ''}>
+      <td><a class="name" href="#" data-go="agent">${a.name}</a> <span class="muted">${a.tpl}</span> ${a.stale ? pill('warn', 'stale') : ''}</td>
+      <td>${pill(a.act, actLabel[a.act])}</td>
+      <td class="wrap dim hide-md" style="max-width:34ch">${a.act === 'waiting' ? `<span style="color:var(--status-waiting)">${esc(a.status)}</span>` : esc(a.status) || '<span class="muted">—</span>'}</td>
+      <td>${a.holder ? av(a.holder, true) : '<span class="muted">free</span>'}</td>
+      <td class="hide-sm dim">${P[a.by].me ? 'you' : P[a.by].name}</td>
+      <td class="actions"><div class="row-actions">${attach}
+        ${a.running ? `<button class="btn" data-size="sm" data-icon-only aria-label="Stop ${a.name}" title="Stop">${ic('stop', 'data-size="sm"')}</button>` : `<button class="btn" data-size="sm" data-icon-only aria-label="Start ${a.name}" title="Start">${ic('play', 'data-size="sm"')}</button>`}
+        <button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove ${a.name}" title="Remove" data-act="rm-agent" data-name="${a.name}">${ic('trash', 'data-size="sm"')}</button></div></td></tr>`;
+  }).join('');
+}
+const timeline = (rows) => `<ol class="timeline">${rows.map(([t, ty, ag, by, tx]) => `<li><time>${t}</time><span class="type" data-t="${ty}">${ty}</span><span class="text">${ag ? `<b>${ag}</b> ` : ''}${esc(tx)}${by ? ` <span class="muted">· ${P[by].me ? 'you' : P[by].name}</span>` : ''}</span></li>`).join('')}</ol>`;
+
+function pageProject() {
+  const tabs = [['agents', 'Agents', AGENTS.length, 'users'], ['services', 'Services', SERVICES.length], ['timeline', 'Timeline'], ['spec', 'Spec'], ['audit', 'Audit log'], ['members', 'Members', MEMBERS.length]];
+  let body = '';
+  if (S.projTab === 'agents') body = `<div class="table-wrap"><table class="table"><thead><tr><th>Agent</th><th>Activity</th><th class="hide-md">Status</th><th>Terminal</th><th class="hide-sm">Spawned by</th><th></th></tr></thead><tbody>${agentRows()}</tbody></table></div>
+    <p class="muted" style="margin:0;font-size:var(--text-xs)"><span class="kbd">j</span> <span class="kbd">k</span> move · <span class="kbd">Enter</span> open · <span class="kbd">a</span> attach · <span class="kbd">s</span> spawn</p>`;
+  if (S.projTab === 'services') body = `<div class="table-wrap"><table class="table"><thead><tr><th>Service</th><th>State</th><th>Detail</th></tr></thead><tbody>${SERVICES.map((s) => `<tr><td class="name">${s.name}</td><td>${pill(s.s)}</td><td class="dim wrap">${s.d}</td></tr>`).join('')}</tbody></table></div>`;
+  if (S.projTab === 'timeline') body = `<div class="toolbar"><div class="chips" role="group" aria-label="Event types"><button class="chip" aria-pressed="true">All</button><button class="chip" aria-pressed="false">Questions</button><button class="chip" aria-pressed="false">Terminal</button><button class="chip" aria-pressed="false">Lifecycle</button><button class="chip" aria-pressed="false">Errors</button></div></div><div class="panel">${timeline(EVENTS)}</div>`;
+  if (S.projTab === 'spec') body = `<div class="banner" data-tone="info"><span class="tag">read-only</span><div class="body">The resolved spec from the last <code>egzo project up</code>. Secrets show as references, never values. To change it, edit <code>egzo.yaml</code> and run <code>egzo project up</code>.</div><button class="btn" data-size="sm">${ic('copy', 'data-size="sm"')}Copy</button></div>
+<pre class="spec">${`<span class="k">version</span>: <span class="v">1</span>
+<span class="k">name</span>: <span class="s">payments</span>
+<span class="k">vaults</span>:
+  <span class="k">main</span>:
+    <span class="k">backend</span>: <span class="s">env</span>
+    <span class="k">secrets</span>: [<span class="s">ANTHROPIC_API_KEY</span>, <span class="s">GITHUB_TOKEN</span>]   <span class="c"># names only</span>
+<span class="k">egress</span>:
+  <span class="k">default</span>:
+    <span class="k">allow</span>: [<span class="s">platform.claude.com</span>, <span class="s">registry.npmjs.org</span>, <span class="s">github.com</span>]
+    <span class="k">services</span>:
+      <span class="k">anthropic</span>: <span class="s">main/ANTHROPIC_API_KEY</span>
+      <span class="k">github</span>: <span class="s">main/GITHUB_TOKEN</span>
+<span class="k">workspaces</span>:
+  <span class="k">repo</span>:
+    <span class="k">git</span>: { <span class="k">url</span>: <span class="s">https://github.com/acme/payments.git</span> }
+<span class="k">agents</span>:
+  <span class="k">claude</span>:
+    <span class="k">harness</span>: <span class="s">claude-code</span>
+    <span class="k">workspaces</span>: [<span class="s">repo</span>]
+  <span class="k">opencode</span>:
+    <span class="k">harness</span>: <span class="s">opencode</span>
+    <span class="k">workspaces</span>: [<span class="s">repo</span>]
+<span class="k">browser</span>: { <span class="k">enabled</span>: <span class="v">true</span> }`.split('\n').map((l) => `<span class="l">${l}</span>`).join('')}</pre>`;
+  if (S.projTab === 'audit') body = `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Agent</th><th class="hide-sm">Detail</th></tr></thead><tbody>${AUDIT.map(([w, who, a, ag, d, ok]) => `<tr><td class="dim">${w}</td><td>${P[who].me ? 'you' : P[who].name}</td><td>${a} ${ok ? '' : pill('error', 'refused')}</td><td>${ag || '<span class="muted">—</span>'}</td><td class="hide-sm dim wrap">${esc(d)}</td></tr>`).join('')}</tbody></table></div>`;
+  if (S.projTab === 'members') body = `<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Role</th><th></th></tr></thead><tbody>${MEMBERS.map(([k, r]) => `<tr><td><span class="presence"><span class="avatar" ${P[k].me ? 'data-me' : ''}>${P[k].i}</span><span style="color:var(--text)">${P[k].name}</span> <span class="muted hide-sm">${P[k].email}</span></span></td>
+      <td>${P[k].me ? `<span class="dim">${r}</span> <span class="muted">(you)</span>` : `<label class="sr-only" for="r-${k}">Role of ${P[k].name}</label><select id="r-${k}" class="select" style="width:auto;height:24px" data-role="${k}">${['user', 'administrator', 'owner'].map((x) => `<option ${x === r ? 'selected' : ''}>${x}</option>`).join('')}</select>`}</td>
+      <td class="actions">${P[k].me ? '' : `<button class="btn" data-variant="danger" data-size="sm" data-act="rm-member" data-name="${k}">Remove</button>`}</td></tr>`).join('')}</tbody></table></div>
+    <div class="twocol"><div class="panel"><header><span class="h-section">Add a person</span></header><div class="pad"><div class="toolbar">
+      <div class="field" style="flex:2"><label for="ap">Person</label><select id="ap" class="select"><option>Lea Martin (lea@example.dev)</option><option>Omar Haddad (omar@example.dev)</option></select></div>
+      <div class="field" style="flex:1"><label for="ar">Role</label><select id="ar" class="select"><option>user</option><option>administrator</option><option>owner</option></select></div>
+      <button class="btn" data-variant="primary" style="align-self:end">Add</button></div><span class="help">People appear here after they sign in to the hub once.</span></div></div>
+    <div class="panel"><header><span class="h-section">Roles</span></header><div class="pad"><dl class="roles"><dt>user</dt><dd>Spawns agents; starts, stops, attaches to and removes their own.</dd><dt>administrator</dt><dd>The same on every agent in the project. Sees the audit log.</dd><dt>owner</dt><dd>An administrator who also manages these roles.</dd></dl></div></div></div>`;
+  return `<div class="page">
+    <div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span></div>
+    <div class="phead"><h1 class="h-page">payments</h1>${S.multi ? eng('lab') : ''}<span class="pill" data-s="neutral">administrator</span><span class="grow"></span>
+      <button class="btn" data-variant="primary" data-act="spawn" ${S.projectDown ? 'disabled' : ''}>${ic('plus')}Spawn agent <span class="kbd">s</span></button></div>
+    <div class="metaline"><span><span class="k">agents</span> 3 running · <span style="color:var(--status-waiting)">1 waiting</span> · 1 stopped</span><span><span class="k">services</span> ${SERVICES.map((s) => `<span class="dot" data-s="${s.s}" title="${s.name}: ${s.s}"></span> ${s.name}`).join('  ')}</span><span class="hide-sm"><span class="k">templates</span> claude, opencode</span></div>
+    ${S.projectDown ? `<div class="banner" data-tone="warn" role="alert"><span class="tag">! sidecars down</span><div class="body">The project's control or proxy sidecar isn't running, so agents can't be spawned or attached. Run <code>egzo project up</code> for this project.</div></div>` : ''}
+    <div class="tabs" role="tablist" aria-label="Project sections">${tabs.map(([k, l, c]) => `<button role="tab" class="tab" aria-selected="${S.projTab === k}" data-ptab="${k}">${l}${c ? ` <span class="count">${c}</span>` : ''}</button>`).join('')}</div>
+    ${body}
+  </div>`;
+}
+
+function pageAgent(down) {
+  if (down) return `<div class="page"><div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span><span>train</span><span>/</span></div>
+    <div class="phead"><h1 class="h-page">finetune-7b</h1>${eng('gpu-box')}${pill('unreachable', 'status unknown')}</div>
+    <div class="empty" style="border-color:var(--status-unreachable)">
+<pre class="art" aria-hidden="true" style="color:var(--status-unreachable)">hub ──── ✕ ──── gpu-box</pre>
+      <h2>Engine gpu-box is unreachable</h2>
+      <p>The hub can't reach the engine this agent runs on, so its status, logs and terminal aren't available. The agent itself may still be running.</p>
+      <p class="muted">${esc(ENGINES[2].err)} · last reached ${ENGINES[2].since}</p>
+      <div class="btn-group"><button class="btn" data-variant="primary">${ic('refresh')}Retry now</button><button class="btn" data-go="engines">Engine settings</button></div>
+    </div></div>`;
+  const a = AGENTS[1], t = tabFor('refund-api');
+  return `<div class="page">
+    <div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span><a href="#" data-go="project">payments</a><span>/</span></div>
+    <div class="phead"><h1 class="h-page">refund-api</h1>${S.multi ? eng('lab') : ''}${pill(a.act, actLabel[a.act])}<span class="grow"></span>
+      <div class="btn-group"><button class="btn" data-variant="primary" data-open="${t.id}">${ic('term')}Go to terminal <span class="kbd">a</span></button><button class="btn">${ic('stop')}Stop</button><button class="btn" data-variant="danger" data-act="rm-agent" data-name="refund-api">${ic('trash')}Remove</button></div></div>
+    <div class="statusline"><span class="pill" data-s="waiting">question</span><span class="q">Keep POST /v1/refunds as a thin wrapper around v2?</span><span class="muted">asked 14:38 · answer it in the terminal</span></div>
+    <div class="twocol" style="grid-template-columns:minmax(0,1fr) minmax(0,320px)">
+      <div style="display:grid;gap:var(--space-4);min-width:0">
+        <div class="termcard">${ic('term')}<div class="grow"><b>Terminal open in tab 2</b><br><span class="dim">You hold it. Only one person can hold a terminal at a time.</span></div>${av('cv', true)}</div>
+        <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="${S.agentTab !== 'logs'}" data-atab="timeline">Timeline</button><button class="tab" role="tab" aria-selected="${S.agentTab === 'logs'}" data-atab="logs">Logs</button></div>
+        ${S.agentTab === 'logs' ? `<pre class="log"><span class="ts">2026-10-14T14:30:51Z</span> egzo agent: harness claude-code ready (pty 120×38)
+<span class="ts">2026-10-14T14:30:52Z</span> egzo agent: workspace repo at /workspace/payments (branch agent/refund-api)
+<span class="ts">2026-10-14T14:31:40Z</span> proxy: <span class="ok">allow</span> CONNECT platform.claude.com:443
+<span class="ts">2026-10-14T14:33:02Z</span> proxy: <span class="ok">allow</span> CONNECT github.com:443 (credential: github)
+<span class="ts">2026-10-14T14:35:18Z</span> proxy: <span class="err">deny</span>  CONNECT sentry.io:443 (not in egress profile default)
+<span class="ts">2026-10-14T14:38:12Z</span> egzo hook: ask "Keep v1 endpoint?" → control
+<span class="ts">2026-10-14T14:38:12Z</span> control: status waiting</pre>` : `<div class="panel">${timeline(EVENTS.filter((e) => e[2] === 'refund-api').concat([['13:28:31', 'spawn', 'refund-api', 'mc', 'Spawned from template claude'], ['13:28:40', 'start', 'refund-api', null, 'Started']]))}</div>`}
+      </div>
+      <aside class="panel" style="align-self:start"><header><span class="h-section">Details</span></header><div class="pad"><dl class="kv">
+        <dt>id</dt><dd><code>lab:payments/refund-api</code></dd><dt>template</dt><dd>claude</dd><dt>harness</dt><dd>claude-code</dd>
+        <dt>spawned by</dt><dd>Maria Chen</dd><dt>created</dt><dd>13:28, 1h 10m ago</dd><dt>container</dt><dd>${pill('running')}</dd><dt>terminal</dt><dd>${av('cv', true)}</dd></dl></div></aside>
+    </div>
+  </div>`;
+}
+
+function pageSignin() {
+  return `<div class="signin"><div class="box">
+    <div class="mark" role="img" aria-label="egzo hub"><svg viewBox="0 0 214.0 38" aria-hidden="true" class="logo-lockup" style="width:260px;height:auto"><path d="M12 6V2h18v18h-4" fill="none" stroke="var(--logo-line-1)" stroke-width="2"/><path d="M7 11V7h18v18h-4" fill="none" stroke="var(--logo-line-2)" stroke-width="2"/><rect x="1" y="11" width="20" height="20" rx="1.5" fill="var(--logo-front)"/><path d="M6 16.5l4 4-4 4M12 25.5h5" fill="none" stroke="var(--logo-prompt)" stroke-width="2.5" stroke-linecap="square"/><g transform="translate(42 29) scale(.3)"><path d="M17.900000000000002 -36.1H54.0L50.300000000000004 -30.900000000000002Q50.300000000000004 -41.0 46.7 -46.3Q43.1 -51.6 36.2 -51.6Q28.700000000000003 -51.6 24.5 -46.05Q20.3 -40.5 20.3 -30.5Q20.3 -19.8 24.5 -14.100000000000001Q28.700000000000003 -8.4 36.5 -8.4Q41.6 -8.4 45.400000000000006 -10.95Q49.2 -13.5 51.800000000000004 -18.400000000000002H62.1Q60.6 -12.200000000000001 57.05 -7.700000000000001Q53.5 -3.2 48.25 -0.8Q43.0 1.6 36.5 1.6Q28.1 1.6 22.05 -2.2Q16.0 -6.0 12.8 -13.200000000000001Q9.600000000000001 -20.400000000000002 9.600000000000001 -30.5Q9.600000000000001 -40.1 12.850000000000001 -47.05Q16.1 -54.0 22.1 -57.8Q28.1 -61.6 36.2 -61.6Q43.900000000000006 -61.6 49.300000000000004 -58.0Q54.7 -54.400000000000006 57.6 -47.550000000000004Q60.5 -40.7 60.5 -31.0Q60.5 -29.900000000000002 60.45 -28.700000000000003Q60.400000000000006 -27.5 60.300000000000004 -26.400000000000002H17.900000000000002Z M129.8 -2.0Q129.8 5.2 126.65 10.5Q123.5 15.8 117.65 18.700000000000003Q111.80000000000001 21.6 103.6 21.6Q96.0 21.6 90.3 19.25Q84.6 16.900000000000002 81.3 12.55Q78.0 8.200000000000001 77.7 2.3000000000000003H88.2Q89.8 6.800000000000001 93.8 9.200000000000001Q97.8 11.600000000000001 103.6 11.600000000000001Q110.80000000000001 11.600000000000001 114.80000000000001 7.850000000000001Q118.80000000000001 4.1000000000000005 118.80000000000001 -2.7V-9.1H115.80000000000001Q113.80000000000001 -6.2 110.0 -4.5Q106.2 -2.8000000000000003 101.8 -2.8000000000000003Q94.5 -2.8000000000000003 89.1 -6.3500000000000005Q83.7 -9.9 80.80000000000001 -16.5Q77.9 -23.1 77.9 -32.0Q77.9 -41.1 80.80000000000001 -47.75Q83.7 -54.400000000000006 89.1 -58.0Q94.5 -61.6 101.8 -61.6Q106.30000000000001 -61.6 110.10000000000001 -59.8Q113.9 -58.0 115.80000000000001 -55.0H118.80000000000001V-60.0H129.8ZM88.8 -32.0Q88.8 -22.900000000000002 92.85 -17.8Q96.9 -12.700000000000001 104.1 -12.700000000000001Q111.4 -12.700000000000001 115.45 -17.8Q119.5 -22.900000000000002 119.5 -32.0Q119.5 -41.1 115.45 -46.2Q111.4 -51.300000000000004 104.1 -51.300000000000004Q96.9 -51.300000000000004 92.85 -46.2Q88.8 -41.1 88.8 -32.0Z M152.4 -60.0H197.6V-40.900000000000006L159.3 -11.3V-10.3H197.6V0.0H152.4V-19.1L190.7 -48.7V-49.7H152.4Z M245.0 1.6Q236.7 1.6 230.6 -2.25Q224.5 -6.1000000000000005 221.15 -13.200000000000001Q217.8 -20.3 217.8 -30.0Q217.8 -39.7 221.15 -46.800000000000004Q224.5 -53.900000000000006 230.6 -57.75Q236.7 -61.6 245.0 -61.6Q253.4 -61.6 259.45 -57.75Q265.5 -53.900000000000006 268.85 -46.800000000000004Q272.2 -39.7 272.2 -30.0Q272.2 -20.3 268.85 -13.200000000000001Q265.5 -6.1000000000000005 259.45 -2.25Q253.4 1.6 245.0 1.6ZM245.0 -8.700000000000001Q252.7 -8.700000000000001 257.0 -14.3Q261.3 -19.900000000000002 261.3 -30.0Q261.3 -40.1 257.0 -45.7Q252.7 -51.300000000000004 245.0 -51.300000000000004Q237.3 -51.300000000000004 233.0 -45.7Q228.7 -40.1 228.7 -30.0Q228.7 -19.900000000000002 233.0 -14.3Q237.3 -8.700000000000001 245.0 -8.700000000000001Z" fill="var(--text)"/></g><g transform="translate(129.0 29) scale(.3)"><path d="M57.1 -84.80000000000001 22.400000000000002 17.0H12.9L47.6 -84.80000000000001Z M82.0 0.0V-84.80000000000001H91.6V-55.0H94.4Q96.7 -58.0 100.4 -59.650000000000006Q104.1 -61.300000000000004 108.5 -61.300000000000004Q114.9 -61.300000000000004 119.5 -58.5Q124.1 -55.7 126.64999999999999 -50.650000000000006Q129.2 -45.6 129.2 -38.7V0.0H119.6V-36.1Q119.6 -43.900000000000006 116.0 -48.0Q112.4 -52.1 105.6 -52.1Q98.8 -52.1 95.19999999999999 -48.0Q91.6 -43.900000000000006 91.6 -36.1V0.0Z M198.0 -59.800000000000004V0.0H188.4V-4.800000000000001H185.6Q183.3 -1.8 179.60000000000002 -0.15000000000000002Q175.9 1.5 171.5 1.5Q165.2 1.5 160.55 -1.25Q155.9 -4.0 153.35000000000002 -9.100000000000001Q150.8 -14.200000000000001 150.8 -21.1V-59.800000000000004H160.4V-23.6Q160.4 -15.9 164.0 -11.75Q167.6 -7.6000000000000005 174.4 -7.6000000000000005Q181.2 -7.6000000000000005 184.8 -11.75Q188.4 -15.9 188.4 -23.6V-59.800000000000004Z M248.9 1.5Q243.9 1.5 239.75 -0.5Q235.6 -2.5 233.5 -6.0H230.7V0.0H221.1V-84.80000000000001H230.7V-53.7H233.5Q235.6 -57.300000000000004 239.75 -59.300000000000004Q243.9 -61.300000000000004 248.9 -61.300000000000004Q256.3 -61.300000000000004 261.8 -57.45Q267.3 -53.6 270.25 -46.6Q273.2 -39.6 273.2 -29.900000000000002Q273.2 -20.200000000000003 270.25 -13.150000000000002Q267.3 -6.1000000000000005 261.8 -2.3000000000000003Q256.3 1.5 248.9 1.5ZM247.0 -7.5Q254.9 -7.5 259.25 -13.4Q263.6 -19.3 263.6 -29.900000000000002Q263.6 -40.5 259.25 -46.400000000000006Q254.9 -52.300000000000004 247.0 -52.300000000000004Q239.1 -52.300000000000004 234.7 -46.400000000000006Q230.3 -40.5 230.3 -29.900000000000002Q230.3 -19.3 234.7 -13.4Q239.1 -7.5 247.0 -7.5Z" fill="var(--text-3)"/></g></svg></div>
+<pre class="boot" aria-hidden="true">hub.example.dev · egzo-hub 0.9.2
+engines ....... <span class="ok">3 configured</span>
+identity ...... OIDC (sso.example.dev)
+session ....... none<span class="cur"></span></pre>
+    ${S.signinError ? `<div class="banner" role="alert"><span class="tag">✕ sign-in failed</span><div class="body">The login provider returned <code>access_denied</code>. Check that your account is allowed to use this hub, then try again.</div></div>` : ''}
+    <div style="display:grid;gap:var(--space-2)"><button class="btn" data-variant="primary" data-size="lg" data-go="home" style="justify-content:center">Sign in with SSO <span class="kbd">↵</span></button>
+    <p class="muted" style="margin:0;font-size:var(--text-xs)">You'll go to your organisation's login page, then come back here. The hub never sees your password.</p></div>
+  </div></div>`;
+}
+
+function pageForbidden() {
+  return `<div class="page" data-narrow><div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span><a href="#" data-go="project">payments</a><span>/</span></div>
+  <div class="empty"><pre class="art" aria-hidden="true">[ 403 ]</pre><h2>Only owners manage members</h2>
+  <p>You're an administrator on payments, so you can operate every agent but can't change who has access. Ask an owner: Cedric Veilleux.</p>
+  <div class="btn-group"><button class="btn" data-go="project">Back to payments</button></div></div></div>`;
+}
+function pageNotFound() {
+  return `<div class="page" data-narrow><div class="empty"><pre class="art" aria-hidden="true">[ 404 ]</pre><h2>No agent at lab:payments/fix-cache</h2>
+  <p>It may have been removed. The timeline of payments shows who removed it and when.</p>
+  <div class="btn-group"><button class="btn" data-variant="primary" data-go="project">Open payments</button><button class="btn" data-go="home">All projects</button></div></div></div>`;
+}
+
+/* ---------- terminals ---------- */
+function stateOverlay(t) {
+  const who = t.holder ? P[t.holder] : P.mc;
+  const id = `${t.engine}:${t.project}/${t.agent}`;
+  switch (t.state) {
+    case 'connecting': return `<div class="tstate"><div class="connecting" role="status"><span class="ok">✓ websocket open</span><span class="ok">✓ agent ${t.agent} is running</span><span class="now">› attaching to the pty <span class="cur"> </span></span></div></div>`;
+    case 'busy': return `<div class="tstate"><div class="tcard" data-tone="busy" role="alert"><h3>${ic('lock')}${who.name} is at this terminal</h3>
+      <p>Since 14:22. There's one terminal per agent and no watch-only mode, so taking over disconnects them.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-take="${t.id}">Take over</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'taken': return `<div class="tstate"><div class="tcard" data-tone="taken" role="alert"><h3>${ic('swap')}${who.name} took over at 14:41</h3>
+      <p>You've been disconnected. What you see is the last screen you had; it no longer updates.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-take="${t.id}">Take it back</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'disconnected': return `<div class="tstate"><div class="tcard" role="alert"><h3>${ic('plug-off')}Connection lost</h3>
+      <p>The connection to the hub dropped. Retrying in 4s (attempt 2 of 5). The agent keeps running.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-reconnect="${t.id}">${ic('refresh')}Reconnect now</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'error': return `<div class="tstate"><div class="tcard" data-tone="error" role="alert"><h3>✕ Can't attach to ${id}</h3>
+      <p>Engine ${t.engine} is unreachable: ${esc(ENGINES[2].err)}.</p><p class="more muted">The tab stays open and reconnects when you ask. Nothing on the engine was changed.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-reconnect="${t.id}">${ic('refresh')}Reconnect</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'stopped': return `<div class="tstate"><div class="tcard" role="status"><h3>■ ${t.agent} stopped</h3>
+      <p>The agent exited with code 0 at 14:44. Its workspace is kept until someone removes the agent.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-start="${t.id}">${ic('play')}Start and reconnect</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+  }
+  return '';
+}
+function pane(id, i) {
+  const t = tabById(id); if (!t) return '<div class="tpane"></div>';
+  const focus = i === S.focusPane;
+  const foot = { connected: `<span class="st"><span class="dot" data-s="${t.act}"></span>${actLabel[t.act]}</span><span class="presence"><span class="avatar" data-me>CV</span>you hold it</span>`,
+    connecting: `<span class="st"><span class="dot" data-s="starting"></span>connecting</span>`, busy: `<span class="st">${ic('lock', 'data-size="sm"')}held by ${P[t.holder || 'mc'].name}</span>`,
+    taken: `<span class="st">${ic('swap', 'data-size="sm"')}taken over</span>`, disconnected: `<span class="st">${ic('plug-off', 'data-size="sm"')}disconnected · retrying</span>`,
+    error: `<span class="st" style="color:var(--status-error)">✕ error</span>`, stopped: `<span class="st"><span class="dot" data-s="stopped"></span>agent stopped</span>` }[t.state];
+  return `<section class="tpane ${S.layout > 1 ? 'compact' : ''}" data-state="${t.state}" ${focus ? 'data-focus' : ''} tabindex="0" aria-label="Terminal ${t.agent}" data-pane="${i}">
+    <div class="thead"><span class="id">${S.multi ? t.engine + ':' : ''}${t.project}/<b>${t.agent}</b></span>${t.state === 'connected' ? pill(t.act, actLabel[t.act]) : ''}<span class="grow"></span>
+      <div class="tools">
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Agent page" title="Agent page" data-go="agent">${ic('file', 'data-size="sm"')}</button>
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Pop out into a window" title="Pop out (Ctrl+] p)">${ic('popout', 'data-size="sm"')}</button>
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Full screen" title="Full screen (Ctrl+] f)" data-act="fullscreen">${ic('max', 'data-size="sm"')}</button>
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close terminal" title="Detach and close (Ctrl+] d)" data-close="${t.id}">${ic('x', 'data-size="sm"')}</button>
+      </div></div>
+    <div class="tbody"><pre class="screen">${cells(SCREENS[t.scr]())}</pre>${stateOverlay(t)}</div>
+    <div class="tfoot">${foot}<span class="grow"></span><span class="hide-sm">${S.layout === 1 ? '132×41' : S.layout === 2 ? '78×41' : '78×19'}</span><span><span class="kbd">Ctrl</span>+<span class="kbd">]</span> then <span class="kbd">?</span> keys</span></div>
+  </section>`;
+}
+function termView() {
+  const layoutBtns = S.layout;
+  return `<div class="termview" data-layout="${S.layout}">${S.panes.map(pane).join('')}</div>`;
+}
+function layoutSwitch() {
+  return `<div class="seg" role="group" aria-label="Terminal layout">${[[1, 'single', 'One terminal'], [2, 'split', 'Two side by side'], [4, 'grid', 'Four in a grid']].map(([n, i, l]) => `<button aria-pressed="${S.layout === n}" data-layout="${n}" aria-label="${l}" title="${l}">${ic(i, 'data-size="sm"')}</button>`).join('')}</div>`;
+}
+
+/* ---------- overlays ---------- */
+function dialog() {
+  const d = S.dialog; if (!d) return '';
+  let h = '';
+  if (d.k === 'spawn') h = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Spawn an agent in payments</h2><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close" data-dlg="close">${ic('x')}</button></header>
+    <div class="content"><div class="field"><label for="st">Template</label><select id="st" class="select"><option>claude · claude-code</option><option>opencode · opencode</option></select></div>
+    <div class="field"><label for="sn">Name</label><input id="sn" class="input" placeholder="automatic, e.g. claude-7f3a" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" maxlength="63"><span class="help">Letters, digits, dot, dash, underscore. Becomes <code>lab:payments/&lt;name&gt;</code>.</span></div></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="primary" data-dlg="spawn">Spawn <span class="kbd">↵</span></button></footer></div>`;
+  if (d.k === 'rm-agent') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh" aria-describedby="dd"><header><h2 id="dh">Remove ${d.name}?</h2></header>
+    <div class="content" id="dd"><ul class="consequence"><li>Deletes the container, its network and its workspace.</li><li>Uncommitted changes in the workspace are lost.</li><li>Anyone at its terminal is disconnected.</li></ul><p class="muted" style="margin:0">This can't be undone. The audit log keeps a record.</p></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="removed">Remove ${d.name}</button></footer></div>`;
+  if (d.k === 'role') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Make ${P[d.who].name} ${d.role === 'owner' ? 'an owner' : d.role === 'administrator' ? 'an administrator' : 'a user'}?</h2></header>
+    <div class="content"><ul class="consequence">${d.role === 'owner' ? '<li>They can add and remove people, including you.</li><li>They can operate every agent in payments.</li>' : d.role === 'administrator' ? '<li>They can start, stop, attach to and remove every agent in payments.</li><li>They can read the audit log.</li>' : '<li>They keep access to their own agents only.</li><li>They lose access to other people\'s terminals; if they hold one, they are disconnected.</li>'}</ul></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="role-ok">Change role</button></footer></div>`;
+  if (d.k === 'rm-member') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Remove ${P[d.name].name} from payments?</h2></header>
+    <div class="content"><ul class="consequence"><li>They lose access to the project and its terminals right away.</li><li>Their agents keep running; administrators can still operate them.</li></ul></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="member-removed">Remove access</button></footer></div>`;
+  if (d.k === 'engine-rm') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Forget engine ${d.name}?</h2></header>
+    <div class="content"><ul class="consequence"><li>The hub stops showing its projects and agents.</li><li>Every role on its projects is deleted.</li><li>Nothing on the engine itself is touched; agents keep running.</li></ul>
+    <div class="field"><label for="cn">Type <code>${d.name}</code> to confirm</label><input id="cn" class="input" autocomplete="off"></div></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="engine-gone">Forget engine</button></footer></div>`;
+  if (d.k === 'hostkey') h = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dh" style="width:min(560px,100%)"><header>${ic('key')}<h2 id="dh">Confirm the host key of build-farm.lan</h2></header>
+    <div class="content"><p class="dim" style="margin:0">This is the first connection to this server. It presented the key below. Check it against the server before you trust it; after you pin it, any other key is refused.</p>
+    <div class="fp"><span class="muted">ED25519</span> SHA256:<span class="h">q9Xw</span>vM2k<span class="h">Lr8T</span>c0Pa<span class="h">nZ4e</span>Y1uB<span class="h">7sJd</span>Hk3f<span class="h">Wm6Q</span>oR2x</div>
+    <div class="field"><span class="label-text">On the server, run</span><code style="padding:6px 8px">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code></div></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="primary" data-dlg="pinned">Pin this key and save</button></footer></div>`;
+  if (d.k === 'help') h = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dh" style="width:min(620px,100%)"><header><h2 id="dh">Keyboard</h2><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close" data-dlg="close">${ic('x')}</button></header>
+    <div class="content">${keymapHTML()}</div></div>`;
+  return `<div class="scrim" data-dlg-scrim>${h}</div>`;
+}
+const LEADER_KEYS = [['1–9', 'go to terminal n'], ['↑ ↓', 'previous / next terminal'], ['h', 'back to the last page'], ['n', 'focus the sidebar'], ['b', 'collapse / expand sidebar'], ['s', 'split: 1 → 2 → 4'], ['o', 'focus the other pane'], ['f', 'full screen on / off'], ['p', 'pop out to a window'], ['d', 'detach and close tab'], [':', 'command menu'], [']', 'send Ctrl+] to the agent'], ['?', 'all shortcuts'], ['Esc', 'cancel']];
+function keymapHTML() {
+  return `<p class="dim" style="margin:0">Inside a terminal every key goes to the agent. Hub shortcuts start with the leader <span class="kbd">Ctrl</span>+<span class="kbd">]</span>, the same escape <code>egzo agent attach</code> uses to detach. Press it, release, then one key.</p>
+  <div class="leader" style="position:static;transform:none;width:auto;box-shadow:none"><div class="keys">${LEADER_KEYS.map(([k, l]) => `<div><span class="kbd">${k}</span>${l}</div>`).join('')}</div></div>
+  <p class="dim" style="margin:0">Outside a terminal (on hub pages), single keys work: <span class="kbd">:</span> or <span class="kbd">Ctrl</span>+<span class="kbd">K</span> command menu, <span class="kbd">/</span> filter, <span class="kbd">j</span>/<span class="kbd">k</span> move in lists, <span class="kbd">Enter</span> open, <span class="kbd">a</span> attach, <span class="kbd">s</span> spawn, <span class="kbd">g</span> <span class="kbd">p</span> projects, <span class="kbd">?</span> this list.</p>`;
+}
+function leaderHUD() {
+  if (!S.leader) return '';
+  return `<div class="leader" role="dialog" aria-label="Terminal keys"><header><b>Ctrl+]</b><span class="muted">waiting for a key…</span><span class="grow"></span><span class="muted">Esc to cancel</span></header>
+    <div class="keys">${LEADER_KEYS.map(([k, l]) => `<div><span class="kbd">${k}</span>${l}</div>`).join('')}</div></div>`;
+}
+function paletteHTML() {
+  if (!S.palette) return '';
+  const q = S.paletteQ.toLowerCase();
+  const items = [
+    ...S.tabs.map((t, i) => ({ g: 'Open terminals', l: `${t.agent}`, s: `${t.project} · ${t.engine}`, k: String(i + 1), a: () => openTab(t.id) })),
+    ...AGENTS.filter((a) => a.running && !tabFor(a.name)).map((a) => ({ g: 'Attach', l: a.name, s: `payments · lab · ${actLabel[a.act]}`, a: () => attach(a.name) })),
+    ...PROJECTS.map((p) => ({ g: 'Projects', l: p.name, s: p.engine, a: () => go('project') })),
+    { g: 'Actions', l: 'Spawn an agent in payments', s: '', a: () => { go('project'); S.dialog = { k: 'spawn' }; } },
+    { g: 'Actions', l: 'Engines', s: 'settings', a: () => go('engines') },
+    { g: 'Actions', l: 'Switch theme', s: '', a: () => toggleTheme() },
+  ].filter((x) => !q || (x.l + ' ' + x.s).toLowerCase().includes(q));
+  S._pal = items;
+  let g = '';
+  return `<div class="scrim" data-pal-scrim style="place-items:start center"></div><div class="palette" role="dialog" aria-label="Command menu"><div class="q"><span>:</span><input id="palq" value="${esc(S.paletteQ)}" placeholder="Go to a project, attach an agent, run an action" aria-controls="pall" autocomplete="off"></div>
+    <div class="list" id="pall" role="listbox">${items.map((x, i) => { const head = x.g !== g ? `<div class="grp label">${(g = x.g)}</div>` : ''; return `${head}<div class="menu-item" role="option" data-pi="${i}" aria-selected="${i === S.paletteSel}">${x.l} <small>${x.s}</small>${x.k ? `<span class="kbd">${x.k}</span>` : ''}</div>`; }).join('') || '<div class="menu-item muted">No match</div>'}</div></div>`;
+}
+
+const PROTO = [
+  ['Screens', [['signin', 'Sign-in'], ['signin-err', 'Sign-in: provider error'], ['home', 'Home: 3 engines, 1 unreachable'], ['home-single', 'Home: single engine'], ['home-empty', 'Home: no access yet'], ['engines', 'Engines (operator)'], ['engines-add', 'Engines: add + inline error'], ['hostkey', 'Engines: confirm ssh host key'],
+    ['project', 'Project: agents'], ['p-services', 'Project: services'], ['p-timeline', 'Project: timeline'], ['p-spec', 'Project: resolved spec'], ['p-audit', 'Project: audit log'], ['p-members', 'Project: members'], ['p-down', 'Project: sidecars down'], ['agent', 'Agent: waiting on a question'], ['agent-logs', 'Agent: logs'], ['agent-down', 'Agent: engine down'], ['forbidden', 'No permission (403)'], ['notfound', 'Not found (404)']]],
+  ['Navigation', [['rail', 'Sidebar collapsed to a rail'], ['nav-empty', 'Sidebar with no terminal open'], ['mobile', 'Phone: full-screen nav (open at < 720px)']]],
+  ['Terminals', [['t1', 'One terminal, full stage'], ['t2', 'Split: two side by side'], ['t4', 'Grid: four'], ['tfs', 'Full screen'], ['leader', 'Leader key menu (Ctrl+])'], ['palette', 'Command menu (:)']]],
+  ['Terminal states (applied to the tab in view)', [['s-connecting', 'Connecting'], ['s-connected', 'Connected'], ['s-busy', 'Busy: someone else holds it'], ['s-taken', 'Taken over: you were displaced'], ['s-disconnected', 'Disconnected, retrying'], ['s-error', 'Error: engine unreachable'], ['s-stopped', 'Agent stopped']]],
+  ['Dialogs and feedback', [['d-spawn', 'Spawn'], ['d-rm', 'Remove agent'], ['d-role', 'Change role'], ['d-eng', 'Forget engine'], ['toast', 'Toasts'], ['help', 'Keyboard reference']]],
+];
+function protoHTML() {
+  return `<button class="proto-btn" data-proto-toggle aria-expanded="${S.proto}">${ic('grid', 'data-size="sm"')}Prototype screens</button>
+  ${S.proto ? `<nav class="proto" aria-label="Prototype screens"><p class="note">Not part of the product. Jumps to each designed screen and state. Everything is example data.</p>
+    ${PROTO.map(([h, items]) => `<div><h4 class="label">${h}</h4><div class="items">${items.map(([k, l]) => `<button class="it" data-proto="${k}" ${S.lastProto === k ? 'aria-current="true"' : ''}>${l}</button>`).join('')}</div></div>`).join('')}
+    <div><h4 class="label">Theme</h4><div class="seg" style="margin-top:4px">${['system', 'dark', 'light'].map((t) => `<button aria-pressed="${(document.documentElement.dataset.theme || 'system') === t}" data-theme-set="${t}">${t}</button>`).join('')}</div></div>
+  </nav>` : ''}`;
+}
+
+/* ---------- render ---------- */
+function hubPage() {
+  switch (S.screen) {
+    case 'signin': return pageSignin();
+    case 'home': return pageHome(false);
+    case 'home-empty': return pageHome(true);
+    case 'engines': return pageEngines();
+    case 'project': return pageProject();
+    case 'agent': return pageAgent(false);
+    case 'agent-down': return pageAgent(true);
+    case 'forbidden': return pageForbidden();
+    case 'notfound': return pageNotFound();
+  }
+}
+function render() {
+  const focusId = document.activeElement && document.activeElement.id;
+  const signin = S.screen === 'signin';
+  $('#root').innerHTML = signin ? `<div class="app" style="grid-template-columns:1fr"><main class="stage" style="grid-template-rows:1fr"><div class="viewport" style="grid-row:1"><div class="hubview">${pageSignin()}</div></div></main></div>${protoHTML()}` :
+    `<div class="app" ${S.fullscreen ? 'data-fullscreen' : ''} ${S.rail ? 'data-rail' : ''} ${S.navOpen ? 'data-nav-open' : ''}>${sidebar()}
+      <main class="stage">${mbar()}<div class="viewport">
+        <div class="hubview" ${S.active ? 'hidden' : ''}>${hubPage()}</div>
+        ${S.active ? termView() : ''}
+      </div></main></div>
+      ${dialog()}${leaderHUD()}${paletteHTML()}${protoHTML()}`;
+  if (S.active && !S.fullscreen) { const th = document.querySelectorAll('.tpane .thead .tools'); if (th[0]) th[0].insertAdjacentHTML('afterbegin', layoutSwitch()); }
+  if (focusId && document.getElementById(focusId)) document.getElementById(focusId).focus();
+  if (S.palette) { const i = $('#palq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  else if (S.dialog) { const b = $('.dialog[data-tone="danger"] input') || $('.dialog[data-tone="danger"] footer .btn') || $('.dialog input, .dialog select, .dialog footer .btn:last-child'); b && b.focus(); }
+}
+
+/* ---------- actions ---------- */
+function go(screen) { S.screen = screen; S.active = 0; S.fullscreen = false; S.navOpen = false; render(); $('.hubview') && ($('.hubview').scrollTop = 0); }
+function openTab(id) {
+  const t = tabById(id); if (!t) return;
+  t.unread = false; S.active = id; S.navOpen = false;
+  if (!S.panes.includes(id)) { if (S.layout === 1) S.panes = [id]; else S.panes[S.focusPane] = id; }
+  S.focusPane = S.panes.indexOf(id);
+  render(); const p = document.querySelector(`.tpane[data-pane="${S.focusPane}"]`); p && p.focus();
+}
+function closeTab(id) {
+  const i = S.tabs.findIndex((t) => t.id === id); if (i < 0) return;
+  const t = S.tabs[i]; S.tabs.splice(i, 1);
+  S.panes = S.panes.filter((p) => p !== id);
+  if (S.active === id) { const n = S.tabs[Math.min(i, S.tabs.length - 1)]; if (n) { S.active = n.id; if (!S.panes.length) S.panes = [n.id]; else if (!S.panes.includes(n.id)) S.panes.push(n.id); S.panes = fillPanes(); } else { S.active = 0; S.panes = []; } }
+  S.focusPane = Math.max(0, S.panes.indexOf(S.active));
+  render(); toast(`Detached from <b>${t.agent}</b>. The agent keeps running.`);
+}
+function attach(name) {
+  const a = AGENTS.find((x) => x.name === name);
+  const t = { id: S.nextId++, engine: 'lab', project: 'payments', agent: name, state: 'connecting', act: a.act, scr: name === 'lint-sweep' ? 'lint' : 'claude', holder: a.holder && !P[a.holder].me ? a.holder : null };
+  S.tabs.push(t); openTab(t.id);
+  setTimeout(() => { t.state = t.holder ? 'busy' : 'connected'; if (S.active) render(); }, 1400);
+}
+function fillPanes() {
+  const want = S.layout; const ids = S.tabs.map((t) => t.id);
+  let panes = S.panes.filter((p) => ids.includes(p)).slice(0, want);
+  if (!panes.includes(S.active) && S.active) panes.unshift(S.active);
+  for (const id of ids) { if (panes.length >= want) break; if (!panes.includes(id)) panes.push(id); }
+  return panes.slice(0, want);
+}
+function setLayout(n) { S.layout = n; if (!S.active && S.tabs[0]) S.active = S.tabs[0].id; S.panes = fillPanes(); S.focusPane = Math.max(0, S.panes.indexOf(S.active)); render(); }
+function cycleTab(d) { const ids = [0, ...S.tabs.map((t) => t.id)]; const i = ids.indexOf(S.active); const n = ids[(i + d + ids.length) % ids.length]; n ? openTab(n) : (S.active = 0, render()); }
+function toggleTheme() { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark ? 'light' : 'dark'; render(); }
+function activeTab() { return tabById(S.panes[S.focusPane] || S.active) || S.tabs[0]; }
+
+function proto(k) {
+  S.lastProto = k; S.rail = k === 'rail'; S.navOpen = k === 'mobile'; S.dialog = null; S.leader = false; S.palette = false; S.fullscreen = false; S.signinError = false; S.projectDown = false; S.enginesForm = false; S.agentTab = 'timeline';
+  if (k !== 'nav-empty' && S._saved && !S.tabs.length) { S.tabs = S._saved; S._saved = null; }
+  const ensureTerm = () => { if (!S.active) { S.active = (S.panes[0] || S.tabs[0].id); } };
+  const pt = { 'p-services': 'services', 'p-timeline': 'timeline', 'p-spec': 'spec', 'p-audit': 'audit', 'p-members': 'members' };
+  if (k === 'home-single') { S.multi = false; S.screen = 'home'; S.active = 0; }
+  else if (k === 'home') { S.multi = true; S.screen = 'home'; S.active = 0; }
+  else if (k === 'signin' || k === 'signin-err') { S.screen = 'signin'; S.signinError = k === 'signin-err'; }
+  else if (['home-empty', 'engines', 'agent', 'agent-down', 'forbidden', 'notfound'].includes(k)) { S.multi = true; S.screen = k; S.active = 0; }
+  else if (k === 'agent-logs') { S.screen = 'agent'; S.agentTab = 'logs'; S.active = 0; }
+  else if (k === 'engines-add') { S.screen = 'engines'; S.enginesForm = true; S.active = 0; }
+  else if (k === 'hostkey') { S.screen = 'engines'; S.enginesForm = true; S.active = 0; S.dialog = { k: 'hostkey' }; }
+  else if (k === 'project') { S.screen = 'project'; S.projTab = 'agents'; S.active = 0; }
+  else if (pt[k]) { S.screen = 'project'; S.projTab = pt[k]; S.active = 0; }
+  else if (k === 'p-down') { S.screen = 'project'; S.projTab = 'agents'; S.projectDown = true; S.active = 0; }
+  else if (k === 'rail') { S.screen = 'project'; S.active = S.tabs[0].id; S.panes = [S.tabs[0].id]; S.layout = 1; }
+  else if (k === 'nav-empty') { S._saved = S._saved || S.tabs; S.tabs = []; S.active = 0; S.panes = []; S.screen = 'home'; }
+  else if (k === 'mobile') { S.active = 0; S.screen = 'project'; }
+  else if (k === 't1') { S.active = S.tabs[0].id; setLayout(1); }
+  else if (k === 't2') { S.active = S.tabs[0].id; S.panes = [S.tabs[0].id, S.tabs[1].id]; S.layout = 2; S.focusPane = 0; }
+  else if (k === 't4') { S.active = S.tabs[0].id; S.panes = S.tabs.slice(0, 4).map((t) => t.id); S.layout = 4; S.focusPane = 0; }
+  else if (k === 'tfs') { ensureTerm(); S.fullscreen = true; toast('Full screen. Press Ctrl+] then f to leave.'); }
+  else if (k === 'leader') { ensureTerm(); S.leader = true; }
+  else if (k === 'palette') { S.palette = true; S.paletteQ = ''; S.paletteSel = 0; }
+  else if (k.startsWith('s-')) { ensureTerm(); if (S.layout !== 1) setLayout(1); const t = activeTab(); t.state = k.slice(2); if (t.state === 'busy' || t.state === 'taken') t.holder = 'mc'; }
+  else if (k === 'd-spawn') { S.screen = 'project'; S.projTab = 'agents'; S.active = 0; S.dialog = { k: 'spawn' }; }
+  else if (k === 'd-rm') { S.screen = 'project'; S.projTab = 'agents'; S.active = 0; S.dialog = { k: 'rm-agent', name: 'migrate-db' }; }
+  else if (k === 'd-role') { S.screen = 'project'; S.projTab = 'members'; S.active = 0; S.dialog = { k: 'role', who: 'so', role: 'administrator' }; }
+  else if (k === 'd-eng') { S.screen = 'engines'; S.active = 0; S.dialog = { k: 'engine-rm', name: 'gpu-box' }; }
+  else if (k === 'help') { S.dialog = { k: 'help' }; }
+  else if (k === 'toast') { render(); toast('Spawned <b>claude-7f3a</b> in payments.'); toast('Stopped <b>fix-auth</b>.'); toast('Couldn\'t stop <b>flaky-tests</b>: engine lab answered 409 (container is restarting). Try again in a moment.', 'error'); return; }
+  render();
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-close],[data-tab],[data-psect],[data-go],[data-act],[data-ptab],[data-atab],[data-open],[data-attach],[data-take],[data-reconnect],[data-start],[data-layout],[data-dlg],[data-dlg-scrim],[data-pal-scrim],[data-pi],[data-proto],[data-proto-toggle],[data-theme-set],[data-filter],[data-pane]');
+  if (!el) return;
+  const d = el.dataset;
+  if (d.close) { e.stopPropagation(); return closeTab(+d.close); }
+  if (d.tab !== undefined) { return +d.tab ? openTab(+d.tab) : (S.active = 0, render()); }
+  if (d.go) { e.preventDefault(); return go(d.go); }
+  if (d.ptab) { S.projTab = d.ptab; return render(); }
+  if (d.psect) { e.preventDefault(); S.projTab = d.psect; return go('project'); }
+  if (d.atab) { S.agentTab = d.atab; return render(); }
+  if (d.open) return openTab(+d.open);
+  if (d.attach) return attach(d.attach);
+  if (d.take) { const t = tabById(+d.take); t.state = 'connecting'; render(); setTimeout(() => { t.state = 'connected'; t.holder = null; render(); toast(`You hold <b>${t.agent}</b>. ${P.mc.name} was disconnected and notified.`); }, 900); return; }
+  if (d.reconnect) { const t = tabById(+d.reconnect); t.state = 'connecting'; render(); setTimeout(() => { t.state = t.engine === 'gpu-box' ? 'error' : 'connected'; render(); }, 1200); return; }
+  if (d.start) { const t = tabById(+d.start); t.state = 'connecting'; render(); setTimeout(() => { t.state = 'connected'; render(); }, 1200); return; }
+  if (d.layout) return setLayout(+d.layout);
+  if (d.filter) { S.homeFilter = d.filter; return render(); }
+  if (d.pane !== undefined && !e.target.closest('button')) { S.focusPane = +d.pane; S.active = S.panes[S.focusPane]; return render(); }
+  if (d.protoToggle !== undefined) { S.proto = !S.proto; return render(); }
+  if (d.proto) return proto(d.proto);
+  if (d.themeSet) { if (d.themeSet === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = d.themeSet; return render(); }
+  if (d.dlgScrim !== undefined && e.target === el) { S.dialog = null; return render(); }
+  if (d.palScrim !== undefined) { S.palette = false; return render(); }
+  if (d.pi) { const x = S._pal[+d.pi]; S.palette = false; x.a(); return render(); }
+  if (d.dlg) {
+    const k = d.dlg, dd = S.dialog; S.dialog = null; render();
+    if (k === 'spawn') { toast('Spawned <b>claude-7f3a</b> in payments.'); }
+    if (k === 'removed') toast(`Removed <b>${dd.name}</b> and its workspace.`);
+    if (k === 'role-ok') toast(`${P[dd.who].name} is now ${dd.role === 'owner' ? 'an owner' : 'an ' + dd.role}.`);
+    if (k === 'member-removed') toast(`${P[dd.name].name} no longer has access to payments.`);
+    if (k === 'engine-gone') toast(`Forgot engine <b>${dd.name}</b>.`);
+    if (k === 'pinned') { S.enginesForm = false; render(); toast('Pinned the host key and saved <b>build-farm</b>. It is reachable.'); }
+    return;
+  }
+  if (d.act) {
+    const a = d.act;
+    if (a === 'palette') { S.palette = true; S.paletteQ = ''; S.paletteSel = 0; }
+    if (a === 'theme') return toggleTheme();
+    if (a === 'rail') S.rail = !S.rail;
+    if (a === 'nav') S.navOpen = !S.navOpen;
+    if (a === 'spawn') S.dialog = { k: 'spawn' };
+    if (a === 'rm-agent') S.dialog = { k: 'rm-agent', name: d.name };
+    if (a === 'rm-member') S.dialog = { k: 'rm-member', name: d.name };
+    if (a === 'engine-add' || a === 'engine-edit') S.enginesForm = true;
+    if (a === 'engine-close') S.enginesForm = false;
+    if (a === 'engine-rm') S.dialog = { k: 'engine-rm', name: d.name };
+    if (a === 'hostkey') S.dialog = { k: 'hostkey' };
+    if (a === 'fullscreen') { S.fullscreen = !S.fullscreen; if (S.fullscreen) toast('Full screen. Press Ctrl+] then f to leave.'); }
+    render();
+  }
+});
+document.addEventListener('change', (e) => { const r = e.target.dataset.role; if (r) { S.dialog = { k: 'role', who: r, role: e.target.value }; render(); } });
+document.addEventListener('input', (e) => { if (e.target.id === 'palq') { S.paletteQ = e.target.value; S.paletteSel = 0; render(); } });
+document.addEventListener('keydown', (e) => {
+  const inField = e.target.matches('input, textarea, select');
+  // Leader: Ctrl+] works everywhere, including inside a terminal.
+  if (e.ctrlKey && (e.key === ']' || e.code === 'BracketRight')) { e.preventDefault(); S.leader = !S.leader; return render(); }
+  if (S.leader) {
+    e.preventDefault(); S.leader = false; const k = e.key;
+    if (/^[1-9]$/.test(k)) { const t = S.tabs[+k - 1]; return t ? openTab(t.id) : render(); }
+    if (k === 'ArrowDown' || k === 'ArrowRight') return cycleTab(1);
+    if (k === 'ArrowUp' || k === 'ArrowLeft') return cycleTab(-1);
+    if (k === 'h') { S.active = 0; S.fullscreen = false; return render(); }
+    if (k === 'b') { S.rail = !S.rail; return render(); }
+    if (k === 'n') { S.rail = false; S.fullscreen = false; render(); const f = $('.side .nav-focus[tabindex="0"]') || $('.side .nav-focus'); return f && f.focus(); }
+    if (k === 's') return setLayout(S.layout === 1 ? 2 : S.layout === 2 ? 4 : 1);
+    if (k === 'o' && S.panes.length > 1) { S.focusPane = (S.focusPane + 1) % S.panes.length; S.active = S.panes[S.focusPane]; render(); const p = document.querySelector(`.tpane[data-pane="${S.focusPane}"]`); return p && p.focus(); }
+    if (k === 'f') { S.fullscreen = !S.fullscreen; return render(); }
+    if (k === 'd' && S.active) return closeTab(S.active);
+    if (k === ':') { S.palette = true; S.paletteQ = ''; S.paletteSel = 0; return render(); }
+    if (k === '?') { S.dialog = { k: 'help' }; return render(); }
+    if (k === ']') { render(); return toast('Sent Ctrl+] to the agent.'); }
+    return render();
+  }
+  if (S.palette) {
+    if (e.key === 'Escape') { S.palette = false; return render(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); S.paletteSel = Math.max(0, Math.min((S._pal || []).length - 1, S.paletteSel + (e.key === 'ArrowDown' ? 1 : -1))); return render(); }
+    if (e.key === 'Enter') { const x = (S._pal || [])[S.paletteSel]; S.palette = false; if (x) x.a(); return render(); }
+    return;
+  }
+  if (S.dialog && e.key === 'Escape') { S.dialog = null; return render(); }
+  // Sidebar keyboard.
+  // Sidebar: one tab stop; ↑/↓ move through terminals and projects, Enter opens, Delete closes a terminal.
+  if (e.target.classList.contains('nav-focus') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault(); const all = [...document.querySelectorAll('.side .nav-focus')]; const i = all.indexOf(e.target); const n = all[Math.max(0, Math.min(all.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]; n.focus(); return;
+  }
+  if (e.target.classList.contains('term-item') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); return e.target.click(); }
+  if (e.target.classList.contains('term-item') && e.key === 'Delete') return closeTab(+e.target.dataset.tab);
+  if (e.target.closest('.tpane') || inField || S.dialog) return; // the terminal owns its keys
+  if (e.key === ':' || (e.ctrlKey && e.key.toLowerCase() === 'k')) { e.preventDefault(); S.palette = true; S.paletteQ = ''; S.paletteSel = 0; return render(); }
+  if (e.key === '?') { S.dialog = { k: 'help' }; return render(); }
+  if (e.key === '/' && $('#q')) { e.preventDefault(); return $('#q').focus(); }
+  if (e.key === 's' && S.screen === 'project' && !S.active) { S.dialog = { k: 'spawn' }; return render(); }
+});
+render();
+</script>

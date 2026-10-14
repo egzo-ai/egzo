@@ -1,0 +1,208 @@
+/* egzo hub · design tokens v1
+ * Dark-first. Every value is a CSS custom property; components use only these.
+ * Theme selection: no attribute = follow the OS; data-theme="light" | "dark" on <html> forces one.
+ * Fonts are self-hosted in the Go binary (no CDN): JetBrains Mono (UI + terminal), Martian Mono (display, sparingly).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── Surfaces: warm CRT black, each step a little lighter ─────────── */
+  --bg:            #0f0d0b;  /* page */
+  --surface-1:     #161310;  /* panels, tables, tab strip */
+  --surface-2:     #1e1a16;  /* hover, raised rows, inputs */
+  --surface-3:     #28221c;  /* selected, pressed, menus */
+  --overlay:       rgb(5 4 3 / 0.72);  /* behind dialogs */
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text:          #f1e5d1;  /* 15.6:1 on bg */
+  --text-2:        #c4b29a;  /* 9.4:1  secondary */
+  --text-3:        #9a8a75;  /* 5.8:1  muted, timestamps; still AA */
+  --text-invert:   #1b1200;
+
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --border:        #3a3128;  /* hairlines between rows (decorative) */
+  --border-strong: #75634f;  /* inputs, controls: ≥3:1 */
+
+  /* ── Accent: P3 amber phosphor ────────────────────────────────────── */
+  --accent:        #ffb000;  /* fills: primary buttons, active tab rule, cursor */
+  --accent-hover:  #ffc23d;
+  --accent-text:   #ffb000;  /* accent used as text/links on bg (10.6:1) */
+  --on-accent:     #1b1200;  /* text on accent fills (10.1:1) */
+  --accent-soft:   rgb(255 176 0 / 0.12);  /* selected row, active tab bg */
+  --accent-line:   rgb(255 176 0 / 0.45);
+  --focus:         #ffd27a;  /* focus ring, always 2px + 2px offset */
+  --brand:         #ffb000;  /* the logo is amber, the same phosphor as the UI */
+  --logo-front:    #ffb000;  /* front container */
+  --logo-prompt:   #0f0d0b;  /* the >_ knocked out of it */
+  --logo-line-1:   #7b5606;  /* back container outline */
+  --logo-line-2:   #c38703;  /* middle container outline */
+
+  /* ── Status (each paired with a glyph; never colour alone) ─────────── */
+  --status-running:      #7fd67f;  /* ● running / working */
+  --status-running-soft: rgb(127 214 127 / 0.12);
+  --status-waiting:      #5cc8ff;  /* ? waiting on a human answer */
+  --status-waiting-soft: rgb(92 200 255 / 0.13);
+  --status-stopped:      #9a8a75;  /* ■ stopped / exited */
+  --status-stopped-soft: rgb(154 138 117 / 0.12);
+  --status-error:        #ff6464;  /* ✕ error / unhealthy / refused */
+  --status-error-soft:   rgb(255 100 100 / 0.12);
+  --status-unreachable:  #b99cff;  /* ⌁ engine unreachable (dashed outline) */
+  --status-unreachable-soft: rgb(185 156 255 / 0.12);
+  --status-warn:         #f5d76e;  /* ! stale, project down */
+  --status-warn-soft:    rgb(245 215 110 / 0.12);
+
+  /* ── Terminal theme (xterm.js ITheme; read at runtime, see docs) ──── */
+  --term-bg:          #0b0907;
+  --term-fg:          #ecdfc9;
+  --term-cursor:      #ffb000;
+  --term-cursor-accent: #0b0907;
+  --term-selection:   rgb(255 176 0 / 0.28);
+  --term-black:       #1e1a16;  --term-bright-black:   #6b5d4d;
+  --term-red:         #ff6b5e;  --term-bright-red:     #ff9a8f;
+  --term-green:       #8fd18a;  --term-bright-green:   #b6e8a8;
+  --term-yellow:      #ffc53d;  --term-bright-yellow:  #ffdd85;
+  --term-blue:        #6fa8ff;  --term-bright-blue:    #9fc4ff;
+  --term-magenta:     #d39cff;  --term-bright-magenta: #e6c2ff;
+  --term-cyan:        #5cc8ff;  --term-bright-cyan:    #9edfff;
+  --term-white:       #d9cbb5;  --term-bright-white:   #fff6e6;
+
+  /* ── Phosphor glow on amber rules (dark only; set to none to disable) ─ */
+  --glow-accent:   0 0 6px rgb(255 176 0 / 0.45);
+
+  /* ── Elevation: borders, not shadows; one shadow for floating layers ─ */
+  --shadow-float:  0 10px 30px rgb(0 0 0 / 0.55), 0 0 0 1px var(--border);
+
+  /* ── Type ─────────────────────────────────────────────────────────── */
+  --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display:  "Martian Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-term:     var(--font-mono);
+
+  --text-2xs: 0.6875rem; /* 11px  key caps, counters */
+  --text-xs:  0.75rem;   /* 12px  labels, badges, meta */
+  --text-sm:  0.8125rem; /* 13px  body, tables (base) */
+  --text-md:  0.875rem;  /* 14px  emphasis, inputs */
+  --text-lg:  1rem;      /* 16px  section titles */
+  --text-xl:  1.25rem;   /* 20px  page titles (display face) */
+  --text-2xl: 1.75rem;   /* 28px  sign-in, empty states */
+  --leading-tight: 1.25;
+  --leading:       1.5;
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-bold:    700;
+  --tracking-label: 0.08em;  /* UPPERCASE labels only */
+  --term-font-size: 13px;
+  --term-line-height: 1.2;
+
+  /* ── Space (4px grid) ─────────────────────────────────────────────── */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ── Size ─────────────────────────────────────────────────────────── */
+  --control-h-sm: 24px;
+  --control-h:    28px;
+  --control-h-lg: 36px;
+  --row-h:        32px;   /* table rows */
+  --hud-h:        40px;   /* sidebar head, mobile bar */
+  --nav-w:        272px;  /* sidebar */
+  --nav-w-md:     232px;  /* sidebar at tablet widths */
+  --nav-w-rail:   52px;   /* collapsed sidebar */
+  --content-max:  1200px;
+
+  /* ── Shape: squared, like a monitor bezel ─────────────────────────── */
+  --radius-0: 0;
+  --radius-1: 2px;   /* badges, pills, keycaps */
+  --radius-2: 4px;   /* buttons, inputs, menus */
+  --radius-3: 6px;   /* dialogs, toasts */
+  --border-w: 1px;
+
+  /* ── Motion ───────────────────────────────────────────────────────── */
+  --dur-instant: 0ms;     /* tab switch, terminal focus: never animate */
+  --dur-fast:    90ms;    /* hover, press */
+  --dur-base:    150ms;   /* menus, toasts in */
+  --dur-slow:    240ms;   /* dialogs */
+  --ease-out:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in:     cubic-bezier(0.4, 0, 1, 1);
+  --blink:       1.06s steps(1, end) infinite;  /* cursor, connecting caret */
+
+  /* ── Layers ───────────────────────────────────────────────────────── */
+  --z-tabbar: 20;
+  --z-menu:   40;
+  --z-dialog: 60;
+  --z-toast:  70;
+  --z-hud:    80;   /* leader-key overlay */
+}
+
+/* ── Light: "printout" — warm paper grey, ink text, the same amber keys ── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f3f0ea; --surface-1: #fbfaf7; --surface-2: #ebe6dd; --surface-3: #e1d9cc;
+    --overlay: rgb(29 24 18 / 0.45);
+    --text: #1d1812; --text-2: #4b4135; --text-3: #6b5e4e; --text-invert: #fbfaf7;
+    --border: #d6cdbf; --border-strong: #968670;
+    --accent: #ffb000; --accent-hover: #f0a400; --accent-text: #8a5300; --on-accent: #1b1200;
+    --accent-soft: rgb(255 176 0 / 0.18); --accent-line: rgb(179 122 0 / 0.55);
+    --focus: #8a5300; --brand: #ffb000;
+    --logo-front: #1d1812; --logo-prompt: #ffb000; --logo-line-1: #d9b066; --logo-line-2: #b37a00;
+    --status-running: #27702b; --status-running-soft: rgb(39 112 43 / 0.10);
+    --status-waiting: #09649a; --status-waiting-soft: rgb(9 100 154 / 0.10);
+    --status-stopped: #6b5e4e; --status-stopped-soft: rgb(107 94 78 / 0.10);
+    --status-error: #b8242b;   --status-error-soft: rgb(184 36 43 / 0.09);
+    --status-unreachable: #6544b8; --status-unreachable-soft: rgb(101 68 184 / 0.09);
+    --status-warn: #7a5d00;    --status-warn-soft: rgb(196 150 0 / 0.14);
+    --term-bg: #fbf9f5; --term-fg: #1d1812; --term-cursor: #b37a00; --term-cursor-accent: #fbf9f5;
+    --term-selection: rgb(255 176 0 / 0.30);
+    --term-black: #1d1812; --term-bright-black: #6b5e4e;
+    --term-red: #b8242b; --term-bright-red: #d1453f;
+    --term-green: #27702b; --term-bright-green: #3a8a3c;
+    --term-yellow: #8a5300; --term-bright-yellow: #a86a00;
+    --term-blue: #1f5fbf; --term-bright-blue: #3b78d4;
+    --term-magenta: #8a3fb8; --term-bright-magenta: #a35ad0;
+    --term-cyan: #09649a; --term-bright-cyan: #1a7fb8;
+    --term-white: #d6cdbf; --term-bright-white: #fbfaf7;
+    --glow-accent: none;
+    --shadow-float: 0 10px 28px rgb(60 45 25 / 0.18), 0 0 0 1px var(--border);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f0ea; --surface-1: #fbfaf7; --surface-2: #ebe6dd; --surface-3: #e1d9cc;
+  --overlay: rgb(29 24 18 / 0.45);
+  --text: #1d1812; --text-2: #4b4135; --text-3: #6b5e4e; --text-invert: #fbfaf7;
+  --border: #d6cdbf; --border-strong: #968670;
+  --accent: #ffb000; --accent-hover: #f0a400; --accent-text: #8a5300; --on-accent: #1b1200;
+  --accent-soft: rgb(255 176 0 / 0.18); --accent-line: rgb(179 122 0 / 0.55);
+  --focus: #8a5300; --brand: #ffb000;
+  --logo-front: #1d1812; --logo-prompt: #ffb000; --logo-line-1: #d9b066; --logo-line-2: #b37a00;
+  --status-running: #27702b; --status-running-soft: rgb(39 112 43 / 0.10);
+  --status-waiting: #09649a; --status-waiting-soft: rgb(9 100 154 / 0.10);
+  --status-stopped: #6b5e4e; --status-stopped-soft: rgb(107 94 78 / 0.10);
+  --status-error: #b8242b;   --status-error-soft: rgb(184 36 43 / 0.09);
+  --status-unreachable: #6544b8; --status-unreachable-soft: rgb(101 68 184 / 0.09);
+  --status-warn: #7a5d00;    --status-warn-soft: rgb(196 150 0 / 0.14);
+  --term-bg: #fbf9f5; --term-fg: #1d1812; --term-cursor: #b37a00; --term-cursor-accent: #fbf9f5;
+  --term-selection: rgb(255 176 0 / 0.30);
+  --term-black: #1d1812; --term-bright-black: #6b5e4e;
+  --term-red: #b8242b; --term-bright-red: #d1453f;
+  --term-green: #27702b; --term-bright-green: #3a8a3c;
+  --term-yellow: #8a5300; --term-bright-yellow: #a86a00;
+  --term-blue: #1f5fbf; --term-bright-blue: #3b78d4;
+  --term-magenta: #8a3fb8; --term-bright-magenta: #a35ad0;
+  --term-cyan: #09649a; --term-bright-cyan: #1a7fb8;
+  --term-white: #d6cdbf; --term-bright-white: #fbfaf7;
+  --glow-accent: none;
+  --shadow-float: 0 10px 28px rgb(60 45 25 / 0.18), 0 0 0 1px var(--border);
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; --blink: none; }
+}

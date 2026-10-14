@@ -1,0 +1,1059 @@
+<title>egzo hub screens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Martian+Mono:wght@300;400;500&display=swap">
+<style>
+/*@TOKENS@*/
+/*@COMPONENTS@*/
+
+/* ═══ App shell ═════════════════════════════════════════════════════════
+   Layout: a left sidebar (open terminals, then projects, then account) and a stage.
+   Pages scroll inside the stage; terminal views fill it and stay mounted when hidden.
+   ≤720px the sidebar becomes the full-screen nav and the stage gets a one-line bar. */
+html, body { height: 100%; }
+.app { height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); min-height: 420px; display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); min-width: 0; }
+.app[data-rail] { grid-template-columns: var(--nav-w-rail) minmax(0, 1fr); }
+.app[data-fullscreen] { grid-template-columns: 0 minmax(0, 1fr); }
+.app[data-fullscreen] .side { overflow: hidden; border: 0; }
+
+.side { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0; background: var(--surface-1);
+  border-right: 1px solid var(--border); padding-left: env(safe-area-inset-left, 0px); z-index: var(--z-tabbar); }
+.side-head { display: flex; align-items: center; gap: var(--space-2); height: var(--hud-h); padding: 0 var(--space-2) 0 var(--space-3); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: var(--space-2); color: var(--text); text-decoration: none; flex: 1; min-width: 0; }
+.brand svg { width: 20px; height: 20px; flex: none; }
+.brand b { font-family: var(--font-display); font-weight: 400; font-size: var(--text-sm); letter-spacing: -0.02em; }
+.brand b span { color: var(--text-3); }
+.goto { margin: var(--space-2); display: flex; align-items: center; gap: var(--space-2); height: var(--control-h); padding: 0 var(--space-2); font: inherit; font-size: var(--text-xs);
+  color: var(--text-3); background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-2); cursor: pointer; text-align: left; }
+.goto:hover { color: var(--text-2); border-color: var(--text-3); }
+.goto span.t { flex: 1; }
+.side-scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: var(--space-3); scrollbar-width: thin; }
+.side-h { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-1); }
+.side-h .label { flex: 1; }
+.side-h .count { font-size: var(--text-2xs); color: var(--text-3); }
+.side-list { display: grid; gap: 1px; padding: 0 var(--space-2); }
+
+.nav-item { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 0 var(--space-2); align-items: center; min-height: 28px; padding: 3px var(--space-2);
+  color: var(--text-2); text-decoration: none; border-radius: var(--radius-1); cursor: pointer; font-size: var(--text-sm); }
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item[aria-current="page"], .nav-item[aria-current="true"] { background: var(--accent-soft); color: var(--text); }
+.nav-item[aria-current="page"]::before, .nav-item[aria-current="true"]::before { content: ""; position: absolute; left: -8px; top: 4px; bottom: 4px; width: 2px; background: var(--accent); box-shadow: var(--glow-accent); }
+.nav-item .ic { display: grid; place-items: center; color: var(--text-3); }
+.nav-item .ini { display: none; }
+.app[data-rail] .nav-item.proj .ic { display: none; }
+.app[data-rail] .nav-item.proj .ini { display: grid; place-items: center; width: 24px; height: 20px; font-size: var(--text-2xs); text-transform: uppercase; border: 1px solid var(--border-strong); border-radius: var(--radius-1); color: var(--text-2); }
+.nav-item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-item .end { display: flex; gap: var(--space-1); align-items: center; }
+.nav-item .end .engine { height: 16px; }
+.nav-item .n { font-size: var(--text-2xs); color: var(--text-3); }
+.nav-sub { display: grid; gap: 1px; padding-left: 24px; margin: 1px 0 var(--space-1); }
+.nav-sub .nav-item { grid-template-columns: minmax(0, 1fr) auto; min-height: 24px; font-size: var(--text-xs); padding: 2px var(--space-2); }
+.nav-sub .nav-item[aria-current="page"]::before { left: -8px; }
+.qcount { font-size: 10px; font-weight: 800; color: var(--bg); background: var(--status-waiting); height: 14px; min-width: 14px; padding: 0 3px; display: grid; place-items: center; border-radius: var(--radius-1); }
+
+/* Terminal entries: three lines, so the list says what each agent is doing without opening it. */
+.term-item { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; grid-template-rows: auto auto auto; gap: 0 var(--space-2); padding: 5px var(--space-2) 6px;
+  border-radius: var(--radius-1); cursor: pointer; color: var(--text-2); }
+.term-item:hover { background: var(--surface-2); }
+.term-item[aria-selected="true"] { background: var(--accent-soft); color: var(--text); }
+.term-item[aria-selected="true"]::before { content: ""; position: absolute; left: -8px; top: 5px; bottom: 5px; width: 2px; background: var(--accent); box-shadow: var(--glow-accent); }
+.term-item[data-visible]:not([aria-selected="true"])::before { content: ""; position: absolute; left: -8px; top: 5px; bottom: 5px; width: 2px; background: var(--accent-line); }
+.term-item .glyph { grid-row: 1; display: grid; place-items: center; height: 18px; color: var(--text-3); }
+.term-item .glyph .icon { width: 12px; height: 12px; }
+.term-item .glyph[data-g="error"] { color: var(--status-error); font-size: 11px; }
+.term-item .nm { grid-column: 2; font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 18px; }
+.term-item[data-unread] .nm { font-weight: var(--weight-bold); }
+.term-item .end { grid-column: 3; grid-row: 1; display: flex; gap: var(--space-1); align-items: center; height: 18px; }
+.term-item .n { font-size: var(--text-2xs); color: var(--text-3); }
+.term-item .where { grid-column: 2 / 4; font-size: var(--text-2xs); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-item .what { grid-column: 2 / 4; font-size: var(--text-xs); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-item .what[data-t="waiting"] { color: var(--status-waiting); }
+.term-item .what[data-t="error"] { color: var(--status-error); }
+.term-item .what[data-t="busy"] { color: var(--accent-text); }
+.term-item .unread { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; box-shadow: var(--glow-accent); }
+.term-item .x { width: 18px; height: 18px; display: grid; place-items: center; border-radius: var(--radius-1); color: var(--text-3); opacity: 0; }
+.term-item:hover .x, .term-item[aria-selected="true"] .x, .term-item:focus-visible .x, .term-item:focus-within .x { opacity: 1; }
+.term-item .x:hover { background: var(--surface-3); color: var(--text); }
+.term-item:focus-visible { outline-offset: -2px; }
+.side-empty { margin: 0 var(--space-3); padding: var(--space-2) var(--space-3); border: 1px dashed var(--border-strong); border-radius: var(--radius-2); font-size: var(--text-xs); color: var(--text-3); }
+.side-add { margin: var(--space-1) var(--space-2) 0; }
+
+.side-foot { border-top: 1px solid var(--border); padding: var(--space-2); display: grid; gap: var(--space-1); }
+.side-foot .row { display: flex; align-items: center; gap: var(--space-1); }
+.side-foot .row .grow { flex: 1; }
+.health { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: 26px; padding: 0 var(--space-2); font: inherit; font-size: var(--text-xs); color: var(--text-2);
+  border: 1px solid transparent; background: none; border-radius: var(--radius-1); cursor: pointer; text-align: left; }
+.health:hover { background: var(--surface-2); }
+.health .t { flex: 1; }
+.health[data-down] .warn { color: var(--status-unreachable); }
+.me { display: inline-flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-1); background: none; border: 0; color: var(--text-2); font: inherit; font-size: var(--text-xs); cursor: pointer; height: 28px; border-radius: var(--radius-2); min-width: 0; }
+.me:hover { background: var(--surface-2); }
+
+/* Rail: 52px, glyphs and numbers only; names in tooltips. */
+.app[data-rail] .side .brand b, .app[data-rail] .side .goto .t, .app[data-rail] .side .goto .kbd, .app[data-rail] .side-h .label, .app[data-rail] .side-h .count,
+.app[data-rail] .term-item .nm, .app[data-rail] .term-item .where, .app[data-rail] .term-item .what, .app[data-rail] .term-item .x, .app[data-rail] .nav-item .nm, .app[data-rail] .nav-item .end,
+.app[data-rail] .nav-sub, .app[data-rail] .side-empty, .app[data-rail] .side-add .t, .app[data-rail] .health .t, .app[data-rail] .me .t, .app[data-rail] .side-foot .hide-rail { display: none; }
+.app[data-rail] .term-item, .app[data-rail] .nav-item { grid-template-columns: 1fr; justify-items: center; padding: 6px 0; }
+.app[data-rail] .term-item .end { grid-column: 1; grid-row: 2; }
+.app[data-rail] .side-head { padding: 0; justify-content: center; flex-direction: column; height: auto; padding-block: var(--space-2); gap: var(--space-2); }
+.app[data-rail] .brand { flex: none; }
+.app[data-rail] .goto { justify-content: center; padding: 0; }
+.app[data-rail] .side-h { justify-content: center; padding: var(--space-2) 0 var(--space-1); }
+.app[data-rail] .side-h::after { content: ""; width: 20px; height: 1px; background: var(--border); }
+.app[data-rail] .side-add { display: flex; justify-content: center; }
+.app[data-rail] .side-foot .row { flex-direction: column; }
+.app[data-rail] .health { justify-content: center; padding: 0; }
+
+.stage { position: relative; min-height: 0; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.mbar { display: none; grid-row: 1; }
+.viewport { position: relative; min-height: 0; grid-row: 2; }
+.hubview { position: absolute; inset: 0; overflow: auto; }
+.termview { position: absolute; inset: 0; display: grid; gap: 1px; background: var(--border); }
+.termview[data-layout="1"] { grid-template-columns: 1fr; }
+.termview[data-layout="2"] { grid-template-columns: 1fr 1fr; }
+.termview[data-layout="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+/* ═══ Hub pages ═══ */
+.page { max-width: var(--content-max); margin: 0 auto; padding-block: var(--space-5) var(--space-8);
+  padding-left: max(var(--space-5), env(safe-area-inset-left, 0px)); padding-right: max(var(--space-5), env(safe-area-inset-right, 0px)); display: grid; gap: var(--space-4); align-content: start; }
+.page[data-narrow] { max-width: 760px; }
+.crumbs { font-size: var(--text-xs); color: var(--text-3); display: flex; gap: var(--space-1); flex-wrap: wrap; align-items: center; }
+.crumbs a { color: var(--text-2); text-decoration: none; }
+.crumbs a:hover { color: var(--accent-text); text-decoration: underline; }
+.phead { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.phead .grow { flex: 1; }
+.phead .h-page .sep { color: var(--text-3); }
+.metaline { display: flex; gap: var(--space-4); flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-2); align-items: center; }
+.metaline .k { color: var(--text-3); }
+.toolbar { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+.toolbar .grow { flex: 1; }
+.search { position: relative; width: min(260px, 100%); }
+.search .icon { position: absolute; left: 8px; top: 6px; color: var(--text-3); }
+.search .input { padding-left: 28px; padding-right: 28px; }
+.search .kbd { position: absolute; right: 6px; top: 5px; }
+.agentsbar { display: inline-flex; gap: 1px; height: 6px; width: 64px; vertical-align: middle; margin-right: var(--space-2); background: var(--surface-3); }
+.agentsbar i { display: block; height: 100%; }
+.agentsbar .r { background: var(--status-running); } .agentsbar .w { background: var(--status-waiting); } .agentsbar .s { background: var(--border-strong); }
+.twocol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); }
+.panel { border: 1px solid var(--border); border-radius: var(--radius-2); background: var(--surface-1); min-width: 0; }
+.panel > header { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: 32px; border-bottom: 1px solid var(--border); }
+.panel > header .grow { flex: 1; }
+.panel > .pad { padding: var(--space-3); display: grid; gap: var(--space-3); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-4); margin: 0; font-size: var(--text-sm); }
+.kv dt { color: var(--text-3); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.statusline { font-size: var(--text-md); color: var(--text); padding: var(--space-3); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-2); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+.statusline .q { color: var(--status-waiting); }
+.termcard { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; padding: var(--space-3); border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-2); }
+.termcard .grow { flex: 1; min-width: 200px; }
+.spec { margin: 0; font-size: 12px; line-height: 1.55; background: var(--term-bg); color: var(--term-fg); border: 1px solid var(--border); border-radius: var(--radius-2); overflow: auto; counter-reset: ln; padding: var(--space-3) 0; }
+.spec span.l { display: block; padding-right: var(--space-4); white-space: pre; }
+.spec span.l::before { counter-increment: ln; content: counter(ln); display: inline-block; width: 4ch; margin-right: 2ch; text-align: right; color: var(--term-bright-black); }
+.spec .k { color: var(--term-yellow); } .spec .c { color: var(--term-bright-black); } .spec .s { color: var(--term-green); } .spec .v { color: var(--term-cyan); }
+.roles { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-4); font-size: var(--text-xs); color: var(--text-2); margin: 0; }
+.roles dt { color: var(--text); }
+.roles dd { margin: 0; }
+.drawer { border: 1px solid var(--border-strong); border-radius: var(--radius-2); background: var(--surface-1); display: grid; }
+.drawer > header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+.drawer > header h2 { margin: 0; font-size: var(--text-md); flex: 1; }
+.drawer .content { padding: var(--space-4); display: grid; gap: var(--space-4); }
+.drawer footer { display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); justify-content: flex-end; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.fp { font-size: var(--text-md); letter-spacing: .02em; padding: var(--space-3); background: var(--term-bg); color: var(--term-fg); border: 1px solid var(--border-strong); border-radius: var(--radius-2); overflow-wrap: anywhere; line-height: 1.6; }
+.fp .h { color: var(--accent-text); }
+
+/* Sign-in */
+.signin { min-height: 100%; display: grid; place-items: center; padding: var(--space-6) max(16px, env(safe-area-inset-left, 0px)); }
+.signin .box { width: min(440px, 100%); display: grid; gap: var(--space-5); }
+.signin .mark { display: flex; align-items: center; gap: var(--space-3); }
+.signin .mark svg { width: 44px; height: 44px; }
+.signin .mark b { font-family: var(--font-display); font-weight: 300; font-size: var(--text-2xl); letter-spacing: -0.03em; }
+.boot { margin: 0; font-size: var(--text-xs); color: var(--text-3); line-height: 1.7; white-space: pre-wrap; }
+.boot .ok { color: var(--status-running); }
+.boot .cur { display: inline-block; width: .6em; height: 1.1em; background: var(--accent); vertical-align: -2px; animation: blink var(--blink); box-shadow: var(--glow-accent); }
+
+/* ═══ Terminal panes ═══ */
+.tpane { display: grid; grid-template-rows: 30px minmax(0, 1fr) 22px; background: var(--term-bg); min-width: 0; min-height: 0; position: relative; outline: none; }
+.tpane::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px transparent; }
+.termview:not([data-layout="1"]) .tpane[data-focus]::after { box-shadow: inset 0 0 0 1px var(--accent); }
+.tpane:focus-visible::after { box-shadow: inset 0 0 0 2px var(--focus); }
+.thead { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-1) 0 var(--space-3); background: var(--surface-1); border-bottom: 1px solid var(--border); min-width: 0; font-size: var(--text-xs); }
+.thead .id { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text-3); }
+.thead .id b { color: var(--text); font-weight: var(--weight-bold); }
+.thead .grow { flex: 1; }
+.thead .tools { display: flex; gap: 2px; flex: none; }
+.tbody { position: relative; overflow: hidden; min-height: 0; }
+.screen { margin: 0; padding: 6px 10px; font-family: var(--font-term); font-size: var(--term-font-size); line-height: var(--term-line-height); color: var(--term-fg); white-space: pre; height: 100%; overflow: hidden; }
+.tpane[data-state]:not([data-state="connected"]) .screen { opacity: .28; filter: saturate(.4); }
+.tpane[data-state="connecting"] .screen { opacity: 0; }
+.tfoot { display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-3); font-size: var(--text-2xs); color: var(--text-3); background: var(--surface-1); border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden; }
+.tfoot .grow { flex: 1; }
+.tfoot .st { display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); }
+.cur { display: inline-block; width: .6em; background: var(--term-cursor); color: var(--term-cursor-accent); animation: blink var(--blink); }
+/* ANSI */
+.fg-r { color: var(--term-red); } .fg-g { color: var(--term-green); } .fg-y { color: var(--term-yellow); } .fg-b { color: var(--term-blue); }
+.fg-m { color: var(--term-magenta); } .fg-c { color: var(--term-cyan); } .fg-w { color: var(--term-white); } .fg-k { color: var(--term-bright-black); }
+.fg-R { color: var(--term-bright-red); } .fg-G { color: var(--term-bright-green); } .fg-W { color: var(--term-bright-white); } .fg-M { color: var(--term-bright-magenta); }
+.bg-g { background: color-mix(in srgb, var(--term-green) 18%, transparent); } .bg-r { background: color-mix(in srgb, var(--term-red) 18%, transparent); }
+.b { font-weight: 700; }
+.cell { display: inline-block; width: 1ch; text-align: center; overflow: visible; } .inv { background: var(--term-fg); color: var(--term-bg); }
+
+/* Terminal state overlay */
+.tstate { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-4); z-index: 2; }
+.tcard { width: min(520px, 100%); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius-3); box-shadow: var(--shadow-float); display: grid; gap: var(--space-3); padding: var(--space-4); }
+.tcard h3 { margin: 0; font-size: var(--text-md); display: flex; gap: var(--space-2); align-items: center; }
+.tcard p { margin: 0; color: var(--text-2); font-size: var(--text-sm); }
+.tcard .acts { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.tcard[data-tone="error"] { border-color: var(--status-error); }
+.tcard[data-tone="error"] h3 { color: var(--status-error); }
+.tcard[data-tone="taken"] h3, .tcard[data-tone="busy"] h3 { color: var(--accent-text); }
+.connecting { font-size: var(--text-sm); color: var(--text-2); display: grid; gap: 4px; }
+.connecting .ok { color: var(--status-running); }
+.connecting .now { color: var(--accent-text); }
+.compact .tcard { padding: var(--space-3); gap: var(--space-2); }
+.compact .tcard p.more { display: none; }
+
+/* Leader HUD */
+.leader { position: fixed; left: 50%; bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: var(--z-hud);
+  width: min(640px, calc(100vw - 32px)); background: var(--surface-3); border: 1px solid var(--accent); border-radius: var(--radius-3); box-shadow: var(--shadow-float), var(--glow-accent); padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-3); }
+.leader header { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--accent-text); }
+.leader header .grow { flex: 1; }
+.leader .keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1) var(--space-4); font-size: var(--text-xs); }
+.leader .keys div { display: flex; gap: var(--space-2); align-items: center; color: var(--text-2); }
+.leader .keys .kbd { color: var(--text); }
+
+/* Command menu */
+.palette { position: fixed; left: 50%; top: 12vh; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); z-index: var(--z-dialog); background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: var(--radius-3); box-shadow: var(--shadow-float); overflow: hidden; }
+.palette .q { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); height: 40px; border-bottom: 1px solid var(--border); }
+.palette .q span { color: var(--accent-text); font-weight: 800; }
+.palette input { flex: 1; background: none; border: 0; color: var(--text); font: inherit; font-size: var(--text-md); outline: none; }
+.palette .list { max-height: 50vh; overflow: auto; padding: var(--space-1); display: grid; }
+.palette .grp { padding: var(--space-2) var(--space-2) 2px; }
+.palette .menu-item small { color: var(--text-3); }
+
+/* ═══ Prototype index (not part of the product) ═══ */
+.proto-btn { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(30px + env(safe-area-inset-bottom, 0px)); z-index: 90; display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 30px; padding: 0 var(--space-3); font: inherit; font-size: var(--text-xs); color: var(--text); background: var(--surface-3); border: 1px dashed var(--accent); border-radius: var(--radius-2); cursor: pointer; box-shadow: var(--shadow-float); }
+.proto { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(68px + env(safe-area-inset-bottom, 0px)); top: 12px; z-index: 90; width: min(300px, calc(100vw - 24px)); overflow: auto;
+  background: var(--surface-1); border: 1px dashed var(--accent); border-radius: var(--radius-3); box-shadow: var(--shadow-float); padding: var(--space-3); display: grid; gap: var(--space-3); align-content: start; }
+.proto h4 { margin: 0; }
+.proto .items { display: grid; gap: 2px; }
+.proto button.it { text-align: left; font: inherit; font-size: var(--text-xs); color: var(--text-2); background: none; border: 0; padding: 4px var(--space-2); border-radius: var(--radius-1); cursor: pointer; }
+.proto button.it:hover { background: var(--surface-2); color: var(--text); }
+.proto button.it[aria-current="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.toasts { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+.proto .note { font-size: var(--text-2xs); color: var(--text-3); margin: 0; }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 1024px) {
+  .app { grid-template-columns: var(--nav-w-md) minmax(0, 1fr); }
+  .termview[data-layout="4"] { grid-template-columns: 1fr 1fr; }
+  .hide-md { display: none; }
+  .twocol { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .app, .app[data-rail] { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+  .app[data-nav-open] .side { display: grid; position: fixed; inset: 0; z-index: var(--z-dialog); padding-right: env(safe-area-inset-right, 0px); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .app[data-nav-open] .side-head .close-nav { display: inline-flex; }
+  .app[data-nav-open] .side .collapse { display: none; }
+  .nav-item, .term-item { min-height: 40px; }
+  .mbar { display: flex; align-items: center; gap: var(--space-2); height: 44px; padding: 0 var(--space-2); background: var(--surface-1); border-bottom: 1px solid var(--border);
+    padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+  .mbar .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
+  .termview[data-layout="2"], .termview[data-layout="4"] { grid-template-columns: 1fr; grid-template-rows: none; }
+  .hide-sm { display: none; }
+  .grid2 { grid-template-columns: 1fr; }
+  .leader .keys { grid-template-columns: 1fr 1fr; }
+}
+.side-head .close-nav { display: none; }
+</style>
+
+<!--@SPRITE@-->
+<div id="root"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+/* ---------- data (example content) ---------- */
+const P = {
+  cv: { name: 'Cedric Veilleux', i: 'CV', me: true, email: 'cedric@example.dev' },
+  mc: { name: 'Maria Chen', i: 'MC', email: 'maria@example.dev' },
+  so: { name: 'Sam Okafor', i: 'SO', email: 'sam@example.dev' },
+  pr: { name: 'Priya Raman', i: 'PR', email: 'priya@example.dev' },
+  jl: { name: 'Jonas Lind', i: 'JL', email: 'jonas@example.dev' },
+};
+const ENGINES = [
+  { name: 'lab', host: 'unix:///var/run/docker.sock', kind: 'local socket', up: true, projects: 3 },
+  { name: 'ci', host: 'tcp://ci.internal:2376', kind: 'tcp + TLS', up: true, projects: 2, tls: true },
+  { name: 'gpu-box', host: 'ssh://ops@gpu-box.lan', kind: 'ssh', up: false, ssh: true, err: 'ssh: connect to host gpu-box.lan port 22: connection refused', since: '14:02' },
+];
+const PROJECTS = [
+  { name: 'payments', engine: 'lab', role: 'administrator', r: 3, w: 1, t: 5, up: true },
+  { name: 'docs-site', engine: 'lab', role: 'user', r: 1, w: 0, t: 2, up: true },
+  { name: 'egzo', engine: 'lab', role: 'owner', r: 2, w: 0, t: 4, up: true },
+  { name: 'eval-harness', engine: 'ci', role: 'administrator', r: 3, w: 0, t: 3, up: true },
+  { name: 'infra-tf', engine: 'ci', role: 'user', r: 0, w: 0, t: 1, up: false },
+];
+const AGENTS = [
+  { name: 'fix-auth', tpl: 'claude', act: 'working', status: 'Running the auth test suite', holder: 'cv', by: 'cv', age: '42m', running: true },
+  { name: 'refund-api', tpl: 'claude', act: 'waiting', status: 'Keep POST /v1/refunds as a wrapper around v2?', holder: 'cv', by: 'mc', age: '1h 10m', running: true },
+  { name: 'flaky-tests', tpl: 'opencode', act: 'idle', status: 'Done: 3 of 3 suites pass', holder: 'mc', by: 'mc', age: '2h 05m', running: true },
+  { name: 'lint-sweep', tpl: 'claude', act: 'starting', status: '', holder: null, by: 'so', age: '12s', running: true },
+  { name: 'migrate-db', tpl: 'claude', act: 'stopped', status: 'Exited (0)', holder: null, by: 'so', age: '1d 3h', running: false, stale: true },
+];
+const SERVICES = [
+  { name: 'control', s: 'running', d: 'healthy · holds agent status and questions' },
+  { name: 'proxy', s: 'running', d: 'healthy · injects credentials, enforces egress' },
+  { name: 'browser', s: 'stopped', d: 'exited (0) · starts when an agent asks for it' },
+];
+const EVENTS = [
+  ['14:38:12', 'ask', 'refund-api', 'mc', 'Asked: keep POST /v1/refunds as a wrapper around v2?'],
+  ['14:36:50', 'attach', 'refund-api', 'cv', 'Attached to the terminal'],
+  ['14:31:07', 'status', 'fix-auth', null, 'Running the auth test suite'],
+  ['14:30:44', 'spawn', 'lint-sweep', 'so', 'Spawned from template claude'],
+  ['14:22:19', 'takeover', 'flaky-tests', 'mc', 'Took over the terminal from Sam Okafor'],
+  ['14:02:03', 'error', null, null, 'Engine gpu-box became unreachable'],
+  ['13:55:41', 'status', 'flaky-tests', null, 'Done: 3 of 3 suites pass'],
+  ['11:40:00', 'stop', 'migrate-db', 'so', 'Stopped (exit 0)'],
+];
+const AUDIT = [
+  ['2026-10-14 14:36:50', 'cv', 'attach', 'refund-api', '', true],
+  ['2026-10-14 14:30:44', 'so', 'spawn', 'lint-sweep', 'template claude', true],
+  ['2026-10-14 14:22:19', 'mc', 'takeover', 'flaky-tests', 'from Sam Okafor', true],
+  ['2026-10-14 14:20:02', 'jl', 'remove', 'flaky-tests', 'role user, not the creator', false],
+  ['2026-10-14 11:40:00', 'so', 'stop', 'migrate-db', '', true],
+  ['2026-10-13 17:12:45', 'cv', 'role', '', 'Priya Raman: user → administrator', true],
+];
+const MEMBERS = [['cv', 'owner'], ['mc', 'administrator'], ['pr', 'administrator'], ['so', 'user'], ['jl', 'user']];
+
+/* ---------- terminal screens (example output) ---------- */
+const box = (w, lines, cls = 'fg-k') => {
+  const top = `<span class="${cls}">╭${'─'.repeat(w)}╮</span>`, bot = `<span class="${cls}">╰${'─'.repeat(w)}╯</span>`;
+  const vis = (h) => [...h.replace(/<[^>]*>/g, '').replace(/&[a-z]+;/g, '_')].length;
+  return [top, ...lines.map(([html]) => `<span class="${cls}">│</span> ${html}${' '.repeat(Math.max(0, w - 1 - vis(html)))}<span class="${cls}">│</span>`), bot].join('\n');
+};
+// Non-ASCII glyphs get a fixed 1ch cell so fallback fonts can't break the grid (xterm does this natively).
+const cells = (h) => ('<span>' + h + '</span>').replace(/>([^<]*)</g, (m, t) => '>' + t.replace(/[^\x00-\x7F─│╭╮╰╯┃┗━]/g, (c) => `<span class="cell">${c}</span>`) + '<');
+const SCREENS = {
+  claude: () => `${box(58, [[`<span class="fg-y">✻</span> <span class="b">Welcome to Claude Code</span>`, 24], ['', 0], [`<span class="fg-k">cwd: /workspace/payments</span>`, 24]], 'fg-y')}
+
+<span class="fg-k">&gt;</span> <span>The session cookie isn't refreshed after the token rotates.</span>
+  <span>Fix it and add a regression test.</span>
+
+<span>⏺</span> I'll look at how sessions are refreshed first.
+
+<span class="fg-g">⏺</span> <span class="b">Read</span>(src/auth/session.ts)
+  <span class="fg-k">⎿  Read 142 lines</span>
+
+<span class="fg-g">⏺</span> <span class="b">Update</span>(src/auth/session.ts)
+  <span class="fg-k">⎿  Updated src/auth/session.ts with 6 additions and 1 removal</span>
+     <span class="fg-k">86</span>     const token = await store.get(id);
+     <span class="fg-k">87</span> <span class="bg-r"><span class="fg-r">-</span>   if (token.expiresAt &lt; now) return null;              </span>
+     <span class="fg-k">87</span> <span class="bg-g"><span class="fg-g">+</span>   if (token.expiresAt &lt; now) {                        </span>
+     <span class="fg-k">88</span> <span class="bg-g"><span class="fg-g">+</span>     const next = await rotate(token);                  </span>
+     <span class="fg-k">89</span> <span class="bg-g"><span class="fg-g">+</span>     res.cookie(SESSION, next.id, cookieOpts(next));   </span>
+     <span class="fg-k">90</span> <span class="bg-g"><span class="fg-g">+</span>     return next;                                       </span>
+     <span class="fg-k">91</span> <span class="bg-g"><span class="fg-g">+</span>   }                                                    </span>
+
+<span class="fg-g">⏺</span> <span class="b">Bash</span>(npm test -- auth)
+  <span class="fg-k">⎿  PASS  test/auth/session.test.ts (14 tests)</span>
+     <span class="fg-k">PASS  test/auth/rotate.test.ts (6 tests)</span>
+     <span class="fg-k">… running test/auth/cookie.test.ts</span>
+
+<span class="fg-y">✶</span> <span class="fg-y">Running tests…</span> <span class="fg-k">(31s · ↓ 1.4k tokens · esc to interrupt)</span>
+
+${box(58, [[`<span class="fg-k">&gt;</span> <span class="cur"> </span>`, 3]])}
+  <span class="fg-m">⏵⏵ bypass permissions on</span> <span class="fg-k">(shift+tab to cycle)</span>`,
+
+  ask: () => `<span>⏺</span> The v1 refund endpoint still gets traffic from the mobile app
+  (2.1k calls in the last 24h, from <span class="fg-c">payments-proxy</span> logs).
+
+<span class="fg-g">⏺</span> <span class="b">Read</span>(src/routes/refunds.v1.ts)
+  <span class="fg-k">⎿  Read 64 lines</span>
+
+${box(62, [[`<span class="fg-c b">☐ Keep v1 endpoint?</span>`, 20], ['', 0],
+  [`Should I keep POST /v1/refunds as a thin wrapper around v2?`, 59], ['', 0],
+  [`<span class="fg-c">❯ 1. Keep it as a wrapper</span>`, 25], [`  <span class="fg-k">  Mobile clients keep working; mark it deprecated.</span>`, 51],
+  [`  2. Remove it now`, 17], [`  <span class="fg-k">  Mobile app 4.12 and older will get 404s.</span>`, 43],
+  [`  3. Type something.`, 19]], 'fg-c')}
+  <span class="fg-k">Enter to select · ↑/↓ to navigate · Esc to cancel</span>`,
+
+  shell: () => `<span class="fg-g">agent@bench-runner</span>:<span class="fg-b">/workspace</span>$ make bench
+go test -run='^$' -bench=. -benchmem ./eval/...
+goos: linux
+goarch: amd64
+pkg: egzo.dev/eval/score
+cpu: AMD EPYC 7763 64-Core Processor
+BenchmarkParseTranscript-8      <span>  41209</span>    <span class="fg-y">28741 ns/op</span>    9216 B/op   112 allocs/op
+BenchmarkScoreRubric-8          <span> 189344</span>     <span class="fg-y">6302 ns/op</span>    1024 B/op    14 allocs/op
+BenchmarkDiffWorkspaces-8       <span>   3120</span>   <span class="fg-y">381900 ns/op</span>  210944 B/op  2048 allocs/op
+<span class="fg-g">PASS</span>
+ok      egzo.dev/eval/score     <span class="fg-k">14.212s</span>
+pkg: egzo.dev/eval/runner
+BenchmarkSpawnLoop-8            <span>    204</span>  <span class="fg-y">5873311 ns/op</span>   88412 B/op   903 allocs/op
+<span class="fg-g">PASS</span>
+ok      egzo.dev/eval/runner    <span class="fg-k">9.876s</span>
+<span class="fg-g">agent@bench-runner</span>:<span class="fg-b">/workspace</span>$ benchstat old.txt new.txt
+name               old time/op    new time/op    delta
+ParseTranscript-8    31.2µs ± 2%    28.7µs ± 1%   <span class="fg-g">-7.94%</span>  (p=0.000 n=10+10)
+ScoreRubric-8        6.29µs ± 1%    6.30µs ± 1%     ~     (p=0.684 n=10+10)
+DiffWorkspaces-8      402µs ± 3%     382µs ± 2%   <span class="fg-g">-4.99%</span>  (p=0.000 n=10+10)
+<span class="fg-g">agent@bench-runner</span>:<span class="fg-b">/workspace</span>$ <span class="cur"> </span>`,
+
+  opencode: () => `<span class="fg-k">┃</span> <span class="b">opencode</span> <span class="fg-k">v0.14 · anthropic/claude · flaky-tests</span>
+<span class="fg-k">┃</span>
+<span class="fg-k">┃</span> <span class="fg-c">user</span>   Find why test/ledger.spec.ts fails about 1 run in 20.
+<span class="fg-k">┃</span>
+<span class="fg-k">┃</span> <span class="fg-m">agent</span>  The ledger test shares a clock with the retry helper.
+<span class="fg-k">┃</span>        I froze time per test and re-ran each suite 50 times.
+<span class="fg-k">┃</span>        <span class="fg-g">✓</span> ledger.spec.ts   50/50
+<span class="fg-k">┃</span>        <span class="fg-g">✓</span> retry.spec.ts    50/50
+<span class="fg-k">┃</span>        <span class="fg-g">✓</span> webhook.spec.ts  50/50
+<span class="fg-k">┃</span>
+<span class="fg-k">┗━━</span> <span class="fg-k">&gt;</span> <span class="cur"> </span>`,
+
+  gpu: () => `<span class="fg-g">agent@finetune-7b</span>:<span class="fg-b">/workspace</span>$ python train.py --config lora.yaml
+step 1800/6000  loss 1.284  lr 1.8e-4  <span class="fg-k">42.1 it/s</span>
+step 1900/6000  loss 1.271  lr 1.8e-4  <span class="fg-k">42.0 it/s</span>
+step 2000/6000  loss 1.266  lr 1.7e-4  <span class="fg-k">41.8 it/s</span>
+<span class="fg-k">saving checkpoint ckpt/step-2000 …</span>`,
+
+  lint: () => `<span class="fg-k">starting harness claude-code …</span>`,
+};
+
+/* ---------- state ---------- */
+const S = {
+  screen: 'project', projTab: 'agents', multi: true, signinError: false, projectDown: false,
+  enginesForm: false, hostkey: false,
+  tabs: [
+    { id: 1, engine: 'lab', project: 'payments', agent: 'fix-auth', state: 'connected', act: 'working', scr: 'claude' },
+    { id: 2, engine: 'lab', project: 'payments', agent: 'refund-api', state: 'connected', act: 'waiting', scr: 'ask', unread: true },
+    { id: 3, engine: 'ci', project: 'eval-harness', agent: 'bench-runner', state: 'connected', act: 'working', scr: 'shell', unread: true, status: 'Comparing benchmarks with benchstat' },
+    { id: 4, engine: 'lab', project: 'payments', agent: 'flaky-tests', state: 'busy', act: 'idle', scr: 'opencode', holder: 'mc' },
+    { id: 5, engine: 'gpu-box', project: 'train', agent: 'finetune-7b', state: 'error', act: 'unknown', scr: 'gpu' },
+  ],
+  active: 0,          // 0 = Hub, otherwise a tab id
+  layout: 1, panes: [1], focusPane: 0,
+  fullscreen: false, leader: false, palette: false, paletteQ: '', paletteSel: 0,
+  dialog: null, proto: false, nextId: 6,
+};
+
+/* ---------- helpers ---------- */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ic = (n, a = '') => `<svg class="icon" aria-hidden="true" ${a}><use href="#i-${n}"/></svg>`;
+const av = (k, live) => `<span class="presence" ${live ? 'data-live' : ''}><span class="avatar" ${P[k].me ? 'data-me' : ''}>${P[k].i}</span>${P[k].me ? 'you' : esc(P[k].name)}</span>`;
+const pill = (s, t) => `<span class="pill" data-s="${s}">${t ?? s}</span>`;
+const eng = (n) => { const e = ENGINES.find((x) => x.name === n); return `<span class="engine" ${e && !e.up ? 'data-down' : ''} title="engine ${n}${e && !e.up ? ' (unreachable)' : ''}">${n}</span>`; };
+const actLabel = { working: 'working', idle: 'idle', waiting: 'waiting for you', starting: 'starting', stopped: 'stopped', unknown: 'unknown' };
+const tabById = (id) => S.tabs.find((t) => t.id === id);
+const tabFor = (agent, project = 'payments') => S.tabs.find((t) => t.agent === agent && t.project === project);
+const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true" class="logo-mark"><path d="M12 6V2h18v18h-4" fill="none" stroke="var(--logo-line-1)" stroke-width="2"/><path d="M7 11V7h18v18h-4" fill="none" stroke="var(--logo-line-2)" stroke-width="2"/><rect x="1" y="11" width="20" height="20" rx="1.5" fill="var(--logo-front)"/><path d="M6 16.5l4 4-4 4M12 25.5h5" fill="none" stroke="var(--logo-prompt)" stroke-width="2.5" stroke-linecap="square"/></svg>`;
+
+function toast(text, tone = 'ok') {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.dataset.tone = tone; el.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+  el.innerHTML = `<span class="glyph">${tone === 'error' ? '✕' : '✓'}</span><div class="body">${text}</div><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Dismiss">${ic('x')}</button>`;
+  el.querySelector('button').onclick = () => el.remove();
+  $('#toasts').append(el);
+  if (tone !== 'error') setTimeout(() => el.remove(), 5000);
+}
+
+/* ---------- sidebar ---------- */
+function tabGlyph(t) {
+  if (t.state === 'connecting') return `<span class="glyph"><span class="dot" data-s="starting"></span></span>`;
+  if (t.state === 'busy') return `<span class="glyph">${ic('lock')}</span>`;
+  if (t.state === 'taken') return `<span class="glyph">${ic('swap')}</span>`;
+  if (t.state === 'disconnected') return `<span class="glyph">${ic('plug-off')}</span>`;
+  if (t.state === 'error') return `<span class="glyph" data-g="error">✕</span>`;
+  if (t.state === 'stopped') return `<span class="glyph"><span class="dot" data-s="stopped"></span></span>`;
+  return `<span class="glyph"><span class="dot" data-s="${t.act}"></span></span>`;
+}
+const stateText = { connecting: 'connecting', connected: 'connected', busy: 'in use by someone else', taken: 'taken over', disconnected: 'disconnected', error: 'error', stopped: 'agent stopped' };
+const pageTitle = () => ({ home: 'Projects', 'home-empty': 'Projects', engines: 'Engines', project: 'payments', agent: 'payments / refund-api', 'agent-down': 'train / finetune-7b', forbidden: 'payments', notfound: 'Not found' }[S.screen] || 'Projects');
+const PSECT = [['agents', 'Agents', AGENTS.length], ['services', 'Services', SERVICES.length], ['timeline', 'Timeline'], ['spec', 'Spec'], ['audit', 'Audit log'], ['members', 'Members', MEMBERS.length]];
+function termWhat(t) {
+  const a = AGENTS.find((x) => x.name === t.agent && t.project === 'payments');
+  if (t.state === 'connecting') return ['', 'Connecting…'];
+  if (t.state === 'busy') return ['busy', `${P[t.holder || 'mc'].name} holds it`];
+  if (t.state === 'taken') return ['busy', `Taken over by ${P[t.holder || 'mc'].name}`];
+  if (t.state === 'disconnected') return ['', 'Disconnected, retrying'];
+  if (t.state === 'error') return ['error', `${t.engine} unreachable`];
+  if (t.state === 'stopped') return ['', 'Agent stopped (exit 0)'];
+  if (t.act === 'waiting') return ['waiting', '? ' + (a ? a.status : 'Waiting for an answer')];
+  return ['', a ? a.status : t.status || actLabel[t.act]];
+}
+
+function sidebar() {
+  const visible = S.active ? S.panes : [];
+  const terms = S.tabs.map((t, i) => {
+    const sel = S.active === t.id;
+    const [wt, what] = termWhat(t);
+    const lbl = `${t.agent}, ${t.project}${S.multi ? ' on ' + t.engine : ''}, ${stateText[t.state]}${t.state === 'connected' ? ', ' + actLabel[t.act] : ''}${t.unread ? ', new output' : ''}`;
+    return `<div role="option" tabindex="${sel || (!S.active && i === 0) ? 0 : -1}" class="term-item nav-focus" aria-selected="${sel}" aria-label="${esc(lbl)}" title="${t.engine}:${t.project}/${t.agent}" data-tab="${t.id}" ${t.unread && !sel ? 'data-unread' : ''} ${visible.includes(t.id) && !sel ? 'data-visible' : ''}>
+      ${tabGlyph(t)}<span class="nm">${t.agent}</span>
+      <span class="end">${t.act === 'waiting' && t.state === 'connected' && !sel ? '<span class="qcount" title="waiting for an answer">?</span>' : ''}${t.unread && !sel && t.act !== 'waiting' ? '<span class="unread" title="new output"></span>' : ''}<span class="n">${i + 1}</span><span class="x" role="button" aria-label="Close ${t.agent}" data-close="${t.id}">${ic('x', 'data-size="sm"')}</span></span>
+      <span class="where">${t.project}${S.multi ? ' · ' + t.engine : ''}</span>
+      <span class="what" data-t="${wt}">${esc(what)}</span>
+    </div>`;
+  }).join('');
+  const onPage = !S.active;
+  const projs = PROJECTS.filter((p) => S.multi || p.engine === 'lab').map((p) => {
+    const cur = onPage && p.name === 'payments' && ['project', 'agent', 'forbidden'].includes(S.screen);
+    const open = p.name === 'payments' && ['project', 'agent', 'forbidden'].includes(S.screen);
+    return `<a class="nav-item nav-focus proj" href="#" tabindex="-1" data-go="project" ${cur && S.screen !== 'project' ? '' : cur ? '' : ''} ${cur && S.screen === 'agent' ? '' : ''} title="${p.engine}:${p.name}">
+        <span class="ic">${ic(open ? 'chev-d' : 'chev-r', 'data-size="sm"')}</span><span class="ini" aria-hidden="true">${p.name.slice(0, 2)}</span><span class="nm">${p.name}</span>
+        <span class="end">${p.w ? `<span class="qcount" title="${p.w} question">${p.w}?</span>` : ''}${p.up ? '' : '<span class="pill" data-s="warn" style="height:16px;font-size:10px">down</span>'}${S.multi ? `<span class="engine">${p.engine}</span>` : ''}</span></a>
+      ${open ? `<div class="nav-sub">${PSECT.map(([k, l, c]) => `<a class="nav-item nav-focus" href="#" tabindex="-1" data-psect="${k}" ${onPage && S.screen === 'project' && S.projTab === k ? 'aria-current="page"' : ''}><span class="nm">${l}</span><span class="end"><span class="n">${c ?? ''}</span></span></a>`).join('')}
+        ${S.screen === 'agent' ? `<a class="nav-item nav-focus" href="#" tabindex="-1" data-go="agent" aria-current="page"><span class="nm">↳ refund-api</span><span class="end"><span class="dot" data-s="waiting"></span></span></a>` : ''}</div>` : ''}`;
+  }).join('');
+  const down = ENGINES.filter((e) => !e.up).length;
+  return `<nav class="side" aria-label="Main">
+    <div class="side-head"><a class="brand" href="#" data-go="home" aria-label="egzo hub, all projects">${LOGO}<b>egzo<span>/hub</span></b></a>
+      <button class="btn collapse" data-variant="quiet" data-size="sm" data-icon-only data-act="rail" aria-label="${S.rail ? 'Expand' : 'Collapse'} sidebar" title="${S.rail ? 'Expand' : 'Collapse'} sidebar (Ctrl+] b)">${ic(S.rail ? 'chev-r' : 'single', 'data-size="sm"')}</button>
+      <button class="btn close-nav" data-variant="quiet" data-size="sm" data-icon-only data-act="nav" aria-label="Close menu">${ic('x')}</button></div>
+    <button class="goto" data-act="palette" aria-label="Go to a project or agent">${ic('search', 'data-size="sm"')}<span class="t">Go to…</span><span class="kbd">:</span></button>
+    <div class="side-scroll">
+      <div class="side-h"><span class="label">Terminals</span><span class="count">${S.tabs.length || ''}</span></div>
+      <div class="side-list" role="listbox" aria-label="Open terminals">${terms || '<p class="side-empty">No terminal open. Use <b>Attach</b> on an agent; it opens here and stays open while you browse.</p>'}</div>
+      <div class="side-add"><button class="btn" data-variant="quiet" data-size="sm" data-act="palette" style="width:100%;justify-content:flex-start" aria-label="Attach an agent">${ic('plus', 'data-size="sm"')}<span class="t">Attach an agent</span></button></div>
+      <div class="side-h"><span class="label">Projects</span><span class="count">${S.multi ? PROJECTS.length : 3}</span></div>
+      <div class="side-list">
+        <a class="nav-item nav-focus" href="#" tabindex="0" data-go="home" ${onPage && S.screen.startsWith('home') ? 'aria-current="page"' : ''}><span class="ic">${ic('list', 'data-size="sm"')}</span><span class="nm">All projects</span><span class="end"><span class="qcount" title="1 question across projects">1?</span></span></a>
+        ${projs}
+      </div>
+    </div>
+    <div class="side-foot">
+      ${S.multi ? `<button class="health" ${down ? 'data-down' : ''} data-go="engines" aria-label="Engines: ${ENGINES.length - down} reachable, ${down} unreachable" ${onPage && S.screen === 'engines' ? 'aria-current="page"' : ''}>${ic('engine', 'data-size="sm"')}<span class="t">Engines <span class="muted">${ENGINES.length - down}/${ENGINES.length}</span></span>${down ? '<span class="warn hide-rail">⌁ 1 down</span>' : ''}</button>` : `<button class="health" data-go="engines">${ic('engine', 'data-size="sm"')}<span class="t">Engines</span></button>`}
+      <div class="row"><button class="me" aria-label="Account: Cedric Veilleux, operator"><span class="avatar" data-me>CV</span><span class="t">cedric · operator</span></button><span class="grow"></span>
+        <button class="btn hide-rail" data-variant="quiet" data-size="sm" data-icon-only data-act="theme" aria-label="Switch theme">${ic(document.documentElement.dataset.theme === 'light' ? 'moon' : 'sun')}</button></div>
+    </div>
+  </nav>`;
+}
+function mbar() {
+  const t = S.active && tabById(S.active);
+  return `<header class="mbar"><button class="btn" data-variant="quiet" data-icon-only data-act="nav" aria-label="Open menu">${ic('list')}</button>
+    <span class="t">${t ? `<b>${t.agent}</b> <span class="muted">${t.project}</span>` : pageTitle()}</span>
+    ${S.tabs.some((x) => x.act === 'waiting' && x.state === 'connected') ? '<span class="qcount">?</span>' : ''}
+    <button class="btn" data-variant="quiet" data-icon-only data-act="palette" aria-label="Go to">${ic('search')}</button></header>`;
+}
+
+/* ---------- pages ---------- */
+function pageHome(empty) {
+  const filter = S.homeFilter || 'all';
+  const rows = PROJECTS.filter((p) => filter === 'all' || p.engine === filter);
+  if (empty) return `<div class="page">
+    <div class="phead"><h1 class="h-page">Projects</h1></div>
+    <div class="empty">
+<pre class="art" aria-hidden="true">┌──────────────┐
+│  0 projects  │
+└──────────────┘</pre>
+      <h2>Nothing here yet</h2>
+      <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Send them the address you signed in with: <code>cedric@example.dev</code>.</p>
+      <p class="muted">Projects are created from the command line with <code>egzo project up</code>, not from the hub.</p>
+    </div></div>`;
+  const down = ENGINES.filter((e) => !e.up);
+  return `<div class="page">
+    <div class="phead"><h1 class="h-page">Projects</h1><span class="muted">${PROJECTS.length}</span><span class="grow"></span>
+      <div class="search"><label class="sr-only" for="q">Filter projects</label>${ic('search')}<input id="q" class="input" placeholder="Filter projects"><span class="kbd">/</span></div></div>
+    ${S.multi && down.length ? down.map((e) => `<div class="banner" data-tone="unreachable" role="alert"><span class="tag">⌁ ${e.name} unreachable</span><div class="body">Its projects are hidden until it answers again. Last reached at ${e.since}. <span class="muted">${esc(e.err)}</span></div><button class="btn" data-size="sm">${ic('refresh', 'data-size="sm"')}Retry</button></div>`).join('') : ''}
+    ${S.multi ? `<div class="toolbar"><span class="label">Engine</span><div class="chips" role="group" aria-label="Filter by engine">
+      <button class="chip" aria-pressed="${filter === 'all'}" data-filter="all">All <span class="count">${PROJECTS.length}</span></button>
+      ${ENGINES.map((e) => `<button class="chip" aria-pressed="${filter === e.name}" data-filter="${e.name}" ${e.up ? '' : 'disabled title="unreachable"'}><span class="dot" data-s="${e.up ? 'running' : 'unreachable'}"></span>${e.name} <span class="count">${e.up ? PROJECTS.filter((p) => p.engine === e.name).length : '—'}</span></button>`).join('')}
+    </div></div>` : ''}
+    <div class="table-wrap"><table class="table"><thead><tr><th>Project</th>${S.multi ? '<th>Engine</th>' : ''}<th>Agents</th><th>Needs you</th><th class="hide-sm">Your role</th></tr></thead><tbody>
+    ${rows.map((p) => `<tr>
+      <td><a class="name" href="#" data-go="project">${p.name}</a> ${p.up ? '' : pill('warn', 'sidecars down')}</td>
+      ${S.multi ? `<td>${eng(p.engine)}</td>` : ''}
+      <td><span class="agentsbar" aria-hidden="true"><i class="r" style="width:${(p.r - p.w) / p.t * 100}%"></i><i class="w" style="width:${p.w / p.t * 100}%"></i><i class="s" style="width:${(p.t - p.r) / p.t * 100}%"></i></span>${p.r} running <span class="muted">of ${p.t}</span></td>
+      <td>${p.w ? pill('waiting', p.w + ' question') : '<span class="muted">—</span>'}</td>
+      <td class="hide-sm dim">${p.role}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="muted" style="margin:0">Press <span class="kbd">:</span> to jump to any project or agent.</p>
+  </div>`;
+}
+
+function pageEngines() {
+  return `<div class="page" data-narrow>
+    <div class="crumbs"><span>Settings</span><span>/</span></div>
+    <div class="phead"><h1 class="h-page">Engines</h1><span class="badge" data-tone="accent">operator</span><span class="grow"></span>
+      <button class="btn" data-variant="primary" data-act="engine-add">${ic('plus')}Add engine</button></div>
+    <p class="dim" style="margin:0;max-width:70ch">The container engines this hub connects to. Credentials are encrypted at rest and never shown again; leave a credential blank to keep the stored one.</p>
+    <div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Address</th><th class="hide-sm">Kind</th><th>State</th><th class="num hide-sm">Projects</th><th></th></tr></thead><tbody>
+    ${ENGINES.map((e) => `<tr><td class="name">${e.name}</td><td><code>${e.host}</code></td><td class="hide-sm dim">${e.kind}</td>
+      <td>${e.up ? pill('running', 'reachable') : pill('unreachable', 'unreachable')}</td><td class="num hide-sm">${e.up ? e.projects : '—'}</td>
+      <td class="actions"><div class="row-actions"><button class="btn" data-size="sm" data-act="engine-edit">Edit</button><button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove ${e.name}" data-act="engine-rm" data-name="${e.name}">${ic('trash', 'data-size="sm"')}</button></div></td></tr>
+      ${e.up ? '' : `<tr data-dim><td></td><td colspan="5" class="wrap" style="height:auto;padding-bottom:8px"><span class="field-error" style="color:var(--status-unreachable)">${esc(e.err)} · since ${e.since}</span></td></tr>`}`).join('')}
+    </tbody></table></div>
+    ${S.enginesForm ? `<section class="drawer" aria-labelledby="eng-h"><header><h2 id="eng-h">Add engine</h2><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close" data-act="engine-close">${ic('x')}</button></header>
+      <div class="content">
+        <div class="grid2">
+          <div class="field"><label for="en">Name</label><input id="en" class="input" value="build-farm"><span class="help">Lowercase, used in URLs: <code>build-farm:project/agent</code></span></div>
+          <div class="field"><label for="ea">Address</label><input id="ea" class="input" value="ssh://ops@build-farm.lan"><span class="help">unix://… · tcp://host:2376 · ssh://user@host</span></div>
+        </div>
+        <fieldset class="group"><legend>ssh</legend>
+          <div class="field"><label for="eu">User, if not in the address</label><input id="eu" class="input" placeholder="ops"></div>
+          <div class="field"><span class="label-text">Private key (PEM, no passphrase)</span>
+            <div class="secret"><span class="state">Stored, 2026-09-30</span><button class="btn" data-size="sm">${ic('key', 'data-size="sm"')}Replace key</button></div>
+            <span class="help">Write-only. The hub never shows a stored key.</span></div>
+        </fieldset>
+        <fieldset class="group"><legend>TLS (tcp:// only)</legend>
+          <div class="field"><label for="eca">CA certificate (PEM)</label><textarea id="eca" class="textarea" placeholder="-----BEGIN CERTIFICATE-----" aria-invalid="true">-----BEGIN CERTIFICATE-----
+MIIBszCCAVmgAwIBAgIU…</textarea><span class="field-error">This doesn't end with -----END CERTIFICATE-----. Paste the whole file.</span></div>
+        </fieldset>
+      </div>
+      <footer><button class="btn" data-act="engine-close">Cancel</button><button class="btn" data-variant="primary" data-act="hostkey">Test and save</button></footer></section>` : ''}
+  </div>`;
+}
+
+function agentRows() {
+  return AGENTS.map((a, i) => {
+    const t = tabFor(a.name);
+    const attach = !a.running ? `<button class="btn" data-size="sm" disabled title="Start the agent to open its terminal">${ic('attach', 'data-size="sm"')}Attach</button>`
+      : t ? `<button class="btn" data-size="sm" data-open="${t.id}">${ic('term', 'data-size="sm"')}Tab ${S.tabs.indexOf(t) + 1}</button>`
+      : `<button class="btn" data-size="sm" data-attach="${a.name}">${ic('attach', 'data-size="sm"')}Attach</button>`;
+    return `<tr ${i === 0 ? 'aria-selected="true"' : ''}>
+      <td><a class="name" href="#" data-go="agent">${a.name}</a> <span class="muted">${a.tpl}</span> ${a.stale ? pill('warn', 'stale') : ''}</td>
+      <td>${pill(a.act, actLabel[a.act])}</td>
+      <td class="wrap dim hide-md" style="max-width:34ch">${a.act === 'waiting' ? `<span style="color:var(--status-waiting)">${esc(a.status)}</span>` : esc(a.status) || '<span class="muted">—</span>'}</td>
+      <td>${a.holder ? av(a.holder, true) : '<span class="muted">free</span>'}</td>
+      <td class="hide-sm dim">${P[a.by].me ? 'you' : P[a.by].name}</td>
+      <td class="actions"><div class="row-actions">${attach}
+        ${a.running ? `<button class="btn" data-size="sm" data-icon-only aria-label="Stop ${a.name}" title="Stop">${ic('stop', 'data-size="sm"')}</button>` : `<button class="btn" data-size="sm" data-icon-only aria-label="Start ${a.name}" title="Start">${ic('play', 'data-size="sm"')}</button>`}
+        <button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove ${a.name}" title="Remove" data-act="rm-agent" data-name="${a.name}">${ic('trash', 'data-size="sm"')}</button></div></td></tr>`;
+  }).join('');
+}
+const timeline = (rows) => `<ol class="timeline">${rows.map(([t, ty, ag, by, tx]) => `<li><time>${t}</time><span class="type" data-t="${ty}">${ty}</span><span class="text">${ag ? `<b>${ag}</b> ` : ''}${esc(tx)}${by ? ` <span class="muted">· ${P[by].me ? 'you' : P[by].name}</span>` : ''}</span></li>`).join('')}</ol>`;
+
+function pageProject() {
+  const tabs = [['agents', 'Agents', AGENTS.length, 'users'], ['services', 'Services', SERVICES.length], ['timeline', 'Timeline'], ['spec', 'Spec'], ['audit', 'Audit log'], ['members', 'Members', MEMBERS.length]];
+  let body = '';
+  if (S.projTab === 'agents') body = `<div class="table-wrap"><table class="table"><thead><tr><th>Agent</th><th>Activity</th><th class="hide-md">Status</th><th>Terminal</th><th class="hide-sm">Spawned by</th><th></th></tr></thead><tbody>${agentRows()}</tbody></table></div>
+    <p class="muted" style="margin:0;font-size:var(--text-xs)"><span class="kbd">j</span> <span class="kbd">k</span> move · <span class="kbd">Enter</span> open · <span class="kbd">a</span> attach · <span class="kbd">s</span> spawn</p>`;
+  if (S.projTab === 'services') body = `<div class="table-wrap"><table class="table"><thead><tr><th>Service</th><th>State</th><th>Detail</th></tr></thead><tbody>${SERVICES.map((s) => `<tr><td class="name">${s.name}</td><td>${pill(s.s)}</td><td class="dim wrap">${s.d}</td></tr>`).join('')}</tbody></table></div>`;
+  if (S.projTab === 'timeline') body = `<div class="toolbar"><div class="chips" role="group" aria-label="Event types"><button class="chip" aria-pressed="true">All</button><button class="chip" aria-pressed="false">Questions</button><button class="chip" aria-pressed="false">Terminal</button><button class="chip" aria-pressed="false">Lifecycle</button><button class="chip" aria-pressed="false">Errors</button></div></div><div class="panel">${timeline(EVENTS)}</div>`;
+  if (S.projTab === 'spec') body = `<div class="banner" data-tone="info"><span class="tag">read-only</span><div class="body">The resolved spec from the last <code>egzo project up</code>. Secrets show as references, never values. To change it, edit <code>egzo.yaml</code> and run <code>egzo project up</code>.</div><button class="btn" data-size="sm">${ic('copy', 'data-size="sm"')}Copy</button></div>
+<pre class="spec">${`<span class="k">version</span>: <span class="v">1</span>
+<span class="k">name</span>: <span class="s">payments</span>
+<span class="k">vaults</span>:
+  <span class="k">main</span>:
+    <span class="k">backend</span>: <span class="s">env</span>
+    <span class="k">secrets</span>: [<span class="s">ANTHROPIC_API_KEY</span>, <span class="s">GITHUB_TOKEN</span>]   <span class="c"># names only</span>
+<span class="k">egress</span>:
+  <span class="k">default</span>:
+    <span class="k">allow</span>: [<span class="s">platform.claude.com</span>, <span class="s">registry.npmjs.org</span>, <span class="s">github.com</span>]
+    <span class="k">services</span>:
+      <span class="k">anthropic</span>: <span class="s">main/ANTHROPIC_API_KEY</span>
+      <span class="k">github</span>: <span class="s">main/GITHUB_TOKEN</span>
+<span class="k">workspaces</span>:
+  <span class="k">repo</span>:
+    <span class="k">git</span>: { <span class="k">url</span>: <span class="s">https://github.com/acme/payments.git</span> }
+<span class="k">agents</span>:
+  <span class="k">claude</span>:
+    <span class="k">harness</span>: <span class="s">claude-code</span>
+    <span class="k">workspaces</span>: [<span class="s">repo</span>]
+  <span class="k">opencode</span>:
+    <span class="k">harness</span>: <span class="s">opencode</span>
+    <span class="k">workspaces</span>: [<span class="s">repo</span>]
+<span class="k">browser</span>: { <span class="k">enabled</span>: <span class="v">true</span> }`.split('\n').map((l) => `<span class="l">${l}</span>`).join('')}</pre>`;
+  if (S.projTab === 'audit') body = `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Agent</th><th class="hide-sm">Detail</th></tr></thead><tbody>${AUDIT.map(([w, who, a, ag, d, ok]) => `<tr><td class="dim">${w}</td><td>${P[who].me ? 'you' : P[who].name}</td><td>${a} ${ok ? '' : pill('error', 'refused')}</td><td>${ag || '<span class="muted">—</span>'}</td><td class="hide-sm dim wrap">${esc(d)}</td></tr>`).join('')}</tbody></table></div>`;
+  if (S.projTab === 'members') body = `<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Role</th><th></th></tr></thead><tbody>${MEMBERS.map(([k, r]) => `<tr><td><span class="presence"><span class="avatar" ${P[k].me ? 'data-me' : ''}>${P[k].i}</span><span style="color:var(--text)">${P[k].name}</span> <span class="muted hide-sm">${P[k].email}</span></span></td>
+      <td>${P[k].me ? `<span class="dim">${r}</span> <span class="muted">(you)</span>` : `<label class="sr-only" for="r-${k}">Role of ${P[k].name}</label><select id="r-${k}" class="select" style="width:auto;height:24px" data-role="${k}">${['user', 'administrator', 'owner'].map((x) => `<option ${x === r ? 'selected' : ''}>${x}</option>`).join('')}</select>`}</td>
+      <td class="actions">${P[k].me ? '' : `<button class="btn" data-variant="danger" data-size="sm" data-act="rm-member" data-name="${k}">Remove</button>`}</td></tr>`).join('')}</tbody></table></div>
+    <div class="twocol"><div class="panel"><header><span class="h-section">Add a person</span></header><div class="pad"><div class="toolbar">
+      <div class="field" style="flex:2"><label for="ap">Person</label><select id="ap" class="select"><option>Lea Martin (lea@example.dev)</option><option>Omar Haddad (omar@example.dev)</option></select></div>
+      <div class="field" style="flex:1"><label for="ar">Role</label><select id="ar" class="select"><option>user</option><option>administrator</option><option>owner</option></select></div>
+      <button class="btn" data-variant="primary" style="align-self:end">Add</button></div><span class="help">People appear here after they sign in to the hub once.</span></div></div>
+    <div class="panel"><header><span class="h-section">Roles</span></header><div class="pad"><dl class="roles"><dt>user</dt><dd>Spawns agents; starts, stops, attaches to and removes their own.</dd><dt>administrator</dt><dd>The same on every agent in the project. Sees the audit log.</dd><dt>owner</dt><dd>An administrator who also manages these roles.</dd></dl></div></div></div>`;
+  return `<div class="page">
+    <div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span></div>
+    <div class="phead"><h1 class="h-page">payments</h1>${S.multi ? eng('lab') : ''}<span class="pill" data-s="neutral">administrator</span><span class="grow"></span>
+      <button class="btn" data-variant="primary" data-act="spawn" ${S.projectDown ? 'disabled' : ''}>${ic('plus')}Spawn agent <span class="kbd">s</span></button></div>
+    <div class="metaline"><span><span class="k">agents</span> 3 running · <span style="color:var(--status-waiting)">1 waiting</span> · 1 stopped</span><span><span class="k">services</span> ${SERVICES.map((s) => `<span class="dot" data-s="${s.s}" title="${s.name}: ${s.s}"></span> ${s.name}`).join('  ')}</span><span class="hide-sm"><span class="k">templates</span> claude, opencode</span></div>
+    ${S.projectDown ? `<div class="banner" data-tone="warn" role="alert"><span class="tag">! sidecars down</span><div class="body">The project's control or proxy sidecar isn't running, so agents can't be spawned or attached. Run <code>egzo project up</code> for this project.</div></div>` : ''}
+    <div class="tabs" role="tablist" aria-label="Project sections">${tabs.map(([k, l, c]) => `<button role="tab" class="tab" aria-selected="${S.projTab === k}" data-ptab="${k}">${l}${c ? ` <span class="count">${c}</span>` : ''}</button>`).join('')}</div>
+    ${body}
+  </div>`;
+}
+
+function pageAgent(down) {
+  if (down) return `<div class="page"><div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span><span>train</span><span>/</span></div>
+    <div class="phead"><h1 class="h-page">finetune-7b</h1>${eng('gpu-box')}${pill('unreachable', 'status unknown')}</div>
+    <div class="empty" style="border-color:var(--status-unreachable)">
+<pre class="art" aria-hidden="true" style="color:var(--status-unreachable)">hub ──── ✕ ──── gpu-box</pre>
+      <h2>Engine gpu-box is unreachable</h2>
+      <p>The hub can't reach the engine this agent runs on, so its status, logs and terminal aren't available. The agent itself may still be running.</p>
+      <p class="muted">${esc(ENGINES[2].err)} · last reached ${ENGINES[2].since}</p>
+      <div class="btn-group"><button class="btn" data-variant="primary">${ic('refresh')}Retry now</button><button class="btn" data-go="engines">Engine settings</button></div>
+    </div></div>`;
+  const a = AGENTS[1], t = tabFor('refund-api');
+  return `<div class="page">
+    <div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span><a href="#" data-go="project">payments</a><span>/</span></div>
+    <div class="phead"><h1 class="h-page">refund-api</h1>${S.multi ? eng('lab') : ''}${pill(a.act, actLabel[a.act])}<span class="grow"></span>
+      <div class="btn-group"><button class="btn" data-variant="primary" data-open="${t.id}">${ic('term')}Go to terminal <span class="kbd">a</span></button><button class="btn">${ic('stop')}Stop</button><button class="btn" data-variant="danger" data-act="rm-agent" data-name="refund-api">${ic('trash')}Remove</button></div></div>
+    <div class="statusline"><span class="pill" data-s="waiting">question</span><span class="q">Keep POST /v1/refunds as a thin wrapper around v2?</span><span class="muted">asked 14:38 · answer it in the terminal</span></div>
+    <div class="twocol" style="grid-template-columns:minmax(0,1fr) minmax(0,320px)">
+      <div style="display:grid;gap:var(--space-4);min-width:0">
+        <div class="termcard">${ic('term')}<div class="grow"><b>Terminal open in tab 2</b><br><span class="dim">You hold it. Only one person can hold a terminal at a time.</span></div>${av('cv', true)}</div>
+        <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="${S.agentTab !== 'logs'}" data-atab="timeline">Timeline</button><button class="tab" role="tab" aria-selected="${S.agentTab === 'logs'}" data-atab="logs">Logs</button></div>
+        ${S.agentTab === 'logs' ? `<pre class="log"><span class="ts">2026-10-14T14:30:51Z</span> egzo agent: harness claude-code ready (pty 120×38)
+<span class="ts">2026-10-14T14:30:52Z</span> egzo agent: workspace repo at /workspace/payments (branch agent/refund-api)
+<span class="ts">2026-10-14T14:31:40Z</span> proxy: <span class="ok">allow</span> CONNECT platform.claude.com:443
+<span class="ts">2026-10-14T14:33:02Z</span> proxy: <span class="ok">allow</span> CONNECT github.com:443 (credential: github)
+<span class="ts">2026-10-14T14:35:18Z</span> proxy: <span class="err">deny</span>  CONNECT sentry.io:443 (not in egress profile default)
+<span class="ts">2026-10-14T14:38:12Z</span> egzo hook: ask "Keep v1 endpoint?" → control
+<span class="ts">2026-10-14T14:38:12Z</span> control: status waiting</pre>` : `<div class="panel">${timeline(EVENTS.filter((e) => e[2] === 'refund-api').concat([['13:28:31', 'spawn', 'refund-api', 'mc', 'Spawned from template claude'], ['13:28:40', 'start', 'refund-api', null, 'Started']]))}</div>`}
+      </div>
+      <aside class="panel" style="align-self:start"><header><span class="h-section">Details</span></header><div class="pad"><dl class="kv">
+        <dt>id</dt><dd><code>lab:payments/refund-api</code></dd><dt>template</dt><dd>claude</dd><dt>harness</dt><dd>claude-code</dd>
+        <dt>spawned by</dt><dd>Maria Chen</dd><dt>created</dt><dd>13:28, 1h 10m ago</dd><dt>container</dt><dd>${pill('running')}</dd><dt>terminal</dt><dd>${av('cv', true)}</dd></dl></div></aside>
+    </div>
+  </div>`;
+}
+
+function pageSignin() {
+  return `<div class="signin"><div class="box">
+    <div class="mark" role="img" aria-label="egzo hub"><svg viewBox="0 0 214.0 38" aria-hidden="true" class="logo-lockup" style="width:260px;height:auto"><path d="M12 6V2h18v18h-4" fill="none" stroke="var(--logo-line-1)" stroke-width="2"/><path d="M7 11V7h18v18h-4" fill="none" stroke="var(--logo-line-2)" stroke-width="2"/><rect x="1" y="11" width="20" height="20" rx="1.5" fill="var(--logo-front)"/><path d="M6 16.5l4 4-4 4M12 25.5h5" fill="none" stroke="var(--logo-prompt)" stroke-width="2.5" stroke-linecap="square"/><g transform="translate(42 29) scale(.3)"><path d="M17.900000000000002 -36.1H54.0L50.300000000000004 -30.900000000000002Q50.300000000000004 -41.0 46.7 -46.3Q43.1 -51.6 36.2 -51.6Q28.700000000000003 -51.6 24.5 -46.05Q20.3 -40.5 20.3 -30.5Q20.3 -19.8 24.5 -14.100000000000001Q28.700000000000003 -8.4 36.5 -8.4Q41.6 -8.4 45.400000000000006 -10.95Q49.2 -13.5 51.800000000000004 -18.400000000000002H62.1Q60.6 -12.200000000000001 57.05 -7.700000000000001Q53.5 -3.2 48.25 -0.8Q43.0 1.6 36.5 1.6Q28.1 1.6 22.05 -2.2Q16.0 -6.0 12.8 -13.200000000000001Q9.600000000000001 -20.400000000000002 9.600000000000001 -30.5Q9.600000000000001 -40.1 12.850000000000001 -47.05Q16.1 -54.0 22.1 -57.8Q28.1 -61.6 36.2 -61.6Q43.900000000000006 -61.6 49.300000000000004 -58.0Q54.7 -54.400000000000006 57.6 -47.550000000000004Q60.5 -40.7 60.5 -31.0Q60.5 -29.900000000000002 60.45 -28.700000000000003Q60.400000000000006 -27.5 60.300000000000004 -26.400000000000002H17.900000000000002Z M129.8 -2.0Q129.8 5.2 126.65 10.5Q123.5 15.8 117.65 18.700000000000003Q111.80000000000001 21.6 103.6 21.6Q96.0 21.6 90.3 19.25Q84.6 16.900000000000002 81.3 12.55Q78.0 8.200000000000001 77.7 2.3000000000000003H88.2Q89.8 6.800000000000001 93.8 9.200000000000001Q97.8 11.600000000000001 103.6 11.600000000000001Q110.80000000000001 11.600000000000001 114.80000000000001 7.850000000000001Q118.80000000000001 4.1000000000000005 118.80000000000001 -2.7V-9.1H115.80000000000001Q113.80000000000001 -6.2 110.0 -4.5Q106.2 -2.8000000000000003 101.8 -2.8000000000000003Q94.5 -2.8000000000000003 89.1 -6.3500000000000005Q83.7 -9.9 80.80000000000001 -16.5Q77.9 -23.1 77.9 -32.0Q77.9 -41.1 80.80000000000001 -47.75Q83.7 -54.400000000000006 89.1 -58.0Q94.5 -61.6 101.8 -61.6Q106.30000000000001 -61.6 110.10000000000001 -59.8Q113.9 -58.0 115.80000000000001 -55.0H118.80000000000001V-60.0H129.8ZM88.8 -32.0Q88.8 -22.900000000000002 92.85 -17.8Q96.9 -12.700000000000001 104.1 -12.700000000000001Q111.4 -12.700000000000001 115.45 -17.8Q119.5 -22.900000000000002 119.5 -32.0Q119.5 -41.1 115.45 -46.2Q111.4 -51.300000000000004 104.1 -51.300000000000004Q96.9 -51.300000000000004 92.85 -46.2Q88.8 -41.1 88.8 -32.0Z M152.4 -60.0H197.6V-40.900000000000006L159.3 -11.3V-10.3H197.6V0.0H152.4V-19.1L190.7 -48.7V-49.7H152.4Z M245.0 1.6Q236.7 1.6 230.6 -2.25Q224.5 -6.1000000000000005 221.15 -13.200000000000001Q217.8 -20.3 217.8 -30.0Q217.8 -39.7 221.15 -46.800000000000004Q224.5 -53.900000000000006 230.6 -57.75Q236.7 -61.6 245.0 -61.6Q253.4 -61.6 259.45 -57.75Q265.5 -53.900000000000006 268.85 -46.800000000000004Q272.2 -39.7 272.2 -30.0Q272.2 -20.3 268.85 -13.200000000000001Q265.5 -6.1000000000000005 259.45 -2.25Q253.4 1.6 245.0 1.6ZM245.0 -8.700000000000001Q252.7 -8.700000000000001 257.0 -14.3Q261.3 -19.900000000000002 261.3 -30.0Q261.3 -40.1 257.0 -45.7Q252.7 -51.300000000000004 245.0 -51.300000000000004Q237.3 -51.300000000000004 233.0 -45.7Q228.7 -40.1 228.7 -30.0Q228.7 -19.900000000000002 233.0 -14.3Q237.3 -8.700000000000001 245.0 -8.700000000000001Z" fill="var(--text)"/></g><g transform="translate(129.0 29) scale(.3)"><path d="M57.1 -84.80000000000001 22.400000000000002 17.0H12.9L47.6 -84.80000000000001Z M82.0 0.0V-84.80000000000001H91.6V-55.0H94.4Q96.7 -58.0 100.4 -59.650000000000006Q104.1 -61.300000000000004 108.5 -61.300000000000004Q114.9 -61.300000000000004 119.5 -58.5Q124.1 -55.7 126.64999999999999 -50.650000000000006Q129.2 -45.6 129.2 -38.7V0.0H119.6V-36.1Q119.6 -43.900000000000006 116.0 -48.0Q112.4 -52.1 105.6 -52.1Q98.8 -52.1 95.19999999999999 -48.0Q91.6 -43.900000000000006 91.6 -36.1V0.0Z M198.0 -59.800000000000004V0.0H188.4V-4.800000000000001H185.6Q183.3 -1.8 179.60000000000002 -0.15000000000000002Q175.9 1.5 171.5 1.5Q165.2 1.5 160.55 -1.25Q155.9 -4.0 153.35000000000002 -9.100000000000001Q150.8 -14.200000000000001 150.8 -21.1V-59.800000000000004H160.4V-23.6Q160.4 -15.9 164.0 -11.75Q167.6 -7.6000000000000005 174.4 -7.6000000000000005Q181.2 -7.6000000000000005 184.8 -11.75Q188.4 -15.9 188.4 -23.6V-59.800000000000004Z M248.9 1.5Q243.9 1.5 239.75 -0.5Q235.6 -2.5 233.5 -6.0H230.7V0.0H221.1V-84.80000000000001H230.7V-53.7H233.5Q235.6 -57.300000000000004 239.75 -59.300000000000004Q243.9 -61.300000000000004 248.9 -61.300000000000004Q256.3 -61.300000000000004 261.8 -57.45Q267.3 -53.6 270.25 -46.6Q273.2 -39.6 273.2 -29.900000000000002Q273.2 -20.200000000000003 270.25 -13.150000000000002Q267.3 -6.1000000000000005 261.8 -2.3000000000000003Q256.3 1.5 248.9 1.5ZM247.0 -7.5Q254.9 -7.5 259.25 -13.4Q263.6 -19.3 263.6 -29.900000000000002Q263.6 -40.5 259.25 -46.400000000000006Q254.9 -52.300000000000004 247.0 -52.300000000000004Q239.1 -52.300000000000004 234.7 -46.400000000000006Q230.3 -40.5 230.3 -29.900000000000002Q230.3 -19.3 234.7 -13.4Q239.1 -7.5 247.0 -7.5Z" fill="var(--text-3)"/></g></svg></div>
+<pre class="boot" aria-hidden="true">hub.example.dev · egzo-hub 0.9.2
+engines ....... <span class="ok">3 configured</span>
+identity ...... OIDC (sso.example.dev)
+session ....... none<span class="cur"></span></pre>
+    ${S.signinError ? `<div class="banner" role="alert"><span class="tag">✕ sign-in failed</span><div class="body">The login provider returned <code>access_denied</code>. Check that your account is allowed to use this hub, then try again.</div></div>` : ''}
+    <div style="display:grid;gap:var(--space-2)"><button class="btn" data-variant="primary" data-size="lg" data-go="home" style="justify-content:center">Sign in with SSO <span class="kbd">↵</span></button>
+    <p class="muted" style="margin:0;font-size:var(--text-xs)">You'll go to your organisation's login page, then come back here. The hub never sees your password.</p></div>
+  </div></div>`;
+}
+
+function pageForbidden() {
+  return `<div class="page" data-narrow><div class="crumbs"><a href="#" data-go="home">Projects</a><span>/</span><a href="#" data-go="project">payments</a><span>/</span></div>
+  <div class="empty"><pre class="art" aria-hidden="true">[ 403 ]</pre><h2>Only owners manage members</h2>
+  <p>You're an administrator on payments, so you can operate every agent but can't change who has access. Ask an owner: Cedric Veilleux.</p>
+  <div class="btn-group"><button class="btn" data-go="project">Back to payments</button></div></div></div>`;
+}
+function pageNotFound() {
+  return `<div class="page" data-narrow><div class="empty"><pre class="art" aria-hidden="true">[ 404 ]</pre><h2>No agent at lab:payments/fix-cache</h2>
+  <p>It may have been removed. The timeline of payments shows who removed it and when.</p>
+  <div class="btn-group"><button class="btn" data-variant="primary" data-go="project">Open payments</button><button class="btn" data-go="home">All projects</button></div></div></div>`;
+}
+
+/* ---------- terminals ---------- */
+function stateOverlay(t) {
+  const who = t.holder ? P[t.holder] : P.mc;
+  const id = `${t.engine}:${t.project}/${t.agent}`;
+  switch (t.state) {
+    case 'connecting': return `<div class="tstate"><div class="connecting" role="status"><span class="ok">✓ websocket open</span><span class="ok">✓ agent ${t.agent} is running</span><span class="now">› attaching to the pty <span class="cur"> </span></span></div></div>`;
+    case 'busy': return `<div class="tstate"><div class="tcard" data-tone="busy" role="alert"><h3>${ic('lock')}${who.name} is at this terminal</h3>
+      <p>Since 14:22. There's one terminal per agent and no watch-only mode, so taking over disconnects them.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-take="${t.id}">Take over</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'taken': return `<div class="tstate"><div class="tcard" data-tone="taken" role="alert"><h3>${ic('swap')}${who.name} took over at 14:41</h3>
+      <p>You've been disconnected. What you see is the last screen you had; it no longer updates.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-take="${t.id}">Take it back</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'disconnected': return `<div class="tstate"><div class="tcard" role="alert"><h3>${ic('plug-off')}Connection lost</h3>
+      <p>The connection to the hub dropped. Retrying in 4s (attempt 2 of 5). The agent keeps running.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-reconnect="${t.id}">${ic('refresh')}Reconnect now</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'error': return `<div class="tstate"><div class="tcard" data-tone="error" role="alert"><h3>✕ Can't attach to ${id}</h3>
+      <p>Engine ${t.engine} is unreachable: ${esc(ENGINES[2].err)}.</p><p class="more muted">The tab stays open and reconnects when you ask. Nothing on the engine was changed.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-reconnect="${t.id}">${ic('refresh')}Reconnect</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+    case 'stopped': return `<div class="tstate"><div class="tcard" role="status"><h3>■ ${t.agent} stopped</h3>
+      <p>The agent exited with code 0 at 14:44. Its workspace is kept until someone removes the agent.</p>
+      <div class="acts"><button class="btn" data-variant="primary" data-start="${t.id}">${ic('play')}Start and reconnect</button><button class="btn" data-close="${t.id}">Close tab</button></div></div></div>`;
+  }
+  return '';
+}
+function pane(id, i) {
+  const t = tabById(id); if (!t) return '<div class="tpane"></div>';
+  const focus = i === S.focusPane;
+  const foot = { connected: `<span class="st"><span class="dot" data-s="${t.act}"></span>${actLabel[t.act]}</span><span class="presence"><span class="avatar" data-me>CV</span>you hold it</span>`,
+    connecting: `<span class="st"><span class="dot" data-s="starting"></span>connecting</span>`, busy: `<span class="st">${ic('lock', 'data-size="sm"')}held by ${P[t.holder || 'mc'].name}</span>`,
+    taken: `<span class="st">${ic('swap', 'data-size="sm"')}taken over</span>`, disconnected: `<span class="st">${ic('plug-off', 'data-size="sm"')}disconnected · retrying</span>`,
+    error: `<span class="st" style="color:var(--status-error)">✕ error</span>`, stopped: `<span class="st"><span class="dot" data-s="stopped"></span>agent stopped</span>` }[t.state];
+  return `<section class="tpane ${S.layout > 1 ? 'compact' : ''}" data-state="${t.state}" ${focus ? 'data-focus' : ''} tabindex="0" aria-label="Terminal ${t.agent}" data-pane="${i}">
+    <div class="thead"><span class="id">${S.multi ? t.engine + ':' : ''}${t.project}/<b>${t.agent}</b></span>${t.state === 'connected' ? pill(t.act, actLabel[t.act]) : ''}<span class="grow"></span>
+      <div class="tools">
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Agent page" title="Agent page" data-go="agent">${ic('file', 'data-size="sm"')}</button>
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Pop out into a window" title="Pop out (Ctrl+] p)">${ic('popout', 'data-size="sm"')}</button>
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Full screen" title="Full screen (Ctrl+] f)" data-act="fullscreen">${ic('max', 'data-size="sm"')}</button>
+        <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close terminal" title="Detach and close (Ctrl+] d)" data-close="${t.id}">${ic('x', 'data-size="sm"')}</button>
+      </div></div>
+    <div class="tbody"><pre class="screen">${cells(SCREENS[t.scr]())}</pre>${stateOverlay(t)}</div>
+    <div class="tfoot">${foot}<span class="grow"></span><span class="hide-sm">${S.layout === 1 ? '132×41' : S.layout === 2 ? '78×41' : '78×19'}</span><span><span class="kbd">Ctrl</span>+<span class="kbd">]</span> then <span class="kbd">?</span> keys</span></div>
+  </section>`;
+}
+function termView() {
+  const layoutBtns = S.layout;
+  return `<div class="termview" data-layout="${S.layout}">${S.panes.map(pane).join('')}</div>`;
+}
+function layoutSwitch() {
+  return `<div class="seg" role="group" aria-label="Terminal layout">${[[1, 'single', 'One terminal'], [2, 'split', 'Two side by side'], [4, 'grid', 'Four in a grid']].map(([n, i, l]) => `<button aria-pressed="${S.layout === n}" data-layout="${n}" aria-label="${l}" title="${l}">${ic(i, 'data-size="sm"')}</button>`).join('')}</div>`;
+}
+
+/* ---------- overlays ---------- */
+function dialog() {
+  const d = S.dialog; if (!d) return '';
+  let h = '';
+  if (d.k === 'spawn') h = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Spawn an agent in payments</h2><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close" data-dlg="close">${ic('x')}</button></header>
+    <div class="content"><div class="field"><label for="st">Template</label><select id="st" class="select"><option>claude · claude-code</option><option>opencode · opencode</option></select></div>
+    <div class="field"><label for="sn">Name</label><input id="sn" class="input" placeholder="automatic, e.g. claude-7f3a" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" maxlength="63"><span class="help">Letters, digits, dot, dash, underscore. Becomes <code>lab:payments/&lt;name&gt;</code>.</span></div></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="primary" data-dlg="spawn">Spawn <span class="kbd">↵</span></button></footer></div>`;
+  if (d.k === 'rm-agent') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh" aria-describedby="dd"><header><h2 id="dh">Remove ${d.name}?</h2></header>
+    <div class="content" id="dd"><ul class="consequence"><li>Deletes the container, its network and its workspace.</li><li>Uncommitted changes in the workspace are lost.</li><li>Anyone at its terminal is disconnected.</li></ul><p class="muted" style="margin:0">This can't be undone. The audit log keeps a record.</p></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="removed">Remove ${d.name}</button></footer></div>`;
+  if (d.k === 'role') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Make ${P[d.who].name} ${d.role === 'owner' ? 'an owner' : d.role === 'administrator' ? 'an administrator' : 'a user'}?</h2></header>
+    <div class="content"><ul class="consequence">${d.role === 'owner' ? '<li>They can add and remove people, including you.</li><li>They can operate every agent in payments.</li>' : d.role === 'administrator' ? '<li>They can start, stop, attach to and remove every agent in payments.</li><li>They can read the audit log.</li>' : '<li>They keep access to their own agents only.</li><li>They lose access to other people\'s terminals; if they hold one, they are disconnected.</li>'}</ul></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="role-ok">Change role</button></footer></div>`;
+  if (d.k === 'rm-member') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Remove ${P[d.name].name} from payments?</h2></header>
+    <div class="content"><ul class="consequence"><li>They lose access to the project and its terminals right away.</li><li>Their agents keep running; administrators can still operate them.</li></ul></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="member-removed">Remove access</button></footer></div>`;
+  if (d.k === 'engine-rm') h = `<div class="dialog" data-tone="danger" role="alertdialog" aria-modal="true" aria-labelledby="dh"><header><h2 id="dh">Forget engine ${d.name}?</h2></header>
+    <div class="content"><ul class="consequence"><li>The hub stops showing its projects and agents.</li><li>Every role on its projects is deleted.</li><li>Nothing on the engine itself is touched; agents keep running.</li></ul>
+    <div class="field"><label for="cn">Type <code>${d.name}</code> to confirm</label><input id="cn" class="input" autocomplete="off"></div></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="danger-solid" data-dlg="engine-gone">Forget engine</button></footer></div>`;
+  if (d.k === 'hostkey') h = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dh" style="width:min(560px,100%)"><header>${ic('key')}<h2 id="dh">Confirm the host key of build-farm.lan</h2></header>
+    <div class="content"><p class="dim" style="margin:0">This is the first connection to this server. It presented the key below. Check it against the server before you trust it; after you pin it, any other key is refused.</p>
+    <div class="fp"><span class="muted">ED25519</span> SHA256:<span class="h">q9Xw</span>vM2k<span class="h">Lr8T</span>c0Pa<span class="h">nZ4e</span>Y1uB<span class="h">7sJd</span>Hk3f<span class="h">Wm6Q</span>oR2x</div>
+    <div class="field"><span class="label-text">On the server, run</span><code style="padding:6px 8px">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code></div></div>
+    <footer><button class="btn" data-dlg="close">Cancel</button><button class="btn" data-variant="primary" data-dlg="pinned">Pin this key and save</button></footer></div>`;
+  if (d.k === 'help') h = `<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dh" style="width:min(620px,100%)"><header><h2 id="dh">Keyboard</h2><button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close" data-dlg="close">${ic('x')}</button></header>
+    <div class="content">${keymapHTML()}</div></div>`;
+  return `<div class="scrim" data-dlg-scrim>${h}</div>`;
+}
+const LEADER_KEYS = [['1–9', 'go to terminal n'], ['↑ ↓', 'previous / next terminal'], ['h', 'back to the last page'], ['n', 'focus the sidebar'], ['b', 'collapse / expand sidebar'], ['s', 'split: 1 → 2 → 4'], ['o', 'focus the other pane'], ['f', 'full screen on / off'], ['p', 'pop out to a window'], ['d', 'detach and close tab'], [':', 'command menu'], [']', 'send Ctrl+] to the agent'], ['?', 'all shortcuts'], ['Esc', 'cancel']];
+function keymapHTML() {
+  return `<p class="dim" style="margin:0">Inside a terminal every key goes to the agent. Hub shortcuts start with the leader <span class="kbd">Ctrl</span>+<span class="kbd">]</span>, the same escape <code>egzo agent attach</code> uses to detach. Press it, release, then one key.</p>
+  <div class="leader" style="position:static;transform:none;width:auto;box-shadow:none"><div class="keys">${LEADER_KEYS.map(([k, l]) => `<div><span class="kbd">${k}</span>${l}</div>`).join('')}</div></div>
+  <p class="dim" style="margin:0">Outside a terminal (on hub pages), single keys work: <span class="kbd">:</span> or <span class="kbd">Ctrl</span>+<span class="kbd">K</span> command menu, <span class="kbd">/</span> filter, <span class="kbd">j</span>/<span class="kbd">k</span> move in lists, <span class="kbd">Enter</span> open, <span class="kbd">a</span> attach, <span class="kbd">s</span> spawn, <span class="kbd">g</span> <span class="kbd">p</span> projects, <span class="kbd">?</span> this list.</p>`;
+}
+function leaderHUD() {
+  if (!S.leader) return '';
+  return `<div class="leader" role="dialog" aria-label="Terminal keys"><header><b>Ctrl+]</b><span class="muted">waiting for a key…</span><span class="grow"></span><span class="muted">Esc to cancel</span></header>
+    <div class="keys">${LEADER_KEYS.map(([k, l]) => `<div><span class="kbd">${k}</span>${l}</div>`).join('')}</div></div>`;
+}
+function paletteHTML() {
+  if (!S.palette) return '';
+  const q = S.paletteQ.toLowerCase();
+  const items = [
+    ...S.tabs.map((t, i) => ({ g: 'Open terminals', l: `${t.agent}`, s: `${t.project} · ${t.engine}`, k: String(i + 1), a: () => openTab(t.id) })),
+    ...AGENTS.filter((a) => a.running && !tabFor(a.name)).map((a) => ({ g: 'Attach', l: a.name, s: `payments · lab · ${actLabel[a.act]}`, a: () => attach(a.name) })),
+    ...PROJECTS.map((p) => ({ g: 'Projects', l: p.name, s: p.engine, a: () => go('project') })),
+    { g: 'Actions', l: 'Spawn an agent in payments', s: '', a: () => { go('project'); S.dialog = { k: 'spawn' }; } },
+    { g: 'Actions', l: 'Engines', s: 'settings', a: () => go('engines') },
+    { g: 'Actions', l: 'Switch theme', s: '', a: () => toggleTheme() },
+  ].filter((x) => !q || (x.l + ' ' + x.s).toLowerCase().includes(q));
+  S._pal = items;
+  let g = '';
+  return `<div class="scrim" data-pal-scrim style="place-items:start center"></div><div class="palette" role="dialog" aria-label="Command menu"><div class="q"><span>:</span><input id="palq" value="${esc(S.paletteQ)}" placeholder="Go to a project, attach an agent, run an action" aria-controls="pall" autocomplete="off"></div>
+    <div class="list" id="pall" role="listbox">${items.map((x, i) => { const head = x.g !== g ? `<div class="grp label">${(g = x.g)}</div>` : ''; return `${head}<div class="menu-item" role="option" data-pi="${i}" aria-selected="${i === S.paletteSel}">${x.l} <small>${x.s}</small>${x.k ? `<span class="kbd">${x.k}</span>` : ''}</div>`; }).join('') || '<div class="menu-item muted">No match</div>'}</div></div>`;
+}
+
+const PROTO = [
+  ['Screens', [['signin', 'Sign-in'], ['signin-err', 'Sign-in: provider error'], ['home', 'Home: 3 engines, 1 unreachable'], ['home-single', 'Home: single engine'], ['home-empty', 'Home: no access yet'], ['engines', 'Engines (operator)'], ['engines-add', 'Engines: add + inline error'], ['hostkey', 'Engines: confirm ssh host key'],
+    ['project', 'Project: agents'], ['p-services', 'Project: services'], ['p-timeline', 'Project: timeline'], ['p-spec', 'Project: resolved spec'], ['p-audit', 'Project: audit log'], ['p-members', 'Project: members'], ['p-down', 'Project: sidecars down'], ['agent', 'Agent: waiting on a question'], ['agent-logs', 'Agent: logs'], ['agent-down', 'Agent: engine down'], ['forbidden', 'No permission (403)'], ['notfound', 'Not found (404)']]],
+  ['Navigation', [['rail', 'Sidebar collapsed to a rail'], ['nav-empty', 'Sidebar with no terminal open'], ['mobile', 'Phone: full-screen nav (open at < 720px)']]],
+  ['Terminals', [['t1', 'One terminal, full stage'], ['t2', 'Split: two side by side'], ['t4', 'Grid: four'], ['tfs', 'Full screen'], ['leader', 'Leader key menu (Ctrl+])'], ['palette', 'Command menu (:)']]],
+  ['Terminal states (applied to the tab in view)', [['s-connecting', 'Connecting'], ['s-connected', 'Connected'], ['s-busy', 'Busy: someone else holds it'], ['s-taken', 'Taken over: you were displaced'], ['s-disconnected', 'Disconnected, retrying'], ['s-error', 'Error: engine unreachable'], ['s-stopped', 'Agent stopped']]],
+  ['Dialogs and feedback', [['d-spawn', 'Spawn'], ['d-rm', 'Remove agent'], ['d-role', 'Change role'], ['d-eng', 'Forget engine'], ['toast', 'Toasts'], ['help', 'Keyboard reference']]],
+];
+function protoHTML() {
+  return `<button class="proto-btn" data-proto-toggle aria-expanded="${S.proto}">${ic('grid', 'data-size="sm"')}Prototype screens</button>
+  ${S.proto ? `<nav class="proto" aria-label="Prototype screens"><p class="note">Not part of the product. Jumps to each designed screen and state. Everything is example data.</p>
+    ${PROTO.map(([h, items]) => `<div><h4 class="label">${h}</h4><div class="items">${items.map(([k, l]) => `<button class="it" data-proto="${k}" ${S.lastProto === k ? 'aria-current="true"' : ''}>${l}</button>`).join('')}</div></div>`).join('')}
+    <div><h4 class="label">Theme</h4><div class="seg" style="margin-top:4px">${['system', 'dark', 'light'].map((t) => `<button aria-pressed="${(document.documentElement.dataset.theme || 'system') === t}" data-theme-set="${t}">${t}</button>`).join('')}</div></div>
+  </nav>` : ''}`;
+}
+
+/* ---------- render ---------- */
+function hubPage() {
+  switch (S.screen) {
+    case 'signin': return pageSignin();
+    case 'home': return pageHome(false);
+    case 'home-empty': return pageHome(true);
+    case 'engines': return pageEngines();
+    case 'project': return pageProject();
+    case 'agent': return pageAgent(false);
+    case 'agent-down': return pageAgent(true);
+    case 'forbidden': return pageForbidden();
+    case 'notfound': return pageNotFound();
+  }
+}
+function render() {
+  const focusId = document.activeElement && document.activeElement.id;
+  const signin = S.screen === 'signin';
+  $('#root').innerHTML = signin ? `<div class="app" style="grid-template-columns:1fr"><main class="stage" style="grid-template-rows:1fr"><div class="viewport" style="grid-row:1"><div class="hubview">${pageSignin()}</div></div></main></div>${protoHTML()}` :
+    `<div class="app" ${S.fullscreen ? 'data-fullscreen' : ''} ${S.rail ? 'data-rail' : ''} ${S.navOpen ? 'data-nav-open' : ''}>${sidebar()}
+      <main class="stage">${mbar()}<div class="viewport">
+        <div class="hubview" ${S.active ? 'hidden' : ''}>${hubPage()}</div>
+        ${S.active ? termView() : ''}
+      </div></main></div>
+      ${dialog()}${leaderHUD()}${paletteHTML()}${protoHTML()}`;
+  if (S.active && !S.fullscreen) { const th = document.querySelectorAll('.tpane .thead .tools'); if (th[0]) th[0].insertAdjacentHTML('afterbegin', layoutSwitch()); }
+  if (focusId && document.getElementById(focusId)) document.getElementById(focusId).focus();
+  if (S.palette) { const i = $('#palq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  else if (S.dialog) { const b = $('.dialog[data-tone="danger"] input') || $('.dialog[data-tone="danger"] footer .btn') || $('.dialog input, .dialog select, .dialog footer .btn:last-child'); b && b.focus(); }
+}
+
+/* ---------- actions ---------- */
+function go(screen) { S.screen = screen; S.active = 0; S.fullscreen = false; S.navOpen = false; render(); $('.hubview') && ($('.hubview').scrollTop = 0); }
+function openTab(id) {
+  const t = tabById(id); if (!t) return;
+  t.unread = false; S.active = id; S.navOpen = false;
+  if (!S.panes.includes(id)) { if (S.layout === 1) S.panes = [id]; else S.panes[S.focusPane] = id; }
+  S.focusPane = S.panes.indexOf(id);
+  render(); const p = document.querySelector(`.tpane[data-pane="${S.focusPane}"]`); p && p.focus();
+}
+function closeTab(id) {
+  const i = S.tabs.findIndex((t) => t.id === id); if (i < 0) return;
+  const t = S.tabs[i]; S.tabs.splice(i, 1);
+  S.panes = S.panes.filter((p) => p !== id);
+  if (S.active === id) { const n = S.tabs[Math.min(i, S.tabs.length - 1)]; if (n) { S.active = n.id; if (!S.panes.length) S.panes = [n.id]; else if (!S.panes.includes(n.id)) S.panes.push(n.id); S.panes = fillPanes(); } else { S.active = 0; S.panes = []; } }
+  S.focusPane = Math.max(0, S.panes.indexOf(S.active));
+  render(); toast(`Detached from <b>${t.agent}</b>. The agent keeps running.`);
+}
+function attach(name) {
+  const a = AGENTS.find((x) => x.name === name);
+  const t = { id: S.nextId++, engine: 'lab', project: 'payments', agent: name, state: 'connecting', act: a.act, scr: name === 'lint-sweep' ? 'lint' : 'claude', holder: a.holder && !P[a.holder].me ? a.holder : null };
+  S.tabs.push(t); openTab(t.id);
+  setTimeout(() => { t.state = t.holder ? 'busy' : 'connected'; if (S.active) render(); }, 1400);
+}
+function fillPanes() {
+  const want = S.layout; const ids = S.tabs.map((t) => t.id);
+  let panes = S.panes.filter((p) => ids.includes(p)).slice(0, want);
+  if (!panes.includes(S.active) && S.active) panes.unshift(S.active);
+  for (const id of ids) { if (panes.length >= want) break; if (!panes.includes(id)) panes.push(id); }
+  return panes.slice(0, want);
+}
+function setLayout(n) { S.layout = n; if (!S.active && S.tabs[0]) S.active = S.tabs[0].id; S.panes = fillPanes(); S.focusPane = Math.max(0, S.panes.indexOf(S.active)); render(); }
+function cycleTab(d) { const ids = [0, ...S.tabs.map((t) => t.id)]; const i = ids.indexOf(S.active); const n = ids[(i + d + ids.length) % ids.length]; n ? openTab(n) : (S.active = 0, render()); }
+function toggleTheme() { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark ? 'light' : 'dark'; render(); }
+function activeTab() { return tabById(S.panes[S.focusPane] || S.active) || S.tabs[0]; }
+
+function proto(k) {
+  S.lastProto = k; S.rail = k === 'rail'; S.navOpen = k === 'mobile'; S.dialog = null; S.leader = false; S.palette = false; S.fullscreen = false; S.signinError = false; S.projectDown = false; S.enginesForm = false; S.agentTab = 'timeline';
+  if (k !== 'nav-empty' && S._saved && !S.tabs.length) { S.tabs = S._saved; S._saved = null; }
+  const ensureTerm = () => { if (!S.active) { S.active = (S.panes[0] || S.tabs[0].id); } };
+  const pt = { 'p-services': 'services', 'p-timeline': 'timeline', 'p-spec': 'spec', 'p-audit': 'audit', 'p-members': 'members' };
+  if (k === 'home-single') { S.multi = false; S.screen = 'home'; S.active = 0; }
+  else if (k === 'home') { S.multi = true; S.screen = 'home'; S.active = 0; }
+  else if (k === 'signin' || k === 'signin-err') { S.screen = 'signin'; S.signinError = k === 'signin-err'; }
+  else if (['home-empty', 'engines', 'agent', 'agent-down', 'forbidden', 'notfound'].includes(k)) { S.multi = true; S.screen = k; S.active = 0; }
+  else if (k === 'agent-logs') { S.screen = 'agent'; S.agentTab = 'logs'; S.active = 0; }
+  else if (k === 'engines-add') { S.screen = 'engines'; S.enginesForm = true; S.active = 0; }
+  else if (k === 'hostkey') { S.screen = 'engines'; S.enginesForm = true; S.active = 0; S.dialog = { k: 'hostkey' }; }
+  else if (k === 'project') { S.screen = 'project'; S.projTab = 'agents'; S.active = 0; }
+  else if (pt[k]) { S.screen = 'project'; S.projTab = pt[k]; S.active = 0; }
+  else if (k === 'p-down') { S.screen = 'project'; S.projTab = 'agents'; S.projectDown = true; S.active = 0; }
+  else if (k === 'rail') { S.screen = 'project'; S.active = S.tabs[0].id; S.panes = [S.tabs[0].id]; S.layout = 1; }
+  else if (k === 'nav-empty') { S._saved = S._saved || S.tabs; S.tabs = []; S.active = 0; S.panes = []; S.screen = 'home'; }
+  else if (k === 'mobile') { S.active = 0; S.screen = 'project'; }
+  else if (k === 't1') { S.active = S.tabs[0].id; setLayout(1); }
+  else if (k === 't2') { S.active = S.tabs[0].id; S.panes = [S.tabs[0].id, S.tabs[1].id]; S.layout = 2; S.focusPane = 0; }
+  else if (k === 't4') { S.active = S.tabs[0].id; S.panes = S.tabs.slice(0, 4).map((t) => t.id); S.layout = 4; S.focusPane = 0; }
+  else if (k === 'tfs') { ensureTerm(); S.fullscreen = true; toast('Full screen. Press Ctrl+] then f to leave.'); }
+  else if (k === 'leader') { ensureTerm(); S.leader = true; }
+  else if (k === 'palette') { S.palette = true; S.paletteQ = ''; S.paletteSel = 0; }
+  else if (k.startsWith('s-')) { ensureTerm(); if (S.layout !== 1) setLayout(1); const t = activeTab(); t.state = k.slice(2); if (t.state === 'busy' || t.state === 'taken') t.holder = 'mc'; }
+  else if (k === 'd-spawn') { S.screen = 'project'; S.projTab = 'agents'; S.active = 0; S.dialog = { k: 'spawn' }; }
+  else if (k === 'd-rm') { S.screen = 'project'; S.projTab = 'agents'; S.active = 0; S.dialog = { k: 'rm-agent', name: 'migrate-db' }; }
+  else if (k === 'd-role') { S.screen = 'project'; S.projTab = 'members'; S.active = 0; S.dialog = { k: 'role', who: 'so', role: 'administrator' }; }
+  else if (k === 'd-eng') { S.screen = 'engines'; S.active = 0; S.dialog = { k: 'engine-rm', name: 'gpu-box' }; }
+  else if (k === 'help') { S.dialog = { k: 'help' }; }
+  else if (k === 'toast') { render(); toast('Spawned <b>claude-7f3a</b> in payments.'); toast('Stopped <b>fix-auth</b>.'); toast('Couldn\'t stop <b>flaky-tests</b>: engine lab answered 409 (container is restarting). Try again in a moment.', 'error'); return; }
+  render();
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-close],[data-tab],[data-psect],[data-go],[data-act],[data-ptab],[data-atab],[data-open],[data-attach],[data-take],[data-reconnect],[data-start],[data-layout],[data-dlg],[data-dlg-scrim],[data-pal-scrim],[data-pi],[data-proto],[data-proto-toggle],[data-theme-set],[data-filter],[data-pane]');
+  if (!el) return;
+  const d = el.dataset;
+  if (d.close) { e.stopPropagation(); return closeTab(+d.close); }
+  if (d.tab !== undefined) { return +d.tab ? openTab(+d.tab) : (S.active = 0, render()); }
+  if (d.go) { e.preventDefault(); return go(d.go); }
+  if (d.ptab) { S.projTab = d.ptab; return render(); }
+  if (d.psect) { e.preventDefault(); S.projTab = d.psect; return go('project'); }
+  if (d.atab) { S.agentTab = d.atab; return render(); }
+  if (d.open) return openTab(+d.open);
+  if (d.attach) return attach(d.attach);
+  if (d.take) { const t = tabById(+d.take); t.state = 'connecting'; render(); setTimeout(() => { t.state = 'connected'; t.holder = null; render(); toast(`You hold <b>${t.agent}</b>. ${P.mc.name} was disconnected and notified.`); }, 900); return; }
+  if (d.reconnect) { const t = tabById(+d.reconnect); t.state = 'connecting'; render(); setTimeout(() => { t.state = t.engine === 'gpu-box' ? 'error' : 'connected'; render(); }, 1200); return; }
+  if (d.start) { const t = tabById(+d.start); t.state = 'connecting'; render(); setTimeout(() => { t.state = 'connected'; render(); }, 1200); return; }
+  if (d.layout) return setLayout(+d.layout);
+  if (d.filter) { S.homeFilter = d.filter; return render(); }
+  if (d.pane !== undefined && !e.target.closest('button')) { S.focusPane = +d.pane; S.active = S.panes[S.focusPane]; return render(); }
+  if (d.protoToggle !== undefined) { S.proto = !S.proto; return render(); }
+  if (d.proto) return proto(d.proto);
+  if (d.themeSet) { if (d.themeSet === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = d.themeSet; return render(); }
+  if (d.dlgScrim !== undefined && e.target === el) { S.dialog = null; return render(); }
+  if (d.palScrim !== undefined) { S.palette = false; return render(); }
+  if (d.pi) { const x = S._pal[+d.pi]; S.palette = false; x.a(); return render(); }
+  if (d.dlg) {
+    const k = d.dlg, dd = S.dialog; S.dialog = null; render();
+    if (k === 'spawn') { toast('Spawned <b>claude-7f3a</b> in payments.'); }
+    if (k === 'removed') toast(`Removed <b>${dd.name}</b> and its workspace.`);
+    if (k === 'role-ok') toast(`${P[dd.who].name} is now ${dd.role === 'owner' ? 'an owner' : 'an ' + dd.role}.`);
+    if (k === 'member-removed') toast(`${P[dd.name].name} no longer has access to payments.`);
+    if (k === 'engine-gone') toast(`Forgot engine <b>${dd.name}</b>.`);
+    if (k === 'pinned') { S.enginesForm = false; render(); toast('Pinned the host key and saved <b>build-farm</b>. It is reachable.'); }
+    return;
+  }
+  if (d.act) {
+    const a = d.act;
+    if (a === 'palette') { S.palette = true; S.paletteQ = ''; S.paletteSel = 0; }
+    if (a === 'theme') return toggleTheme();
+    if (a === 'rail') S.rail = !S.rail;
+    if (a === 'nav') S.navOpen = !S.navOpen;
+    if (a === 'spawn') S.dialog = { k: 'spawn' };
+    if (a === 'rm-agent') S.dialog = { k: 'rm-agent', name: d.name };
+    if (a === 'rm-member') S.dialog = { k: 'rm-member', name: d.name };
+    if (a === 'engine-add' || a === 'engine-edit') S.enginesForm = true;
+    if (a === 'engine-close') S.enginesForm = false;
+    if (a === 'engine-rm') S.dialog = { k: 'engine-rm', name: d.name };
+    if (a === 'hostkey') S.dialog = { k: 'hostkey' };
+    if (a === 'fullscreen') { S.fullscreen = !S.fullscreen; if (S.fullscreen) toast('Full screen. Press Ctrl+] then f to leave.'); }
+    render();
+  }
+});
+document.addEventListener('change', (e) => { const r = e.target.dataset.role; if (r) { S.dialog = { k: 'role', who: r, role: e.target.value }; render(); } });
+document.addEventListener('input', (e) => { if (e.target.id === 'palq') { S.paletteQ = e.target.value; S.paletteSel = 0; render(); } });
+document.addEventListener('keydown', (e) => {
+  const inField = e.target.matches('input, textarea, select');
+  // Leader: Ctrl+] works everywhere, including inside a terminal.
+  if (e.ctrlKey && (e.key === ']' || e.code === 'BracketRight')) { e.preventDefault(); S.leader = !S.leader; return render(); }
+  if (S.leader) {
+    e.preventDefault(); S.leader = false; const k = e.key;
+    if (/^[1-9]$/.test(k)) { const t = S.tabs[+k - 1]; return t ? openTab(t.id) : render(); }
+    if (k === 'ArrowDown' || k === 'ArrowRight') return cycleTab(1);
+    if (k === 'ArrowUp' || k === 'ArrowLeft') return cycleTab(-1);
+    if (k === 'h') { S.active = 0; S.fullscreen = false; return render(); }
+    if (k === 'b') { S.rail = !S.rail; return render(); }
+    if (k === 'n') { S.rail = false; S.fullscreen = false; render(); const f = $('.side .nav-focus[tabindex="0"]') || $('.side .nav-focus'); return f && f.focus(); }
+    if (k === 's') return setLayout(S.layout === 1 ? 2 : S.layout === 2 ? 4 : 1);
+    if (k === 'o' && S.panes.length > 1) { S.focusPane = (S.focusPane + 1) % S.panes.length; S.active = S.panes[S.focusPane]; render(); const p = document.querySelector(`.tpane[data-pane="${S.focusPane}"]`); return p && p.focus(); }
+    if (k === 'f') { S.fullscreen = !S.fullscreen; return render(); }
+    if (k === 'd' && S.active) return closeTab(S.active);
+    if (k === ':') { S.palette = true; S.paletteQ = ''; S.paletteSel = 0; return render(); }
+    if (k === '?') { S.dialog = { k: 'help' }; return render(); }
+    if (k === ']') { render(); return toast('Sent Ctrl+] to the agent.'); }
+    return render();
+  }
+  if (S.palette) {
+    if (e.key === 'Escape') { S.palette = false; return render(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); S.paletteSel = Math.max(0, Math.min((S._pal || []).length - 1, S.paletteSel + (e.key === 'ArrowDown' ? 1 : -1))); return render(); }
+    if (e.key === 'Enter') { const x = (S._pal || [])[S.paletteSel]; S.palette = false; if (x) x.a(); return render(); }
+    return;
+  }
+  if (S.dialog && e.key === 'Escape') { S.dialog = null; return render(); }
+  // Sidebar keyboard.
+  // Sidebar: one tab stop; ↑/↓ move through terminals and projects, Enter opens, Delete closes a terminal.
+  if (e.target.classList.contains('nav-focus') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault(); const all = [...document.querySelectorAll('.side .nav-focus')]; const i = all.indexOf(e.target); const n = all[Math.max(0, Math.min(all.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]; n.focus(); return;
+  }
+  if (e.target.classList.contains('term-item') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); return e.target.click(); }
+  if (e.target.classList.contains('term-item') && e.key === 'Delete') return closeTab(+e.target.dataset.tab);
+  if (e.target.closest('.tpane') || inField || S.dialog) return; // the terminal owns its keys
+  if (e.key === ':' || (e.ctrlKey && e.key.toLowerCase() === 'k')) { e.preventDefault(); S.palette = true; S.paletteQ = ''; S.paletteSel = 0; return render(); }
+  if (e.key === '?') { S.dialog = { k: 'help' }; return render(); }
+  if (e.key === '/' && $('#q')) { e.preventDefault(); return $('#q').focus(); }
+  if (e.key === 's' && S.screen === 'project' && !S.active) { S.dialog = { k: 'spawn' }; return render(); }
+});
+render();
+</script>
