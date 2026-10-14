@@ -39,10 +39,10 @@ func (r Role) AtLeast(other Role) bool { return r.rank() >= other.rank() && r.ra
 type Action string
 
 const (
-	View           Action = "view"            // see the project, its agents, events and logs
-	Spawn          Action = "spawn"           // make an agent
-	Operate        Action = "operate"         // start, stop, remove, attach (write) an agent
-	ManageRoles    Action = "manage-roles"    // grant and remove roles
+	View        Action = "view"         // see the project, its agents, events and logs
+	Spawn       Action = "spawn"        // make an agent
+	Operate     Action = "operate"      // start, stop, remove, attach (write) an agent
+	ManageRoles Action = "manage-roles" // grant and remove roles
 )
 
 // Operator is the actor string of the CLI and of agents spawned from it.
