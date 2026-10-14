@@ -1,6 +1,6 @@
 # Roadmap: the hub web UI as a Svelte single-page app, on an API-first back-end
 
-**Status.** Designed, not built. A rewrite of the front end and of the layer that serves it. [hub.md](hub.md) describes what
+**Status.** Built (see "What was built" at the end). A rewrite of the front end and of the layer that serves it. [hub.md](hub.md) describes what
 the hub does and is built; this item changes how its UI is built and served, and **adds no hub feature**: no new
 operation, permission, data or setting. The new things are in the front end only (layouts, shortcuts, navigation).
 
@@ -86,3 +86,20 @@ happen more. Decide whether the same user re-attaching counts as the same holder
 - The same user in two windows (above).
 - OpenAPI by hand, or generated from the Go handlers.
 - Whether to keep the old HTML pages for a release behind the new ones (the plan above replaces them in phase 5 instead).
+
+## What was built
+
+- `hub/internal/web`: the JSON API (`api.go`, documented in `hub/docs/api.md`), the login redirects, the terminal websocket (now at
+  `/api/v1/e/.../terminal`), and `appHandler`, which serves the embedded app and falls back to `index.html`. The templates, the
+  `?fragment=1` refresh and the form posts are gone. State changes need JSON and the hub's Origin.
+- `hub/web`: Svelte 5 + TypeScript + Vite. The sidebar, the pages, the dialogs, and the terminal workspace of the design: terminals
+  mounted above the router, one xterm and one websocket each, layouts 1 / 2 / 4, the Ctrl+] leader, the command menu, the rail,
+  full screen, the phone navigation, light and dark. Fonts are vendored from `@fontsource`.
+- Not built, on purpose: pop-out to a window; the design's invented terminal texts and the prototype's "Retry" and counters that
+  the hub has no data for (reconnecting is manual, no retry timer); OpenAPI (the contract is `types.ts` and `api.md`, kept honest by
+  the Go API tests and the browser tests).
+- Tests: the Go API tests in `hub/internal/web`, Vitest for the terminal session protocol, the workspace, the leader key, the
+  router and the API client, and the Playwright suite in `hub/e2e` rewritten for the new markup, with new tests for several
+  terminals, the leader key, the command menu and the confirmations.
+- The one question left open above is unchanged: the same person in two windows meets "busy" against themselves and can take it
+  over, with a click.

@@ -33,6 +33,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make hub-web
+      - run: make hub-web-test
       - run: make hub-build
       - run: make hub-test
       - run: |

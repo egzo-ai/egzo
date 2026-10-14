@@ -1,0 +1,12 @@
+/* What the app adds to the design's tokens, components and shell. */
+.table tr.refused td { color: var(--text-3); }
+.table tbody tr:focus-visible { outline-offset: -2px; }
+.xterm { padding: 0; }
+details { border: 1px solid var(--border); border-radius: var(--radius-2); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-3); }
+details > summary { cursor: pointer; font-size: var(--text-xs); color: var(--text-2); }
+details[open] > summary { margin-bottom: var(--space-3); }
+.chip[data-down] { border-style: dashed; }
+.statusline .q { color: var(--status-waiting); }
+.side-head .close-nav { display: none; }
+body { overflow: hidden; }
+.grid2 { align-items: start; }

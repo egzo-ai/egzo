@@ -4,11 +4,10 @@ ARG GO_VERSION=1.27.2
 
 FROM docker.io/library/node:22-alpine AS web
 WORKDIR /src/hub/web
-COPY hub/web/package.json hub/web/package-lock.json ./
+COPY hub/web/package.json hub/web/package-lock.json hub/web/.npmrc ./
 RUN npm ci --no-audit --no-fund
-COPY hub/web/build.mjs ./
-COPY hub/web/src ./src
-RUN mkdir -p ../internal/web/dist && node build.mjs
+COPY hub/web/ ./
+RUN npm run build
 
 FROM docker.io/library/golang:${GO_VERSION}-alpine AS build
 WORKDIR /src

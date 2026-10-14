@@ -2,7 +2,7 @@
 GO ?= go
 BIN := bin/egzo
 
-.PHONY: build test lint specs clean image images hub-web hub-build hub-test hub-lint hub-image hub-e2e hub-integration hub-stack
+.PHONY: build test lint specs clean image images hub-web hub-web-test hub-build hub-test hub-lint hub-image hub-e2e hub-integration hub-stack
 
 VERSION ?= dev
 REGISTRY ?= ghcr.io/egzo-ai
@@ -39,10 +39,15 @@ clean:
 
 # --- the hub (hub/ is its own Go module; see roadmap/hub.md) ---------------------------------------------------------------------
 
-# The web UI's scripts and styles, and xterm.js, built into hub/internal/web/dist, which the hub embeds. Needs node, or docker.
+# The web app (Svelte, TypeScript, Vite; hub/web) built into hub/internal/web/dist, which the hub embeds. Needs node, or docker.
 hub-web:
-	if command -v npm >/dev/null; then cd hub/web && npm ci --no-audit --no-fund && node build.mjs; \
-	else docker run --rm -u $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/hub:/w -w /w/web docker.io/library/node:22-alpine sh -c "npm ci --no-audit --no-fund && node build.mjs"; fi
+	if command -v npm >/dev/null; then cd hub/web && npm ci --no-audit --no-fund && npm run build; \
+	else docker run --rm -u $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/hub:/w -w /w/web docker.io/library/node:22-alpine sh -c "npm ci --no-audit --no-fund && npm run build"; fi
+
+# The web app's type check and unit tests (after hub-web, which installs its packages).
+hub-web-test:
+	if command -v npm >/dev/null; then cd hub/web && npm run check && npm test; \
+	else docker run --rm -u $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/hub:/w -w /w/web docker.io/library/node:22-alpine sh -c "npm run check && npm test"; fi
 
 hub-build: hub-web
 	cd hub && CGO_ENABLED=0 $(GO) build -trimpath -o ../bin/egzo-hub ./cmd/egzo-hub

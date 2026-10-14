@@ -2,3 +2,4 @@ bin
 .git
 specs
 known-issues
+**/node_modules

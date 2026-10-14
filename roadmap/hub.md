@@ -167,9 +167,10 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   remove or lower themselves. Every operation is audited, allowed or refused.
 - Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the
   operator confirms its fingerprint); one engine down does not take the page down.
-- The web UI: projects (engine badge and filter only with several engines), project page (agents, spawn, start / stop /
-  remove, services, timeline, spec, audit log, members), agent page (status, timeline, logs, a terminal held by one person with
-  presence and take-over). No messaging. A question an agent is waiting on is shown as a status.
+- The web UI, a Svelte app on a JSON API ([web-ui-spa.md](web-ui-spa.md)): projects (engine badge and filter only with several
+  engines), project page (agents, spawn, start / stop / remove, services, timeline, spec, audit log, members), agent page (status,
+  timeline, logs), and terminals: several at once, in a sidebar, held by one person each with presence and take-over. No
+  messaging. A question an agent is waiting on is shown as a status.
 - Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
   the terminal websocket.
 - Tests: Go unit tests with the engine seam faked; Playwright tests of the pages; `make hub-integration` (real engine, real
@@ -179,7 +180,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
-- **The web UI as a Svelte SPA on an API-first back-end**, with a new design: see [web-ui-spa.md](web-ui-spa.md).
 - **Discovery beyond the timer**: see [discovery.md](discovery.md).
 - **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

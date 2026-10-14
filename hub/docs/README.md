@@ -49,9 +49,19 @@ There is no messaging in the web UI: talk to an agent in its terminal.
 
 ## The terminal
 
-Whoever may operate an agent can open its terminal; there is no read-only view. One person holds it at a time, and the agent page
-says who. Opening it while somebody else does offers **Take over**, which ends their terminal ("taken over by ...") and gives it to
-you. Anyone who may open it may take it over. The terminal is sized to the browser window that opens it.
+Whoever may operate an agent can open its terminal (**Attach**); there is no read-only view. One person holds it at a time, and the
+agent page says who. Opening it while somebody else does offers **Take over**, which ends their terminal ("taken over by ...") and
+gives it to you ("Take it back" does the same the other way). Anyone who may open it may take it over. The terminal is sized to
+the pane that shows it.
+
+You can have several terminals open at once, across projects and engines. They are listed in the sidebar, stay connected while
+you browse the pages, come back after a reload (the agent's session lives on the engine), and can be shown one at a time, side by
+side, or four to a screen. Closing one detaches; the agent keeps running. Up to 12 can be open.
+
+Keys inside a terminal belong to the agent, with one exception: **Ctrl+]** is the leader, and the key after it is the hub's
+(`1`-`9` go to a terminal, `s` changes the layout, `f` is full screen, `d` closes, `?` lists them all). The browser keeps a few
+chords for itself (Ctrl+W, Ctrl+T, Ctrl+N): a page cannot take them, so they act on the browser tab and never reach the agent. On
+pages, `:` or Ctrl+K opens the command menu; single-key shortcuts can be turned off in the shortcut reference.
 
 ### Known issue: the CLI
 
@@ -97,7 +107,8 @@ The hub is its own Go module (`hub/`); it imports core's packages and core never
 ```sh
 make hub-test           # go vet and go test -race
 make hub-lint           # staticcheck and govulncheck
-make hub-web            # the scripts and styles, and xterm.js, into internal/web/dist (node, or docker)
+make hub-web            # the web app (Svelte, Vite) into internal/web/dist, which the binary embeds (node, or docker)
+make hub-web-test       # its type check and unit tests
 make hub-build          # bin/egzo-hub
 make hub-integration    # the Docker engine implementation against a real engine and a real project
 make hub-e2e            # the browser tests (Playwright, in docker), against the hub with fake engines
@@ -105,5 +116,18 @@ make hub-stack          # the whole stack for real: image, Dex login, a real pro
 make hub-image
 ```
 
-Tests: ordinary Go unit tests (the engine seam is faked in `internal/engines/fake`, the login provider in `internal/oidctest`),
-Playwright tests of the pages in `e2e/`, and the integration and stack runs above. Core's specs-first rule does not apply here.
+Tests: ordinary Go unit tests (the engine seam is faked in `internal/engines/fake`, the login provider in `internal/oidctest`; the
+API is tested through HTTP in `internal/web`), Vitest for the web app's logic (`web/src/lib/*.test.ts`), Playwright tests of the app
+in `e2e/`, and the integration and stack runs above. Core's specs-first rule does not apply here.
+
+### The web app
+
+`web/` is a Svelte 5 + TypeScript single-page app built by Vite. The hub serves it for every address that is not the API, so the
+app's own routes (`/e/lab/p/web/a/coder-1`) survive a reload. The design it implements is in `roadmap/egzo-design/` (tokens,
+components and the clickable prototype). The API it talks to is described in [api.md](api.md).
+
+```sh
+cd hub/web && npm ci && npm run dev     # the app on :5173, proxying /api and the login to a hub on :8080 (EGZO_HUB=...)
+```
+
+There is no node on some machines; `make hub-web` and `make hub-web-test` run in docker when `npm` is missing.

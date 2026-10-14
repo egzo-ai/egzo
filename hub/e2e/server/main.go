@@ -179,7 +179,11 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			if actor == "" {
 				actor = "operator"
 			}
-			e.SetAgent(c.Project, engines.Agent{Name: c.Agent, Template: "coder", State: orDefault(c.State, "running"), Activity: orDefault(c.State, "idle"),
+			container := "running"
+			if c.State == "stopped" {
+				container = "exited"
+			}
+			e.SetAgent(c.Project, engines.Agent{Name: c.Agent, Template: "coder", State: container, Activity: orDefault(c.State, "idle"),
 				Status: c.Text, Waiting: c.Waiting, Actor: actor, Created: time.Now()})
 		case "add-project":
 			e.AddProject(engines.Project{Name: c.Project, Templates: []string{"coder"}})
