@@ -159,14 +159,6 @@ func list(m json_, key string) []map[string]any {
 	return out
 }
 
-func names(items []map[string]any, key string) []string {
-	var out []string
-	for _, it := range items {
-		out = append(out, it[key].(string))
-	}
-	return out
-}
-
 // signIn walks the login: the hub redirects to the provider, the person types a name, the provider redirects back.
 func (b *browser) signIn(user string) {
 	b.t.Helper()
