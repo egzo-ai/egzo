@@ -182,4 +182,5 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   [messaging-adapters.md](messaging-adapters.md).
 - **Discovery beyond the timer**: see [discovery.md](discovery.md).
 - **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
+- **Incompatible controls** (an old sidecar shows as "Starting"): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
 - Resource usage, and a way for an owner to remove a user from the hub altogether.
