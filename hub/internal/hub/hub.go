@@ -1,4 +1,4 @@
-// Package hub is the hub's own logic: discovery over several engines, orphan claims, and every operation a user asks for, each
+// Package hub is the hub's own logic: discovery over several engines, the operators' access, and every operation a user asks for, each
 // checked against the roles and written to the audit log. It speaks to engines only through engines.Engine.
 package hub
 
@@ -22,6 +22,11 @@ var (
 	ErrForbidden = errors.New("you are not allowed to do that")
 	// ErrNotFound is returned for what does not exist, and for a project the user has no role on: its existence is not leaked.
 	ErrNotFound = errors.New("not found")
+	// ErrOperatorAccess is returned when somebody tries to give, change or remove an operator's role on a project: an operator is not
+	// granted a role, they hold every project.
+	ErrOperatorAccess = errors.New("an operator holds every project: that is changed under Settings, Users, not as a role")
+	// ErrLastOperator is returned when a change would leave the hub with no operator.
+	ErrLastOperator = store.ErrLastOperator
 )
 
 // Hub ties the database, the engines and the rules together.
@@ -57,8 +62,8 @@ func (h *Hub) Registry() *engines.Registry { return h.registry }
 
 // --- discovery ---------------------------------------------------------------------------------------------------------------
 
-// Scan asks every engine for its projects, keeps what it learns, and gives the operator owner on every project nobody owns.
-// An engine that fails is recorded as failed and does not stop the others.
+// Scan asks every engine for its projects and keeps what it learns. An engine that fails is recorded as failed and does not stop
+// the others.
 func (h *Hub) Scan(ctx context.Context) error {
 	rows, err := h.store.Engines(ctx)
 	if err != nil {
@@ -89,58 +94,17 @@ func (h *Hub) Scan(ctx context.Context) error {
 	h.mu.Lock()
 	h.scanned = results
 	h.mu.Unlock()
-	return h.claimOrphans(ctx)
-}
-
-// claimOrphans gives the operator owner on every discovered project that has no owner. It is the only special case in the
-// permission model; everything after it is an ordinary role check.
-func (h *Hub) claimOrphans(ctx context.Context) error {
-	operator, err := h.store.Operator(ctx)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil // nobody has logged in yet: the first login claims
-	}
-	if err != nil {
-		return err
-	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for engine, scan := range h.scanned {
-		if scan.err != nil {
-			continue
-		}
-		for _, p := range scan.projects {
-			claimed, err := h.store.ClaimIfOrphan(ctx, engine, p.Name, operator.ID)
-			if err != nil {
-				return err
-			}
-			if claimed {
-				h.log.Info("operator owns an orphan project", "engine", engine, "project", p.Name)
-				_ = h.store.Audit(ctx, store.AuditEntry{Actor: "hub", Action: "project.claim", Engine: engine, Project: p.Name, Detail: "no owner: the operator", Allowed: true})
-			}
-		}
-	}
 	return nil
 }
 
-// Login records a successful login. The first user becomes the operator and owns what is already discovered.
+// Login records a successful login. The first user becomes an operator.
 func (h *Hub) Login(ctx context.Context, identity, email, name string) (store.User, error) {
 	user, created, err := h.store.LoginUser(ctx, identity, email, name)
 	if err != nil {
 		return store.User{}, err
 	}
 	if created && user.IsOperator {
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.operator", Detail: "the first login is the operator", Allowed: true})
-		h.mu.RLock()
-		scanned := len(h.scanned) > 0
-		h.mu.RUnlock()
-		if !scanned {
-			// the first scan may not have run before the first login
-			if err := h.Scan(ctx); err != nil {
-				return user, err
-			}
-		} else if err := h.claimOrphans(ctx); err != nil {
-			return user, err
-		}
+		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.operator", Detail: "the first login is an operator", Allowed: true})
 	}
 	return user, nil
 }
@@ -177,14 +141,16 @@ func (h *Hub) Engines(ctx context.Context) ([]EngineView, error) {
 	return views, nil
 }
 
-// ProjectRef is a project on an engine, with what the user holds on it.
+// ProjectRef is a project on an engine, with what the user holds on it. For an operator Role is owner and Operator is set: they
+// hold the project without a grant.
 type ProjectRef struct {
-	Engine  string
-	Project engines.Project
-	Role    rbac.Role
+	Engine   string
+	Project  engines.Project
+	Role     rbac.Role
+	Operator bool
 }
 
-// Projects lists the projects the user holds a role on, across engines, from the last scan. unreachable lists the engines that
+// Projects lists the projects the user holds a role on (an operator: every project), across engines, from the last scan. unreachable lists the engines that
 // did not answer, so the page can say so without dropping what the others returned.
 func (h *Hub) Projects(ctx context.Context, user store.User) (refs []ProjectRef, unreachable []EngineView, err error) {
 	grants, err := h.store.GrantsOf(ctx, user.ID)
@@ -207,14 +173,18 @@ func (h *Hub) Projects(ctx context.Context, user store.User) (refs []ProjectRef,
 			continue
 		}
 		if scan.err != nil {
-			if hasRoleOnEngine(roles, v.Name) {
+			if user.IsOperator || hasRoleOnEngine(roles, v.Name) {
 				unreachable = append(unreachable, v)
 			}
 			continue
 		}
 		for _, p := range scan.projects {
-			if role, ok := roles[[2]string{v.Name, p.Name}]; ok {
-				refs = append(refs, ProjectRef{Engine: v.Name, Project: p, Role: role})
+			role, ok := roles[[2]string{v.Name, p.Name}]
+			if user.IsOperator {
+				role, ok = rbac.Owner, true
+			}
+			if ok {
+				refs = append(refs, ProjectRef{Engine: v.Name, Project: p, Role: role, Operator: user.IsOperator})
 			}
 		}
 	}
@@ -251,13 +221,18 @@ type ProjectView struct {
 	Engine    string
 	Project   engines.Project
 	Role      rbac.Role
+	Operator  bool // the user holds the project as an operator, not through a grant
 	Agents    []AgentView
 	CanSpawn  bool
 	CanManage bool
 }
 
-// access finds the user's role on a project, or ErrNotFound when they have none.
+// access finds the user's role on a project, or ErrNotFound when they have none. An operator holds every project: they are owner
+// without a grant.
 func (h *Hub) access(ctx context.Context, user store.User, engine, project string) (rbac.Role, error) {
+	if user.IsOperator {
+		return h.operatorAccess(ctx, engine, project)
+	}
 	role, err := h.store.Role(ctx, engine, project, user.ID)
 	if err != nil {
 		return rbac.None, err
@@ -266,6 +241,28 @@ func (h *Hub) access(ctx context.Context, user store.User, engine, project strin
 		return rbac.None, ErrNotFound
 	}
 	return role, nil
+}
+
+// operatorAccess is the operator's way in: the engine must be one the hub has, and when its last scan listed the projects, the
+// project must be one of them. An engine that did not answer is not an excuse to refuse: the call itself says what is wrong.
+func (h *Hub) operatorAccess(ctx context.Context, engine, project string) (rbac.Role, error) {
+	if _, err := h.store.Engine(ctx, engine); errors.Is(err, store.ErrNotFound) {
+		return rbac.None, ErrNotFound
+	} else if err != nil {
+		return rbac.None, err
+	}
+	h.mu.RLock()
+	scan := h.scanned[engine]
+	h.mu.RUnlock()
+	if scan != nil && scan.err == nil {
+		for _, p := range scan.projects {
+			if p.Name == project {
+				return rbac.Owner, nil
+			}
+		}
+		return rbac.None, ErrNotFound
+	}
+	return rbac.Owner, nil
 }
 
 func (h *Hub) engine(ctx context.Context, name string) (engines.Engine, error) {
@@ -309,7 +306,7 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 	if err != nil {
 		return ProjectView{}, err
 	}
-	view := ProjectView{Engine: engine, Project: project, Role: role,
+	view := ProjectView{Engine: engine, Project: project, Role: role, Operator: user.IsOperator,
 		CanSpawn: rbac.Can(user.Subject(), role, rbac.Spawn, ""), CanManage: rbac.Can(user.Subject(), role, rbac.ManageRoles, "")}
 	for _, a := range project.Agents {
 		av := AgentView{Agent: a, CanOperate: rbac.Can(user.Subject(), role, rbac.Operate, a.Actor)}

@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Project, ProjectList, SaveEngineAnswer, Session, TimelineEvent,
+  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Project, ProjectList, SaveEngineAnswer, Session, TimelineEvent, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -55,6 +55,9 @@ export const api = {
   saveEngine: (input: EngineInput) => request<SaveEngineAnswer>("POST", "/engines", input),
   confirmEngine: (token: string) => request<SaveEngineAnswer>("POST", "/engines/confirm", { token }),
   removeEngine: (name: string) => request<{ removed: string }>("DELETE", `/engines/${enc(name)}`),
+
+  users: () => request<{ users: UserRow[]; me: string }>("GET", "/users"),
+  setOperator: (id: string, isOperator: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { isOperator }),
 
   project: (engine: string, name: string) => request<Project>("GET", project(engine, name)),
   events: (engine: string, name: string, agentName = "", limit = 40) =>

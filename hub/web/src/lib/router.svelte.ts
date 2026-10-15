@@ -3,10 +3,13 @@
 export type ProjectTab = "agents" | "services" | "timeline" | "spec" | "audit" | "members";
 export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "spec", "audit", "members"];
 
+export type SettingsTab = "engines" | "users";
+export const settingsTabs: SettingsTab[] = ["engines", "users"];
+
 export type Route =
   | { name: "home" }
   | { name: "login" }
-  | { name: "engines" }
+  | { name: "settings"; tab: SettingsTab }
   | { name: "project"; engine: string; project: string; tab: ProjectTab }
   | { name: "agent"; engine: string; project: string; agent: string; tab: "overview" | "logs" }
   | { name: "notfound" };
@@ -23,7 +26,10 @@ export function parse(pathname: string): Route {
   const parts = pathname.split("/").filter(Boolean).map(dec);
   if (parts.length === 0) return { name: "home" };
   if (parts[0] === "login" && parts.length === 1) return { name: "login" };
-  if (parts[0] === "engines" && parts.length === 1) return { name: "engines" };
+  // /engines is where the engines were before Settings; it, and /settings alone, land on the first tab
+  if (parts[0] === "engines" && parts.length === 1) return { name: "settings", tab: "engines" };
+  if (parts[0] === "settings" && parts.length === 1) return { name: "settings", tab: "engines" };
+  if (parts[0] === "settings" && parts.length === 2 && (settingsTabs as string[]).includes(parts[1]!)) return { name: "settings", tab: parts[1] as SettingsTab };
   if (parts[0] === "e" && parts[2] === "p" && parts[1] && parts[3]) {
     const [, engine, , project, ...rest] = parts as [string, string, string, string, ...string[]];
     if (rest.length === 0) return { name: "project", engine, project, tab: "agents" };
@@ -41,7 +47,9 @@ export function parse(pathname: string): Route {
 const enc = encodeURIComponent;
 export const href = {
   home: () => "/",
-  engines: () => "/engines",
+  settings: (tab: SettingsTab = "engines") => `/settings/${tab}`,
+  engines: () => "/settings/engines",
+  users: () => "/settings/users",
   project: (engine: string, project: string, tab: ProjectTab = "agents") =>
     `/e/${enc(engine)}/p/${enc(project)}${tab === "agents" ? "" : "/" + tab}`,
   agent: (engine: string, project: string, agent: string, tab: "overview" | "logs" = "overview") =>
@@ -50,9 +58,17 @@ export const href = {
 
 export const nav = $state({ path: "/", route: { name: "home" } as Route, previous: "/" });
 
+/** The address a route is known by, for the ones that have older or shorter ones. */
+export function canonical(route: Route): string | null {
+  return route.name === "settings" ? href.settings(route.tab) : null;
+}
+
 function sync() {
+  const route = parse(location.pathname);
+  const canon = canonical(route);
+  if (canon && location.pathname !== canon) history.replaceState(null, "", canon + location.search);
   nav.path = location.pathname + location.search;
-  nav.route = parse(location.pathname);
+  nav.route = route;
 }
 
 /** Go to an address of the app. */

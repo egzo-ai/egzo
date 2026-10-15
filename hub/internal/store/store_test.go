@@ -22,7 +22,7 @@ func open(t *testing.T) *Store {
 
 var ctx = context.Background()
 
-func TestTheFirstUserIsTheOperatorAndOnlyOne(t *testing.T) {
+func TestTheFirstUserIsAnOperatorAndLaterOnesAreNot(t *testing.T) {
 	s := open(t)
 	first, created, err := s.LoginUser(ctx, "issuer\nsub-1", "root@example.com", "Root")
 	if err != nil || !created || !first.IsOperator {
@@ -36,9 +36,56 @@ func TestTheFirstUserIsTheOperatorAndOnlyOne(t *testing.T) {
 	if created || again.ID != first.ID || !again.IsOperator {
 		t.Fatalf("a returning login made %+v (created=%v)", again, created)
 	}
-	operator, err := s.Operator(ctx)
-	if err != nil || operator.ID != first.ID {
-		t.Errorf("operator = %+v, %v", operator, err)
+}
+
+func TestOperatorsAreMadeAndUnmadeAndTheLastOneCannotBe(t *testing.T) {
+	s := open(t)
+	a, _, _ := s.LoginUser(ctx, "i\n1", "a@x", "A")
+	b, _, _ := s.LoginUser(ctx, "i\n2", "b@x", "B")
+	if _, err := s.SetOperator(ctx, a.ID, false); !errors.Is(err, ErrLastOperator) {
+		t.Fatalf("demoting the last operator: %v", err)
+	}
+	if changed, err := s.SetOperator(ctx, b.ID, true); err != nil || !changed {
+		t.Fatalf("making b an operator: changed=%v %v", changed, err)
+	}
+	if changed, err := s.SetOperator(ctx, b.ID, true); err != nil || changed {
+		t.Errorf("making b an operator twice: changed=%v %v", changed, err)
+	}
+	if changed, err := s.SetOperator(ctx, a.ID, false); err != nil || !changed {
+		t.Fatalf("demoting a while b is one: changed=%v %v", changed, err)
+	}
+	if _, err := s.SetOperator(ctx, b.ID, false); !errors.Is(err, ErrLastOperator) {
+		t.Errorf("demoting the last operator, now b: %v", err)
+	}
+	if got, _ := s.User(ctx, a.ID); got.IsOperator {
+		t.Error("a is still an operator")
+	}
+	if got, _ := s.User(ctx, b.ID); !got.IsOperator {
+		t.Error("b stopped being an operator")
+	}
+	if _, err := s.SetOperator(ctx, "uGHOST", true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a user that does not exist: %v", err)
+	}
+	if err := s.DeleteUser(ctx, b.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleting an operator: %v", err)
+	}
+}
+
+func TestUsersComeBackInTheOrderTheySignedIn(t *testing.T) {
+	s := open(t)
+	var want []string
+	for i := 0; i < 12; i++ { // within the same second, whatever their ids sort like
+		u, _, _ := s.LoginUser(ctx, "i\n"+string(rune('a'+i)), "x@x", "U")
+		want = append(want, u.ID)
+	}
+	users, err := s.Users(ctx)
+	if err != nil || len(users) != len(want) {
+		t.Fatalf("users = %d, %v", len(users), err)
+	}
+	for i, u := range users {
+		if u.ID != want[i] {
+			t.Fatalf("user %d is %s, want %s", i, u.ID, want[i])
+		}
 	}
 }
 
@@ -72,28 +119,6 @@ func TestRolesAreGrantedReplacedAndRemoved(t *testing.T) {
 	s.SetRole(ctx, "local", "web", u.ID, rbac.None)
 	if grants, _ := s.GrantsOf(ctx, u.ID); len(grants) != 0 {
 		t.Errorf("grants after removal: %+v", grants)
-	}
-}
-
-func TestAnOrphanProjectIsClaimedOnce(t *testing.T) {
-	s := open(t)
-	a, _, _ := s.LoginUser(ctx, "i\n1", "a@x", "A")
-	b, _, _ := s.LoginUser(ctx, "i\n2", "b@x", "B")
-	s.SetRole(ctx, "local", "web", a.ID, rbac.User) // a lower role is replaced by the claim
-	if claimed, err := s.ClaimIfOrphan(ctx, "local", "web", a.ID); err != nil || !claimed {
-		t.Fatalf("claimed=%v err=%v", claimed, err)
-	}
-	if role, _ := s.Role(ctx, "local", "web", a.ID); role != rbac.Owner {
-		t.Errorf("role = %q", role)
-	}
-	if claimed, _ := s.ClaimIfOrphan(ctx, "local", "web", b.ID); claimed {
-		t.Error("a project that has an owner was claimed")
-	}
-	if owned, _ := s.HasOwner(ctx, "local", "web"); !owned {
-		t.Error("HasOwner = false")
-	}
-	if owned, _ := s.HasOwner(ctx, "local", "other"); owned {
-		t.Error("HasOwner = true for a project nobody owns")
 	}
 }
 

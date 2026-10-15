@@ -5,7 +5,7 @@
 
   const pages: [string, string][] = [
     [": or Ctrl+K", "command menu"], ["/", "filter the list"], ["j k", "move between rows"], ["Enter", "open the row"], ["a", "attach to the agent in the row"],
-    ["s", "spawn an agent"], ["g p", "go to the projects"], ["g e", "go to the engines (operator)"], ["?", "this reference"],
+    ["s", "spawn an agent"], ["g p", "go to the projects"], ["g e", "go to the engines (operator)"], ["g u", "go to the users (operator)"], ["?", "this reference"],
   ];
 </script>
 

@@ -107,7 +107,7 @@
     <div class="phead">
       <h1 class="h-page">{project.name}</h1>
       {#if multi}<EngineBadge name={project.engine} />{/if}
-      <span class="badge" title="your role">{project.role}</span>
+      {#if project.operator}<span class="badge" title="You hold every project as an operator">operator</span>{:else}<span class="badge" title="your role">{project.role}</span>{/if}
       <span class="grow"></span>
       {#if project.canSpawn}<button class="btn" data-variant="primary" data-key="s" aria-label="Spawn agent" aria-keyshortcuts="s" onclick={openSpawn} disabled={!project.up}>Spawn agent <span class="kbd">s</span></button>{/if}
     </div>

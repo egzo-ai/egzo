@@ -58,6 +58,7 @@ function pageKey(e: KeyboardEvent): boolean {
     goPending = 0;
     if (e.key === "p") { navigate(href.home()); return true; }
     if (e.key === "e" && app.user?.isOperator) { navigate(href.engines()); return true; }
+    if (e.key === "u" && app.user?.isOperator) { navigate(href.users()); return true; }
     return false;
   }
   switch (e.key) {

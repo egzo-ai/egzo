@@ -184,7 +184,7 @@ func (s *Store) User(ctx context.Context, id string) (User, error) {
 }
 
 func (s *Store) Users(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at, id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -200,12 +200,43 @@ func (s *Store) Users(ctx context.Context) ([]User, error) {
 	return users, rows.Err()
 }
 
-// Operator returns the one operator, or ErrNotFound before the first login.
-func (s *Store) Operator(ctx context.Context) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE is_operator = 1`))
+// ErrLastOperator is returned when a change would leave the hub with no operator.
+var ErrLastOperator = errors.New("the last operator cannot be removed")
+
+// SetOperator makes a user an operator or takes it away. The last operator cannot be demoted, by themselves or by anyone: one
+// transaction counts and writes. It reports whether anything changed, and returns ErrNotFound for a user that does not exist.
+func (s *Store) SetOperator(ctx context.Context, id string, on bool) (changed bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var current int
+	if err := tx.QueryRowContext(ctx, `SELECT is_operator FROM users WHERE id = ?`, id).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	if (current == 1) == on {
+		return false, nil
+	}
+	if !on {
+		var operators int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE is_operator = 1`).Scan(&operators); err != nil {
+			return false, err
+		}
+		if operators <= 1 {
+			return false, ErrLastOperator
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET is_operator = ? WHERE id = ?`, boolInt(on), id); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
-// DeleteUser removes a user and, by cascade, their grants and sessions. The operator cannot be deleted.
+// DeleteUser removes a user and, by cascade, their grants and sessions. An operator cannot be deleted: demote them first.
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ? AND is_operator = 0`, id)
 	if err != nil {
@@ -276,27 +307,6 @@ func (s *Store) grants(ctx context.Context, query string, args ...any) ([]Grant,
 		grants = append(grants, g)
 	}
 	return grants, rows.Err()
-}
-
-// HasOwner reports whether anybody owns the project.
-func (s *Store) HasOwner(ctx context.Context, engine, project string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM grants WHERE engine = ? AND project = ? AND role = ?`, engine, project, string(rbac.Owner)).Scan(&n)
-	return n > 0, err
-}
-
-// ClaimIfOrphan makes userID the owner of the project when it has no owner; it reports whether it did. One statement, so two
-// scans never both claim.
-func (s *Store) ClaimIfOrphan(ctx context.Context, engine, project, userID string) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `INSERT INTO grants (engine, project, user_id, role)
-		SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM grants WHERE engine = ? AND project = ? AND role = ?)
-		ON CONFLICT (engine, project, user_id) DO UPDATE SET role = excluded.role`,
-		engine, project, userID, string(rbac.Owner), engine, project, string(rbac.Owner))
-	if err != nil {
-		return false, err
-	}
-	n, _ := result.RowsAffected()
-	return n > 0, nil
 }
 
 // --- sessions ----------------------------------------------------------------------------------------------------------------

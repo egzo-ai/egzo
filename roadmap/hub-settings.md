@@ -1,7 +1,8 @@
 # Roadmap: hub settings, with engines and users
 
-**Status.** Open, not designed. Today the hub has one operator, set at the first login, and no way to change that
-(see [hub.md](hub.md), "Permissions"). Engines are the operator's page; there is no list of users at all.
+**Status.** The first slice is built (see "What was built"); "Later" is open. Before it, the hub had one operator, set at the
+first login, and no way to change that (see [hub.md](hub.md), "Permissions"); engines were the operator's page and there was no
+list of users.
 
 The need: a hub-level **Settings** area, outside any project, with two views:
 
@@ -61,6 +62,23 @@ describe the claiming that step 1 removes.
 - **A richer users list.** First and last sign-in, the projects each person holds a role on (it answers "what can this person see?"),
   search for a long list.
 - **Later hub-level things** (auth settings, defaults, retention) would land in the same area. Do not build them now.
+
+## What was built
+
+- **The bypass.** `Hub.access` returns owner for an operator on any project of a known engine; when the engine's last scan listed
+  its projects, the project must be on it. `Projects` lists every scanned project for an operator, with `operator: true`. The
+  claiming is gone: `claimOrphans`, `ClaimIfOrphan` and `HasOwner` are removed, and nothing writes grants for an operator. An
+  engine that did not answer is not "not found" for an operator: the call reports the engine.
+- **Locked Members rows.** `Members` lists the operators after the grants, as owner with `operator` set (a grant left on a person
+  who became an operator is not listed twice); `Candidates` leaves them out; `SetRole` refuses an operator target with
+  `ErrOperatorAccess` before any other rule. Home and the project page say "operator" where a role would be.
+- **Several operators, the last one protected.** `Store.SetOperator` counts and writes in one transaction and returns
+  `ErrLastOperator` (409 `conflict`); it is the only way to change the flag.
+- **Users.** `GET /users`, `PUT /users/{id}` `{isOperator}`, operators only; the audit entries `operator.grant` and
+  `operator.revoke` (refusals too) have no engine and no project. A change that changes nothing is not audited.
+- **Settings.** An operator-only Settings entry in the sidebar, with Engines (moved; `/engines` and `/settings` land on
+  `/settings/engines`) and Users. Keys: `g e`, `g u`; both are in the command menu.
+- The recovery from a lost operator sign-in is written in `hub/docs/README.md`; the break-glass setting is not built.
 
 ## Tests
 

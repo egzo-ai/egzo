@@ -82,7 +82,7 @@
                 </span>{running} running of {p.agents.length}
               </td>
               <td>{#if waiting}<span class="pill" data-s="waiting">{waiting} waiting</span>{:else}<span class="muted">–</span>{/if}</td>
-              <td>{p.role}</td>
+              <td>{#if p.operator}<span class="badge" title="You hold every project as an operator">operator</span>{:else}{p.role}{/if}</td>
             </tr>
           {/each}
         </tbody>

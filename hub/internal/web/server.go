@@ -79,6 +79,8 @@ func (s *Server) Handler() http.Handler {
 	api("POST "+apiPrefix+"/engines", s.operatorOnly(s.saveEngine))
 	api("POST "+apiPrefix+"/engines/confirm", s.operatorOnly(s.confirmEngine))
 	api("DELETE "+apiPrefix+"/engines/{name}", s.operatorOnly(s.removeEngine))
+	api("GET "+apiPrefix+"/users", s.operatorOnly(s.listUsers))
+	api("PUT "+apiPrefix+"/users/{id}", s.operatorOnly(s.setOperator))
 
 	const project = apiPrefix + "/e/{engine}/p/{project}"
 	api("GET "+project, s.project)

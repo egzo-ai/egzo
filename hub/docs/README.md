@@ -17,7 +17,7 @@ docker compose up -d
 ```
 
 Open <http://localhost:8080>, sign in with the local account of `dex.yaml` (`admin@example.com`, password `password`; replace it
-with a real connector before anything else). **The first person to sign in is the operator** and owns every project the hub
+with a real connector before anything else). **The first person to sign in is an operator**, who holds every project the hub
 finds. Create a project with the CLI as usual (`egzo project up`) and it shows up within seconds.
 
 > **The quick start mounts the Docker socket into the hub.** That is root-equivalent on the host: anyone who controls the hub
@@ -42,8 +42,17 @@ A role is held on one project of one engine. Roles live in the hub's database; t
 | administrator | the same on every agent of the project; read the audit log and the logs |
 | owner | an administrator who also grants and removes roles. An owner cannot remove or lower themselves |
 
-Agents started with the CLI belong to the operator. A project nobody owns (one made after the hub started, or by someone else)
-is owned by the operator, at the next scan. Every action, allowed or refused, is in the project's audit log.
+**Operators** are hub-level, not a role. An operator manages the engines and the users, and holds **every project on every
+engine as its owner**, without a grant: a project made after the hub started is theirs as soon as a scan lists it, and nothing is
+written to the database for it. That includes other people's agents and terminals, so make somebody an operator only when you
+would give them the keys to the machine the engines run on (they can already add engines). Operators appear on every project's
+Members tab, shaded and tagged "operator": their access is not a role and cannot be changed there. Agents started with the CLI
+belong to the operators. Every action, allowed or refused, is in the project's audit log.
+
+The first person to sign in is an operator. An operator makes or removes others under **Settings, Users**; the last operator
+cannot be removed. If the only operator's sign-in is lost (their account at the identity provider is gone, or its email changed),
+nobody can make a new one from the UI. Until the hub has something for that, edit its database: stop the hub, then
+`sqlite3 /data/hub.db "UPDATE users SET is_operator = 1 WHERE email = 'the.person@example.com'"`, and start it again.
 
 There is no messaging in the web UI: talk to an agent in its terminal.
 
@@ -71,7 +80,7 @@ resize changes it for the other, and what both type reaches the program. Avoid i
 
 ## Engines
 
-Engines are added in the UI by the operator (**Engines**), not in the compose file. The connection is tested before it is saved.
+Engines are added in the UI by an operator (**Settings, Engines**), not in the compose file. The connection is tested before it is saved.
 
 | Address | Notes |
 |---|---|

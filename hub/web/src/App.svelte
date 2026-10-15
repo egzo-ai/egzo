@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import sprite from "./lib/icons.svg?raw";
-  import { ApiError } from "./lib/api";
   import { app, boot, signOut } from "./lib/app.svelte";
   import { keys, startKeyboard } from "./lib/keyboard.svelte";
   import { nav, navigate, startRouter } from "./lib/router.svelte";
@@ -15,10 +14,10 @@
   import TermView from "./components/TermView.svelte";
   import Toasts from "./components/Toasts.svelte";
   import AgentPage from "./pages/AgentPage.svelte";
-  import Engines from "./pages/Engines.svelte";
   import ErrorPage from "./pages/ErrorPage.svelte";
   import Home from "./pages/Home.svelte";
   import Project from "./pages/Project.svelte";
+  import Settings from "./pages/Settings.svelte";
   import SignIn from "./pages/SignIn.svelte";
 
   onMount(() => {
@@ -48,7 +47,7 @@
   $effect(() => {
     const r = nav.route;
     document.title =
-      (r.name === "project" ? r.project + " · " : r.name === "agent" ? r.agent + " · " : r.name === "engines" ? "Engines · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
+      (r.name === "project" ? r.project + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? (r.tab === "users" ? "Users" : "Engines") + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
   });
 
   const routeKey = $derived.by(() => {
@@ -84,8 +83,7 @@
           {#key routeKey}
             {@const r = nav.route}
             {#if r.name === "home"}<Home />
-            {:else if r.name === "engines"}
-              {#if app.user.isOperator}<Engines />{:else}<ErrorPage error={new ApiError(403, "forbidden", "Only the operator manages engines.")} />{/if}
+            {:else if r.name === "settings"}<Settings tab={r.tab} />
             {:else if r.name === "project"}<Project engine={r.engine} name={r.project} tab={r.tab} />
             {:else if r.name === "agent"}<AgentPage engine={r.engine} project={r.project} agent={r.agent} tab={r.tab} />
             {:else}<ErrorPage error={new Error("There is no such page.")} />{/if}

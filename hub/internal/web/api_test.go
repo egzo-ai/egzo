@@ -42,7 +42,7 @@ func TestTheAppIsServedForItsOwnAddressesAndTheAPIAnswersJSONWhenSignedOut(t *te
 	}
 }
 
-func TestSigningInMakesTheFirstUserTheOperatorWhoOwnsTheOrphans(t *testing.T) {
+func TestSigningInMakesTheFirstUserAnOperatorWhoHoldsEveryProject(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.hub.Scan(ctx)
@@ -57,8 +57,11 @@ func TestSigningInMakesTheFirstUserTheOperatorWhoOwnsTheOrphans(t *testing.T) {
 	}
 	_, projects := b.get("/projects")
 	got := list(projects, "projects")
-	if len(got) != 1 || got[0]["name"] != "web" || got[0]["engine"] != "local" || got[0]["role"] != "owner" {
+	if len(got) != 1 || got[0]["name"] != "web" || got[0]["engine"] != "local" || got[0]["role"] != "owner" || got[0]["operator"] != true {
 		t.Errorf("projects = %v", projects)
+	}
+	if grants, _ := r.store.GrantsOf(ctx, r.userID("root")); len(grants) != 0 {
+		t.Errorf("an operator was given grants: %+v", grants)
 	}
 }
 
@@ -260,6 +263,10 @@ func TestMembersCanBeAddedChangedAndRemovedByAnOwner(t *testing.T) {
 	if cands := list(m, "candidates"); len(cands) != 1 || cands[0]["email"] != "alice@example.com" || m["me"] != r.userID("root") {
 		t.Fatalf("members = %v", m)
 	}
+	// the operator is listed, as owner, marked: their access is not a role
+	if rows := list(m, "members"); len(rows) != 1 || at(rows[0], "user", "name") != "root" || rows[0]["role"] != "owner" || rows[0]["operator"] != true {
+		t.Errorf("members = %v", rows)
+	}
 	if code, _ := root.post("/e/local/p/web/members", json_{"user": uid, "role": "administrator"}); code != 200 {
 		t.Errorf("grant = %d", code)
 	}
@@ -272,12 +279,74 @@ func TestMembersCanBeAddedChangedAndRemovedByAnOwner(t *testing.T) {
 	if code, _ := alice.post("/e/local/p/web/members", json_{"user": uid, "role": "owner"}); code != 403 {
 		t.Errorf("an administrator granting owner = %d", code)
 	}
-	if code, out := root.post("/e/local/p/web/members", json_{"user": r.userID("root"), "role": "none"}); code != 403 || !strings.Contains(out["message"].(string), "cannot remove or lower themselves") {
+	root.post("/e/local/p/web/members", json_{"user": uid, "role": "owner"})
+	if code, out := alice.post("/e/local/p/web/members", json_{"user": uid, "role": "none"}); code != 403 || !strings.Contains(out["message"].(string), "cannot remove or lower themselves") {
 		t.Errorf("an owner removing themselves = %d %v", code, out)
+	}
+	// an operator's access is not a role, whoever asks and whatever the role
+	for _, who := range []*browser{root, alice} {
+		for _, role := range []string{"none", "user", "owner"} {
+			if code, out := who.post("/e/local/p/web/members", json_{"user": r.userID("root"), "role": role}); code != 403 || !strings.Contains(out["message"].(string), "operator holds every project") {
+				t.Errorf("setting the operator to %s = %d %v", role, code, out)
+			}
+		}
 	}
 	root.post("/e/local/p/web/members", json_{"user": uid, "role": "none"})
 	if code, _ := alice.get("/e/local/p/web"); code != 404 {
 		t.Errorf("a removed member still sees the project: %d", code)
+	}
+}
+
+func TestOnlyAnOperatorListsUsersAndMakesOperators(t *testing.T) {
+	r := newRig(t, "local")
+	r.fakes["local"].AddProject(project("web"))
+	r.hub.Scan(ctx)
+	root := r.browser()
+	root.signIn("root")
+	alice := r.browser()
+	alice.signIn("alice")
+	uid := r.userID("alice")
+
+	if code, _ := alice.get("/users"); code != 403 {
+		t.Errorf("a user listing users = %d", code)
+	}
+	if code, _ := alice.put("/users/"+uid, json_{"isOperator": true}); code != 403 {
+		t.Errorf("a user making themselves an operator = %d", code)
+	}
+	code, out := root.get("/users")
+	rows := list(out, "users")
+	if code != 200 || len(rows) != 2 || out["me"] != r.userID("root") || rows[0]["isOperator"] != true || rows[1]["isOperator"] != false || rows[1]["createdAt"] == nil {
+		t.Fatalf("users = %d %v", code, out)
+	}
+	if rows[1]["identity"] != nil {
+		t.Errorf("the identity is shown: %v", rows[1])
+	}
+	if code, out := root.put("/users/"+uid, json_{}); code != 400 {
+		t.Errorf("no value = %d %v", code, out)
+	}
+	if code, _ := root.put("/users/uGHOST", json_{"isOperator": true}); code != 404 {
+		t.Errorf("a user that does not exist = %d", code)
+	}
+	if code, _ := root.put("/users/"+uid, json_{"isOperator": true}); code != 200 {
+		t.Fatalf("making an operator = %d", code)
+	}
+	if code, _ := alice.get("/engines"); code != 200 {
+		t.Errorf("a new operator manages engines: %d", code)
+	}
+	if _, projects := alice.get("/projects"); len(list(projects, "projects")) != 1 {
+		t.Errorf("a new operator holds every project: %v", projects)
+	}
+	if code, _ := root.put("/users/"+r.userID("root"), json_{"isOperator": false}); code != 200 {
+		t.Errorf("an operator stepping down while another is one = %d", code)
+	}
+	if code, _ := root.get("/engines"); code != 403 {
+		t.Errorf("a demoted operator still manages engines: %d", code)
+	}
+	if code, out := alice.put("/users/"+uid, json_{"isOperator": false}); code != 409 || out["code"] != "conflict" {
+		t.Errorf("the last operator stepping down = %d %v", code, out)
+	}
+	if code, _ := alice.put("/users/"+uid, json_{"isOperator": true}); code != 200 {
+		t.Errorf("setting the same value = %d", code)
 	}
 }
 

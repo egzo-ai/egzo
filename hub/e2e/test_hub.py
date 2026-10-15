@@ -33,6 +33,7 @@ def test_the_first_person_to_sign_in_is_the_operator_and_sees_every_project(hub,
     expect(projects_table(page).locator("tbody tr")).to_have_count(4)  # web and data on local, web and ml on lab
     expect(projects_table(page).get_by_role("link", name="data")).to_be_visible()
     expect(projects_table(page).get_by_role("link", name="ml")).to_be_visible()
+    expect(projects_table(page).locator("tbody tr").first).to_contain_text("operator")  # held as an operator: no role
     # two engines: each project says where it lives
     expect(projects_table(page).locator(".engine")).to_have_count(4)
 
@@ -87,12 +88,21 @@ def test_a_newcomer_sees_nothing_until_an_owner_adds_them(hub, page, new_person)
     expect(alice.get_by_role("tab", name="Audit log")).to_have_count(0)
 
 
-def test_an_owner_cannot_remove_themselves(hub, page):
+def test_an_owner_cannot_remove_themselves_and_an_operator_is_a_locked_row(hub, page, new_person):
     sign_in(page, hub, "root")
-    page.goto(hub.url + "/e/local/p/web/members")
-    row = page.locator("tr[data-user]").first
-    expect(row.get_by_role("button", name="Remove")).to_have_count(0)
-    expect(row.get_by_role("combobox")).to_be_disabled()
+    alice = new_person("alice")
+    hub.world("grant", engine="local", project="web", user="alice", role="owner")
+    alice.goto(hub.url + "/e/local/p/web/members")
+    mine = alice.locator("tr[data-user]").filter(has_text="alice@example.com")
+    expect(mine.get_by_role("button", name="Remove")).to_have_count(0)
+    expect(mine.get_by_role("combobox")).to_be_disabled()
+    # the operator holds the project without a role: listed, shaded, and nothing to change
+    locked = alice.locator("tr[data-operator]")
+    expect(locked).to_have_count(1)
+    expect(locked).to_contain_text("root")
+    expect(locked).to_contain_text("operator")
+    expect(locked.get_by_role("button")).to_have_count(0)
+    expect(locked.get_by_role("combobox")).to_have_count(0)
 
 
 def test_removing_a_member_asks_first(hub, page, new_person):
@@ -264,7 +274,7 @@ def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person
     expect(alice.locator("tr[data-agent=coder-1]").get_by_role("button", name="Stop coder-1")).to_have_count(0)
 
 
-def test_a_project_nobody_owns_goes_to_the_operator_when_it_appears(single_hub, page):
+def test_an_operator_holds_a_project_as_soon_as_the_scan_finds_it(single_hub, page):
     sign_in(page, single_hub, "root")
     single_hub.world("add-project", engine="local", project="fresh")
     expect(projects_table(page).get_by_role("link", name="fresh")).to_be_visible(timeout=10000)  # found by the next scan
@@ -272,7 +282,9 @@ def test_a_project_nobody_owns_goes_to_the_operator_when_it_appears(single_hub, 
 
 def test_the_operator_adds_an_ssh_engine_and_confirms_its_host_key(single_hub, page):
     sign_in(page, single_hub, "root")
-    page.get_by_role("link", name="Engines", exact=True).click()
+    page.get_by_role("link", name=re.compile("^Settings")).click()
+    expect(page.get_by_role("heading", name="Settings")).to_be_visible()
+    expect(page.get_by_role("tab", name="Engines")).to_have_attribute("aria-selected", "true")
     expect(page.get_by_test_id("engines")).to_contain_text("local")
     page.get_by_label("Name").fill("far")
     page.get_by_label("Address", exact=True).fill("ssh://me@far.example")
@@ -293,12 +305,59 @@ def test_the_operator_adds_an_ssh_engine_and_confirms_its_host_key(single_hub, p
     expect(page.get_by_role("status").last).to_contain_text("Removed engine far")
 
 
-def test_only_the_operator_sees_the_engines_page(hub, page, new_person):
+def test_only_an_operator_sees_the_settings(hub, page, new_person):
     sign_in(page, hub, "root")
     alice = new_person("alice")
-    expect(alice.get_by_role("link", name=re.compile("^Engines"))).to_have_count(0)
-    alice.goto(hub.url + "/engines")
-    expect(alice.get_by_role("heading", name="Forbidden")).to_be_visible()
+    expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_have_count(0)
+    for path in ("/settings/engines", "/settings/users", "/engines"):
+        alice.goto(hub.url + path)
+        expect(alice.get_by_role("heading", name="Forbidden")).to_be_visible()
+    # the old address lands on the engines tab
+    page.goto(hub.url + "/engines")
+    expect(page).to_have_url(hub.url + "/settings/engines")
+    expect(page.get_by_test_id("engines")).to_be_visible()
+
+
+def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub, page, new_person):
+    sign_in(page, hub, "root")
+    alice = new_person("alice")
+    expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_have_count(0)
+
+    page.get_by_role("link", name=re.compile("^Settings")).click()
+    page.get_by_role("tab", name="Users").click()
+    users = page.get_by_test_id("users")
+    expect(users.locator("tr[data-user]")).to_have_count(2)
+    root_row = users.locator("tr[data-user]").filter(has_text="root@example.com")
+    alice_row = users.locator("tr[data-user]").filter(has_text="alice@example.com")
+    # the only operator cannot be removed
+    expect(root_row.get_by_role("button", name="Remove operator from root")).to_be_disabled()
+    expect(alice_row.get_by_test_id("operator-badge")).to_have_count(0)
+
+    alice_row.get_by_role("button", name="Make alice an operator").click()
+    page.get_by_role("dialog").get_by_role("button", name="Cancel").click()
+    expect(alice_row.get_by_test_id("operator-badge")).to_have_count(0)
+    alice_row.get_by_role("button", name="Make alice an operator").click()
+    page.get_by_role("dialog").get_by_role("button", name="Make operator").click()
+    expect(page.get_by_role("status")).to_contain_text("alice is an operator")
+    expect(alice_row.get_by_test_id("operator-badge")).to_be_visible()
+
+    # alice now has the settings, and holds every project
+    alice.goto(hub.url + "/")
+    expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_be_visible()
+    expect(projects_table(alice).locator("tbody tr")).to_have_count(4)  # every project of both engines, none of them granted
+    expect(projects_table(alice).locator("tbody tr").first).to_contain_text("operator")
+
+    # with two operators, root may step down, and is then no operator
+    expect(root_row.get_by_role("button", name="Remove operator from root")).to_be_enabled()
+    root_row.get_by_role("button", name="Remove operator from root").click()
+    page.get_by_role("dialog").get_by_role("button", name="Remove operator").click()
+    expect(page.get_by_role("heading", name="Forbidden")).to_be_visible()
+    expect(page.get_by_role("link", name=re.compile("^Settings"))).to_have_count(0)
+
+    # alice is the last one
+    alice.goto(hub.url + "/settings/users")
+    last = alice.get_by_test_id("users").locator("tr[data-user]").filter(has_text="alice@example.com")
+    expect(last.get_by_role("button", name="Remove operator from alice")).to_be_disabled()
 
 
 def test_the_audit_log_shows_who_did_what_and_what_was_refused(hub, page, new_person):

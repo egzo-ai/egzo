@@ -86,8 +86,7 @@
 {#if failure}
   <ErrorPage error={failure} />
 {:else}
-  <div class="page">
-    <div class="phead"><h1 class="h-page">Engines</h1><span class="muted">{engines?.length ?? ""}</span></div>
+  <div style="display:grid;gap:var(--space-4)">
     <p class="dim" style="margin:0">The container engines the hub manages. Credentials are encrypted, never shown again, and left unchanged when a field is blank.</p>
 
     <div class="table-wrap">

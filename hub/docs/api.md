@@ -9,20 +9,20 @@ anything must send `Content-Type: application/json` and the `Origin` of the hub'
 is refused (415, 403).
 
 **Errors** are `{"code": "...", "message": "..."}` with a real status: `unauthorized` (401), `forbidden` (403), `not_found` (404; also
-for a project the person has no role on, so its existence is not leaked), `bad_request`, `invalid` (422), `expired` (410),
-`operation_failed` and `engine_error` (502).
+for a project the person has no role on, so its existence is not leaked; an operator gets it for a project that is not on a scan), `bad_request`, `invalid` (422), `expired` (410),
+`conflict` (409), `operation_failed` and `engine_error` (502).
 
 | Call | Answer |
 |---|---|
 | `GET /session` | `{user: {id, name, email, isOperator}, engines: [{name, up, err}]}` |
 | `POST /logout` | `{ok}` |
-| `GET /projects` | `{projects: [{engine, name, role, up, agents: [{name, template, running, activity, status, waiting}]}], unreachable: [{name, err}]}` from the last scan; it feeds the home page and the sidebar and calls no engine |
-| `GET /e/{engine}/p/{project}` | the project, read live: `{engine, name, role, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder}], canSpawn, canManage, canAudit}` |
+| `GET /projects` | `{projects: [{engine, name, role, operator, up, agents: [{name, template, running, activity, status, waiting}]}], unreachable: [{name, err}]}` from the last scan; it feeds the home page and the sidebar and calls no engine |
+| `GET /e/{engine}/p/{project}` | the project, read live: `{engine, name, role, operator, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder}], canSpawn, canManage, canAudit}` |
 | `GET .../events?agent=&limit=` | `{events: [{time, type, agent, actor, text}]}`, newest first |
 | `POST .../spawn` `{template, name}` | `{agent}` |
 | `GET .../spec` | `{text}` |
-| `GET .../members` (owner) | `{members: [{user, role}], candidates: [user], roles, me}` |
-| `POST .../members` `{user, role}` (owner) | `{ok}`; `role` is `user`, `administrator`, `owner` or `none` |
+| `GET .../members` (owner) | `{members: [{user, role, operator}], candidates: [user], roles, me}`; an operator is listed last, as `owner` with `operator: true` |
+| `POST .../members` `{user, role}` (owner) | `{ok}`; `role` is `user`, `administrator`, `owner` or `none`. Refused (403) for an operator: their access is not a role |
 | `GET .../audit` (administrator) | `{entries: [{at, actor, action, agent, detail, allowed}]}` |
 | `GET .../a/{agent}` | `{project, agent}` (the project without its other agents) |
 | `POST .../a/{agent}/{start,stop,rm}` | `{agent, verb}` |
@@ -32,6 +32,8 @@ for a project the person has no role on, so its existence is not leaked), `bad_r
 | `POST /engines` `{name, host, sshUser, ca, cert, key, sshKey}` (operator) | `{saved}`, or `{pending: {name, host, fingerprint, token}}` when an ssh host key must be confirmed first. Credentials are never returned |
 | `POST /engines/confirm` `{token}` (operator) | `{saved}`; the token lives ten minutes and works once |
 | `DELETE /engines/{name}` (operator) | `{removed}` |
+| `GET /users` (operator) | `{users: [{id, name, email, isOperator, createdAt}], me}` |
+| `PUT /users/{id}` `{isOperator}` (operator) | `{ok}`. 409 `conflict` when it would remove the last operator; setting the value a person already has changes nothing |
 
 `.../` is `/e/{engine}/p/{project}`.
 

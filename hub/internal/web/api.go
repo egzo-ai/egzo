@@ -48,6 +48,10 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusNotFound, "not_found", "There is nothing here, or you have no access to it.")
 	case errors.Is(err, hub.ErrForbidden):
 		s.apiFail(w, http.StatusForbidden, "forbidden", "You are not allowed to do that.")
+	case errors.Is(err, hub.ErrOperatorAccess):
+		s.apiFail(w, http.StatusForbidden, "forbidden", "An operator holds every project. Change that under Settings, Users, not as a role.")
+	case errors.Is(err, hub.ErrLastOperator):
+		s.apiFail(w, http.StatusConflict, "conflict", "The last operator cannot be removed. Make somebody else an operator first.")
 	default:
 		s.log.Error("request", "path", r.URL.Path, "err", err)
 		s.apiFail(w, http.StatusBadGateway, "engine_error", err.Error())
@@ -127,6 +131,7 @@ type projectJSON struct {
 	Engine    string        `json:"engine"`
 	Name      string        `json:"name"`
 	Role      rbac.Role     `json:"role"`
+	Operator  bool          `json:"operator"` // held as an operator, without a grant
 	Up        bool          `json:"up"`
 	Templates []string      `json:"templates"`
 	Services  []serviceJSON `json:"services"`
@@ -142,7 +147,7 @@ func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 }
 
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
-	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Up: v.Project.Up, Templates: v.Project.Templates,
+	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Operator: v.Operator, Up: v.Project.Up, Templates: v.Project.Templates,
 		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
 	if p.Templates == nil {
 		p.Templates = []string{}
@@ -194,18 +199,19 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Waiting  bool   `json:"waiting"`
 	}
 	type project struct {
-		Engine string    `json:"engine"`
-		Name   string    `json:"name"`
-		Role   rbac.Role `json:"role"`
-		Up     bool      `json:"up"`
-		Agents []agent   `json:"agents"`
+		Engine   string    `json:"engine"`
+		Name     string    `json:"name"`
+		Role     rbac.Role `json:"role"`
+		Operator bool      `json:"operator"`
+		Up       bool      `json:"up"`
+		Agents   []agent   `json:"agents"`
 	}
 	out := struct {
 		Projects    []project    `json:"projects"`
 		Unreachable []engineJSON `json:"unreachable"`
 	}{Projects: []project{}, Unreachable: []engineJSON{}}
 	for _, ref := range refs {
-		p := project{Engine: ref.Engine, Name: ref.Project.Name, Role: ref.Role, Up: ref.Project.Up, Agents: []agent{}}
+		p := project{Engine: ref.Engine, Name: ref.Project.Name, Role: ref.Role, Operator: ref.Operator, Up: ref.Project.Up, Agents: []agent{}}
 		for _, a := range ref.Project.Agents {
 			p.Agents = append(p.Agents, agent{Name: a.Name, Template: a.Template, Running: a.Running(), Activity: a.Activity, Status: a.Status, Waiting: a.Waiting})
 		}
@@ -334,8 +340,9 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request, user store.User
 	}
 	candidates, _ := s.hub.Candidates(r.Context(), user, engine, project)
 	type member struct {
-		User userJSON  `json:"user"`
-		Role rbac.Role `json:"role"`
+		User     userJSON  `json:"user"`
+		Role     rbac.Role `json:"role"`
+		Operator bool      `json:"operator"` // holds the project as an operator: not a role, cannot be changed here
 	}
 	out := struct {
 		Members    []member    `json:"members"`
@@ -344,7 +351,7 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request, user store.User
 		Me         string      `json:"me"`
 	}{Members: []member{}, Candidates: []userJSON{}, Roles: rbac.Roles, Me: user.ID}
 	for _, m := range members {
-		out.Members = append(out.Members, member{User: userOf(m.User), Role: m.Role})
+		out.Members = append(out.Members, member{User: userOf(m.User), Role: m.Role, Operator: m.Operator})
 	}
 	for _, c := range candidates {
 		out.Candidates = append(out.Candidates, userOf(c))
@@ -424,6 +431,44 @@ func (n namer) actor(actor string) string {
 		return "a removed user"
 	}
 	return actor
+}
+
+// --- users -------------------------------------------------------------------------------------------------------------------
+
+type userRowJSON struct {
+	userJSON
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.User) {
+	users, err := s.hub.Users(r.Context(), user)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	rows := make([]userRowJSON, 0, len(users))
+	for _, u := range users {
+		rows = append(rows, userRowJSON{userJSON: userOf(u), CreatedAt: u.CreatedAt})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": rows, "me": user.ID})
+}
+
+func (s *Server) setOperator(w http.ResponseWriter, r *http.Request, user store.User) {
+	var body struct {
+		IsOperator *bool `json:"isOperator"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.IsOperator == nil {
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "Say isOperator: true or false.")
+		return
+	}
+	if err := s.hub.SetOperator(r.Context(), user, r.PathValue("id"), *body.IsOperator); err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // --- engines -----------------------------------------------------------------------------------------------------------------

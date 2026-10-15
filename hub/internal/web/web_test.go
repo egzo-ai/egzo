@@ -121,6 +121,7 @@ func (b *browser) call(method, path string, body any) (int, json_) {
 
 func (b *browser) get(path string) (int, json_)            { return b.call("GET", path, nil) }
 func (b *browser) post(path string, body any) (int, json_) { return b.call("POST", path, body) }
+func (b *browser) put(path string, body any) (int, json_)  { return b.call("PUT", path, body) }
 func (b *browser) del(path string) (int, json_)            { return b.call("DELETE", path, nil) }
 
 // page fetches an address of the app itself, as a browser navigating to it.

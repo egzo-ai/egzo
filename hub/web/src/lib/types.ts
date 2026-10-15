@@ -35,6 +35,8 @@ export interface ProjectBrief {
   engine: string;
   name: string;
   role: Role;
+  /** Held as an operator: every project, with no grant. */
+  operator: boolean;
   up: boolean;
   agents: AgentBrief[];
 }
@@ -69,6 +71,8 @@ export interface Project {
   engine: string;
   name: string;
   role: Role;
+  /** Held as an operator: every project, with no grant. */
+  operator: boolean;
   up: boolean;
   templates: string[];
   services: Service[];
@@ -94,6 +98,13 @@ export interface TimelineEvent {
 export interface Member {
   user: User;
   role: Role;
+  /** An operator holds the project without a role: the row cannot be changed here. */
+  operator: boolean;
+}
+
+/** A person who has signed in, as the Users page lists them. */
+export interface UserRow extends User {
+  createdAt: string;
 }
 
 export interface Members {

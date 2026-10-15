@@ -10,7 +10,7 @@
     const r = nav.route;
     switch (r.name) {
       case "home": return "Projects";
-      case "engines": return "Engines";
+      case "settings": return "Settings";
       case "project": return r.project;
       case "agent": return `${r.project} / ${r.agent}`;
       default: return "egzo hub";

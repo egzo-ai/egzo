@@ -180,8 +180,8 @@
 
   <div class="side-foot">
     {#if app.user?.isOperator}
-      <a class="health" href={href.engines()} data-down={down ? "" : undefined} aria-current={onPage && route.name === "engines" ? "page" : undefined} aria-label={multi ? `Engines: ${app.engines.length - down} reachable, ${down} unreachable` : "Engines"} onclick={showPage}>
-        <Icon name="engine" size="sm" /><span class="t">Engines{#if multi}&nbsp;<span class="muted">{app.engines.length - down}/{app.engines.length}</span>{/if}</span>
+      <a class="health" href={href.settings()} data-down={down ? "" : undefined} aria-current={onPage && route.name === "settings" ? "page" : undefined} aria-label={down ? `Settings: ${down} of ${app.engines.length} engines unreachable` : "Settings"} onclick={showPage}>
+        <Icon name="engine" size="sm" /><span class="t">Settings</span>
         {#if down}<span class="warn hide-rail">⌁ {down} down</span>{/if}
       </a>
     {:else if multi}

@@ -15,7 +15,10 @@
     const out: Item[] = [];
     const multi = multiEngine();
     out.push({ group: "Go to", label: "All projects", run: () => { showPage(); navigate(href.home()); } });
-    if (app.user?.isOperator) out.push({ group: "Go to", label: "Engines", run: () => { showPage(); navigate(href.engines()); } });
+    if (app.user?.isOperator) {
+      out.push({ group: "Go to", label: "Engines", run: () => { showPage(); navigate(href.engines()); } });
+      out.push({ group: "Go to", label: "Users", run: () => { showPage(); navigate(href.users()); } });
+    }
     for (const p of app.projects) {
       out.push({ group: "Projects", label: p.name, hint: multi ? p.engine : "", run: () => { showPage(); navigate(href.project(p.engine, p.name)); } });
       for (const a of p.agents) {

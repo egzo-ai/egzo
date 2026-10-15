@@ -45,16 +45,16 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
 - **OIDC through Dex**, bundled as a compose service. The hub only speaks OIDC to it; the user plugs their provider
   (GitHub first) into Dex with Dex's own documentation. No provider code in the hub.
 - A user is created on the first successful login and has access to nothing.
-- **The very first user is the operator.** There is only one. The operator gets **owner on every project the hub has
-  no owner for** (an orphan): at first login, and again whenever a scan finds a project (any engine) with no owner.
-  That is the only special case; every check afterwards is a normal RBAC check.
+- **The very first user is an operator.** An operator holds **every project as its owner, without a grant** (see
+  [hub-settings.md](hub-settings.md)); operators make and remove other operators, and the last one stays. That is the only
+  special case; every other check is a normal RBAC check.
 - To be invited, a user must already exist: they log in, see nothing, and an owner grants them a role.
 
 ## Permissions (RBAC)
 
 - Resources: **projects and agents** only. Roles are granted per project (and per engine: the grant key is
   `(engine, project)`). An agent has a creator field (the `actor` label that spawn already writes). Agents spawned
-  from the CLI belong to the operator (special case).
+  from the CLI belong to the operators (special case).
 - Roles:
   - **user**: spawn, start, stop, attach and delete their own agents.
   - **administrator**: the same on every agent of the project.
@@ -141,7 +141,7 @@ Information model: engine → projects → agents, services.
 
 - **An `Engine` seam owned by the hub**: `Projects`, `Agents`, `Spawn`, `Start`, `Stop`, `Rm`, `Attach`, implemented by
   delegating to the core packages, and faked in the hub's tests. That covers what is the hub's own logic: discovery,
-  orphan grants, RBAC, fan-out over N engines, an engine going down.
+  the operators' access, RBAC, fan-out over N engines, an engine going down.
 - Discovery is by labels, per engine, on a timer (engine events: see [discovery.md](discovery.md)).
 - Risks to track: privileged socket access (rootless, later a label-scoped proxy); engine credentials for remote
   engines stored by the hub; many exec streams (engine events plus on-demand sidecar streams); `project up`
@@ -153,7 +153,7 @@ Information model: engine → projects → agents, services.
 - Web UI: one flat project list with an engine badge and an engine filter (both hidden with one engine); URLs carry
   the engine.
 - Engine connections are data, managed by the operator in the UI (encrypted, write-only, host key pinned).
-- The first login is the operator, with no claim code. Projects with no owner are claimed by that login.
+- The first login is an operator, with no claim code. Operators hold every project without a grant.
 - Hub code lives in `hub/`, a separate Go module; hub imports core, never the reverse; hub and adapters are
   unit-tested, not spec-driven (see "Code layout and rules").
 
@@ -162,9 +162,11 @@ Information model: engine → projects → agents, services.
 In `hub/`, with the decisions above unless listed under "Not yet".
 
 - The model: a separate module, multi-engine, observe and operate only, secrets never read, roles in the hub's database.
-- Login through OIDC (Dex in the compose stack); the first login is the operator and owns the orphan projects, again on every
-  scan. Roles user / administrator / owner per `(engine, project)`, "own agents" by the `actor` label, an owner cannot
+- Login through OIDC (Dex in the compose stack); the first login is an operator, and operators hold every project without a
+  grant. Roles user / administrator / owner per `(engine, project)`, "own agents" by the `actor` label, an owner cannot
   remove or lower themselves. Every operation is audited, allowed or refused.
+- Settings for operators ([hub-settings.md](hub-settings.md)): Engines, and Users, where an operator makes or removes other
+  operators; the last one cannot be removed.
 - Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the
   operator confirms its fingerprint); one engine down does not take the page down.
 - The web UI, a Svelte app on a JSON API ([web-ui-spa.md](web-ui-spa.md)): projects (engine badge and filter only with several
@@ -182,6 +184,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   [messaging-adapters.md](messaging-adapters.md).
 - **Discovery beyond the timer**: see [discovery.md](discovery.md).
 - **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
-- **Hub settings with engines and users** (granting operator, listing users): see [hub-settings.md](hub-settings.md).
+- **Hub settings, later parts** (a hub-level audit view, removing users, a richer users list, break-glass operator): see [hub-settings.md](hub-settings.md).
 - **Incompatible controls** (an old sidecar shows as "Starting"): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

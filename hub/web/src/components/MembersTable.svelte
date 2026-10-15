@@ -47,8 +47,12 @@
     <tbody>
       {#each data.members as m (m.user.id)}
         {@const me = m.user.id === data.me}
-        <tr data-user={m.user.id}>
+        <tr data-user={m.user.id} data-dim={m.operator ? "" : undefined} data-operator={m.operator ? "" : undefined}>
           <td><span class="presence"><span class="avatar" data-me={me ? "" : undefined}>{initials(m.user.name)}</span>{m.user.name}</span> <span class="muted">{m.user.email}</span></td>
+          {#if m.operator}
+            <td><span class="badge" title="An operator holds every project. This is not a role: change it under Settings, Users.">operator</span></td>
+            <td class="actions"><span class="muted">{me ? "you · " : ""}holds every project</span></td>
+          {:else}
           <td>
             <span class="btn-group">
               <select class="select" style="width:auto" aria-label="Role of {m.user.name}" disabled={me} value={chosen[m.user.id] ?? m.role} onchange={(e) => (chosen[m.user.id] = e.currentTarget.value as Role)}>
@@ -58,6 +62,7 @@
             </span>
           </td>
           <td class="actions">{#if !me}<button class="btn" data-variant="danger" data-size="sm" aria-label="Remove {m.user.name}" onclick={() => remove(m.user.id, m.user.name)}>Remove</button>{:else}<span class="muted">you</span>{/if}</td>
+          {/if}
         </tr>
       {/each}
     </tbody>

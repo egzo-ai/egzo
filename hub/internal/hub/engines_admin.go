@@ -35,7 +35,7 @@ func (h *Hub) requireOperator(ctx context.Context, user store.User, action, engi
 	if user.IsOperator {
 		return nil
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: action, Engine: engine, Detail: "refused: only the operator manages engines"})
+	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: action, Engine: engine, Detail: "refused: only an operator may do that"})
 	return ErrForbidden
 }
 
