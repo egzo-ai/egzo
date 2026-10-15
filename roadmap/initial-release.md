@@ -1,8 +1,11 @@
-# Roadmap: initial release
+# Roadmap: what is required for 1.0.0
 
-What is left before egzo is publicly announced, and what to re-check in the documentation when it is. egzo is already
-published as early 0.x releases (tags `0.0.1-rc1` to `0.4.1`; GitHub releases from `0.1.1`), so this page is no longer
-about whether anything is out, but about what makes a first release one that can be recommended.
+This page tracks what has to be true before egzo 1.0.0, and what to re-check in the documentation then. egzo is already
+published as early 0.x releases (tags `0.0.1-rc1` to `0.4.1`; GitHub releases from `0.1.1`), so "initial release" now means
+the first one that can be recommended.
+
+The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matrix.md](ci-test-matrix.md)). The solution
+(runners, hosted or self-hosted, which CI) is not chosen; the requirement is that the matrix runs somewhere automated.
 
 ## Done
 
@@ -17,8 +20,9 @@ about whether anything is out, but about what makes a first release one that can
 
 - [ ] **Check the releases.** `0.4.0` has a tag but no GitHub release and no images, and `0.1.0` and `0.0.1-rc1` have images
       but no release: find out why, and make sure a tag cannot half-publish.
-- [ ] **The hub image.** `hub/compose.yaml` pulls `ghcr.io/egzo-ai/egzo-hub`, which `release.yml` does not build and ghcr does not
-      have. Add it to the release (and make the package public), then drop the "build it yourself" lines from `hub/docs/README.md`.
+- [ ] **TODO: publish the hub image.** `hub/compose.yaml` pulls `ghcr.io/egzo-ai/egzo-hub`, which `release.yml` does not build and ghcr does not
+      have, so the hub quick start only works after `make hub-image` and `EGZO_HUB_VERSION=dev`. Add the image to the release (and make the
+      package public), then drop those two lines from the quick start in `hub/docs/README.md`.
 - [ ] `ci.yml` should also build the images without pushing, so a broken Dockerfile shows before a tag does.
 - [ ] **arm64 has to be run**, not only built: no spec runs on arm64, and the browser has not been tried there. Until then do not
       claim arm64 support beyond "builds".
@@ -28,9 +32,9 @@ about whether anything is out, but about what makes a first release one that can
       right binary, verifies its checksum and installs it, for a `curl ... | sh` style install and perhaps a package
       (Homebrew tap, `.deb`). Then update `docs/install.md` to lead with it and keep the manual download as the fallback.
 - [ ] Check the name, domain, org and registry (DESIGN.md, "Naming": availability was never really checked).
-- [ ] A CI matrix of reference platforms ([`ci-test-matrix.md`](ci-test-matrix.md),
-      `known-issues/reference-platform-ci-matrix.md`): until then the specs have only run on one machine, and "supported on
-      Podman" or "gVisor works" are not claims to make.
+- [ ] **A CI matrix running the specs** on every reference platform ([`ci-test-matrix.md`](ci-test-matrix.md),
+      `known-issues/reference-platform-ci-matrix.md`). `ci.yml` runs only the Go tests, linters and hub tests today. The CI solution is
+      undecided; until the matrix runs, "supported on Podman" or "gVisor works" are not claims to make.
 - [ ] Decide whether Podman is supported in the first release, given
       `known-issues/rootful-podman-intermittent-egress.md` and `known-issues/podman-gvisor-unsupported.md`.
 - [ ] Retire [`review-leftovers.md`](review-leftovers.md): file its concrete items as GitHub issues (the `errcheck` sweep, a fake
