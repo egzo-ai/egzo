@@ -27,30 +27,39 @@ The need: a hub-level **Settings** area, outside any project, with two views:
   already reads that as `subject.IsOperator`, so with several operators it means any of them; the UI shows "operator (CLI)".
 - **Roles on projects are unchanged** and stay on the project's Members tab. Only an operator manages engines and users.
 
-## Ideas
+## First
 
-- **Protect the last operator.** An operator cannot remove or lower their own status when they are the last one, and nobody
-  can lower the last one. Same shape as "an owner cannot remove or lower themselves" in `rbac.CanAssign`.
-- **Members tab shows operators, locked.** Operators are listed on every project in a disabled shade with an "operator" tag, so it is
-  clear their access is not a role and cannot be removed there. `CanAssign` / `SetRole` refuse to change an operator's access, and the
-  list of people to add leaves operators out.
-- **Home lists every project for an operator**, tagged "operator" where a role would be.
-- **Users list.** Name, email, first and last sign-in, operator or not, and the projects they hold a role on. Search, since this
-  list can be long. The user list has to say what a person *can* see, because that is the question an operator asks first.
-- **Grant and revoke operator** with a confirmation, and an audit entry.
-- **Existing grants.** A person who is made operator may already hold explicit grants, and the first operator holds the owner rows
-  that orphan claiming wrote. They are harmless while the bypass is on, but they come back as real access if the person is demoted.
-  Decide: promoting deletes their explicit grants, or demoting keeps what they had. Existing hubs also hold claimed rows for the
-  operator already; a migration could remove them.
-- **Remove a user.** `Store.DeleteUser` exists (grants and sessions go with it, and it refuses the operator) and nothing calls
-  it. Decide whether to expose it, and what happens to the agents they created (their actor label stays, as a name that no longer resolves).
-- **Hub-level audit.** The audit log is per project (`engine`, `project` columns). Operator changes, user removals and engine
-  changes have no project: show them in a hub-level log under Settings, or in the same table with an empty project.
-- **Break-glass.** The operator's OIDC identity can be lost (provider account deleted, email changed), and then nobody can
-  become operator. A start-up setting, such as `EGZO_OPERATOR_IDENTITY`, that grants operator to that identity, or a hub
-  subcommand that does it, would close the gap. Without it the fix is editing the database.
-- **Navigation.** A Settings entry in the sidebar, for operators only, with Engines and Users as its two views; `/settings/engines`
-  and `/settings/users`. The existing `/engines` route redirects. In the design, Settings is a settings-style page, not a primary view.
+One slice, in this order. Each step leaves the hub working.
+
+1. **The bypass.** `access()` and `Projects()` treat an operator as owner of every scanned project; `claimOrphans` and `ClaimIfOrphan` go.
+   The visible part belongs here too: **operators listed on every project's Members tab, locked** (a disabled shade, an "operator" tag,
+   `CanAssign` / `SetRole` refuse to change them, they are left out of the list of people to add), and **Home lists every project for an
+   operator**, tagged "operator" where a role would be.
+   *Existing grants:* leave them alone, no migration. The owner rows that claiming wrote stay as ordinary rows. They do nothing while the
+   person is an operator and show up as real roles on the Members tab if they are demoted, where an owner can remove them.
+2. **Several operators, and the last one is protected.** `Store.Operator()` and the "very first user" rule stop assuming one. The last
+   operator cannot be demoted, by themselves or by anyone, in the same shape as "an owner cannot remove or lower themselves".
+3. **Users, and grant or revoke operator.** `GET /api/v1/users` (name, email, operator or not) and `PUT /api/v1/users/{id}` to set
+   operator, operator only, with a confirmation in the UI. Each change is an audit entry with no engine and no project (the columns
+   are already empty-able), written now so that nothing is lost before there is a view of it.
+4. **Settings in the sidebar.** For operators only, with **Engines** (moved, `/settings/engines`, and `/engines` redirects) and
+   **Users** (`/settings/users`). In the design, Settings is a settings-style page, not a primary view.
+
+Tests and docs go with each step (below). `hub.md`, `hub/docs/README.md` and `hub/docs/api.md` change when step 1 lands, because they
+describe the claiming that step 1 removes.
+
+## Later
+
+- **Break-glass.** The operator's OIDC identity can be lost (provider account deleted, email changed), and then nobody can become
+  operator. A start-up setting such as `EGZO_OPERATOR_IDENTITY`, or a hub subcommand, would close it. Not now: the hub is early, the fix
+  is a one-line edit of the database (`users.is_operator`), and a break-glass needs its own documentation and care. Write the edit
+  down in the operator docs in step 3 so that the way out exists on paper.
+- **A hub-level audit view.** Step 3 writes the entries; showing them (a log under Settings, or the project table with an empty
+  project) is separate.
+- **Remove a user.** `Store.DeleteUser` exists (grants and sessions go with it, and it refuses the operator) and nothing calls it.
+  Open: whether to expose it, and what happens to the agents they created (the actor label stays, as a name that no longer resolves).
+- **A richer users list.** First and last sign-in, the projects each person holds a role on (it answers "what can this person see?"),
+  search for a long list.
 - **Later hub-level things** (auth settings, defaults, retention) would land in the same area. Do not build them now.
 
 ## Tests
