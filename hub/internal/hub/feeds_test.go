@@ -365,3 +365,23 @@ func TestAnOperatorSeesTheFeedOfEveryProjectAndAUserOnlyTheirs(t *testing.T) {
 		return feed.State == FeedLive && got.Activity == "working"
 	})
 }
+
+func TestRemovingAnEngineStopsItsStreamsAtOnce(t *testing.T) {
+	r := newRig(t, "local", "lab")
+	r.fakes["lab"].AddProject(project("data", "coder"))
+	op := r.login("root")
+	r.startFeeds(quick)
+	r.scan()
+	eventually(t, "the engine to be followed and watched", func() bool { return r.fakes["lab"].Feeds("data") == 1 && r.fakes["lab"].WatchStarts() >= 1 })
+	if err := r.hub.RemoveEngine(ctx, op, "lab"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the follower of the removed engine to stop", func() bool { return r.fakes["lab"].Feeds("data") == 0 })
+	m := r.hub.feedManager()
+	m.mu.Lock()
+	_, watched := m.watches["lab"]
+	m.mu.Unlock()
+	if watched {
+		t.Error("the event watcher of a removed engine is still there")
+	}
+}

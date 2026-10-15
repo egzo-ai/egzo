@@ -13,6 +13,7 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/engines"
 	"github.com/egzo-ai/egzo/hub/internal/engines/fake"
+	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 )
 
@@ -145,6 +146,57 @@ func TestAProjectOffersOnlyWhatTheRoleAllows(t *testing.T) {
 		if code, _ := alice.get("/e/local/p/web" + path); code != 403 {
 			t.Errorf("%s for a user = %d", path, code)
 		}
+	}
+}
+
+func TestTheAgentsActivityComesFromTheStatusFeedAndTheFeedIsReported(t *testing.T) {
+	r := newRig(t, "local")
+	r.fakes["local"].AddProject(project("web", "coder"))
+	working := agent("coder-1", "operator")
+	working.Activity, working.Waiting = "working", true
+	r.fakes["local"].SetAgent("web", working)
+	r.fakes["local"].AddProject(project("mute", "coder"))
+	r.fakes["local"].SetAgent("mute", agent("coder-1", "operator"))
+	r.fakes["local"].SetFeedSilent("mute", true) // its control sidecar logs no status
+	feeds, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	r.hub.StartFeeds(feeds, hub.FeedOptions{Silent: 150 * time.Millisecond, BackoffMin: 5 * time.Millisecond, BackoffMax: 20 * time.Millisecond})
+	r.hub.Scan(ctx)
+	b := r.browser()
+	b.signIn("root")
+
+	var web, mute map[string]any
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		_, projects := b.get("/projects")
+		for _, p := range list(projects, "projects") {
+			if p["name"] == "web" {
+				web = p
+			} else {
+				mute = p
+			}
+		}
+		if at(json_(web), "feed", "state") == "live" && at(json_(mute), "feed", "state") == "unavailable" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if at(json_(web), "feed", "state") != "live" {
+		t.Fatalf("web feed = %v", web["feed"])
+	}
+	if a := list(json_(web), "agents")[0]; a["activity"] != "working" || a["waiting"] != true {
+		t.Errorf("the list shows what the feed said: %v", a)
+	}
+	if at(json_(mute), "feed", "state") != "unavailable" || !strings.Contains(at(json_(mute), "feed", "message").(string), "writes no status") {
+		t.Fatalf("mute feed = %v", mute["feed"])
+	}
+	if a := list(json_(mute), "agents")[0]; a["activity"] != "unknown" || a["running"] != true {
+		t.Errorf("a running agent whose status cannot be read is unknown, not starting: %v", a)
+	}
+	// the project page says the same
+	_, page := b.get("/e/local/p/mute")
+	if at(page, "feed", "state") != "unavailable" || list(page, "agents")[0]["activity"] != "unknown" {
+		t.Errorf("project page = %v", page)
 	}
 }
 

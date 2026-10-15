@@ -136,6 +136,13 @@ func (h *Hub) RemoveEngine(ctx context.Context, user store.User, name string) er
 	h.mu.Lock()
 	delete(h.scanned, name)
 	h.mu.Unlock()
+	if rows, err := h.store.Engines(ctx); err == nil {
+		names := make([]string, len(rows))
+		for i, row := range rows {
+			names[i] = row.Name
+		}
+		h.reconcileFeeds(names) // its streams stop now, not at the next listing
+	}
 	return h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "engine.remove", Engine: name, Allowed: true})
 }
 
