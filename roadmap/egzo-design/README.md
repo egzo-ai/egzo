@@ -22,7 +22,8 @@ Published copies (same content): design system https://claude.ai/artifact/6E1H1z
 - Fonts are self-hosted, not loaded from a CDN: **JetBrains Mono** (UI and terminal) and **Martian Mono** (page titles and the wordmark only). Both are OFL.
 - Terminal is **xterm.js** (already vendored under `/static/xterm/`), themed from the `--term-*` tokens (snippet below).
 - Dark mode first, light mode required. WCAG AA contrast (already verified for every token pair), visible focus everywhere, full keyboard use.
-- No scanlines or other CRT effects. The retro feel comes from amber, monospace and a faint `--glow-accent` in dark mode only.
+- Orange is the only warm colour. Never tint a neutral toward it and never use a dimmed orange as a fill: orange mixed into a dark grey is brown. Selected rows use a neutral lift plus an orange rule. In light mode orange is never text: links are text-coloured with an orange underline, and orange appears only as fills, rules and dots.
+- No scanlines or other CRT effects. The retro feel comes from orange, monospace and a faint `--glow-accent` in dark mode only.
 
 ## App shell
 
@@ -38,7 +39,7 @@ Published copies (same content): design system https://claude.ai/artifact/6E1H1z
 ```
 
 - **Sidebar** (`--nav-w` 272px, `--nav-w-md` 232px at ≤1024px, `--nav-w-rail` 52px collapsed):
-  - **Terminals**: one entry per open terminal, in the order opened (drag to reorder). Three lines: status glyph + agent name + number (1–9); `project · engine` (engine only when the hub has more than one); the agent's status text. A question from the agent turns that line cyan and shows the question. Unread output: bold name + amber dot; a question shows a cyan `?` chip instead. Close (×) detaches; the agent keeps running.
+  - **Terminals**: one entry per open terminal, in the order opened (drag to reorder). Three lines: status glyph + agent name + number (1–9); `project · engine` (engine only when the hub has more than one); the agent's status text. A question from the agent turns that line cyan and shows the question. Unread output: bold name + orange dot; a question shows a cyan `?` chip instead. Close (×) detaches; the agent keeps running.
   - **Projects**: "All projects" (home), then every project with its question count and engine badge. The current project unfolds into Agents, Services, Timeline, Spec, Audit log, Members (only the sections the user's role can open).
   - Footer: engines (reachable/total, ⌁ when one is down; operators only get the link), account, theme.
 - **Phone (≤720px)**: sidebar hidden; a 44px bar with ☰, the page or terminal name, a `?` when any agent is waiting, and search. ☰ opens the sidebar full screen; choosing anything closes it.
@@ -75,7 +76,7 @@ States map to the existing control frames in `hub/internal/web/terminal.go` (`bu
 
 | State | Overlay (over the dimmed last frame) | Sidebar glyph |
 |---|---|---|
-| connecting | checklist: websocket open, agent running, attaching to the pty, blinking caret | blinking amber dot |
+| connecting | checklist: websocket open, agent running, attaching to the pty, blinking caret | blinking orange dot |
 | connected | none | activity glyph (● ▶ ○ ?) |
 | busy | "Maria Chen is at this terminal. Since 14:22." No watch-only mode. **Take over** / Close | lock |
 | taken | "Maria Chen took over at 14:41." Last frame frozen. **Take it back** / Close | swap |
@@ -126,7 +127,7 @@ On pages (focus not in a field or terminal): `:` or Ctrl+K command menu, `/` fil
 ## Rules that are easy to miss
 
 - Status is never colour alone: every state has a glyph and a word (see the Status section of `egzo-system.html`). Unreachable uses a dashed outline.
-- One primary (amber) action per region. Danger buttons are outlined in rows, solid only inside the confirmation.
+- One primary (orange) action per region. Danger buttons are outlined in rows, solid only inside the confirmation.
 - Row actions are always visible, never on hover only.
 - Tab switching and terminal focus are instant (no animation). Durations come from `--dur-*`; all become 0 under reduced motion.
 - With a single engine, the UI never shows engine badges or filters (URLs still carry the engine).
