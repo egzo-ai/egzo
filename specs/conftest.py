@@ -15,6 +15,7 @@ fail there, and are marked so. Nothing is probed or skipped for them: egzo is as
 
 import copy
 import hashlib
+import shlex
 import json
 import os
 import secrets
@@ -28,6 +29,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+import clitree
 
 pytest_plugins = ["pytester", "spec_status"]
 
@@ -94,6 +97,22 @@ class Project:
 
     def run(self, *args, env=None, **kwargs):
         return self.egzo.run(*args, cwd=self.root, env={**self.env, **(env or {})}, **kwargs)
+
+    def sh(self, command, *arguments, **kwargs):
+        """Run an egzo command line written as the shell would take it: `p.sh("agent spawn coder issue-1 -m hi")`.
+        `arguments` are appended as they are (a text with spaces, a path). The line is checked against the CLI's own help
+        first, so a spec that names a command or a flag egzo does not have fails as itself. Use `run` to try a bad line."""
+        argv = [*shlex.split(command), *map(str, arguments)]
+        wrong = clitree.problem(self.egzo.binary, argv)
+        if wrong:
+            pytest.fail(f"this spec runs a command egzo does not have: egzo {command}\n{wrong}", pytrace=False)
+        return self.run(*argv, **kwargs)
+
+    def ok(self, command, *arguments, **kwargs):
+        """`sh`, which must exit 0."""
+        result = self.sh(command, *arguments, **kwargs)
+        assert result.returncode == 0, f"egzo {command} {' '.join(map(str, arguments))}\n{result.stderr}"
+        return result
 
     def config(self, document, *args, **kwargs):
         """Write the file and run `egzo config`."""
@@ -550,3 +569,28 @@ def registry(engine):
         )
         assert login.returncode == 0, f"could not log in to {host}:\n{login.stderr}"
     return Registry(engine, host)
+
+
+@pytest.fixture(scope="module")
+def shared_project(tmp_path_factory, engine, egzo):
+    """A project bound to the engine that lasts for a whole module, for the specs that only need it running and take what
+    they change from agents of their own. Removed, with everything it made, when the module is done."""
+    root = tmp_path_factory.mktemp("shared") / f"spec-{secrets.token_hex(4)}"
+    created = Project(root, egzo, {**engine.env, "EGZO_IMAGE": engine.image_for(egzo.binary)})
+    yield created
+    created.run("project", "down", "--force")
+    engine.cleanup(created.name)
+
+
+@pytest.fixture(scope="module")
+def team(shared_project, engine):
+    """The shared project, up, with the template `worker` and two instances of it, `coder` and `reviewer` (see agentapi.Team)."""
+    from agentapi import Team
+
+    return Team(engine, shared_project, engine.agent_image())
+
+
+@pytest.fixture
+def pair(team):
+    """Two fresh instances of `worker`, for a spec whose counts must not include what other specs did."""
+    return team.pair()

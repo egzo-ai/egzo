@@ -1,6 +1,6 @@
 # Roadmap: overhaul the specs suite
 
-**Status.** Decided, not started. Specs stay pytest (a transcript format such as testscript or cram was considered and
+**Status.** Started: the messaging specs are the pilot (see "Pilot"). The rest is converted file by file. Specs stay pytest (a transcript format such as testscript or cram was considered and
 rejected: it would throw away the status model in `spec_status.py` and the `pexpect` session specs).
 
 ## Why
@@ -32,6 +32,18 @@ rejected: it would throw away the status model in `spec_status.py` and the `pexp
   them.
 - **Tiers by marker** (`pure`, `sidecars`, `agents`, `real`: internet, git, real harness images). It does not speed up a full run
   but lets a push run the cheap tiers and a release run all, and it fits [the CI matrix](ci-test-matrix.md).
+
+## Pilot: messaging
+
+`test_messaging.py` (48 specs, 246 s) became `specs/message/test_message_cli.py` and `test_agent_api.py` (19 specs, 64 s, nothing
+dropped but the repetition): a shared `team` project per module, fresh `pair` agents only for the specs that count, scenarios that
+follow a story, a batch of agent calls in one `exec`, command-literal specs (`project.sh`, `project.ok`) checked against the CLI's
+help (`specs/clitree.py`, and a spec in `test_meta.py` for every literal). Three things the pilot taught:
+
+- State that looks per-agent is not always. "A person has at most 20 open messages" is the operator's counter for the whole
+  project, so a spec that fills it must answer the messages again, or it poisons every later spec of the module.
+- A rate limit left on a shared agent shows in every later spec: flooding specs take fresh agents.
+- `up` and `spawn` are about a second each, so the remaining cost of a module is its spawns: fresh agents are what to economise.
 
 ## Not decided
 

@@ -26,6 +26,11 @@ def agent(**fields):
     return definition
 
 
+def custom(image, **fields):
+    """An agent that runs any image as given: the stand-in for a harness in specs that need a running container."""
+    return agent(harness="custom", image=image, **fields)
+
+
 def anthropic_profile(**extra):
     """The profile that lets an agent reach its model API."""
     profile = {

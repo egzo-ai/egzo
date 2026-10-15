@@ -63,6 +63,15 @@ outcome per area (one area per `test_<area>.py`).
 - Use `support.py` builders (`spec`, `agent`, `anthropic_profile`, ...) so a spec reads as the YAML
   it describes. Specs that need an engine take `live_project`, which cleans up everything it created.
 - Specs assert behaviour at the CLI and engine boundary only, never implementation details.
+- **Write the command as the shell would take it**: `project.sh("agent spawn coder issue-1 -m hi")`, or `project.ok(...)` when it
+  must exit 0; values with spaces go after the string (`project.ok("message send coder", text)`). The line is checked against
+  the CLI's own help, at run time and, for every literal, by a spec in `test_meta.py`, so a renamed command or flag fails the spec.
+  `run` is for a line that is meant to be wrong.
+- **Share what can be shared.** `shared_project` and `team` (in `conftest.py` and `agentapi.py`) bring one project up for a whole
+  module, with a template `worker` and the instances `coder` and `reviewer`. A spec that counts something (open requests, a rate
+  limit, the rows of `ps`) takes fresh agents with `pair`. A spec about `up`, `down`, stale instances or the lock keeps
+  `live_project`. Prefer a scenario that follows one story, with an assertion at each step, over many specs that each set the
+  same thing up; the engine specs of a module should cost about one `up`.
 
 ## Helpers for a spec that needs a running agent
 
@@ -127,7 +136,8 @@ do not change the exit code. Changing this contract means changing these specs f
 | `test_operations.py` | `system check` (including the log driver), `project up --dry-run`, `project rotate-ca`, `up` taking no agent, `proxy rules`, the engine-side project lock |
 | `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
 | `test_daily.py` | `logs`, `exec`, `start`, `stop`, `restart`, `proxy log` |
-| `test_messaging.py` | the message model, the agent's tools (HTTP and MCP) and `egzo message send|ls|reply` |
+| `message/test_message_cli.py` | `egzo message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
+| `message/test_agent_api.py` | what an agent does to the control sidecar: the HTTP tools, MCP, hooks, and the limits |
 | `test_logs.py` | the engine's default logging for every container; the control sidecar's JSON logs, status on standard output |
 | `test_snapshot.py` | the resolved project kept on the control volume, read through `/v1` |
 

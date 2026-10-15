@@ -115,3 +115,31 @@ def test_skipped_spec_is_not_counted_as_done(suite):
     )
     result = suite.runpytest()
     result.stdout.fnmatch_lines(["area *0 *0 *0 *1"])
+
+
+def test_every_command_line_a_spec_writes_is_a_command_egzo_has(egzo):
+    """The specs write commands as the shell would take them (`project.sh("agent spawn coder -m hi")`). Each one written as a
+    literal is checked against the CLI's own help, so a spec cannot name a command or a flag that was renamed or removed."""
+    import ast
+    from pathlib import Path
+
+    import clitree
+
+    problems = []
+    for path in sorted(Path(__file__).parent.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("sh", "ok") and node.args):
+                continue
+            first = node.args[0]
+            if isinstance(first, ast.JoinedStr):  # an f-string: what is substituted is one word
+                text = "".join(v.value if isinstance(v, ast.Constant) else "X" for v in first.values)
+            elif isinstance(first, ast.Constant) and isinstance(first.value, str):
+                text = first.value
+            else:
+                continue
+            import shlex
+
+            wrong = clitree.problem(egzo.binary, shlex.split(text))
+            if wrong:
+                problems.append(f"{path.name}:{node.lineno}: egzo {text}: {wrong}")
+    assert not problems, "\n".join(problems)
