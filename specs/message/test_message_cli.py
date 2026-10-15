@@ -205,3 +205,23 @@ def test_what_an_agent_writes_never_acts_on_the_operators_terminal(pair, team):
     b.resolve(message_id, "done \x1b]0;pwned\x07 \x1b[31mred")
     waited = p.sh("message send --wait --timeout 3s", b.name, "again")
     assert "\x1b" not in waited.stdout + waited.stderr
+
+
+def test_message_ls_filters_by_recipient_sender_kind_and_state(pair, team):
+    a, b = pair
+    p = team.project
+    first, second = team.send(a.name, "for the first"), team.send(b.name, "for the second")
+    assert set(team.messages("--to", a.name)) == {first}
+    assert set(team.messages("--to", b.address)) == {second}
+    assert {first, second} <= set(team.messages("--from", "operator"))
+    assert team.messages("--from", a.name) == {}
+    assert {first, second} <= set(team.messages("--kind", "request")) and first not in team.messages("--kind", "question")
+    assert {first, second} <= set(team.messages("--state", "pending")) and first not in team.messages("--state", "resolved")
+
+    p.ok("agent rm --force", a.name)  # fails what it still owed
+    assert first in team.messages("--state", "resolved") and first not in team.messages("--state", "pending")
+    for flag, value in (("--kind", "rumor"), ("--state", "maybe")):
+        refused = p.sh("message ls", flag, value)
+        assert refused.returncode != 0 and value in refused.stderr
+    assert p.sh("msg send", b.name, "through the alias").returncode == 0, "msg is an alias of message"
+    assert p.sh("message reply", "m" + "0" * 32, "x").returncode != 0

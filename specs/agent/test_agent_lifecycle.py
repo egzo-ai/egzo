@@ -176,3 +176,23 @@ def test_stop_and_start_keep_an_instance_and_what_is_left_after_a_container_is_r
     assert not leftovers(engine, sandbox, "coder-1")
     assert sandbox.sh("message send coder-1 hi").returncode != 0, "no longer registered with control"
     assert sandbox.spawn("coder", "coder-1") == "coder-1", "the name is free again"
+
+
+def test_agent_ls_lists_the_instances_and_not_the_sidecars_and_rm_takes_names_or_filters(sandbox, engine):
+    assert sandbox.instance_names() == []
+    sandbox.spawn("coder")
+    sandbox.spawn("coder", "issue-7")
+    assert sandbox.instance_names() == ["coder-1", "issue-7"]
+    assert [row["name"] for row in json.loads(sandbox.ok("agent ls --json").stdout)] == ["coder-1", "issue-7"]
+    assert any(name.endswith("control-1") for name in sandbox.ps()) and any(name.endswith("proxy-1") for name in sandbox.ps())
+
+    neither = sandbox.sh("agent rm")
+    assert neither.returncode != 0 and "--stale" in neither.stderr
+    both = sandbox.sh("agent rm coder-1 --stopped")
+    assert both.returncode != 0 and "not both" in both.stderr
+    assert sandbox.instance_names() == ["coder-1", "issue-7"]
+
+    sandbox.ok("agent stop coder-1")
+    assert engine.instance(sandbox.name, "coder-1").raw["State"]["Running"] is False
+    sandbox.ok("agent start coder-1")
+    assert engine.instance(sandbox.name, "coder-1").raw["State"]["Running"] is True

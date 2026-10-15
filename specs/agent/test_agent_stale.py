@@ -72,6 +72,10 @@ def test_editing_a_template_makes_its_instances_stale_and_up_refuses_until_they_
     assert dry.returncode == 1, dry.stderr
     assert sorted(line for line in dry.stdout.splitlines() if line.startswith("stale:")) == ["stale: coder-1", "stale: other"]
 
+    drift = p.sh("project check", env={"ANTHROPIC_API_KEY": "a", "GITHUB_TOKEN": "b", "DEPLOY_TOKEN": "c"})
+    assert drift.returncode == 0, "drift is shown but is not an error"
+    assert any(line.startswith("warn") and "up --dry-run" in line for line in drift.stdout.splitlines()), drift.stdout
+
     before = {c.name: c.raw["Id"] for c in engine.containers(p.name)}
     refused = p.sh("project up", timeout=300)
     assert refused.returncode == 1 and "stale" in refused.stderr and "coder-1" in refused.stderr and "reviewer-1" not in refused.stderr
