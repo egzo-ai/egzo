@@ -26,7 +26,7 @@ verbs is enough:
   `get-message ID`, `resolve ID TEXT --outcome done`, `update ID TEXT`, `ask ID TEXT`, `message TO TEXT`,
   `status TEXT`, `agents`. The `egzo` binary is already in every harness
   image, and the credentials are already in the container (`EGZO_CONTROL_URL`, `EGZO_AGENT`, `EGZO_TOKEN`),
-  so nothing new has to be installed and no configuration file is needed. `egzo agent hook` already works this way.
+  so nothing new has to be installed and no configuration file is needed. `egzo hook` already works this way.
 - The CLI calls the HTTP verbs directly. It does not need an MCP client; it is not an MCP bridge, although it
   plays the role bridges such as `mcporter` play for pi (the harness runs a shell command, the result comes
   back as the command's output).
