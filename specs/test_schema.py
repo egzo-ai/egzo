@@ -231,3 +231,27 @@ def test_a_wrong_type_is_reported_with_its_line(project):
     result = project.sh("project check --resolved")
     assert result.returncode != 0
     assert "egzo.yaml:5" in result.stderr
+
+
+# --- the inject section ----------------------------------------------------------------------------------------
+
+
+def test_inject_settings_are_validated(project):
+    base = {"harness": "custom", "image": "alpine"}
+    for inject, complaint in (
+        ({"human_quiet": "soon"}, "human_quiet"),
+        ({"ack_timeout": "-3s"}, "ack_timeout"),
+        ({"idle_signal": "vibes"}, "idle_signal"),
+        ({"quiescence": "abc"}, "quiescence"),
+        ({"nonsense": 1}, "nonsense"),
+    ):
+        result = project.config(spec(agents={"coder": {**base, "inject": inject}}))
+        assert result.returncode != 0, inject
+        assert complaint in result.stderr
+
+
+def test_inject_defaults_are_resolved(project):
+    resolved = project.resolved(spec(agents={"coder": {"harness": "claude-code"}}, egress={"default": {"allow": ["x.test"]}}))
+    assert resolved["agents"]["coder"]["inject"] == {"human_quiet": "30s", "ack_timeout": "60s", "idle_signal": "hook", "quiescence": "5s"}
+    resolved = project.resolved(spec(agents={"coder": {"harness": "custom", "image": "alpine"}}))
+    assert resolved["agents"]["coder"]["inject"]["idle_signal"] == "quiescence"
