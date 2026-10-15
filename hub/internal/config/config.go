@@ -19,6 +19,8 @@ type Config struct {
 	PublicURL    string
 	TrustedProxy []string
 	LocalEngine  string // the address of the engine seeded as "local"; empty for none
+	// ScanInterval is how often an engine is listed again whatever its events said, in case one was missed. Changes are found by
+	// the events; this is the fallback.
 	ScanInterval time.Duration
 }
 
@@ -33,7 +35,7 @@ func Parse(get func(string) string) (Config, error) {
 		OIDCSecret:   get("EGZO_OIDC_CLIENT_SECRET"),
 		PublicURL:    get("EGZO_PUBLIC_URL"),
 		LocalEngine:  "unix:///var/run/docker.sock",
-		ScanInterval: 5 * time.Second,
+		ScanInterval: 60 * time.Second,
 	}
 	if v, ok := lookup(get, "EGZO_LOCAL_ENGINE"); ok {
 		c.LocalEngine = v

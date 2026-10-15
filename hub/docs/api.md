@@ -16,8 +16,8 @@ for a project the person has no role on, so its existence is not leaked; an oper
 |---|---|
 | `GET /session` | `{user: {id, name, email, isOperator}, engines: [{name, up, err}]}` |
 | `POST /logout` | `{ok}` |
-| `GET /projects` | `{projects: [{engine, name, role, operator, up, agents: [{name, template, running, activity, status, waiting}]}], unreachable: [{name, err}]}` from the last scan; it feeds the home page and the sidebar and calls no engine |
-| `GET /e/{engine}/p/{project}` | the project, read live: `{engine, name, role, operator, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder}], canSpawn, canManage, canAudit}` |
+| `GET /projects` | `{projects: [{engine, name, role, operator, feed, up, agents: [{name, template, running, activity, status, waiting}]}], unreachable: [{name, err}]}` from what the hub holds (the engines' last listing, kept current by their events, and the agents' status from the control sidecars' logs); it feeds the home page and the sidebar and calls no engine |
+| `GET /e/{engine}/p/{project}` | the project, from what the hub holds (the templates from the control sidecar, kept for five minutes): `{engine, name, role, operator, feed, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder}], canSpawn, canManage, canAudit}` |
 | `GET .../events?agent=&limit=` | `{events: [{time, type, agent, actor, text}]}`, newest first |
 | `POST .../spawn` `{template, name}` | `{agent}` |
 | `GET .../spec` | `{text}` |
@@ -36,6 +36,12 @@ for a project the person has no role on, so its existence is not leaked; an oper
 | `PUT /users/{id}` `{isOperator}` (operator) | `{ok}`. 409 `conflict` when it would remove the last operator; setting the value a person already has changes nothing |
 
 `.../` is `/e/{engine}/p/{project}`.
+
+**`activity` and `feed`.** An agent's `activity` is `starting`, `idle`, `working`, `blocked`, `stopped` (its container is not running), or
+`unknown` (it runs, and the hub cannot read what it is doing). A project's `feed` is `{state, message}` and says how far `activity`,
+`status` and `waiting` can be trusted: `live` (status lines are arriving), `connecting` (nothing yet), `stale` (it went quiet for
+longer than three heartbeats) or `unavailable` (the log cannot be followed, or the sidecar writes no status), with the reason in
+`message`. Unless the feed is `live`, every running agent is `unknown`.
 
 ## The terminal websocket
 

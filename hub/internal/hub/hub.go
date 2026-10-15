@@ -38,6 +38,9 @@ type Hub struct {
 	mu       sync.RWMutex
 	scanned  map[string]*engineScan // by engine name
 	attached map[string]*Attachment // who holds the terminal, by "engine:project/agent"
+	feeds    *feedManager           // the status followers and event watchers; nil until StartFeeds
+	pubMu    sync.Mutex
+	pub      map[projectKey]*publishedEntry
 }
 
 type engineScan struct {
@@ -51,7 +54,7 @@ func New(s *store.Store, r *engines.Registry, log *slog.Logger) *Hub {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Hub{store: s, registry: r, log: log, scanned: map[string]*engineScan{}, attached: map[string]*Attachment{}}
+	return &Hub{store: s, registry: r, log: log, scanned: map[string]*engineScan{}, attached: map[string]*Attachment{}, pub: map[projectKey]*publishedEntry{}}
 }
 
 // Store gives the web layer the database for what is not an operation: login, sessions.
@@ -69,32 +72,90 @@ func (h *Hub) Scan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	results := make(map[string]*engineScan, len(rows))
+	names := make([]string, len(rows))
+	for i, row := range rows {
+		names[i] = row.Name
+	}
+	results := h.listEngines(ctx, names)
+	h.mu.Lock()
+	h.scanned = results
+	h.mu.Unlock()
+	h.reconcileFeeds(names)
+	return nil
+}
+
+// scanEngines lists some engines again and leaves what is known of the others as it is.
+func (h *Hub) scanEngines(ctx context.Context, names []string) error {
+	rows, err := h.store.Engines(ctx)
+	if err != nil {
+		return err
+	}
+	var all, listed []string
+	have := map[string]bool{}
+	for _, row := range rows {
+		all = append(all, row.Name)
+		have[row.Name] = true
+	}
+	for _, name := range names {
+		if have[name] {
+			listed = append(listed, name)
+		}
+	}
+	results := h.listEngines(ctx, listed)
+	h.mu.Lock()
+	for name := range h.scanned {
+		if !have[name] {
+			delete(h.scanned, name)
+		}
+	}
+	for name, scan := range results {
+		h.scanned[name] = scan
+	}
+	h.mu.Unlock()
+	h.reconcileFeeds(all)
+	return nil
+}
+
+// listEngines asks the named engines for their projects, all at once.
+func (h *Hub) listEngines(ctx context.Context, names []string) map[string]*engineScan {
+	results := make(map[string]*engineScan, len(names))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for _, row := range rows {
+	for _, name := range names {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			scan := &engineScan{at: time.Now()}
-			eng, err := h.registry.Get(ctx, row.Name)
+			eng, err := h.registry.Get(ctx, name)
 			if err == nil {
 				scan.projects, err = eng.Projects(ctx)
 				if err != nil {
-					h.registry.Failed(row.Name, err)
+					h.registry.Failed(name, err)
 				}
 			}
 			scan.err = err
 			mu.Lock()
-			results[row.Name] = scan
+			results[name] = scan
 			mu.Unlock()
 		}()
 	}
 	wg.Wait()
-	h.mu.Lock()
-	h.scanned = results
-	h.mu.Unlock()
-	return nil
+	return results
+}
+
+// reconcileFeeds lets the streams follow what the scans found.
+func (h *Hub) reconcileFeeds(engineNames []string) {
+	m := h.feedManager()
+	if m == nil {
+		return
+	}
+	h.mu.RLock()
+	scanned := make(map[string]*engineScan, len(h.scanned))
+	for name, scan := range h.scanned {
+		scanned[name] = scan
+	}
+	h.mu.RUnlock()
+	m.reconcile(scanned, engineNames)
 }
 
 // Login records a successful login. The first user becomes an operator.
@@ -148,6 +209,8 @@ type ProjectRef struct {
 	Project  engines.Project
 	Role     rbac.Role
 	Operator bool
+	// Feed says how far what the agents are doing can be trusted.
+	Feed Feed
 }
 
 // Projects lists the projects the user holds a role on (an operator: every project), across engines, from the last scan. unreachable lists the engines that
@@ -184,7 +247,8 @@ func (h *Hub) Projects(ctx context.Context, user store.User) (refs []ProjectRef,
 				role, ok = rbac.Owner, true
 			}
 			if ok {
-				refs = append(refs, ProjectRef{Engine: v.Name, Project: p, Role: role, Operator: user.IsOperator})
+				shown, feed := h.overlay(v.Name, p)
+				refs = append(refs, ProjectRef{Engine: v.Name, Project: shown, Role: role, Operator: user.IsOperator, Feed: feed})
 			}
 		}
 	}
@@ -218,10 +282,12 @@ type AgentView struct {
 
 // ProjectView is the project page.
 type ProjectView struct {
-	Engine    string
-	Project   engines.Project
-	Role      rbac.Role
-	Operator  bool // the user holds the project as an operator, not through a grant
+	Engine   string
+	Project  engines.Project
+	Role     rbac.Role
+	Operator bool // the user holds the project as an operator, not through a grant
+	// Feed says how far what the agents are doing can be trusted.
+	Feed      Feed
 	Agents    []AgentView
 	CanSpawn  bool
 	CanManage bool
@@ -288,25 +354,32 @@ func (h *Hub) call(ctx context.Context, name string, f func(engines.Engine) erro
 	return err
 }
 
-// Project reads one project live from its engine.
+// Project reads one project. The containers come from the last scan, which the engine's events keep current, so a page that polls
+// asks the engine for nothing; a project the scan does not list (it is newer than the scan) is read from the engine. The agents'
+// activity comes from the status feed, and the templates from the sidecar, kept for a few minutes.
 func (h *Hub) Project(ctx context.Context, user store.User, engine, name string) (ProjectView, error) {
 	role, err := h.access(ctx, user, engine, name)
 	if err != nil {
 		return ProjectView{}, err
 	}
-	var project engines.Project
-	err = h.call(ctx, engine, func(e engines.Engine) (err error) {
-		project, err = e.Project(ctx, name)
-		return err
-	})
-	var gone engines.ErrNoProject
-	if errors.As(err, &gone) {
-		return ProjectView{}, ErrNotFound
+	project, found := h.scannedProject(engine, name)
+	if !found {
+		err = h.call(ctx, engine, func(e engines.Engine) (err error) {
+			project, err = e.Project(ctx, name)
+			return err
+		})
+		var gone engines.ErrNoProject
+		if errors.As(err, &gone) {
+			return ProjectView{}, ErrNotFound
+		}
+		if err != nil {
+			return ProjectView{}, err
+		}
 	}
-	if err != nil {
-		return ProjectView{}, err
-	}
-	view := ProjectView{Engine: engine, Project: project, Role: role, Operator: user.IsOperator,
+	published, ok := h.publishedFor(ctx, engine, project)
+	project = withTemplates(project, published, ok)
+	project, feed := h.overlay(engine, project)
+	view := ProjectView{Engine: engine, Project: project, Role: role, Operator: user.IsOperator, Feed: feed,
 		CanSpawn: rbac.Can(user.Subject(), role, rbac.Spawn, ""), CanManage: rbac.Can(user.Subject(), role, rbac.ManageRoles, "")}
 	for _, a := range project.Agents {
 		av := AgentView{Agent: a, CanOperate: rbac.Can(user.Subject(), role, rbac.Operate, a.Actor)}
@@ -314,6 +387,22 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 		view.Agents = append(view.Agents, av)
 	}
 	return view, nil
+}
+
+// scannedProject is a project as the last scan of its engine saw it.
+func (h *Hub) scannedProject(engine, name string) (engines.Project, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	scan := h.scanned[engine]
+	if scan == nil || scan.err != nil {
+		return engines.Project{}, false
+	}
+	for _, p := range scan.projects {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return engines.Project{}, false
 }
 
 // Agent reads one agent of a project.

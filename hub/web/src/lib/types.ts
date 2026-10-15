@@ -31,12 +31,19 @@ export interface AgentBrief {
   waiting: boolean;
 }
 
+/** How far the agents' activity can be trusted: the status the control sidecar logs, followed by the hub. */
+export interface Feed {
+  state: "live" | "connecting" | "stale" | "unavailable";
+  message?: string;
+}
+
 export interface ProjectBrief {
   engine: string;
   name: string;
   role: Role;
   /** Held as an operator: every project, with no grant. */
   operator: boolean;
+  feed: Feed;
   up: boolean;
   agents: AgentBrief[];
 }
@@ -73,6 +80,7 @@ export interface Project {
   role: Role;
   /** Held as an operator: every project, with no grant. */
   operator: boolean;
+  feed: Feed;
   up: boolean;
   templates: string[];
   services: Service[];

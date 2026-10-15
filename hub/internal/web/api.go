@@ -121,6 +121,14 @@ type agentJSON struct {
 	Holder     string    `json:"holder"`
 }
 
+// feedJSON says how far the agents' activity can be trusted: live, connecting, stale or unavailable, and why.
+type feedJSON struct {
+	State   string `json:"state"`
+	Message string `json:"message,omitempty"`
+}
+
+func feedOf(f hub.Feed) feedJSON { return feedJSON{State: string(f.State), Message: f.Message} }
+
 type serviceJSON struct {
 	Name   string `json:"name"`
 	State  string `json:"state"`
@@ -132,6 +140,7 @@ type projectJSON struct {
 	Name      string        `json:"name"`
 	Role      rbac.Role     `json:"role"`
 	Operator  bool          `json:"operator"` // held as an operator, without a grant
+	Feed      feedJSON      `json:"feed"`
 	Up        bool          `json:"up"`
 	Templates []string      `json:"templates"`
 	Services  []serviceJSON `json:"services"`
@@ -147,7 +156,7 @@ func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 }
 
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
-	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Operator: v.Operator, Up: v.Project.Up, Templates: v.Project.Templates,
+	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Operator: v.Operator, Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
 		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
 	if p.Templates == nil {
 		p.Templates = []string{}
@@ -203,6 +212,7 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Name     string    `json:"name"`
 		Role     rbac.Role `json:"role"`
 		Operator bool      `json:"operator"`
+		Feed     feedJSON  `json:"feed"`
 		Up       bool      `json:"up"`
 		Agents   []agent   `json:"agents"`
 	}
@@ -211,7 +221,7 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Unreachable []engineJSON `json:"unreachable"`
 	}{Projects: []project{}, Unreachable: []engineJSON{}}
 	for _, ref := range refs {
-		p := project{Engine: ref.Engine, Name: ref.Project.Name, Role: ref.Role, Operator: ref.Operator, Up: ref.Project.Up, Agents: []agent{}}
+		p := project{Engine: ref.Engine, Name: ref.Project.Name, Role: ref.Role, Operator: ref.Operator, Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
 		for _, a := range ref.Project.Agents {
 			p.Agents = append(p.Agents, agent{Name: a.Name, Template: a.Template, Running: a.Running(), Activity: a.Activity, Status: a.Status, Waiting: a.Waiting})
 		}

@@ -24,11 +24,30 @@ type Engine struct {
 	calls    []string
 	closed   bool
 	attached map[string]int
+
+	// the status feed and the event watch: what FollowStatus and Watch deliver
+	feedWake    map[string]map[*chan struct{}]struct{} // by project: who is following
+	feedStarts  map[string]int
+	feedTries   map[string]int
+	feedErr     map[string]error // by project: following fails with this
+	feedSilent  map[string]bool  // by project: following works and says nothing, as a sidecar that logs no status does
+	feedEvery   time.Duration
+	watchWake   map[*chan struct{}]struct{}
+	watchErr    error
+	watchStarts int
+	watchTries  int
+	publishedBy map[string]engines.Published
+	publishedN  int
+	projectN    int
 }
 
 // New returns an engine with no projects.
 func New() *Engine {
-	return &Engine{projects: map[string]*engines.Project{}, events: map[string][]engines.Event{}, attached: map[string]int{}}
+	return &Engine{
+		projects: map[string]*engines.Project{}, events: map[string][]engines.Event{}, attached: map[string]int{},
+		feedWake: map[string]map[*chan struct{}]struct{}{}, feedStarts: map[string]int{}, feedTries: map[string]int{}, feedErr: map[string]error{}, feedSilent: map[string]bool{},
+		feedEvery: 30 * time.Second, watchWake: map[*chan struct{}]struct{}{}, publishedBy: map[string]engines.Published{},
+	}
 }
 
 // AddProject adds (or replaces) a project; Up is derived: a project is up when it has templates.
@@ -40,6 +59,7 @@ func (e *Engine) AddProject(p engines.Project) {
 	}
 	p.Up = true
 	e.projects[p.Name] = &p
+	e.changed(p.Name)
 }
 
 // RemoveProject makes a project disappear, as `project down` does.
@@ -47,6 +67,7 @@ func (e *Engine) RemoveProject(name string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.projects, name)
+	e.changed(name)
 }
 
 // SetAgent adds or replaces an agent of a project.
@@ -54,6 +75,7 @@ func (e *Engine) SetAgent(project string, a engines.Agent) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	p := e.projects[project]
+	defer e.changed(project)
 	for i := range p.Agents {
 		if p.Agents[i].Name == a.Name {
 			p.Agents[i] = a
@@ -75,6 +97,7 @@ func (e *Engine) SetDown(err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.down = err
+	e.changed("") // a watch of an engine that went down ends; the followers learn at their next line
 }
 
 // Calls lists what was done to the engine, as "verb project/agent actor".
@@ -117,9 +140,17 @@ func (e *Engine) Projects(ctx context.Context) ([]engines.Project, error) {
 	return out, nil
 }
 
+// ProjectReads says how many times a project was read one at a time (a scan lists them all and does not count).
+func (e *Engine) ProjectReads() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.projectN
+}
+
 func (e *Engine) Project(ctx context.Context, name string) (engines.Project, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.projectN++
 	if e.down != nil {
 		return engines.Project{}, e.down
 	}
@@ -174,6 +205,7 @@ func (e *Engine) Spawn(ctx context.Context, project, template, name, actor strin
 		return "", fmt.Errorf("instance %q already exists", name)
 	}
 	e.record("spawn %s/%s %s", project, name, actor)
+	defer e.changed(project)
 	p.Agents = append(p.Agents, engines.Agent{Name: name, Template: template, State: "running", Activity: "idle", Actor: actor, Created: time.Now()})
 	return name, nil
 }
@@ -187,6 +219,7 @@ func (e *Engine) Start(ctx context.Context, project, agent string) error {
 	}
 	e.record("start %s/%s", project, agent)
 	a.State, a.Activity = "running", "idle"
+	e.changed(project)
 	return nil
 }
 
@@ -199,6 +232,7 @@ func (e *Engine) Stop(ctx context.Context, project, agent string) error {
 	}
 	e.record("stop %s/%s", project, agent)
 	a.State, a.Activity = "exited", "stopped"
+	e.changed(project)
 	return nil
 }
 
@@ -216,6 +250,7 @@ func (e *Engine) Remove(ctx context.Context, project, agent string) error {
 			break
 		}
 	}
+	e.changed(project)
 	return nil
 }
 
@@ -312,6 +347,246 @@ func (e *Engine) Spec(ctx context.Context, project string) ([]byte, error) {
 		return nil, engines.ErrNoProject{Name: project}
 	}
 	return []byte("name: " + project + "\nagents: [" + strings.Join(p.Templates, ", ") + "]\n"), nil
+}
+
+// --- the status feed, the event watch and the published templates ----------------------------------------------------
+
+// changed tells the followers of a project and the watchers of the engine that something changed. It runs under the lock.
+func (e *Engine) changed(project string) {
+	for wake := range e.feedWake[project] {
+		select {
+		case *wake <- struct{}{}:
+		default:
+		}
+	}
+	for wake := range e.watchWake {
+		select {
+		case *wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// Touch makes the watchers call back, as an event of the engine does, without changing anything.
+func (e *Engine) Touch() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.changed("")
+}
+
+// SetFeedError makes following a project's status fail with err, as an engine whose log cannot be read does; nil mends it.
+func (e *Engine) SetFeedError(project string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.feedErr[project] = err
+	e.changed(project)
+}
+
+// SetFeedSilent makes following a project's status work and deliver nothing, as a control sidecar that logs no status does.
+func (e *Engine) SetFeedSilent(project string, silent bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.feedSilent[project] = silent
+	e.changed(project)
+}
+
+// SetFeedInterval sets the heartbeat of the status lines the engine delivers.
+func (e *Engine) SetFeedInterval(every time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.feedEvery = every
+}
+
+// FeedStarts says how many times a project's status was followed from the start.
+func (e *Engine) FeedStarts(project string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.feedStarts[project]
+}
+
+// FeedTries says how many times following a project's status was attempted, whether it worked or not.
+func (e *Engine) FeedTries(project string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.feedTries[project]
+}
+
+// Feeds says how many followers a project has right now.
+func (e *Engine) Feeds(project string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.feedWake[project])
+}
+
+// SetWatchError makes watching the engine fail with err; nil mends it.
+func (e *Engine) SetWatchError(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.watchErr = err
+}
+
+// WatchTries says how many times watching the engine was attempted, whether it worked or not.
+func (e *Engine) WatchTries() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.watchTries
+}
+
+// WatchStarts says how many times the engine was watched.
+func (e *Engine) WatchStarts() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.watchStarts
+}
+
+// SetPublished sets the templates the control sidecar of a project holds, by name and hash.
+func (e *Engine) SetPublished(project string, p engines.Published) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.publishedBy[project] = p
+}
+
+// PublishedReads says how many times the published templates were asked for.
+func (e *Engine) PublishedReads() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.publishedN
+}
+
+func (e *Engine) Published(ctx context.Context, project string) (engines.Published, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.publishedN++
+	if e.down != nil {
+		return engines.Published{}, e.down
+	}
+	if p, ok := e.publishedBy[project]; ok {
+		return p, nil
+	}
+	proj, ok := e.projects[project]
+	if !ok {
+		return engines.Published{}, engines.ErrNoProject{Name: project}
+	}
+	out := engines.Published{Templates: map[string]string{}}
+	for _, t := range proj.Templates {
+		out.Templates[t] = "hash-" + t
+	}
+	return out, nil
+}
+
+// statusLine is the state of the project, as a control sidecar would log it.
+func (e *Engine) statusLine(project, reason string) (engines.StatusLine, bool) {
+	p, ok := e.projects[project]
+	if !ok {
+		return engines.StatusLine{}, false
+	}
+	line := engines.StatusLine{Time: time.Now().UTC(), Reason: reason, Interval: e.feedEvery, Agents: []engines.AgentStatus{}}
+	for _, a := range p.Agents {
+		line.Agents = append(line.Agents, engines.AgentStatus{Agent: a.Name, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Updated: line.Time})
+	}
+	return line, true
+}
+
+// FollowStatus delivers the state of the project at once, then again whenever it changes and every heartbeat.
+func (e *Engine) FollowStatus(ctx context.Context, project string, on func(engines.StatusLine)) error {
+	e.mu.Lock()
+	e.feedTries[project]++
+	if e.down != nil {
+		err := e.down
+		e.mu.Unlock()
+		return err
+	}
+	if err := e.feedErr[project]; err != nil {
+		e.mu.Unlock()
+		return err
+	}
+	wake := make(chan struct{}, 1)
+	if e.feedWake[project] == nil {
+		e.feedWake[project] = map[*chan struct{}]struct{}{}
+	}
+	e.feedWake[project][&wake] = struct{}{}
+	e.feedStarts[project]++
+	every := e.feedEvery
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.feedWake[project], &wake)
+		e.mu.Unlock()
+	}()
+
+	deliver := func(reason string) error {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.down != nil {
+			return e.down
+		}
+		if err := e.feedErr[project]; err != nil {
+			return err
+		}
+		if e.feedSilent[project] {
+			return nil
+		}
+		if line, ok := e.statusLine(project, reason); ok {
+			on(line)
+		}
+		return nil
+	}
+	if err := deliver("start"); err != nil {
+		return err
+	}
+	beat := time.NewTicker(every)
+	defer beat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-beat.C:
+			if err := deliver("heartbeat"); err != nil {
+				return err
+			}
+		case <-wake:
+			if err := deliver("change"); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// Watch calls changed whenever the fake engine changes, or is touched.
+func (e *Engine) Watch(ctx context.Context, changed func()) error {
+	e.mu.Lock()
+	e.watchTries++
+	if e.watchErr != nil || e.down != nil {
+		err := e.watchErr
+		if err == nil {
+			err = e.down
+		}
+		e.mu.Unlock()
+		return err
+	}
+	wake := make(chan struct{}, 1)
+	e.watchWake[&wake] = struct{}{}
+	e.watchStarts++
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.watchWake, &wake)
+		e.mu.Unlock()
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-wake:
+			e.mu.Lock()
+			err := e.down
+			e.mu.Unlock()
+			if err != nil {
+				return err
+			}
+			changed()
+		}
+	}
 }
 
 func (e *Engine) Close() error {

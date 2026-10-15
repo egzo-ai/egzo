@@ -40,13 +40,13 @@
       case "stopped": return ["", "Agent stopped"];
     }
     if (a?.waiting) return ["waiting", "? " + (a.status || "Waiting for an answer")];
-    return ["", a?.status || a?.activity || ""];
+    return ["", a?.status || (a?.activity && a.activity !== "unknown" ? a.activity : "")];
   }
 
   function label(t: Term): string {
     const a = agentOf(t);
     const s = shownState(t);
-    return `${t.agent}, ${t.project}${multi ? " on " + t.engine : ""}, ${stateText[s]}${s === "connected" && a ? ", " + a.activity : ""}${t.unread ? ", new output" : ""}`;
+    return `${t.agent}, ${t.project}${multi ? " on " + t.engine : ""}, ${stateText[s]}${s === "connected" && a && a.activity !== "unknown" ? ", " + a.activity : ""}${t.unread ? ", new output" : ""}`;
   }
 
   const waitingIn = (engine: string, project: string) => app.projects.find((p) => p.engine === engine && p.name === project)?.agents.filter((a) => a.waiting).length ?? 0;
@@ -122,7 +122,7 @@
             {:else if s === "disconnected"}<Icon name="plug-off" />
             {:else if s === "error"}<span data-g="error">✕</span>
             {:else if s === "stopped"}<span class="dot" data-s="stopped"></span>
-            {:else}<span class="dot" data-s={a?.waiting ? "waiting" : a?.activity || "running"}></span>{/if}
+            {:else}<span class="dot" data-s={a?.waiting ? "waiting" : a?.activity && a.activity !== "unknown" ? a.activity : "running"}></span>{/if}
           </span>
           <span class="nm">{t.agent}</span>
           <span class="end">

@@ -23,6 +23,10 @@ describe("format", () => {
     expect(activityLabel("idle", true)).toBe("waiting for you");
     expect(activityKind("working", false)).toBe("working");
     expect(activityKind("something-new", false)).toBe("neutral");
-    expect(activityLabel("", false)).toBe("unknown");
+    // a running agent whose status cannot be read is just running: never "starting", which it is not known to be
+    expect(activityLabel("", false)).toBe("running");
+    expect(activityLabel("unknown", false)).toBe("running");
+    expect(activityKind("unknown", false)).toBe("running");
+    expect(activityLabel("blocked", false)).toBe("blocked");
   });
 });

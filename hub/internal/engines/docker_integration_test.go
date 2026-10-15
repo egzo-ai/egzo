@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,13 +119,38 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 		t.Fatalf("project %s in %+v", name, projects)
 	}
 	detail, err := eng.Project(ctx, name)
-	if err != nil || len(detail.Templates) != 1 || detail.Templates[0] != "coder" || !detail.Up {
+	if err != nil || !detail.Up || len(detail.Services) != 2 || detail.Services[0].Health != "healthy" {
 		t.Fatalf("project = %+v, %v", detail, err)
 	}
 	if _, err := eng.Project(ctx, "no-such-project-here"); err == nil {
 		t.Error("an unknown project was found")
 	} else if _, ok := err.(engines.ErrNoProject); !ok {
 		t.Errorf("err = %T %v", err, err)
+	}
+
+	// what the control sidecar holds of its templates
+	if published, err := eng.Published(ctx, name); err != nil || len(published.Templates) != 1 || published.Templates["coder"] == "" {
+		t.Fatalf("published = %+v, %v", published, err)
+	}
+
+	// the two streams the hub lives on: the engine's events, and the status the control sidecar logs
+	var changes atomic.Int32
+	streams, stopStreams := context.WithCancel(ctx)
+	defer stopStreams()
+	go eng.Watch(streams, func() { changes.Add(1) })
+	statusLines := make(chan engines.StatusLine, 256)
+	followed := make(chan error, 1)
+	go func() { followed <- eng.FollowStatus(streams, name, func(l engines.StatusLine) { statusLines <- l }) }()
+	var first engines.StatusLine
+	select {
+	case first = <-statusLines:
+	case err := <-followed:
+		t.Fatalf("following the status failed before a line: %v (is the engine's log readable? egzo system check says)", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("no status line from the control sidecar")
+	}
+	if first.Reason == "" || first.Interval < time.Second || len(first.Agents) != 0 {
+		t.Errorf("the first status line = %+v", first)
 	}
 
 	// spawn on behalf of a user: the actor label is what the hub's own-agents rule reads
@@ -146,6 +172,31 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 	// the cli sees the same agent
 	if ps := egzo("ps"); !strings.Contains(ps, "user:u1") {
 		t.Errorf("egzo ps does not show the actor:\n%s", ps)
+	}
+
+	// the engine said a container was made, and the control sidecar logged the new agent with what it is doing
+	waitFor(t, "an event for the new container", func() bool { return changes.Load() > 0 })
+	var idle bool
+	waitFor(t, "a status line that has the agent idle (the terminal program is quiet)", func() bool {
+		for {
+			select {
+			case l := <-statusLines:
+				for _, a := range l.Agents {
+					idle = idle || (a.Agent == "coder-1" && a.Activity == "idle")
+				}
+			default:
+				return idle
+			}
+		}
+	})
+	// the commands the hub runs itself (a command in the sidecar, an attach) are events too, and are not news
+	settled := changes.Load()
+	if _, err := eng.Events(ctx, name, "", 5); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if n := changes.Load(); n != settled {
+		t.Errorf("a command run in the sidecar counted as %d change(s): the hub would list the engine again for its own commands", n-settled)
 	}
 
 	// stop and start

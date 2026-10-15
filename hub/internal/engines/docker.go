@@ -68,10 +68,11 @@ func (d *Docker) Projects(ctx context.Context) ([]Project, error) {
 		case kindAgent:
 			p.Agents = append(p.Agents, Agent{
 				Name: item.Labels[engine.LabelInstance], Template: item.Labels[engine.LabelService], State: item.State,
-				Actor: item.Labels[engine.LabelActor], Created: time.Unix(item.Created, 0), Activity: activityOf(item.State, ""),
+				Actor: item.Labels[engine.LabelActor], Created: time.Unix(item.Created, 0), Activity: activityOf(item.State),
+				TemplateHash: item.Labels[engine.LabelTemplateHash],
 			})
 		case kindControl, kindProxy:
-			p.Services = append(p.Services, Service{Name: kind, State: item.State})
+			p.Services = append(p.Services, Service{Name: kind, State: item.State, Health: healthOf(item.Status), ID: item.ID})
 		}
 	}
 	projects := make([]Project, 0, len(byName))
@@ -92,28 +93,37 @@ func sidecarsRunning(services []Service) bool {
 	return running[kindControl] && running[kindProxy]
 }
 
-func activityOf(state, reported string) string {
-	switch {
-	case state != "running":
+// activityOf is what a container's state says of what its agent is doing: stopped when it is not running, and nothing more. A
+// list of containers cannot say what a running agent is doing; the status feed does.
+func activityOf(state string) string {
+	if state != "running" {
 		return "stopped"
-	case reported == "":
-		return "starting"
 	}
-	return reported
+	return ""
 }
 
+// healthOf reads a container's health from the status text of a container listing ("Up 5 minutes (healthy)").
+func healthOf(status string) string {
+	switch {
+	case strings.Contains(status, "(unhealthy)"):
+		return "unhealthy"
+	case strings.Contains(status, "(healthy)"):
+		return "healthy"
+	case strings.Contains(status, "(health: starting)"):
+		return "starting"
+	}
+	return ""
+}
+
+// Project reads one project from the engine's containers and volumes. It runs no command in the control sidecar: the templates
+// come from Published and what the agents are doing from FollowStatus.
 func (d *Docker) Project(ctx context.Context, name string) (Project, error) {
 	observed, err := stack.Observe(ctx, d.client, name)
 	if err != nil {
 		return Project{}, err
 	}
 	project := Project{Name: name}
-	var published *stack.Published
-	if p, err := stack.ReadPublished(ctx, d.client, name); err == nil {
-		published = &p
-		project.Templates = p.Names()
-	}
-	rows := stack.Rows(observed, d.reported(ctx, name), published)
+	rows := stack.Rows(observed, nil, nil)
 	for _, r := range observed.Resources {
 		if r.Type == "container" && project.Dir == "" {
 			project.Dir, project.CreatedBy = r.ProjectDir, ""
@@ -126,8 +136,8 @@ func (d *Docker) Project(ctx context.Context, name string) (Project, error) {
 		switch row.Kind {
 		case kindAgent:
 			project.Agents = append(project.Agents, Agent{
-				Name: row.Name, Template: row.Service, State: row.State, Health: row.Health, Activity: row.Activity, Status: row.Status,
-				Open: row.Open, Waiting: row.Waiting, Actor: row.Actor, Stale: row.Stale, Created: row.Created,
+				Name: row.Name, Template: row.Service, State: row.State, Health: row.Health, Activity: activityOf(row.State),
+				Actor: row.Actor, Created: row.Created,
 			})
 		case kindControl, kindProxy:
 			project.Services = append(project.Services, Service{Name: row.Kind, State: row.State, Health: row.Health})
@@ -138,24 +148,17 @@ func (d *Docker) Project(ctx context.Context, name string) (Project, error) {
 	return project, nil
 }
 
-// reported asks the control sidecar what each agent last said about itself; best effort, like `egzo ps`.
-func (d *Docker) reported(ctx context.Context, project string) map[string]stack.Report {
-	reported := map[string]stack.Report{}
-	reply, err := stack.ControlRequest(ctx, d.client, project, "GET", "/v1/agents", nil)
+// Published asks the control sidecar for the templates it holds, which runs a command in it.
+func (d *Docker) Published(ctx context.Context, project string) (Published, error) {
+	published, err := stack.ReadPublished(ctx, d.client, project)
 	if err != nil {
-		return reported
+		return Published{}, err
 	}
-	var statuses []struct {
-		Agent, Status, Activity string
-		Open                    int
-		Waiting                 bool
+	out := Published{Templates: make(map[string]string, len(published.Templates))}
+	for name, template := range published.Templates {
+		out.Templates[name] = template.Hash
 	}
-	if json.Unmarshal(reply, &statuses) == nil {
-		for _, s := range statuses {
-			reported[s.Agent] = stack.Report{Status: s.Status, Activity: s.Activity, Open: s.Open, Waiting: s.Waiting}
-		}
-	}
-	return reported
+	return out, nil
 }
 
 // instance finds an agent's container.

@@ -1,19 +1,23 @@
 # Roadmap: detect incompatible controls and report their status
 
-**Status.** Open, not designed. **Needed for 1.0.0.** Not before.
+**Status.** Partly built (the status feed, see below); the rest is open and **needed for 1.0.0**. Not before.
 
-The hub learns an agent's activity from its project's control sidecar (`GET /v1/agents`, `GET /v1/events`, ...). A project
-brought up by an older egzo keeps its old control sidecar until `egzo project up` runs again, and that sidecar may not have
-the endpoint the hub calls (a `404 page not found`). The hub swallows the error, so the agent shows as **Starting**
-for ever (`activityOf` in `hub/internal/engines/docker.go`, `Rows` in `internal/stack/apply.go`), even though it works, and the
-events panel logs an error every few seconds. Stopping and starting the agent does not help: only the agent container is
-recreated, not the sidecar.
+The hub used to learn an agent's activity from its project's control sidecar by running a command in it (`GET /v1/agents`), and a sidecar
+made by an older egzo that lacked the endpoint answered `404 page not found`: the hub swallowed the error and showed the agent as
+**Starting** for ever. Stopping and starting the agent did not help, since only the agent container is recreated, not the sidecar.
+
+**Built so far (see the [known issue](../known-issues/container-logging-follows-the-engine-default.md)).** The hub no longer asks the
+sidecar: it follows the status the sidecar writes to its log, and a project is `live`, `connecting`, `stale` or `unavailable`. A sidecar
+that writes no status lines, which is every one made before the status log, is `unavailable` ("the control sidecar writes no status: it
+is older than this hub, or its log cannot be read") after 90 seconds, and its running agents show as running, never "starting". A log
+that cannot be read at all is `unavailable` with the engine's error. That covers the symptom, and tells an old sidecar from a
+healthy one, but not **why**: an old control and an unreadable log look the same, and nothing compares versions.
 
 The labels do not separate the two cases. An old and a new control both carry `ai.egzo.spec-version=1`, and `ai.egzo.created-by`
 is a build string (`egzo/0.0.1-rc1`, or a bare `egzo/dev` for an unreleased build) that cannot be compared.
 
-The need: the hub and the CLI tell an incompatible or unreachable control from a healthy one, say so on the agent and the
-project, and name the fix. This will keep coming back as the control API grows, so the rule for changing it belongs here too.
+The need that remains: the hub and the CLI tell an *incompatible* control from an unreadable log, name the fix, and the rule for
+changing the control API belongs here too, because this will keep coming back as it grows.
 
 Everything below is open. Pick the smallest thing that works.
 
@@ -24,10 +28,13 @@ Everything below is open. Pick the smallest thing that works.
   without the endpoint answers 404, and that 404 means "api 0, too old". It works on builds with no useful label.
 - **The hub decides.** It declares the `api` it needs, and the capability it wants for each feature. The control knows nothing
   about the hub. A missing optional capability turns off one feature, not the project.
-- **Typed result from every control call**: `ok`, `unreachable`, `outdated`, `error`, instead of a swallowed error. An agent's
-  activity is then `stopped`, `outdated` or `unreachable`, or `starting` only when control answered but the agent has not reported.
-- **Show it.** A distinct state on the agent, the project and the services ("control outdated, run `egzo project up` again"),
-  with the control's version on the project page. One failing endpoint degrades one panel with an explanation, and logs once, not on every poll.
+- **Typed result from every control call**: `ok`, `unreachable`, `outdated`, `error`, instead of a swallowed error. (The feed states
+  `live`, `stale` and `unavailable` are the first half of this; `outdated` is the part still missing, and needs the version.)
+  Put the version in the status line itself (`{"type":"status","v":1,...}` already has a format version), so an old sidecar
+  that writes no line and an unreadable log can be told apart once a version is there.
+- **Show it.** A distinct state on the project and the services ("control outdated, run `egzo project up` again"), with the control's
+  version on the project page. (The banner for an unavailable feed exists; it cannot yet say "outdated".) The timeline, spec and
+  templates are still read by running a command in the sidecar, and an old sidecar's `404` there is reported as an error of that panel.
 - **The CLI too.** `egzo agent ls` and `egzo project status` flag an outdated control, and `egzo doctor`, if there is one, checks it.
 - **Labels as a hint only.** Compare `created-by` or the image version with the running egzo when both are releases; say
   "built by 0.0.1-rc1" and never block on it.

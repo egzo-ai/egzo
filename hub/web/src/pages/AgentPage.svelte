@@ -24,16 +24,23 @@
   const a = $derived(data?.agent);
   const isOpen = $derived(workspace.terms.some((t) => t.id === termId(engine, project, agent)));
 
+  // The agent itself comes from what the hub already holds, so it is read often. The timeline is read from the control sidecar, which
+  // runs a command in it, so it is read slowly and only when it is on the screen.
   $effect(() => poll(async () => {
     try {
       data = await api.agent(engine, project, agent);
       failure = null;
-      events = await api.events(engine, project, agent, 40);
     } catch (e) {
       if (!data) failure = e;
       else throw e;
     }
   }));
+  $effect(() => {
+    if (tab !== "overview") return;
+    return poll(async () => {
+      events = await api.events(engine, project, agent, 40);
+    }, 15000);
+  });
   $effect(() => {
     if (tab === "logs") void api.logs(engine, project, agent).then((t) => (logs = t)).catch((e) => toast(errorText(e), "error"));
   });

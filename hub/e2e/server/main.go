@@ -84,12 +84,9 @@ func run(scenario string) error {
 		return err
 	}
 	go http.Serve(hubListener, app.Handler())
-	go func() {
-		for {
-			h.Scan(ctx)
-			time.Sleep(time.Second)
-		}
-	}()
+	// the real loop: the fake engines' events and status lines drive it, with a short fallback only where an engine has no events
+	go h.Run(ctx, hub.FeedOptions{Fallback: 30 * time.Second, Fast: time.Second, BackoffMin: 200 * time.Millisecond, BackoffMax: 2 * time.Second,
+		Silent: 5 * time.Second, Debounce: 50 * time.Millisecond})
 	go http.Serve(controlListener, control(world, h, db))
 
 	json.NewEncoder(os.Stdout).Encode(map[string]string{
@@ -186,6 +183,8 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			e.SetAgent(c.Project, engines.Agent{Name: c.Agent, Template: "coder", State: container, Activity: orDefault(c.State, "idle"),
 				Status: c.Text, Waiting: c.Waiting, Actor: actor, Created: time.Now()})
 		case "add-project":
+			// state "silent": its control sidecar logs no status, as an old one does
+			e.SetFeedSilent(c.Project, c.State == "silent")
 			e.AddProject(engines.Project{Name: c.Project, Templates: []string{"coder"}})
 		case "remove-project":
 			e.RemoveProject(c.Project)

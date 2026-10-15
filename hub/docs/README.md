@@ -18,7 +18,7 @@ docker compose up -d
 
 Open <http://localhost:8080>, sign in with the local account of `dex.yaml` (`admin@example.com`, password `password`; replace it
 with a real connector before anything else). **The first person to sign in is an operator**, who holds every project the hub
-finds. Create a project with the CLI as usual (`egzo project up`) and it shows up within seconds.
+finds. Create a project with the CLI as usual (`egzo project up`) and it shows up within a second or two.
 
 > **The quick start mounts the Docker socket into the hub.** That is root-equivalent on the host: anyone who controls the hub
 > controls the machine. Prefer a rootless engine, or an ssh engine on another machine (below), for anything but a trial.
@@ -78,6 +78,28 @@ The hub only knows the terminals it opened. `egzo attach` goes straight to the a
 end it. Attaching with the CLI to an agent that is open in the hub is risky: the session has one screen size, so each side's window
 resize changes it for the other, and what both type reaches the program. Avoid it. Nothing in the hub prevents it.
 
+## How the hub keeps up
+
+The hub does not poll the engines. It reads two streams that the engines push, and lists the containers only when they say something changed:
+
+- **The status feed.** The control sidecar of every project writes the agents' status to its log, as JSON lines on standard output (a line
+  when something changes, and one every 30 seconds). The hub follows that log through the engine's log API, one stream per project,
+  and what the sidebar, Home and the project pages show an agent doing (working, idle, blocked, waiting on a question, its status
+  line) is the newest line. It runs no command in the sidecar for it.
+- **The engine's events.** The hub watches the engine's event stream for the containers of egzo projects. When one is made,
+  started, stopped or removed, it lists that engine again (a project, an agent, a sidecar appears or goes), within a fraction of a second.
+- **Both are retried** with a delay that grows from one second to a minute when they break, and start over when they have run for
+  a while. When an engine's events do not work, the hub lists it every 5 seconds instead; `EGZO_SCAN_INTERVAL` is the slow fallback.
+- **A page that polls asks the hub, not the engine.** The project and agent pages read what the hub already holds. What it still
+  reads from the engine is the templates (kept for five minutes, or until the sidecar is another container), and the timeline, log,
+  spec and audit tabs, only while they are open.
+
+This needs a log the engine can stream back, which is the engine's default driver (egzo chooses none): `json-file`, `local` or
+`journald` on Docker, `k8s-file` or `journald` on Podman. Run `egzo system check` on the host. If the status cannot be read the
+project page says why, and its agents show as **running**: the hub never says "starting" for a state it does not know. An old
+control sidecar (made by an egzo before the status log) writes no status; run `egzo project up` again. See
+[the known issue](../../known-issues/container-logging-follows-the-engine-default.md).
+
 ## Engines
 
 Engines are added in the UI by an operator (**Settings, Engines**), not in the compose file. The connection is tested before it is saved.
@@ -104,7 +126,7 @@ All settings are environment variables, set in the compose file.
 | `EGZO_PUBLIC_URL` | derived | the address people use, if the proxy cannot be trusted to say |
 | `EGZO_TRUSTED_PROXIES` | none | addresses or CIDRs of the reverse proxy whose `X-Forwarded-Host` and `X-Forwarded-Proto` are believed |
 | `EGZO_LOCAL_ENGINE` | `unix:///var/run/docker.sock` | seeded as `local` when the hub knows no engine; `none` for no engine |
-| `EGZO_SCAN_INTERVAL` | `5s` | how often engines are asked for their projects |
+| `EGZO_SCAN_INTERVAL` | `60s` | how often an engine is listed again whatever its events said: a fallback for a missed event (changes are found by the events). An engine whose events do not work is listed every 5 seconds instead |
 
 The hub does not terminate TLS. Behind a proxy set `EGZO_TRUSTED_PROXIES`, so the login redirect and the cookies use the right
 address and scheme.

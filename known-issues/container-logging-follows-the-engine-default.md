@@ -1,6 +1,6 @@
 # Container logs follow the engine's default, and agent status needs a readable log
 
-Status: **decided for v1, not built yet** (written 2026-10-15).
+Status: **built** (written 2026-10-15; the hub follows the log, `egzo system check` tries the driver).
 
 ## What egzo v1 does
 
@@ -13,10 +13,13 @@ Status: **decided for v1, not built yet** (written 2026-10-15).
   `log_size_max` in `containers.conf`. A change to the default applies only to containers created after it, so recreate the
   project (`egzo project down`, `egzo project up`) to pick it up.
 - Sysadmins choose `journald` and others for good reasons. An egzo that overrides the choice is a surprise.
+- **The control sidecar adds a line to its log every 30 seconds** (the status heartbeat), and one for each change of an agent's state,
+  coalesced to at most a few a second: a few hundred kilobytes a day for a project, which a bounded log absorbs and an unbounded
+  one keeps. `EGZO_STATUS_INTERVAL` on the sidecar changes the heartbeat.
 
-Today the code does the opposite: `BoundedLogs` (`internal/stack/desired.go`, `internal/stack/apply.go`) pins `json-file` with
-`max-size 10m`, `max-file 3` on every container, and the spec `test_the_sidecars_run_unprivileged_with_limits_and_bounded_logs` and
-`test_an_agent_cannot_fork_without_limit` assert it. Removing the pin, and those assertions, is part of this change.
+Before this, egzo pinned `json-file` with `max-size 10m`, `max-file 3` on every container (`BoundedLogs`). That is gone, and the
+specs now assert the opposite: every container has the logging a container made by hand on that engine has
+(`test_every_container_uses_the_engines_default_logging`). `egzo system check` warns when the default is a `json-file` with no limit.
 
 ## Later
 
@@ -25,10 +28,20 @@ overriding the engine's default where the user asks for it. Not in v1. It is a s
 
 ## Why the log has to be readable
 
-The hub (and egzo itself) learn what an agent is doing (activity, a waiting question, the status line) from the control sidecar.
-Asking it with `docker exec` on every scan costs too much, so the plan is that control writes its status as lines in its own log
-and the hub follows that log through the engine socket (`ContainerLogs` with `follow`). That needs a log the engine can stream
-back. Without one the hub cannot tell an agent's status, and shows it as unknown (never "starting").
+The hub learns what an agent is doing (activity, a waiting question, the status line) from the control sidecar, and asking it with
+`docker exec` on a timer costs too much. So the control sidecar writes its status as JSON lines on its **standard output**: one on
+every change, and one every 30 seconds (`EGZO_STATUS_INTERVAL` on the sidecar), each a complete snapshot of the project's agents.
+Everything else it says goes to standard error, as JSON. The hub follows the container's log through the engine's log API
+(`ContainerLogs`, standard output only, `follow`), one stream per project, and keeps the newest line. That needs a log the engine can
+stream back; the engines tell the two streams apart whatever the driver. The same reading is already needed by the git jobs
+(`prep` containers return their output through the log) and by `egzo logs`, so a driver that cannot be read breaks those too, and
+`egzo system check` fails on it. A log that cannot be followed makes the hub show the project's agents as **running**, with a
+banner that says why, and never "starting".
+
+**What `system check` does about it:** it reads the engine's default driver (`/info`, which Podman leaves empty), and when the egzo
+image is on the engine it runs a throwaway container that writes to both streams and follows its log: it reports whether the
+log was readable, followed while the container ran, and kept the streams apart, and what driver and options the engine gave the
+container. Without the image it can only judge the driver by name, and says that it did not try.
 
 ## Known not to work
 
@@ -49,10 +62,12 @@ Checked on this machine (Docker with the daemons' own drivers, Podman 5.7.0) unl
 Known to work: Docker `json-file`, `local`, `journald`, and the remote drivers through the dual-logging cache while the endpoint is
 healthy (tested with `syslog`); Podman `k8s-file` (which `json-file` is an alias for) and `journald`.
 
-## What egzo will do about it
+## What egzo does about it
 
-Say so: a project whose engine cannot stream the log of its control sidecar gets a status of `unknown` in the hub, and
-`egzo project up` warns, naming the driver. It is not an error: the agents run, and the terminal, start, stop and remove all
-work. Only live status and the "waiting" question are missing. See also
-[control-compatibility](../roadmap/control-compatibility.md), where an outdated control that prints no status lines is the same
-signal.
+- `egzo system check` fails on a driver it cannot read (`none`, Podman's `passthrough`), warns when it cannot tell, and warns about a
+  `json-file` with no size limit.
+- The hub shows a project whose status log cannot be followed as: its agents running, with a banner that carries the reason (the
+  engine's error, or "the control sidecar writes no status"). The terminal, start, stop and remove all work. Only live activity and
+  the "waiting" question are missing. An outdated control sidecar that writes no status lines is the same signal
+  ([control-compatibility](../roadmap/control-compatibility.md)).
+- `egzo project up` does not check the driver; `egzo system check` does.

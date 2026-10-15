@@ -28,7 +28,7 @@ func TestDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != ":8080" || c.DataDir != "/data" || c.LocalEngine != "unix:///var/run/docker.sock" || c.ScanInterval != 5*time.Second {
+	if c.Listen != ":8080" || c.DataDir != "/data" || c.LocalEngine != "unix:///var/run/docker.sock" || c.ScanInterval != 60*time.Second {
 		t.Errorf("%+v", c)
 	}
 	if c.OIDCIssuer != "http://dex:5556/dex" {

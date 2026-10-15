@@ -27,10 +27,10 @@ export function initials(name: string): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-/** The label of an agent's activity. */
+/** The label of an agent's activity. "unknown" is what a running agent is when the hub cannot read its status (never "starting"). */
 export function activityLabel(activity: string, waiting: boolean): string {
   if (waiting) return "waiting for you";
-  return activity || "unknown";
+  return activity === "unknown" || !activity ? "running" : activity;
 }
 
 /** The status-pill kind of an agent (the design's data-s). */
@@ -39,6 +39,8 @@ export function activityKind(activity: string, waiting: boolean): string {
   switch (activity) {
     case "working": case "idle": case "starting": case "stopped": case "error": case "done": case "running":
       return activity;
+    case "unknown":
+      return "running"; // its container runs; what it is doing is not known
   }
   return "neutral";
 }

@@ -67,7 +67,7 @@ func run(log *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go scanLoop(ctx, h, db, cfg.ScanInterval, log)
+	go h.Run(ctx, hub.FeedOptions{Fallback: cfg.ScanInterval})
 
 	server := &http.Server{Addr: cfg.Listen, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -81,23 +81,4 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	return nil
-}
-
-// scanLoop is discovery: every engine is asked for its projects on a timer, and a project nobody owns goes to the operator.
-func scanLoop(ctx context.Context, h *hub.Hub, db *store.Store, every time.Duration, log *slog.Logger) {
-	tick := time.NewTicker(every)
-	defer tick.Stop()
-	for {
-		scan, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := h.Scan(scan); err != nil && ctx.Err() == nil {
-			log.Warn("scan failed", "err", err)
-		}
-		_ = db.PurgeSessions(scan)
-		cancel()
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-	}
 }

@@ -280,6 +280,28 @@ def test_an_operator_holds_a_project_as_soon_as_the_scan_finds_it(single_hub, pa
     expect(projects_table(page).get_by_role("link", name="fresh")).to_be_visible(timeout=10000)  # found by the next scan
 
 
+def test_a_project_whose_sidecar_logs_no_status_says_so_and_shows_its_agents_as_running(single_hub, page):
+    sign_in(page, single_hub, "root")
+    single_hub.world("add-project", engine="local", project="mute", state="silent")
+    single_hub.world("set-agent", engine="local", project="mute", agent="coder-1", state="working")
+    page.goto(single_hub.url + "/e/local/p/mute")
+    agent = page.get_by_test_id("agents").locator("tr[data-agent=coder-1]")
+    expect(agent).to_be_visible()
+    # nothing has been heard yet: the agent is not called "starting", and there is nothing to warn about yet
+    expect(agent).not_to_contain_text("starting")
+    # after a while of silence the page says why it cannot tell what the agent is doing
+    expect(page.get_by_test_id("feed-banner")).to_contain_text("writes no status", timeout=15000)
+    expect(agent).to_contain_text("running")
+    expect(agent).not_to_contain_text("starting")
+
+
+def test_a_project_with_a_status_log_shows_what_its_agents_do_and_no_banner(single_hub, page):
+    sign_in(page, single_hub, "root")
+    page.goto(single_hub.url + "/e/local/p/web")
+    expect(page.locator("tr[data-agent=coder-1]")).to_contain_text("working")
+    expect(page.get_by_test_id("feed-banner")).to_have_count(0)
+
+
 def test_the_operator_adds_an_ssh_engine_and_confirms_its_host_key(single_hub, page):
     sign_in(page, single_hub, "root")
     page.get_by_role("link", name=re.compile("^Settings")).click()

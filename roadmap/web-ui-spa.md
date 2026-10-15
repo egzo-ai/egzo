@@ -22,8 +22,9 @@ screen (`egzo-screens.html`) and the design system (`egzo-system.html`).
 - **Serving.** Every non-API GET returns `index.html`, so deep links work and URLs keep the engine
   (`/e/{engine}/p/{project}/...`). Hashed assets are cached for good. Fonts (JetBrains Mono, Martian Mono, both OFL) are
   vendored, not loaded from Google.
-- **Freshness is what it is today:** the data is fetched on navigation and polled where the pages poll now
-  (`?fragment=1`). No push channel.
+- **Freshness:** the data is fetched on navigation and the pages poll the hub. The hub itself holds what the engines push (its event
+  and status streams, see [hub.md](hub.md)), so a poll asks the engine for nothing; the timelines read the sidecar and are polled slowly.
+  No push channel to the browser.
 
 ## Only what exists
 

@@ -142,9 +142,11 @@ Information model: engine → projects → agents, services.
 - **An `Engine` seam owned by the hub**: `Projects`, `Agents`, `Spawn`, `Start`, `Stop`, `Rm`, `Attach`, implemented by
   delegating to the core packages, and faked in the hub's tests. That covers what is the hub's own logic: discovery,
   the operators' access, RBAC, fan-out over N engines, an engine going down.
-- Discovery is by labels, per engine, on a timer (engine events: see [discovery.md](discovery.md)).
+- Discovery is by labels, per engine. The hub does not poll: it follows each engine's event stream and lists the engine again when a
+  container of egzo changes, keeps a slow timer only as a fallback (`EGZO_SCAN_INTERVAL`, 60 seconds; 5 seconds for an engine whose
+  events do not work), and follows each project's control sidecar log for what its agents are doing. Streams retry with growing delays.
 - Risks to track: privileged socket access (rootless, later a label-scoped proxy); engine credentials for remote
-  engines stored by the hub; many exec streams (engine events plus on-demand sidecar streams); `project up`
+  engines stored by the hub; one log stream per project with a running control sidecar and one event stream per engine (the hub holds them open); `project up`
   recreating containers while users are attached (the hub must handle disconnects cleanly).
 
 ## Decided
@@ -165,6 +167,11 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 - Login through OIDC (Dex in the compose stack); the first login is an operator, and operators hold every project without a
   grant. Roles user / administrator / owner per `(engine, project)`, "own agents" by the `actor` label, an owner cannot
   remove or lower themselves. Every operation is audited, allowed or refused.
+- Streams instead of polling ([container logging](../known-issues/container-logging-follows-the-engine-default.md)): the control
+  sidecar logs the agents' status as JSON on standard output (on change, and a heartbeat every 30 seconds); the hub follows it through
+  the engine's log API and the engine's events for discovery, retries both with backoff, and serves the pages from what it holds. A
+  running agent whose status cannot be read is **running**, never "starting", and the project says why. `egzo system check` tries the
+  engine's default log driver. See `hub/docs/README.md`, "How the hub keeps up".
 - Settings for operators ([hub-settings.md](hub-settings.md)): Engines, and Users, where an operator makes or removes other
   operators; the last one cannot be removed.
 - Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the
@@ -185,5 +192,5 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 - **Discovery beyond the timer**: see [discovery.md](discovery.md).
 - **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
 - **Hub settings, later parts** (a hub-level audit view, removing users, a richer users list, break-glass operator): see [hub-settings.md](hub-settings.md).
-- **Incompatible controls** (an old sidecar shows as "Starting"): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
+- **Incompatible controls** (the rest of it: a version the hub can compare): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

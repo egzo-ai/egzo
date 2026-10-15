@@ -43,9 +43,10 @@
   $effect(() => poll(loadProject));
   $effect(() => {
     if (tab !== "timeline") return;
+    // read from the control sidecar, which runs a command in it: slowly
     return poll(async () => {
       events = await api.events(engine, name, "", 60);
-    });
+    }, 15000);
   });
   $effect(() => {
     if (tab === "spec") void api.spec(engine, name).then((t) => (spec = t)).catch((e) => toast(errorText(e), "error"));
@@ -117,6 +118,11 @@
       {#each project.services as s}<span><span class="dot" data-s={s.state === "running" ? "running" : "stopped"}></span> {s.name}</span>{/each}
       {#if project.templates.length}<span><span class="k">templates</span> {project.templates.join(", ")}</span>{/if}
     </div>
+
+    {#if (project.feed.state === "unavailable" || project.feed.state === "stale") && agents.some((a) => a.running)}
+      <div class="banner" data-tone="info" role="status" data-testid="feed-banner"><span class="tag">? Agent status unavailable</span>
+        <div class="body">What the agents are doing cannot be read, so they show as running. {project.feed.message}</div></div>
+    {/if}
 
     {#if !project.up}
       <div class="banner" data-tone="warn" role="alert"><span class="tag">! Sidecars down</span>
