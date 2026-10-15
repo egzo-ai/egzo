@@ -1,7 +1,7 @@
 # Roadmap: a CI test matrix for the specs
 
 The specs (`specs/`) are the specification and the status report, but they have only ever run on one developer
-machine. Until they run on every platform egzo claims to support, "works on Podman" and "gVisor works" are not claims
+machine: `.github/workflows/ci.yml` runs the Go tests, the linters and the hub's tests, never the specs. Until they run on every platform egzo claims to support, "works on Podman" and "gVisor works" are not claims
 the docs can make. Background: `known-issues/reference-platform-ci-matrix.md`; how a run picks its platform:
 `specs/README.md`.
 

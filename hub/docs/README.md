@@ -13,6 +13,8 @@ cd hub
 cp .env.example .env            # set EGZO_SECRET_KEY and EGZO_OIDC_CLIENT_SECRET: openssl rand -hex 32
 echo "127.0.0.1 dex" | sudo tee -a /etc/hosts      # a first try on one machine: the browser must reach Dex by the name the hub uses
 export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+(cd .. && make hub-image)          # the hub image is not published yet: build it, tagged dev
+echo "EGZO_HUB_VERSION=dev" >> .env
 docker compose up -d
 ```
 
@@ -74,7 +76,7 @@ pages, `:` or Ctrl+K opens the command menu; single-key shortcuts can be turned 
 
 ### Known issue: the CLI
 
-The hub only knows the terminals it opened. `egzo attach` goes straight to the agent's session and the hub neither sees it nor can
+The hub only knows the terminals it opened. `egzo agent attach` goes straight to the agent's session and the hub neither sees it nor can
 end it. Attaching with the CLI to an agent that is open in the hub is risky: the session has one screen size, so each side's window
 resize changes it for the other, and what both type reaches the program. Avoid it. Nothing in the hub prevents it.
 

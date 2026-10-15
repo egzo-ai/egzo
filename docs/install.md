@@ -12,12 +12,15 @@ Desktop, Colima or OrbStack). Neither is supported yet; see
 
 ## Get egzo
 
-Egzo is a single static binary. Download the one for your platform from the releases page of
-[github.com/egzo-ai/egzo](https://github.com/egzo-ai/egzo), make it executable and put it on your `PATH`:
+Egzo is a single static binary. Each [release](https://github.com/egzo-ai/egzo/releases) has `egzo-linux-amd64`,
+`egzo-linux-arm64` and a `SHA256SUMS` file. Download the one for your machine, check it, make it executable and put it on
+your `PATH`:
 
 ```console
-$ chmod +x egzo
-$ sudo mv egzo /usr/local/bin/      # or any directory on your PATH, such as ~/.local/bin
+$ curl -fsSLO https://github.com/egzo-ai/egzo/releases/latest/download/egzo-linux-amd64
+$ curl -fsSLO https://github.com/egzo-ai/egzo/releases/latest/download/SHA256SUMS
+$ sha256sum --ignore-missing -c SHA256SUMS
+$ install -m 0755 egzo-linux-amd64 ~/.local/bin/egzo      # or /usr/local/bin with sudo, any directory on your PATH
 $ egzo version
 ```
 
@@ -27,8 +30,7 @@ That is all the CLI needs. It talks to your container engine, and pulls the imag
 own version, so the CLI and the sidecars cannot drift. To pull from another registry (a mirror), set
 `EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `egzo agent spawn` says which image and how to override it.
 
-> Egzo has not been released yet, so there is nothing to download today; until it is, build from source (below). The
-> release and an install script are tracked in [`roadmap/initial-release.md`](../roadmap/initial-release.md).
+> There is no install script yet, and the releases are early (0.x): see [`roadmap/initial-release.md`](../roadmap/initial-release.md).
 
 ## Pick an engine
 
@@ -86,7 +88,7 @@ your choice (journald is common). Two things follow.
 
 ## Building from source
 
-For development, or until a release exists. You need Go 1.27 or later, Docker (to build images) and `make`:
+For development, or to run something that is not released. You need Go 1.27 or later, Docker (to build images) and `make`:
 
 ```console
 $ git clone https://github.com/egzo-ai/egzo && cd egzo

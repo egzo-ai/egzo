@@ -46,7 +46,7 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 - `egzo system check` should report what it found (Desktop, Colima, OrbStack).
 
 **2. Files the CLI writes and mounts**
-- Workspaces, the prompt and the project lock live in the engine ([`portable-workspaces.md`](portable-workspaces.md)): no
+- Workspaces, the prompt and the project lock live in the engine ([`docs/workspaces.md`](../docs/workspaces.md)): no
   host path is bind-mounted, so Docker Desktop's file sharing, `/mnt/c` on WSL2 and its slowness, and the ownership
   mapping of shared files are not in the way. Volumes are also the fast path on Docker Desktop.
 - **File ownership.** Agents run as the invoking user's uid and gid (`os.Getuid()` in `internal/stack/up.go`) and the
@@ -63,8 +63,9 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 **4. Distribution**
 - Release binaries for `darwin/arm64` and `darwin/amd64`, with checksums, and a Homebrew tap. This extends the install
   wrapper in [`initial-release.md`](initial-release.md).
-- Harness images are multi-arch (`linux/amd64` and `linux/arm64`), since Apple silicon runs arm64 Linux containers.
-  Check that the harnesses (Node, `claude`, `opencode`) and the egzo binary build for arm64. This helps Linux arm64 too.
+- Harness images are multi-arch (`linux/amd64` and `linux/arm64`, built by `release.yml`), since Apple silicon runs arm64
+  Linux containers. They build, but no spec has run on arm64 yet. The release also has `egzo-linux-arm64`; only the
+  `darwin` binaries are missing.
 
 **5. Isolation differences to document**
 - On Docker Desktop the engine's "host" is a VM: an extra boundary, but shared by all your containers. The
@@ -88,9 +89,9 @@ The CLI is native (`darwin/arm64`, `darwin/amd64`), so this is where the code ha
 - [ ] WSL2: try the quick start and the specs on WSL2 with Docker Desktop; document the setup and the `/mnt/c` rule;
       add the two `system check` hints.
 - [ ] macOS: cross-compile for `darwin`; engine discovery through Docker contexts and Desktop sockets.
-- [ ] Decide the uid/gid and ownership story on Desktop, and the default workspace storage (host bind vs named volume),
-      after measuring on both macOS and WSL2.
-- [ ] Multi-arch images; macOS release binaries and a Homebrew tap.
+- [ ] Decide the uid/gid and ownership story on Desktop, after measuring on both macOS and WSL2 (workspaces are engine
+      volumes, so there is no host-bind option to choose).
+- [ ] Run the arm64 images; macOS release binaries and a Homebrew tap (multi-arch images and `linux/arm64` binaries are released).
 - [ ] Reference platforms and runners in the CI matrix.
 - [ ] Update `docs/install.md` (engine and platform table), `docs/security.md` and `docs/workspaces.md` (host-path
       caveats) when it lands.

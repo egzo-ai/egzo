@@ -1,6 +1,6 @@
 # egzo documentation
 
-Egzo is early, and has not been released: see [`roadmap/initial-release.md`](../roadmap/initial-release.md) for what the docs
+Egzo is early (0.x releases): see [`roadmap/initial-release.md`](../roadmap/initial-release.md) for what the docs
 still have to be checked against. These pages are quick pointers, not a reference; `egzo <command> --help` and `egzo project check --resolved` are the
 detail, and the executable specs in `specs/` are the status report.
 

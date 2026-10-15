@@ -6,12 +6,12 @@ A spec that needs the outside world fails when it is unreachable (`CLAUDE.md`: n
 or with one of these sites down shows red specs that say nothing about egzo. What the suite reaches today:
 
 - **`example.com`, `example.org`**: the egress and audit specs (`test_proxy.py`, `test_agents.py`, `test_daily.py`,
-  `test_instances.py`, `test_operations.py`) fetch real pages through the proxy to prove allow and deny. Several other
+  `test_instances.py`, `test_operations.py`) fetch real pages through the proxy to prove allow and deny (also `test_egress.py`, `test_browser.py`, `test_secrets.py`, `test_cli.py`, `test_git_workspaces.py`). Several other
   specs only use the names as strings in a config and need nothing.
-- **`httpbin.org`, `httpbingo.org`**: the injection and placeholder specs in `test_proxy.py` need a server that echoes back
+- **`httpbin.org`, `httpbingo.org`**: the injection and placeholder specs in `test_proxy.py` and `test_browser.py` need a server that echoes back
   the headers and body it received. These are third-party sites, and `httpbingo.org` has no say in our uptime.
 - **`github.com`**: the git workspace specs clone a public repository (`test_git_workspaces.py`, parts of
-  `test_workspaces.py`, `test_up_down.py`, `test_egress.py`, `test_init.py`).
+  `test_workspaces.py`, `test_egress.py`, `test_init.py`, `test_schema.py`, `test_cli.py`, and the `support.py` helpers).
 - **A registry** (`localhost:5000`, or `EGZO_SPEC_REGISTRY`): `test_images.py`. That is ours to run, but it has to exist.
 - **`docker.io`** (`alpine:3`, `apk add curl git`) and the harness image builds (npm, apt): the agent images the specs build
   come from the internet the first time.

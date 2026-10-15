@@ -60,7 +60,7 @@ $ egzo message ls            # open requests; `egzo message ls --kind question` 
 $ egzo message reply ID "text"    # answer a question an agent asked
 $ egzo proxy log           # what the agents tried to reach
 $ egzo system check              # engine, isolation and git (no project needed)
-$ egzo workspace ls              # workspaces, their paths and states
+$ egzo workspace ls              # workspaces, their volumes and states
 $ egzo workspace fetch           # clone or refresh the git bases
 ```
 

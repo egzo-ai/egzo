@@ -20,7 +20,8 @@ and [messaging](messaging.md).
 - **Optional gVisor** (`runtime: runsc`) as a stronger kernel boundary, on engines that can apply it.
 - **Per-agent identity.** Each instance has its own token, used for the proxy and the control sidecar. A token only
   lets an agent act as itself, and the proxy applies that agent's profile, not another's.
-- **Nothing from your host is mounted** unless the file says so, and only the paths it names.
+- **Nothing from your host is mounted.** Workspaces are engine volumes, so no directory of yours is exposed to an agent;
+  files go in and out only with `egzo workspace put` and `get`.
 
 ## What it does not protect against
 
@@ -36,7 +37,6 @@ Be clear about these before running agents on something you care about.
   steering can do; it does not stop the agent from being steered.
 - **The workspace is writable.** Agents can delete or corrupt what you mount read-write. Use `:ro` for directories and git for
   code. Every agent has its own worktree.
-- **Host paths** you mount are as exposed as you make them.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
   that is root-equivalent. Prefer a rootless engine.
 - **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.
@@ -82,5 +82,5 @@ loops (20 open requests per recipient, 30 messages a minute, 8 levels deep).
 ## Reporting a problem
 
 `specs/` includes containment specs that assume the agent is hostile and check the intended limits: no egress except
-through the proxy, no secrets in the agent, no host access beyond what the file mounts. They test those limits; they
+through the proxy, no secrets in the agent, no host access. They test those limits; they
 are not a proof. If you find a way around one, that is a bug worth reporting.

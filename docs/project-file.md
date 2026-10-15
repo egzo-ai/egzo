@@ -4,7 +4,7 @@ A project is one `egzo.yaml`. Everything is denied unless the file declares it, 
 agents may use. It has five parts: **vaults** (where secrets come from), **egress** (what agents may reach),
 **workspaces** (what they work on), **agents** (the templates) and, optionally, **proxy**/**name**.
 
-`egzo project check --resolved` prints the file validated and fully resolved; `egzo project check --resolved` is the quickest way to see what a short
+`egzo project check --resolved` prints the file validated and fully resolved: the quickest way to see what a short
 file expands to. The project name defaults to the directory name (`name:`, `-p` or `EGZO_PROJECT_NAME` override it);
 renaming a project creates a new one.
 

@@ -99,7 +99,7 @@ to work. There is no override flag; rename the project (`-p`, env or `name:`) or
   image tagged with its own version, so CLI and sidecars cannot drift. It includes git >= 2.47 for
   the prep role. `proxy.image` stays overridable. Harness images are separate:
   `ghcr.io/egzo-ai/egzo-harness-<name>`.
-- `egzo agent` and `egzo hook` are the in-container roles (pty holder, hooks), the same binary, copied into
+- `egzo agent` (`run`, `browser`, `hook`) is the in-container role (pty holder, hooks), the same binary, copied into
   every harness image.
 - Config file `egzo.yaml`, env vars `EGZO_*`. egzo keeps nothing in the project directory.
 - Labels follow the DNS convention under our domain: `ai.egzo.*` (e.g. `ai.egzo.project`).
@@ -255,7 +255,7 @@ Commands are grouped by what they act on. There are no aliases for names that mo
 - Reuse from v1 (the abandoned first attempt): harness adapter Render logic (pure, golden-tested), proxy/gate
   lessons (todos/0002), Claude onboarding/trust seeding in ~/.claude.json.
 
-## Workspaces (decided; engine volumes, see `roadmap/portable-workspaces.md`)
+## Workspaces (engine volumes)
 - Declared at top level and **project-scoped**: one workspace is shared by every template that lists it. An agent
   references them in `workspaces:` as a list of `name[:ro]`; a name that is not declared is an error, and so is a
   path (`./docs`, `/srv/data`), with a message that says to declare it. Nothing of the host is ever mounted: a
@@ -767,11 +767,11 @@ agent env, agent filesystem, or logs; assert direct egress fails.
 ## Implementation notes (what exists, and where it differs from the drafts above)
 
 Built and covered by specs (Docker is the engine the specs run against now; Podman works through its
-compatible socket but is not exercised by the current suite): `init`, `config`, `up` (`--dry-run`,
-`--recreate`, `--dry-run`), `agent spawn|ls|rm|attach`, `project down`, `ps` (`--json`), `logs`, `exec`, `start|stop|restart`,
-`send` (`--interrupt`), `events`, `questions`, `answer`, `secrets ls`, `proxy log|rules`, `ca rotate`,
-`system check`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|attach`,
-`egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
+compatible socket but is not exercised by the current suite): `project init|up|down|check|rotate-ca|unlock`
+(`up --dry-run`, `check --resolved`), `agent spawn|ls|rm|start|stop|attach`, `message send|ls|reply`,
+`workspace ls|put|get|fetch|rm`, `ps` (`--json`), `logs`, `exec`, `start|stop|restart`, `events`, `proxy log|rules`,
+`system check`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|browser|hook`,
+`egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
 the egzo image with `make images`); `custom` runs any image.
 
 Decisions taken while building (reversible; each is covered by specs):
@@ -850,7 +850,7 @@ Decisions taken while building (reversible; each is covered by specs):
   produces files (merged into what the harness already keeps in the volume), a command line and the interrupt
   key. Claude Code starts with `--permission-mode bypassPermissions`, never with `permissions.defaultMode` in the settings (which makes it ask on its first start whether to make auto mode the default; nobody is there to answer in an unattended agent, and an injected Enter would). Claude Code: `~/.claude.json` (onboarding done, each workspace trusted, a placeholder API key
   pre-approved, the `egzo` MCP server), `~/.claude/settings.json` (its bypass prompt skipped, any earlier `defaultMode` removed, hooks
-  `egzo hook <Name>`), `--model`, `--append-system-prompt` with the platform instructions + the agent's prompt,
+  `egzo agent hook <Name>`), `--model`, `--append-system-prompt` with the platform instructions + the agent's prompt,
   `IS_SANDBOX=1`. OpenCode: `opencode.json` (`permission: {"*": "allow"}`, the MCP server, model,
   instructions) and a plugin that reports `SessionStart` when it loads (OpenCode only creates a session on the
   first prompt), `UserPromptSubmit` from `chat.message` and `Stop` from `session.idle`. `permissions: default`

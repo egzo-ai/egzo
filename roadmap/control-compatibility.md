@@ -35,7 +35,7 @@ Everything below is open. Pick the smallest thing that works.
 - **Show it.** A distinct state on the project and the services ("control outdated, run `egzo project up` again"), with the control's
   version on the project page. (The banner for an unavailable feed exists; it cannot yet say "outdated".) The timeline, spec and
   templates are still read by running a command in the sidecar, and an old sidecar's `404` there is reported as an error of that panel.
-- **The CLI too.** `egzo agent ls` and `egzo project status` flag an outdated control, and `egzo doctor`, if there is one, checks it.
+- **The CLI too.** `egzo ps` and `egzo agent ls` flag an outdated control, and `egzo system check` checks it.
 - **Labels as a hint only.** Compare `created-by` or the image version with the running egzo when both are releases; say
   "built by 0.0.1-rc1" and never block on it.
 - **The change rule.** Adding an endpoint or a field is free. A change or removal bumps `api`. Support a window (the current

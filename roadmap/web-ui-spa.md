@@ -7,7 +7,7 @@ operation, permission, data or setting. The new things are in the front end only
 The design is in [egzo-design/](egzo-design/README.md): tokens, components, icons, logo, a clickable prototype of every
 screen (`egzo-screens.html`) and the design system (`egzo-system.html`).
 
-## What changes
+## What changed
 
 - **Back-end: API first.** `hub/internal/web` stops rendering HTML. It serves JSON under `/api/v1/...` for what the pages do
   today (list projects, spawn, start / stop / remove, timeline, logs, spec, audit, members, engines CRUD and confirm) and the
@@ -47,47 +47,6 @@ per terminal.
   else goes to the agent, and the Ctrl+] leader works in a plain browser tab.
 - Fix the design's README and the prototype text for both when the design folder is next regenerated; until then this page wins.
 
-## Terminals and tabs
-
-Backend-wise this needs nothing new: presence, take-over and the control frames (`busy`, `taken`, `error`) are keyed per
-agent, so **one websocket per open terminal** with the existing protocol. The front end:
-
-- Terminals live in a store above the router. Each owns one xterm and one websocket for its whole life; navigating, splitting,
-  collapsing the sidebar or going full screen only hides it. Only Close destroys it.
-- The open list is kept in `sessionStorage` and reattached on reload (the agent's session survives on the server).
-- A terminal is fitted only while visible and sends its size when shown. Cap the number of open terminals and bound the
-  scrollback. A quiet websocket may need keepalive pings behind a proxy.
-- States are the design's: connecting, connected, busy (take over), taken (take it back), disconnected (reconnect), error,
-  stopped. Reconnect and retry timing are client-side.
-- Layouts 1 / 2 / 4, reorder, full screen, the Ctrl+] leader and the command menu are front-end work.
-
-Open point: today a person who opens the same agent in two windows meets "busy" against themselves. With tabs this will
-happen more. Decide whether the same user re-attaching counts as the same holder (probably a take-over without a prompt).
-
-## Phases
-
-1. **API.** Extract the JSON API under the current handlers while the HTML pages still work. Convert the Go tests in
-   `hub/internal/web` to assert JSON. Write the OpenAPI file and generate the types.
-2. **Scaffold.** Vite + Svelte + TypeScript in `hub/web/`, the embed, the SPA fallback, fonts, the docker build, Makefile
-   targets and the CI job. An empty shell with the sidebar and the tokens.
-3. **Pages**, one at a time: sign-in redirect, home, engines, project (agents, services, timeline, spec, audit, members),
-   agent, dialogs, error pages.
-4. **Terminals.** The store, the pane, the states, layouts, the leader key, the command menu.
-5. **Remove** the templates, the old `web/src` scripts and the `?fragment` handling.
-
-## Tests
-
-- Go unit tests of the API with the engine seam faked (as now).
-- Vitest for the front-end logic (the terminal store, the state machine, the keyboard leader).
-- The Playwright suite in `hub/e2e` is what shows that no visible behaviour was lost. It is rewritten for the new markup
-  and must keep passing; `make hub-stack` stays.
-
-## Open questions
-
-- The same user in two windows (above).
-- OpenAPI by hand, or generated from the Go handlers.
-- Whether to keep the old HTML pages for a release behind the new ones (the plan above replaces them in phase 5 instead).
-
 ## What was built
 
 - `hub/internal/web`: the JSON API (`api.go`, documented in `hub/docs/api.md`), the login redirects, the terminal websocket (now at
@@ -102,5 +61,5 @@ happen more. Decide whether the same user re-attaching counts as the same holder
 - Tests: the Go API tests in `hub/internal/web`, Vitest for the terminal session protocol, the workspace, the leader key, the
   router and the API client, and the Playwright suite in `hub/e2e` rewritten for the new markup, with new tests for several
   terminals, the leader key, the command menu and the confirmations.
-- The one question left open above is unchanged: the same person in two windows meets "busy" against themselves and can take it
-  over, with a click.
+- Still open: the same person in two windows meets "busy" against themselves and can take it over, with a click. Whether the
+  same user re-attaching should count as the same holder (a take-over without a prompt) is undecided.

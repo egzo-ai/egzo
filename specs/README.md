@@ -80,24 +80,24 @@ for the browser specs).
 
 ## Output contract assumed by the specs
 
-`egzo config` prints the resolved configuration as YAML and exits non-zero with a message on stderr
+`egzo project check --resolved` prints the resolved configuration as YAML and exits non-zero with a message on stderr
 when the file is invalid. The specs read these keys:
 
 ```yaml
 name: <project>
 workspaces:
-  <name>: { path: <abs host dir>, git: {url: ...} }   # git workspaces: the directory of .base and the worktrees
+  <name>: {} | { git: {url, branch} }   # a volume either way; there is no path (an engine volume has no host directory)
 agents:
   <agent>:
     workdir: /workspace/<name> | /workspace
     egress: <profile>
     workspaces:
-      - { name, mount, mode: rw|ro, host_path?, from? }
+      - { name, mount, mode: rw|ro }
 egress:
   <profile>: { allow: [...], services: { <name>: { hosts, inject?, secret?, placeholder?, inspect? } } }
 ```
 
-`agents:` entries are templates; there is no `depends_on` and no cross-agent workspace reference (`from`).
+`agents:` entries are templates; there is no `depends_on`, no cross-agent workspace reference and no host path.
 Warnings (for example an agent whose profile cannot reach its harness's provider) go to stderr and
 do not change the exit code. Changing this contract means changing these specs first.
 
@@ -106,24 +106,30 @@ do not change the exit code. Changing this contract means changing these specs f
 | File | Covers |
 |---|---|
 | `test_meta.py` | the status model itself |
-| `test_schema.py` | validation of `egzo.yaml`, no users in files, no secrets in output |
+| `test_schema.py` | validation of `egzo.yaml` (`egzo project check --resolved`), no users in files, no secrets in output |
+| `test_init.py` | `egzo project init`: the scaffolded file |
+| `test_cli.py` | the shape of the command line: the groups (`project`, `agent`, `message`, `workspace`, `system`) and the top-level commands |
 | `test_project_name.py` | name resolution and the same-name-other-directory refusal |
-| `test_workspaces.py` | mounts, working directory, git sources, the dropped cross-agent reference |
+| `test_workspaces.py` | engine-volume workspaces (no `path`), references, mounts, working directory, `egzo workspace put|get|ls|rm`, the lock lease |
 | `test_egress.py` | profiles, services (wildcards only without a secret), built-ins, extend, placeholders, by-host rules, reachability warnings |
-| `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`), `egzo secrets` |
+| `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`), the secrets `project check` and `proxy rules` report |
 | `test_labels.py` | the `ai.egzo.*` label contract |
-| `test_up_down.py` | `up` (infrastructure and templates, no agent), `down`, `--dry-run`, idempotency, workspace safety |
-| `test_spawn.py` | templates and `egzo spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
-| `test_instances.py` | `ps` and `ps --json`, `rm`, `prune`, stale instances and the `up` refusal |
+| `test_up_down.py` | `project up` (infrastructure and templates, no agent), `project down`, idempotency, workspace safety |
+| `test_spawn.py` | templates and `egzo agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
+| `test_instances.py` | `ps` and `ps --json`, `agent rm`, stale instances and the `project up` refusal |
 | `test_agents.py` | one container per instance, networks, isolation, who agents run as |
 | `test_proxy.py` | injection, placeholders, `inspect` and wildcard services, TLS, Encrypted Client Hello, deny unless allowed, per-agent policy, CA, audit |
-| `test_session.py` | `egzo attach` and the session fidelity matrix, against a stand-in TUI |
+| `test_session.py` | `egzo agent attach` and the session fidelity matrix, against a stand-in TUI |
 | `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
 | `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
 | `test_browser.py` | the Chromium and Playwright MCP server built into both harness images: registered with the harness, browsing through the proxy, a form login with a placeholder |
 | `test_git_workspaces.py` | the base clone at `up`, a worktree per instance at spawn, fetch, `--reuse`, removal with the instance (clones from github.com) |
-| `test_operations.py` | `doctor`, `diff`, `ca rotate`, `up` taking no agent, `proxy rules` |
+| `test_operations.py` | `system check` (including the log driver), `project up --dry-run`, `project rotate-ca`, `up` taking no agent, `proxy rules`, the engine-side project lock |
 | `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
+| `test_daily.py` | `logs`, `exec`, `start`, `stop`, `restart`, `proxy log` |
+| `test_messaging.py` | the message model, the agent's tools (HTTP and MCP) and `egzo message send|ls|reply` |
+| `test_logs.py` | the engine's default logging for every container; the control sidecar's JSON logs, status on standard output |
+| `test_snapshot.py` | the resolved project kept on the control volume, read through `/v1` |
 
 ## Not covered
 

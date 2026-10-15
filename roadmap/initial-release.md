@@ -1,65 +1,66 @@
 # Roadmap: initial release
 
-What has to be true before egzo is published, and what to re-check in the documentation when it is. The docs in
-`docs/` were written against a source build, before any image or binary was published, so parts of them are
-promises that have not been checked against a real release.
+What is left before egzo is publicly announced, and what to re-check in the documentation when it is. egzo is already
+published as early 0.x releases (tags `0.0.1-rc1` to `0.4.1`; GitHub releases from `0.1.1`), so this page is no longer
+about whether anything is out, but about what makes a first release one that can be recommended.
+
+## Done
+
+- `release.yml` ran. A tag without a `v` (`0.4.1`) builds the `linux/amd64` and `linux/arm64` binaries with `SHA256SUMS`
+  (attached to the GitHub release), then the multi-arch sidecar image and the two harness images, pushed to `ghcr.io/egzo-ai/`
+  (`egzo`, `egzo-harness-claude-code`, `egzo-harness-opencode`) with provenance. A tag with a `-` is a pre-release and is not
+  tagged `latest`. The three packages are public (they pull without a login).
+- The harness packages are pinned with build arguments (`CLAUDE_CODE_VERSION`, `OPENCODE_VERSION`, `PLAYWRIGHT_MCP_VERSION`).
+- `docs/install.md` tells how to download and check a release.
 
 ## Publish
 
-- [ ] `release.yml` (written, not yet run): triggered by a tag without a `v` (`0.1.0`; first tested with `0.0.1-rc1`). One tag builds everything, so the image tag and `egzo version` agree:
-      the binaries and `SHA256SUMS` for the GitHub release, the multi-arch sidecar image, then the harness images
-      (they `COPY --from` the sidecar image). The arm64 images are built under QEMU, so expect a slow run; if that hurts,
-      move to native arm runners (`ubuntu-26.04-arm`) and merge the manifests. It pushes to ghcr.io with `GITHUB_TOKEN` (`packages: write`), with
-      provenance and, optionally, keyless cosign signing. `ci.yml` should also build the images without pushing.
-      Decided: linux/amd64 and linux/arm64 from the start, so the arm64 harness images have to be run and checked
-      before claiming support (no spec runs on arm64 yet); pin the harness npm packages (`@anthropic-ai/claude-code`,
-      `opencode-ai`) with build args instead of installing whatever is latest.
-- [ ] After the first push, set the three ghcr packages (`egzo`, `egzo-harness-claude-code`, `egzo-harness-opencode`)
-      to public and link them to the repository; they start private, and nobody else can pull them until then.
-- [ ] Prebuilt images on `ghcr.io/egzo-ai/`: `egzo` (the sidecar image) and `egzo-harness-claude-code`,
-      `egzo-harness-opencode`, tagged with the CLI version (`make images` builds the same set).
-- [ ] A released `egzo` binary per platform (Linux amd64 and arm64 to start), attached to a GitHub release with
-      checksums, so users download it and put it on their `PATH` and do not need Go 1.27 to try it.
-- [ ] An install wrapper (later, after the plain download works): a script that detects the platform, downloads the
+- [ ] **Check the releases.** `0.4.0` has a tag but no GitHub release and no images, and `0.1.0` and `0.0.1-rc1` have images
+      but no release: find out why, and make sure a tag cannot half-publish.
+- [ ] **The hub image.** `hub/compose.yaml` pulls `ghcr.io/egzo-ai/egzo-hub`, which `release.yml` does not build and ghcr does not
+      have. Add it to the release (and make the package public), then drop the "build it yourself" lines from `hub/docs/README.md`.
+- [ ] `ci.yml` should also build the images without pushing, so a broken Dockerfile shows before a tag does.
+- [ ] **arm64 has to be run**, not only built: no spec runs on arm64, and the browser has not been tried there. Until then do not
+      claim arm64 support beyond "builds".
+- [ ] Optional: keyless cosign signing of the images and the binaries.
+- [ ] Native arm runners (`ubuntu-26.04-arm`) instead of QEMU, if the arm64 builds are too slow.
+- [ ] An install wrapper (after the plain download works, which it now does): a script that detects the platform, downloads the
       right binary, verifies its checksum and installs it, for a `curl ... | sh` style install and perhaps a package
       (Homebrew tap, `.deb`). Then update `docs/install.md` to lead with it and keep the manual download as the fallback.
 - [ ] Check the name, domain, org and registry (DESIGN.md, "Naming": availability was never really checked).
 - [ ] A CI matrix of reference platforms ([`ci-test-matrix.md`](ci-test-matrix.md),
-      `known-issues/reference-platform-ci-matrix.md`): until then the specs have
-      only run on one machine, and "supported on Podman" or "gVisor works" are not claims to make.
+      `known-issues/reference-platform-ci-matrix.md`): until then the specs have only run on one machine, and "supported on
+      Podman" or "gVisor works" are not claims to make.
 - [ ] Decide whether Podman is supported in the first release, given
       `known-issues/rootful-podman-intermittent-egress.md` and `known-issues/podman-gvisor-unsupported.md`.
-- [ ] Once the GitHub project is live, retire [`review-leftovers.md`](review-leftovers.md): file the four concrete items
-      as GitHub issues (the `errcheck` sweep, a fake `client.APIClient` for `Up`/`Apply`/`Down`/`RunPrep` unit tests,
-      audit-log sampling of repeated denials, and a `known-issues/` entry for the `govulncheck` finding GO-2026-4887; `known-issues/moby-daemon-advisories.md` now exists, so only the issue link is left),
-      fold the Podman uid mapping and per-request cost notes into `DESIGN.md` or drop them, then delete the file and
-      this link. Its R-nn and T-nn ids refer to the deleted `TODO.md` and mean nothing to outsiders.
+- [ ] Retire [`review-leftovers.md`](review-leftovers.md): file its concrete items as GitHub issues (the `errcheck` sweep, a fake
+      `client.APIClient` for `Up`/`Apply`/`Down`/`RunPrep` unit tests, audit-log sampling of repeated denials, and a link to
+      `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost
+      notes into `DESIGN.md` or drop them, then delete the file and this link. Its R-nn and T-nn ids refer to the deleted
+      `TODO.md` and mean nothing to outsiders.
 
-## Documentation review once images are published
+## Documentation review against the published artifacts
 
-The docs need a pass by someone who installs egzo from the published artifacts on a clean machine and follows
-them. Known places to fix:
+Done in the 2026-10-15 housekeeping pass: every `egzo` command in `docs/`, `README.md`, `DESIGN.md` and `specs/README.md` exists
+in the CLI, the install page and the status paragraphs no longer say there is no release, and the claims about workspaces
+(engine volumes, no host path), the sidecars (non-root uid, read-only root) and the message limits match the code.
 
-- [ ] `docs/install.md`: the download instructions name a releases page and a binary that do not exist yet. Check the
-      real asset names, `chmod`/`PATH` steps and checksum instructions, remove the "not released yet" note, and state
-      which image tags exist (a version, `latest`?). Update it again when the install wrapper lands.
-- [ ] `docs/intro.md`: the first run (`egzo project init`, `project up`, `agent spawn --attach`) should be run end to end from the
-      published binary and images, and its `Requirements` and `Status` sections updated.
-- [ ] `docs/images.md`: the `FROM ghcr.io/egzo-ai/egzo-harness-claude-code:latest` example must name a tag that
-      exists; check the advice to match the tag to `egzo version`, and the derived-image rules (entrypoint, uid, no
-      `CMD`) against a real build and `agent spawn`.
-- [ ] `docs/harnesses.md`: the "Images" section (default name, `EGZO_HARNESS_PREFIX`, the error for an image that
-      cannot be pulled) should be checked against the registry as published.
-- [ ] `docs/troubleshooting.md`: the pull-failure row, and the "Known problems" list, against what is still true.
-- [ ] Every command and flag in the docs against `egzo --help` of the released build, and every YAML example run
-      through `egzo project check --resolved`. The examples were written from the design and the code, and were not all executed.
-- [ ] Unverified claims to confirm or remove: that `agent attach` works for a `custom` harness image; that sidecars run
-      as a non-root uid (`docs/security.md`); the exact placeholder credentials each harness receives.
+What a pass on a **clean machine, from the published binary and images**, still has to check:
+
+- [ ] `docs/install.md`: the download, checksum and `PATH` steps as written, and which image tags exist (a version, `latest`).
+      Update it again when the install wrapper lands.
+- [ ] `docs/intro.md`: the first run (`egzo project init`, `project up`, `agent spawn --attach`) end to end.
+- [ ] `docs/images.md`: the `FROM ghcr.io/egzo-ai/egzo-harness-claude-code:latest` example and the derived-image rules
+      (entrypoint, uid, no `CMD`) against a real build and `agent spawn`.
+- [ ] `docs/harnesses.md`: the "Images" section (default name, `EGZO_HARNESS_PREFIX`, the error for an image that cannot be pulled).
+- [ ] `docs/troubleshooting.md`: the pull-failure row, and "Known problems", against what is still true.
+- [ ] Every YAML example run through `egzo project check --resolved`. The examples were written from the design and the code,
+      and were not all executed.
+- [ ] Unverified claims: that `agent attach` works for a `custom` harness image; the exact placeholder credentials each harness
+      receives.
 - [ ] Dead links: `docs/` links to `../README.md`, `roadmap/` and `known-issues/` by path.
-- [ ] The top-level `README.md` status paragraph and "Requirements" section, which says images come from
-      `ghcr.io/egzo-ai/egzo-harness-<name>` or from `make images`.
 
 ## Later
 
-The other roadmap items are separate: [hub, web UI and Discord](hub.md), [ssh access for
+The other roadmap items are separate: [hub](hub.md) and [messaging adapters](messaging-adapters.md), [ssh access for
 agents](ssh-access.md), [review leftovers](review-leftovers.md), [CI test matrix](ci-test-matrix.md), [macOS and Windows (WSL2) hosts](windows-and-macos.md).

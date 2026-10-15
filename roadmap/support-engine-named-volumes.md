@@ -4,7 +4,7 @@ Status: proposed, later addition. Nothing is built and there are no specs yet.
 
 ## Why
 
-Portable workspaces (`roadmap/portable-workspaces.md`) dropped host-bound directories with no escape hatch. That is
+Portable workspaces (built: `docs/workspaces.md`, `DESIGN.md` "Workspaces") dropped host-bound directories with no escape hatch. That is
 right for almost everyone, but some users need an agent to reach data that lives outside egzo: a NAS share, a large
 cache, a media library. The escape hatch is **not** a host path in the project file. It is a reference to a volume that
 already exists in the engine.

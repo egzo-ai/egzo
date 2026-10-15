@@ -3,7 +3,6 @@
 **Status.** The hub and its web UI are built (`hub/`, see [hub/docs/README.md](../hub/docs/README.md) and "Built" at the end of
 this page). The messaging adapters (NATS, `egzo-discord`) are a separate item: [messaging-adapters.md](messaging-adapters.md).
 
-Replaces `hub-and-web-ui.md` and `web-ui-requirements.md`. Where the two disagreed, the web UI requirements won.
 Core implements none of this; what core guarantees for it is summarised in DESIGN.md, "Not in core".
 
 ## Model
@@ -91,8 +90,7 @@ Information model: engine → projects → agents, services.
 
 - **A separate Go module** (`hub/go.mod`). Core's `go.mod`, `staticcheck` and `govulncheck` never see NATS, OIDC,
   the frontend or Discord libraries. The hub requires core with `replace github.com/egzo-ai/egzo => ../`. Go's
-  `internal` rule is path-based, so the hub can import core's `internal/...` packages. To confirm with the first
-  build.
+  `internal` rule is path-based, so the hub can import core's `internal/...` packages (confirmed by the build).
 - **The compiler enforces the direction.** Code under `hub/internal/` can be imported only from `hub/`, and
   `hub/cmd/` packages are `main`. So nothing hub-side is importable by core. Never put hub code in a non-`internal`
   package under `hub/`.
@@ -121,7 +119,7 @@ Information model: engine → projects → agents, services.
    fetched, resolved; status change; question asked and answered), questions (`ask`) with a stable message id and
    an `actor` on every message and answer. Consumed by the hub on behalf of messaging adapters, not by the web UI.
 
-## What core must still do for the hub
+## What core did for the hub
 
 - [x] **An engine constructor that takes a host.** `engine.Dial(Target)`: a unix or tcp host, TLS material as PEM from
       memory, and an optional dialer. ssh is a dialer the hub supplies (`hub/internal/engines/ssh.go`, with the host key
