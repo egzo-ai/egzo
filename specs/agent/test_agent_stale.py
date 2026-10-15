@@ -84,6 +84,8 @@ def test_editing_a_template_makes_its_instances_stale_and_up_refuses_until_they_
     env = dict(item.split("=", 1) for item in engine.instance(p.name, "coder-2").raw["Config"]["Env"])
     assert env["V"] == "1", "a refused up publishes nothing: spawn still uses the old template"
 
+    hash_label = f"{LABEL_PREFIX}template-hash"
+    old_hash = engine.instance(p.name, "coder-2").labels[hash_label]
     why = p.ok("agent rm --stale --dry-run").stdout
     assert "would remove coder-1" in why and "stale" in why and engine.instance(p.name, "coder-1") is not None
     p.ok("agent rm --stale --yes")
@@ -93,6 +95,7 @@ def test_editing_a_template_makes_its_instances_stale_and_up_refuses_until_they_
     assert p.spawn("coder") == "coder-1"
     env = dict(item.split("=", 1) for item in engine.instance(p.name, "coder-1").raw["Config"]["Env"])
     assert env["V"] == "2" and p.ps()["coder-1"]["STALE"] == ""
+    assert engine.instance(p.name, "coder-1").labels[hash_label] != old_hash, "the template hash changes when the template does"
 
     # the filters add up: one stale, one stopped, one neither
     p.spawn("reviewer")  # reviewer-2
