@@ -115,7 +115,7 @@ func TestTheDependencyGraphOfARealProjectHasNoCycle(t *testing.T) {
 
 // --- R-27: limits and unprivileged sidecars ----------------------------------------------------------------------
 
-func TestSidecarsRunUnprivilegedWithLimitsAndBoundedLogs(t *testing.T) {
+func TestSidecarsRunUnprivilegedWithLimits(t *testing.T) {
 	d := desire(t, desireProject())
 	for _, name := range []string{"proj-control-1", "proj-proxy-1"} {
 		c := findContainer(t, d, name)
@@ -127,9 +127,6 @@ func TestSidecarsRunUnprivilegedWithLimitsAndBoundedLogs(t *testing.T) {
 		}
 		if len(c.OwnedVolumes) == 0 {
 			t.Errorf("%s writes volumes it does not own", name)
-		}
-		if !c.BoundedLogs {
-			t.Errorf("%s logs are unbounded", name)
 		}
 	}
 	control := findContainer(t, d, "proj-control-1")
@@ -149,8 +146,8 @@ func TestSidecarsRunUnprivilegedWithLimitsAndBoundedLogs(t *testing.T) {
 
 func TestAgentsGetAProcessLimitUnlessTheFileSetsOne(t *testing.T) {
 	d := desire(t, desireProject())
-	if c := findContainer(t, d, "proj-coder"); c.PidsLimit != defaultAgentPids || !c.BoundedLogs {
-		t.Errorf("pids = %d, bounded logs = %v", c.PidsLimit, c.BoundedLogs)
+	if c := findContainer(t, d, "proj-coder"); c.PidsLimit != defaultAgentPids {
+		t.Errorf("pids = %d", c.PidsLimit)
 	}
 	project := desireProject()
 	coder := project.Agents["coder"]

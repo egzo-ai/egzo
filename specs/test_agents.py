@@ -284,7 +284,7 @@ def test_agents_have_no_capabilities_and_cannot_gain_privileges(live_project, en
 # --- containers are limited and the sidecars are not root --------------------------------------------------------
 
 
-def test_the_sidecars_run_unprivileged_with_limits_and_bounded_logs(live_project, engine, agent_image):
+def test_the_sidecars_run_unprivileged_with_limits(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
     for service in ("control", "proxy"):
         raw = container(engine, live_project, service).raw
@@ -292,7 +292,6 @@ def test_the_sidecars_run_unprivileged_with_limits_and_bounded_logs(live_project
         assert user and user.split(":")[0] not in ("0", "root"), f"{service} runs as {user!r}"
         host = raw["HostConfig"]
         assert host["Memory"] > 0 and host["PidsLimit"] and host["PidsLimit"] > 0, f"{service} is not limited"
-        assert host["LogConfig"]["Config"].get("max-size"), f"{service} logs are unbounded"
         assert host["ReadonlyRootfs"] and "ALL" in host["CapDrop"]
 
 
@@ -300,7 +299,6 @@ def test_an_agent_cannot_fork_without_limit(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image), "small": custom(agent_image, resources={"pids": 64, "memory": "256m"})}))
     default = container(engine, live_project, "coder-1").raw["HostConfig"]
     assert default["PidsLimit"] and 0 < default["PidsLimit"] <= 100000
-    assert default["LogConfig"]["Config"].get("max-size")
     small = container(engine, live_project, "small-1").raw["HostConfig"]
     assert small["PidsLimit"] == 64
     assert small["Memory"] == small["MemorySwap"] > 0, "swap must not double a memory limit"

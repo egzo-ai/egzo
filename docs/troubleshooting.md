@@ -74,6 +74,12 @@ $ egzo exec NAME -- sh
 $ egzo events               # the typed event stream
 ```
 
+The control sidecar writes JSON lines. The agents' status goes to standard output, one `{"type":"status",...}` line when
+something changes and one every 30 seconds; anything control has to complain about goes to standard error as
+`{"time","level","msg",...}`. To see only the problems: `docker logs PROJECT-control-1 >/dev/null` (or `podman logs`). The logs use the
+engine's default logging: if `egzo logs` prints nothing for a container that should have said something, run
+`egzo system check` and read its `logs` line.
+
 ## Known problems
 
 - **Rootful Podman, intermittent loss of outbound connectivity.** The proxy's first outbound connection sometimes

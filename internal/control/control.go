@@ -45,6 +45,7 @@ func Run() error {
 	agents := agentServer((&agentAPI{server: srv}).handler())
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	go newStatusLog(srv, os.Stdout, os.Getenv("EGZO_PROJECT"), statusInterval()).run(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -53,7 +54,7 @@ func Run() error {
 	}()
 	go func() {
 		if err := agents.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			os.Stderr.WriteString("agent API: " + err.Error() + "\n")
+			logger.Error("agent API stopped", "err", err)
 		}
 	}()
 

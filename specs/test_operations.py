@@ -57,6 +57,24 @@ def test_system_check_fails_loudly_when_no_engine_answers(project):
     assert "fail" in result.stdout and "engine" in result.stdout
 
 
+def test_system_check_says_whether_the_engines_log_can_be_read_and_followed(live_project, engine):
+    """egzo reads container logs (git jobs, `egzo logs`, the agents' status), so a driver that cannot be read is a problem."""
+    result = live_project.run("system", "check")
+    lines = [l for l in result.stdout.splitlines() if re.match(r"(ok|warn|fail)\s+logs?\b", l)]
+    assert lines, f"no line about the engine's log:\n{result.stdout}"
+    assert lines[0].startswith("ok"), lines
+    assert re.search(r"json-file|local|journald|k8s-file", lines[0]), f"the line must name the driver: {lines[0]}"
+    assert re.search(r"read", lines[0]) and re.search(r"follow|stream", lines[0]), lines[0]
+
+
+def test_system_check_names_the_log_driver_even_when_it_cannot_try_it(project, engine):
+    """With no egzo image on the engine there is nothing to run, so the check can only look at the driver."""
+    result = project.run("system", "check", env={**engine.env, "EGZO_IMAGE": "egzo-spec-no-such-image:0"})
+    lines = [l for l in result.stdout.splitlines() if re.match(r"(ok|warn|fail)\s+logs?\b", l)]
+    assert lines, f"no line about the engine's log:\n{result.stdout}"
+    assert not lines[0].startswith("fail"), lines
+
+
 def test_system_check_reports_the_isolation_runtimes(project, engine):
     out = project.run("system", "check", env=engine.env).stdout
     assert re.search(r"(ok|warn)\s+.*gVisor|runsc", out), out

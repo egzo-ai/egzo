@@ -130,7 +130,8 @@ Idempotent. `up` always
 returns once converged: there is no foreground mode and no `-d` (agents are TUIs you `attach` to,
 nothing streams to the `up` terminal). Preview with `--dry-run` (long form only, no short flag).
 Caveat: labels are immutable, so *runtime status* (starting/idle/working/blocked) is NOT stored in labels.
-It is held by the `control` sidecar (in-memory + volume) and queried via `engine exec`.
+It is held by the `control` sidecar (in-memory + volume), queried via `engine exec`, and written to the sidecar's log as
+status lines that a client can follow through the engine's log API (see **Logging** below).
 Existence/config = engine; liveness/status = control sidecar. Engine health = container health.
 
 ## Example project file (egzo.yaml)
@@ -749,6 +750,7 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
       test_snapshot.py     # spec snapshot on the control volume
       test_daily.py        # logs, exec (with a terminal), start/stop/restart, proxy log
       test_messaging.py    # status, say, questions, queue and inbox, hooks, typed event stream
+      test_logs.py         # the engine's default logging, control's JSON logs: status on stdout, the rest on stderr
 
     test_session.py      # attach and the session fidelity matrix (P0 rows block release)
     test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
@@ -875,6 +877,24 @@ Decisions taken while building (reversible; each is covered by specs):
 - **Sidecar image** (`Dockerfile`) is the static binary on Alpine with CA roots and git >= 2.48.
 - **Label kinds** in use: `control`, `proxy`, `agent` and `prep` (short-lived containers and the network of `up`'s
   base clones, which never outlive the command).
+- **Logging.** egzo makes no choice about logging: every container it creates (agents, control, proxy, the short-lived prep
+  containers) gets **the engine's default log driver and options**, because that default is the sysadmin's decision
+  (journald is common). egzo sets no `LogConfig`; `egzo.yaml` has no logging key (a Compose-style one may come later).
+  Bounding the logs is therefore the engine's configuration, and `egzo system check` says so when the default is a
+  `json-file` with no size limit. egzo does read logs back (the git jobs' output, `egzo logs`, and the agents' status,
+  which the hub follows), so the default must be a driver the engine can read and follow: `json-file`, `local` and
+  `journald` on Docker, `k8s-file` and `journald` on Podman, and Docker's remote drivers through its local cache.
+  `egzo system check` classifies the default by name and, when the egzo image is on the engine, tries it with a container
+  that writes to both streams, reports `fail` for a driver that cannot be read back (`none`, Podman's `passthrough`), and
+  `warn` when it cannot tell (see `known-issues/container-logging-follows-the-engine-default.md`).
+  **The control sidecar logs JSON, one object per line, on two streams.** Standard output carries only the agents'
+  status: `{"type":"status","v":1,"time","project","reason","interval","agents":[{agent,status,activity,open,waiting,updated}]}`,
+  written when something changes (`reason: "change"`, coalesced over 300 ms, and only when what a reader sees changed), when the sidecar
+  comes up (`start`), and every `interval` seconds (30 by default, `EGZO_STATUS_INTERVAL` on the sidecar sets it) as a
+  `heartbeat` that repeats the whole state, so a reader that joins late has the current state from the last line and can tell a silent sidecar
+  from a quiet one. Standard error carries everything else control says, as `{"time","level","msg",...}` with a lowercase
+  level. The proxy's audit lines (JSON, on its standard output) are unchanged. A client follows just the status with the
+  engine's own log API (`ContainerLogs` with stdout only), with no `exec`.
 - **Messaging contract** (control sidecar). Agent API on `http://control:7777` (HTTP basic: agent name and
   its token, in `EGZO_CONTROL_URL`, `EGZO_AGENT` and `EGZO_TOKEN`): `GET|POST /v1/messages`,
   `GET /v1/messages/{id}`, `POST /v1/messages/{id}/resolve|update|ask`, `GET /v1/agents`, `POST /v1/status`,
@@ -905,7 +925,7 @@ separate `egzo-hub` deliverable (see `roadmap/hub.md`). What that means for core
 - The project YAML and the CLI are the only way to create or change a project. Nothing else writes config.
 - Secrets are CLI-only. No user identities live in YAML, ever; who may talk to agents is not declared there.
 - Core exposes what another client needs: the `ai.egzo.*` label schema, the control sidecar's operator API
-  (reached by `engine exec` only), attach as `engine exec`, the message and event contract, and importable Go
+  (reached by `engine exec` only) and its status log (followed through the engine's log API), attach as `engine exec`, the message and event contract, and importable Go
   packages (list, inspect, read-spec, start/stop, attach, send) rather than logic inside CLI commands.
 
 ## Hardening decisions (code review of the first implementation)
@@ -926,7 +946,7 @@ separate `egzo-hub` deliverable (see `roadmap/hub.md`). What that means for core
   snapshots are verified against their hash and retired past 50; every recipient has at most 20 open requests; the
   holder releases an agent that sits at "working" while its screen is silent (`if: working`), and announces itself with
   `if_unset`, so it never undoes the harness's own first report.
-- **Containers.** Sidecars run as 65532 with memory and process limits; every container has bounded engine logs; agents
+- **Containers.** Sidecars run as 65532 with memory and process limits; every container uses the engine's default logging (egzo sets none, so the sysadmin's choice stands); agents
   have a process limit and, with a memory limit, no extra swap; egzo run as root still gives agents uid 1000; rootless
   Docker is treated like Podman. Agents start only after the sidecars are healthy and attached. One command changes a
   project at a time (the engine-side lease `<project>.lock`).

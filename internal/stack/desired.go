@@ -83,8 +83,6 @@ type ContainerSpec struct {
 	// swap does not double it.
 	PidsLimit  int64
 	MemorySwap int64
-	// BoundedLogs caps the engine's log of the container, which otherwise grows without limit.
-	BoundedLogs bool
 	// Agents run under an init process that reaps children and forwards signals.
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
@@ -192,7 +190,6 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		Memory:         controlMemory,
 		MemorySwap:     controlMemory,
 		PidsLimit:      controlPids,
-		BoundedLogs:    true,
 		Env:            []string{"EGZO_PROJECT=" + project.Name},
 		Mounts:         []MountSpec{{Source: controlVolume.Name, Target: controlState}},
 		Tmpfs:          map[string]string{"/tmp": sidecarTmpfs},
@@ -238,7 +235,6 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 			Memory:         proxyMemory,
 			MemorySwap:     proxyMemory,
 			PidsLimit:      proxyPids,
-			BoundedLogs:    true,
 			Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run/egzo": sidecarTmpfsState},
 			Network:        egress.Name,
 			Healthcheck:    []string{"/egzo", "proxy", "healthcheck"},
@@ -342,8 +338,7 @@ func agentContainer(
 		Init:       true,
 		Identity:   identity,
 
-		PidsLimit:   defaultAgentPids,
-		BoundedLogs: true,
+		PidsLimit: defaultAgentPids,
 	}
 
 	// Agents reach the world only through the proxy and trust only the project CA on top of the

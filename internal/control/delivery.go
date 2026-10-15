@@ -5,9 +5,7 @@ package control
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -175,7 +173,7 @@ func (s *server) expire(now time.Time) {
 	for _, m := range s.events.announcedMessages() {
 		if now.After(m.Deadline) && m.Attempts >= maxAnnouncements {
 			if _, err := s.events.append(Event{Type: "unconfirmed", Agent: agentOf(m.To), Actor: m.To, ID: m.ID}); err != nil {
-				fmt.Fprintf(os.Stderr, "control: recording unconfirmed message %s: %v\n", m.ID, err)
+				logger.Error("recording an unconfirmed message", "message", m.ID, "err", err)
 			}
 		}
 	}

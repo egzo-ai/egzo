@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -105,7 +104,7 @@ func openStore(dir string) (*store, error) {
 		}
 	}
 	if s.skipped > 0 {
-		fmt.Fprintf(os.Stderr, "control: skipped %d unreadable line(s) of the event log\n", s.skipped)
+		logger.Warn("skipped unreadable line(s) of the event log", "lines", s.skipped)
 	}
 	if !endsWithNewline {
 		// A crash left half a line: end it, or the next event would be glued to it and lost.
@@ -114,6 +113,13 @@ func openStore(dir string) (*store, error) {
 		}
 	}
 	return s, nil
+}
+
+// waker returns a channel that closes when the next event is appended.
+func (s *store) waker() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wake
 }
 
 func (s *store) write(data []byte) error {
@@ -144,7 +150,7 @@ func (s *store) append(event Event) (Event, error) {
 	s.add(event)
 	if s.maxLogBytes > 0 && s.size > s.maxLogBytes {
 		if err := s.compact(); err != nil {
-			fmt.Fprintf(os.Stderr, "control: compacting the event log: %v\n", err)
+			logger.Error("compacting the event log", "err", err)
 		}
 	}
 	return event, nil

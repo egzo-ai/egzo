@@ -33,7 +33,8 @@ func newSystemCommand() *cobra.Command {
 		Use:   "check",
 		Short: "Check the engine, its isolation and git",
 		Long: "Check what egzo depends on, with no project file: that the engine answers, whether it runs rootless, whether\n" +
-			"gVisor is registered, that internal networks work, and git (in the egzo image, which makes the worktrees,\n" +
+			"gVisor is registered, that internal networks work, that the engine's default log driver can be read back and\n" +
+			"followed (egzo uses the engine's own logging and reads it), and git (in the egzo image, which makes the worktrees,\n" +
 			"and on this host, where the worktrees are read; both need 2.48 or later for relative worktree links).\n" +
 			"Each line starts with ok, warn or fail; egzo exits non-zero when any check fails.",
 		Args: cobra.NoArgs,
@@ -55,6 +56,7 @@ func newSystemCommand() *cobra.Command {
 			} else {
 				defer c.Close()
 				checkEngine(ctx, c, report)
+				checkLogs(ctx, c, report)
 				checkImageGit(ctx, c, report)
 			}
 			if failed {

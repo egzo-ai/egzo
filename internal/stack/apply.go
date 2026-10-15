@@ -150,9 +150,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		limit := spec.PidsLimit
 		host.Resources.PidsLimit = &limit
 	}
-	if spec.BoundedLogs {
-		host.LogConfig = container.LogConfig{Type: "json-file", Config: map[string]string{"max-size": "10m", "max-file": "3"}}
-	}
+	// No LogConfig: the engine's default logging is the sysadmin's choice (known-issues/container-logging-follows-the-engine-default.md).
 	host.Tmpfs = spec.Tmpfs
 	for _, m := range spec.Mounts {
 		kind := mount.TypeVolume

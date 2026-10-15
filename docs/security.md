@@ -14,7 +14,7 @@ and [messaging](messaging.md).
 - **No secrets in the agent.** Credentials sit in the proxy, loaded by `egzo project up`, and are added to requests to the hosts
   of declared services. They are not in the agent's environment, in labels, in `docker inspect` or in any image.
   The harness gets a placeholder value.
-- **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits, bounded logs,
+- **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits,
   sidecars as a non-root uid with a read-only root. Agents run as your uid and gid, not as root. The engine socket is
   never mounted into an agent.
 - **Optional gVisor** (`runtime: runsc`) as a stronger kernel boundary, on engines that can apply it.

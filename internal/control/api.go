@@ -43,6 +43,16 @@ type server struct {
 	key    []byte // the project key, read once
 	// placeholderMu makes reading and making placeholders one step.
 	placeholderMu sync.Mutex
+	// registry is signalled when an agent is registered or removed, so the status log writes the new list.
+	registry chan struct{}
+}
+
+// registryChanged tells the status log the list of agents changed.
+func (s *server) registryChanged() {
+	select {
+	case s.registry <- struct{}{}:
+	default:
+	}
 }
 
 func newServer(dir string) (*server, error) {
@@ -50,7 +60,7 @@ func newServer(dir string) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &server{dir: dir, events: events}, nil
+	return &server{dir: dir, events: events, registry: make(chan struct{}, 1)}, nil
 }
 
 func ensureState(dir string) error { return os.MkdirAll(dir, 0o755) }
@@ -443,6 +453,7 @@ func (s *server) registerAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.registryChanged()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -471,6 +482,7 @@ func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.registryChanged()
 	w.WriteHeader(http.StatusNoContent)
 }
 
