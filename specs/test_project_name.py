@@ -23,13 +23,13 @@ def test_the_environment_overrides_the_file(project):
 
 def test_the_flag_overrides_the_environment(project):
     project.write(spec(name="from-file"))
-    result = project.run("-p", "from-flag", "project", "check", "--resolved", env={"EGZO_PROJECT_NAME": "from-env"})
+    result = project.sh("-p from-flag project check --resolved", env={"EGZO_PROJECT_NAME": "from-env"})
     assert result.yaml()["name"] == "from-flag"
 
 
 def test_the_long_flag_is_equivalent(project):
     project.write(spec())
-    result = project.run("--project-name", "from-flag", "project", "check", "--resolved")
+    result = project.sh("--project-name from-flag project check --resolved")
     assert result.yaml()["name"] == "from-flag"
 
 
@@ -46,7 +46,7 @@ def test_invalid_names_are_rejected(project, bad):
 
 def test_a_name_in_use_from_another_directory_refuses_every_command(live_project, make_project):
     live_project.write(spec())
-    assert live_project.run("project", "up").returncode == 0
+    assert live_project.sh("project up").returncode == 0
 
     other = make_project(env=live_project.env)
     other.write(spec(agents={"coder": {"harness": "custom", "image": "alpine"}}))

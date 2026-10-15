@@ -30,12 +30,12 @@ def test_logs_show_what_the_container_wrote(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
     wrote = live_project.run("exec", "coder-1", "--", "sh", "-c", "echo hello-from-the-agent > /proc/1/fd/1")
     assert wrote.returncode == 0, wrote.stderr
-    assert "hello-from-the-agent" in live_project.run("logs", "coder-1").stdout
+    assert "hello-from-the-agent" in live_project.sh("logs coder-1").stdout
 
 
 def test_logs_of_an_unknown_service_name_the_service(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    result = live_project.run("logs", "ghost")
+    result = live_project.sh("logs ghost")
     assert result.returncode != 0
     assert "ghost" in result.stderr
 
@@ -54,13 +54,13 @@ def test_exec_keeps_stdout_and_stderr_apart(live_project, engine, agent_image):
 
 def test_exec_passes_stdin_through(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    result = live_project.run("exec", "coder-1", "--", "cat", input="piped in\n")
+    result = live_project.sh("exec coder-1 -- cat", input="piped in\n")
     assert result.stdout == "piped in\n"
 
 
 def test_exec_in_an_unknown_service_is_an_error(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    assert live_project.run("exec", "ghost", "--", "true").returncode != 0
+    assert live_project.sh("exec ghost -- true").returncode != 0
 
 
 def spawn_exec(live_project, egzo, *command, dimensions=(24, 80)):
@@ -114,9 +114,9 @@ def test_stop_and_start_work_on_the_existing_container(live_project, engine, age
     one_agent(live_project, agent_image)
     before = engine.instance(live_project.name, "coder-1").raw["Id"]
 
-    assert live_project.run("stop", "coder-1").returncode == 0
+    assert live_project.sh("stop coder-1").returncode == 0
     assert state(engine, live_project, "coder-1")["Running"] is False
-    assert live_project.run("start", "coder-1").returncode == 0
+    assert live_project.sh("start coder-1").returncode == 0
     assert state(engine, live_project, "coder-1")["Running"] is True
     after = engine.instance(live_project.name, "coder-1").raw["Id"]
     assert after == before
@@ -125,14 +125,14 @@ def test_stop_and_start_work_on_the_existing_container(live_project, engine, age
 def test_restart_restarts_the_container(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
     started = state(engine, live_project, "coder-1")["StartedAt"]
-    assert live_project.run("restart", "coder-1").returncode == 0
+    assert live_project.sh("restart coder-1").returncode == 0
     assert state(engine, live_project, "coder-1")["StartedAt"] != started
 
 
 def test_up_leaves_a_stopped_instance_stopped(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    assert live_project.run("stop", "coder-1").returncode == 0
-    result = live_project.run("project", "up")
+    assert live_project.sh("stop coder-1").returncode == 0
+    result = live_project.sh("project up")
     assert result.returncode == 0, result.stderr
     assert state(engine, live_project, "coder-1")["Running"] is False
 
@@ -148,21 +148,21 @@ def test_naming_a_template_says_to_spawn_it(live_project, engine, agent_image):
 
 def test_the_sidecars_are_reached_by_their_service_name(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    assert live_project.run("logs", "control").returncode == 0
-    assert live_project.run("logs", "proxy").returncode == 0
-    assert live_project.run("exec", "control", "--", "true").returncode == 0
+    assert live_project.sh("logs control").returncode == 0
+    assert live_project.sh("logs proxy").returncode == 0
+    assert live_project.sh("exec control -- true").returncode == 0
 
 
 def test_proxy_log_shows_the_audit_trail(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    live_project.run("exec", "coder-1", "--", "curl", "-sS", "-m", "10", "-o", "/dev/null", "https://example.org/")
-    events = [json.loads(line) for line in live_project.run("proxy", "log").stdout.splitlines() if line.startswith("{")]
+    live_project.sh("exec coder-1 -- curl -sS -m 10 -o /dev/null https://example.org/")
+    events = [json.loads(line) for line in live_project.sh("proxy log").stdout.splitlines() if line.startswith("{")]
     denied = [e for e in events if e["host"] == "example.org"]
     assert denied and denied[0]["action"] == "deny" and denied[0]["agent"] == "coder-1"
 
 
 def test_ps_lists_the_project_containers_by_service(live_project, engine, agent_image):
     one_agent(live_project, agent_image)
-    listing = live_project.run("ps").stdout
+    listing = live_project.sh("ps").stdout
     for service in ("control", "proxy", "coder", "coder-1"):
         assert service in listing

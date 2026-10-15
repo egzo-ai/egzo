@@ -67,7 +67,7 @@ def detach(client):
 
 
 def state_of(project, name):
-    for line in project.run("ps").stdout.splitlines()[1:]:
+    for line in project.sh("ps").stdout.splitlines()[1:]:
         cells = line.split()
         if len(cells) > 2 and cells[0] == name:
             return cells[2]
@@ -242,7 +242,7 @@ def test_a_read_only_observer_sees_everything_and_types_nothing(session):
 
 def test_an_agent_whose_program_exits_at_once_fails_spawn_with_its_exit_code(live_project, session_image):
     live_project.up(spec(agents={"coder": tui(session_image, "exit")}))
-    result = live_project.run("agent", "spawn", "coder", timeout=300)
+    result = live_project.sh("agent spawn coder", timeout=300)
     assert result.returncode != 0
     assert "code 3" in result.stderr and "bye" in result.stderr
 

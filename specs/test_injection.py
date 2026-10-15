@@ -65,7 +65,7 @@ def when(event):
 
 
 def activity(project, name="coder"):
-    for row in table(project.run("ps").stdout):
+    for row in table(project.sh("ps").stdout):
         if row["NAME"] == name:
             return row["ACTIVITY"]
 
@@ -147,7 +147,7 @@ def test_inject_defaults_are_resolved(project):
 
 def test_ps_shows_an_activity_column(run):
     project = run()
-    assert "ACTIVITY" in project.run("ps").stdout.splitlines()[0]
+    assert "ACTIVITY" in project.sh("ps").stdout.splitlines()[0]
 
 
 def test_an_agent_is_idle_once_its_harness_says_the_session_started(run):
@@ -174,15 +174,15 @@ def test_hooks_drive_the_activity_of_an_agent(live_project, engine, agent_image)
 def test_a_stopped_agent_shows_as_stopped(run):
     project = run()
     wait_activity(project, "idle")
-    assert project.run("stop", "coder").returncode == 0
+    assert project.sh("stop coder").returncode == 0
     assert activity(project) == "stopped"
 
 
 def test_a_started_agent_goes_through_starting_to_idle_again(run):
     project = run()
     wait_activity(project, "idle")
-    project.run("stop", "coder")
-    project.run("start", "coder")
+    project.sh("stop coder")
+    project.sh("start coder")
     wait_activity(project, "idle")
 
 
@@ -258,7 +258,7 @@ def test_the_reply_to_a_request_is_announced_to_the_agent_that_sent_it(live_proj
 def test_messages_that_pile_up_while_the_agent_works_are_announced_in_one_line(run):
     project = run(FAKE_WORK="5")
     wait_activity(project, "idle")
-    first = project.run("message", "send", "coder", "first").stdout.split()[1]
+    first = project.sh("message send coder first").stdout.split()[1]
     wait_activity(project, "working")
     later = [project.run("message", "send", "coder", word).stdout.split()[1] for word in ("alpha", "beta", "gamma")]
     wait_for(lambda: len(of_type(project, "resolved")) == 4, "all four to be resolved", timeout=90)
@@ -272,9 +272,9 @@ def test_messages_that_pile_up_while_the_agent_works_are_announced_in_one_line(r
 def test_nothing_is_announced_while_the_agent_is_working(run):
     project = run(FAKE_WORK="6")
     wait_activity(project, "idle")
-    project.run("message", "send", "coder", "first")
+    project.sh("message send coder first")
     wait_activity(project, "working")
-    project.run("message", "send", "coder", "second")
+    project.sh("message send coder second")
     wait_for(lambda: len(of_type(project, "resolved")) == 2, "both to be resolved", timeout=60)
     all_events = events(project)
     first_stop = next(e for e in all_events if e["type"] == "hook" and e["text"] == "Stop")
@@ -313,11 +313,11 @@ def test_a_question_makes_the_agent_wait_and_the_answer_is_announced_to_it(run):
     project.run("message", "send", "coder", "deploy it, and need-answer first")
     question = wait_for(lambda: next((r for r in messages(project).values() if r["KIND"] == "question"), None), "the question", timeout=60)
     wait_activity(project, "idle")  # asking ends the turn
-    row = next(r for r in table(project.run("ps").stdout) if r["NAME"] == "coder")
+    row = next(r for r in table(project.sh("ps").stdout) if r["NAME"] == "coder")
     assert row["WAITING"] == "yes" and row["OPEN"] == "1"
     assert project.run("message", "reply", question["ID"], "to staging").returncode == 0
     wait_for(lambda: any(REPLY.match(p) for p in prompts(project)), "the answer to be announced", timeout=60)
-    assert next(r for r in table(project.run("ps").stdout) if r["NAME"] == "coder")["WAITING"] == ""
+    assert next(r for r in table(project.sh("ps").stdout) if r["NAME"] == "coder")["WAITING"] == ""
 
 
 def test_send_wait_returns_what_the_agent_resolves_with(run, egzo):
@@ -360,11 +360,11 @@ def test_a_message_the_agent_never_fetches_is_announced_again_then_unconfirmed(r
 def test_a_message_for_a_stopped_agent_waits_and_is_announced_after_it_starts(run):
     project = run()
     wait_activity(project, "idle")
-    project.run("stop", "coder")
+    project.sh("stop coder")
     sent = project.run("message", "send", "coder", "while you were away").stdout.split()[1]
     time.sleep(2)
     assert not of_type(project, "announced")
-    project.run("start", "coder")
+    project.sh("start coder")
     wait_for(lambda: any(sent in p for p in prompts(project)), "the announcement after the restart", timeout=60)
 
 

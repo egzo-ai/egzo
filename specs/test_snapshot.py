@@ -28,7 +28,7 @@ def snapshots(engine, project):
 
 def up(project, document, **env):
     project.write(document)
-    result = project.run("project", "up", env=env, timeout=300)
+    result = project.sh("project up", env=env, timeout=300)
     assert result.returncode == 0, result.stderr
     return result
 
@@ -37,7 +37,7 @@ def test_up_stores_the_resolved_project_on_the_control_volume(live_project, engi
     up(live_project, spec())
     [name] = snapshots(engine, live_project)
     stored = yaml.safe_load(control_request(engine, live_project, "GET", f"/v1/specs/{name}").stdout)
-    assert stored["config"] == live_project.run("project", "check", "--resolved").yaml()
+    assert stored["config"] == live_project.sh("project check --resolved").yaml()
     assert stored["spec-version"] == "1"
     assert stored["created-by"].startswith("egzo/")
 
@@ -81,7 +81,7 @@ def test_down_removes_the_snapshots_with_the_control_state(live_project, engine)
     up(live_project, spec())
     up(live_project, spec(workspaces={"scratch": {}}))
     assert len(snapshots(engine, live_project)) == 2
-    assert live_project.run("project", "down").returncode == 0
+    assert live_project.sh("project down").returncode == 0
     up(live_project, spec(workspaces={"scratch": {}}))
     assert len(snapshots(engine, live_project)) == 1, "the history of the project that was taken down is not kept"
 

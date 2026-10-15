@@ -42,7 +42,7 @@ def project_spec(image, *, workspace=None, agents=None, allow=("github.com",), e
 
 def up_ok(project, document):
     project.write(document)
-    result = project.run("project", "up", timeout=400)
+    result = project.sh("project up", timeout=400)
     assert result.returncode == 0, result.stderr
     return result
 
@@ -105,7 +105,7 @@ def two_templates(image):
 
 
 def audit(project):
-    return [json.loads(line) for line in project.run("proxy", "log").stdout.splitlines() if line.startswith("{")]
+    return [json.loads(line) for line in project.sh("proxy log").stdout.splitlines() if line.startswith("{")]
 
 
 # --- up makes the base ---------------------------------------------------------------------------------------
@@ -281,7 +281,7 @@ def test_a_missing_base_that_cannot_be_cloned_stops_spawn_with_a_clear_error(liv
     assert engine.instances(live_project.name) == []
     assert not [r for r in engine.resources(live_project.name) if r.name.endswith("_coder-1")], "a failed spawn left resources behind"
     assert not worktree_exists(engine, live_project) and not base_exists(engine, live_project)
-    assert live_project.run("ps", "--json").returncode == 0
+    assert live_project.sh("ps --json").returncode == 0
 
 
 # --- spawn fetches -------------------------------------------------------------------------------------------
@@ -339,7 +339,7 @@ def test_committed_work_survives_rm_on_the_branch_and_reuse_continues_it(live_pr
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project, "coder", "issue-1")
     git(engine, live_project, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "--allow-empty", "-qm", "keep me", instance="issue-1")
-    assert live_project.run("agent", "rm", "--force", "issue-1").returncode == 0
+    assert live_project.sh("agent rm --force issue-1").returncode == 0
     assert not worktree_exists(engine, live_project, "issue-1")
     assert git(engine, live_project, "log", "-1", "--format=%s", "egzo/issue-1") == "keep me"
     refused = spawn(live_project, "coder", "issue-1")
@@ -361,7 +361,7 @@ def test_an_existing_worktree_is_never_modified_by_another_spawn(live_project, e
 def test_an_automatic_name_skips_the_one_a_branch_was_left_under(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project)
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
     assert spawn_ok(live_project) == "coder-2", "coder-1 left the branch egzo/coder-1 behind"
 
 
@@ -373,7 +373,7 @@ def test_rm_deletes_the_worktree_without_a_check_and_keeps_the_base_and_the_othe
     spawn_ok(live_project)
     spawn_ok(live_project)
     assert shell(engine, live_project, "echo 'not committed, and nobody asks' > wip.txt", instance="coder-1").returncode == 0
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
     assert not worktree_exists(engine, live_project, "coder-1")
     assert has_file(engine, live_project, "README", "coder-2")
     assert base_exists(engine, live_project)
@@ -385,7 +385,7 @@ def test_rm_deletes_the_worktree_without_a_check_and_keeps_the_base_and_the_othe
 def test_down_removes_the_worktrees_of_the_instances_and_keeps_the_base(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project)
-    result = live_project.run("project", "down", "--force")
+    result = live_project.sh("project down --force")
     assert result.returncode == 0, result.stderr
     assert "repo" in result.stdout, "down says which workspaces it keeps"
     assert [r.name for r in engine.resources(live_project.name)] == [live_project.base_volume("repo")]
@@ -395,30 +395,21 @@ def test_down_removes_the_worktrees_of_the_instances_and_keeps_the_base(live_pro
 def test_a_new_up_after_down_reuses_the_base_without_cloning_again(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     assert shell(engine, live_project, "echo mine > .git/marker").returncode == 0
-    assert live_project.run("project", "down").returncode == 0
+    assert live_project.sh("project down").returncode == 0
     up_ok(live_project, project_spec(agent_image, allow=("example.com",)))  # github is unreachable: a clone would fail
     assert shell(engine, live_project, "cat .git/marker").stdout == "mine\n"
     assert spawn_ok(live_project, "coder", "again", "--no-fetch") == "again"
     assert has_file(engine, live_project, "README", "again")
 
 
-def test_down_and_rm_no_longer_know_workspace_flags(live_project, engine, agent_image):
-    up_ok(live_project, project_spec(agent_image))
-    spawn_ok(live_project)
-    for command in (["project", "down", "--workspaces"], ["agent", "rm", "--workspaces", "coder-1"], ["project", "down", "--volumes"]):
-        result = live_project.run(*command)
-        assert result.returncode != 0 and "unknown flag" in result.stderr, command
-    assert worktree_exists(engine, live_project)
-
-
 def test_workspace_rm_removes_the_base_and_refuses_while_an_instance_uses_it(live_project, engine, agent_image):
     up_ok(live_project, project_spec(agent_image))
     spawn_ok(live_project)
-    refused = live_project.run("workspace", "rm", "repo")
+    refused = live_project.sh("workspace rm repo")
     assert refused.returncode != 0 and "coder-1" in refused.stderr
     assert base_exists(engine, live_project)
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
-    removed = live_project.run("workspace", "rm", "repo")
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
+    removed = live_project.sh("workspace rm repo")
     assert removed.returncode == 0, removed.stderr
     assert not base_exists(engine, live_project)
 
@@ -428,7 +419,7 @@ def test_workspace_rm_removes_a_worktree_volume_left_by_no_instance(live_project
     volume = live_project.worktree_volume("repo", "gone")
     labels = ["--label", f"{LABEL_PREFIX}project={live_project.name}", "--label", f"{LABEL_PREFIX}kind=workspace"]
     assert engine.run("volume", "create", *labels, volume).returncode == 0
-    removed = live_project.run("workspace", "rm", "repo", "--worktree", "gone")
+    removed = live_project.sh("workspace rm repo --worktree gone")
     assert removed.returncode == 0, removed.stderr
     assert not engine.volume_exists(volume) and base_exists(engine, live_project)
 

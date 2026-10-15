@@ -93,7 +93,7 @@ def test_an_auto_name_takes_the_first_free_number(live_project, engine, agent_im
     project_with(live_project, agent_image)
     live_project.spawn("coder")
     live_project.spawn("coder")
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
     assert live_project.spawn("coder") == "coder-1"
 
 
@@ -121,7 +121,7 @@ def test_every_instance_has_its_own_identity_toward_the_control_sidecar(live_pro
 
 def test_spawn_json_describes_the_instance(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("agent", "spawn", "coder", "issue-1", "--json", timeout=300)
+    result = live_project.sh("agent spawn coder issue-1 --json", timeout=300)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
         "name": "issue-1", "service": "coder", "container": f"{live_project.name}-issue-1", "actor": "operator",
@@ -130,7 +130,7 @@ def test_spawn_json_describes_the_instance(live_project, engine, agent_image):
 
 def test_the_progress_goes_to_stderr(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("agent", "spawn", "coder", timeout=300)
+    result = live_project.sh("agent spawn coder", timeout=300)
     assert result.stdout == "coder-1\n"
     assert result.stderr.strip(), "spawn says what it is doing, on stderr"
 
@@ -182,7 +182,7 @@ def test_editing_the_file_changes_nothing_for_spawn_until_up_runs(live_project, 
 def test_a_template_added_to_the_file_cannot_be_spawned_before_up(live_project, engine, agent_image):
     project_with(live_project, agent_image)
     live_project.write(spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    result = live_project.run("agent", "spawn", "reviewer")
+    result = live_project.sh("agent spawn reviewer")
     assert result.returncode != 0
     assert "reviewer" in result.stderr and "egzo project up" in result.stderr
     assert engine.instances(live_project.name) == []
@@ -190,14 +190,14 @@ def test_a_template_added_to_the_file_cannot_be_spawned_before_up(live_project, 
 
 def test_an_unknown_template_names_the_published_ones(live_project, engine, agent_image):
     project_with(live_project, agent_image, coder=custom(agent_image), reviewer=custom(agent_image))
-    result = live_project.run("agent", "spawn", "nobody")
+    result = live_project.sh("agent spawn nobody")
     assert result.returncode != 0
     assert "nobody" in result.stderr and "coder" in result.stderr and "reviewer" in result.stderr
 
 
 def test_the_environment_of_the_machine_that_spawns_does_not_leak_into_the_instance(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    live_project.run("agent", "spawn", "coder", env={"SPAWNER_ONLY_VARIABLE": "leak"}, timeout=300)
+    live_project.sh("agent spawn coder", env={"SPAWNER_ONLY_VARIABLE": "leak"}, timeout=300)
     env = engine.instance(live_project.name, "coder-1").raw["Config"]["Env"]
     assert not [e for e in env if e.startswith("SPAWNER_ONLY_VARIABLE")]
 
@@ -207,7 +207,7 @@ def test_the_environment_of_the_machine_that_spawns_does_not_leak_into_the_insta
 
 def test_spawn_before_up_says_to_run_up_and_creates_nothing(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image)}))
-    result = live_project.run("agent", "spawn", "coder")
+    result = live_project.sh("agent spawn coder")
     assert result.returncode != 0
     assert "egzo project up" in result.stderr
     assert engine.resources(live_project.name) == []
@@ -215,16 +215,16 @@ def test_spawn_before_up_says_to_run_up_and_creates_nothing(live_project, engine
 
 def test_spawn_after_down_says_to_run_up(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    assert live_project.run("project", "down", "--force").returncode == 0
-    result = live_project.run("agent", "spawn", "coder")
+    assert live_project.sh("project down --force").returncode == 0
+    result = live_project.sh("agent spawn coder")
     assert result.returncode != 0 and "egzo project up" in result.stderr
     assert engine.instances(live_project.name) == []
 
 
 def test_spawn_never_starts_the_infrastructure(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    assert live_project.run("stop", "proxy").returncode == 0
-    result = live_project.run("agent", "spawn", "coder")
+    assert live_project.sh("stop proxy").returncode == 0
+    result = live_project.sh("agent spawn coder")
     assert result.returncode != 0
     assert "proxy" in result.stderr and "egzo project up" in result.stderr
     assert engine.instances(live_project.name) == []
@@ -265,7 +265,7 @@ def test_a_name_that_exists_exits_17_and_changes_nothing(live_project, engine, a
 def test_a_name_that_exists_under_another_template_also_exits_17_and_names_that_template(live_project, engine, agent_image):
     project_with(live_project, agent_image, coder=custom(agent_image), reviewer=custom(agent_image))
     live_project.spawn("reviewer", "shared-name")
-    result = live_project.run("agent", "spawn", "coder", "shared-name")
+    result = live_project.sh("agent spawn coder shared-name")
     assert result.returncode == 17
     assert "reviewer" in result.stderr
     assert engine.instance(live_project.name, "shared-name").labels[f"{LABEL_PREFIX}service"] == "reviewer"
@@ -301,7 +301,7 @@ def test_a_template_name_is_not_an_instance_for_the_commands_that_address_one(li
 
 def test_a_spawn_that_fails_leaves_nothing_behind_and_the_name_stays_free(live_project, engine, agent_image):
     project_with(live_project, agent_image, broken=custom("egzo-spec-no-such-image:0"), coder=custom(agent_image))
-    result = live_project.run("agent", "spawn", "broken", "attempt", timeout=300)
+    result = live_project.sh("agent spawn broken attempt", timeout=300)
     assert result.returncode != 0
     assert "egzo-spec-no-such-image" in result.stderr
     assert engine.instances(live_project.name) == []
@@ -314,7 +314,7 @@ def test_a_spawn_that_fails_leaves_nothing_behind_and_the_name_stays_free(live_p
 
 def test_wait_needs_a_message(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("agent", "spawn", "coder", "--wait")
+    result = live_project.sh("agent spawn coder --wait")
     assert result.returncode != 0
     assert "-m" in result.stderr or "message" in result.stderr
     assert engine.instances(live_project.name) == []
@@ -322,7 +322,7 @@ def test_wait_needs_a_message(live_project, engine, agent_image):
 
 def test_wait_and_attach_exclude_each_other(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("agent", "spawn", "coder", "-m", "x", "--wait", "--attach")
+    result = live_project.sh("agent spawn coder -m x --wait --attach")
     assert result.returncode != 0
     assert engine.instances(live_project.name) == []
 
@@ -417,10 +417,10 @@ def test_the_agent_environment_names_the_instance_not_the_template(live_project,
 
 def test_a_name_that_would_clash_with_the_proxys_network_is_refused(live_project, engine, agent_image):
     project_with(live_project, agent_image)
-    result = live_project.run("agent", "spawn", "coder", "egress")
+    result = live_project.sh("agent spawn coder egress")
     assert result.returncode == 1 and "egress" in result.stderr
     assert engine.instance(live_project.name, "egress") is None
-    assert live_project.run("agent", "spawn", "coder", "notes").returncode == 0  # an ordinary name is fine
+    assert live_project.sh("agent spawn coder notes").returncode == 0  # an ordinary name is fine
 
 
 @pytest.mark.parametrize("flags", [("--json", "--wait", "-m", "x"), ("--json", "--attach")])
@@ -451,8 +451,8 @@ def test_spawns_started_together_take_turns_and_all_succeed(live_project, engine
 def test_spawning_after_the_file_changed_warns_that_the_instance_is_stale_already(live_project, engine, agent_image):
     live_project.up(spec(agents={"coder": custom(agent_image, env={"V": "1"})}))
     live_project.write(spec(agents={"coder": custom(agent_image, env={"V": "2"})}))
-    result = live_project.run("agent", "spawn", "coder")
+    result = live_project.sh("agent spawn coder")
     assert result.returncode == 0, result.stderr
     assert "warning" in result.stderr and "egzo project up" in result.stderr and "coder-1" in result.stderr
     assert result.stdout.strip() == "coder-1"
-    assert live_project.run("ps").stdout.count("stale") >= 1
+    assert live_project.sh("ps").stdout.count("stale") >= 1

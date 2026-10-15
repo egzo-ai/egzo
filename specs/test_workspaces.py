@@ -58,7 +58,7 @@ def test_an_agent_without_workspaces_mounts_nothing(project):
 
 def test_path_is_not_a_workspace_key_and_the_error_says_what_to_do(project):
     project.write("name: demo\nworkspaces:\n  docs:\n    path: ./docs\n")
-    result = project.run("project", "check", "--resolved")
+    result = project.sh("project check --resolved")
     assert result.returncode != 0
     assert 'egzo.yaml:4:5: workspaces.docs: unknown key "path"' in result.stderr
     assert "egzo workspace put" in result.stderr
@@ -80,7 +80,7 @@ def test_the_resolved_workspace_has_no_path(project, workspace):
 
 def test_a_project_directory_reached_from_anywhere_resolves_the_same_workspaces(project, tmp_path):
     project.write(spec(workspaces=workspaces(scratch={}), agents={"coder": agent(workspaces=["repo", "scratch"])}))
-    here = project.run("project", "check", "--resolved").yaml()
+    here = project.sh("project check --resolved").yaml()
     elsewhere = project.egzo.run("-f", project.root / "egzo.yaml", "project", "check", "--resolved", cwd=tmp_path).yaml()
     assert here["workspaces"] == elsewhere["workspaces"]
     assert here["agents"]["coder"]["workspaces"] == elsewhere["agents"]["coder"]["workspaces"]

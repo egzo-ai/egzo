@@ -206,7 +206,7 @@ def test_every_unknown_key_is_reported_not_only_the_first(project):
 
 def test_an_unknown_key_is_reported_with_its_line_and_column(project):
     project.write("name: demo\nworkspaces:\n  repo:\n    gti: ./x\n")
-    result = project.run("project", "check", "--resolved")
+    result = project.sh("project check --resolved")
     assert result.returncode != 0
     assert 'egzo.yaml:4:5: workspaces.repo: unknown key "gti", did you mean "git"?' in result.stderr
 
@@ -219,7 +219,7 @@ def test_an_unknown_key_in_a_service_definition_is_reported_the_same_way(project
 
 def test_project_check_prints_every_error_and_exits_1(project):
     project.write(spec(nonsense=1, agents={"coder": agent(imge="x")}))
-    result = project.run("project", "check")
+    result = project.sh("project check")
     assert result.returncode == 1
     fails = [line for line in result.stdout.splitlines() if line.startswith("fail")]
     assert len(fails) == 2, result.stdout
@@ -228,6 +228,6 @@ def test_project_check_prints_every_error_and_exits_1(project):
 
 def test_a_wrong_type_is_reported_with_its_line(project):
     project.write("name: demo\nagents:\n  coder:\n    harness: custom\n    workspaces: not-a-list\n")
-    result = project.run("project", "check", "--resolved")
+    result = project.sh("project check --resolved")
     assert result.returncode != 0
     assert "egzo.yaml:5" in result.stderr

@@ -38,23 +38,16 @@ def started(project, image, **agents):
 
 
 def instance_names(project):
-    return [row["NAME"] for row in table(project.run("agent", "ls").stdout)]
+    return [row["NAME"] for row in table(project.sh("agent ls").stdout)]
 
 
 # --- the tree ----------------------------------------------------------------------------------------------
 
 
 def test_the_help_lists_the_groups_and_the_commands_that_stay_at_the_top(project):
-    out = project.run("--help").stdout
+    out = project.sh("--help").stdout
     for name in GROUPS + TOP_LEVEL:
         assert re.search(rf"^\s+{name}\s", out, re.M), (name, out)
-
-
-@pytest.mark.parametrize("name", REMOVED)
-def test_a_command_that_moved_is_unknown_and_has_no_alias(project, name):
-    result = project.run(name)
-    assert result.returncode != 0
-    assert f'unknown command "{name}"' in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -74,7 +67,7 @@ def test_every_group_lists_its_commands(project, group, commands):
 
 
 def test_msg_is_an_alias_of_message(project):
-    assert project.run("msg", "--help").stdout == project.run("message", "--help").stdout
+    assert project.sh("msg --help").stdout == project.sh("message --help").stdout
 
 
 # --- project check -----------------------------------------------------------------------------------------
@@ -86,7 +79,7 @@ def secret_vault(*names):
 
 def test_check_of_a_valid_project_prints_ok_lines_and_exits_zero(project):
     project.write(spec(vaults=secret_vault("TOKEN")))
-    result = project.run("project", "check", env={"TOKEN": "a-secret"})
+    result = project.sh("project check", env={"TOKEN": "a-secret"})
     assert result.returncode == 0, result.stdout + result.stderr
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert all(re.match(r"(ok|warn|fail)\s", line) for line in lines), result.stdout
@@ -96,7 +89,7 @@ def test_check_of_a_valid_project_prints_ok_lines_and_exits_zero(project):
 
 def test_check_exits_one_on_an_invalid_file_and_says_why(project):
     project.write(spec(agents={"coder": agent(workspaces=["nope"])}))
-    result = project.run("project", "check")
+    result = project.sh("project check")
     assert result.returncode == 1
     assert "nope" in result.stdout + result.stderr
 
@@ -104,7 +97,7 @@ def test_check_exits_one_on_an_invalid_file_and_says_why(project):
 @pytest.mark.parametrize("value, word", [(None, "missing"), ("", "missing")])
 def test_check_exits_one_when_an_environment_secret_is_missing_or_empty(project, value, word):
     project.write(spec(vaults=secret_vault("TOKEN")))
-    result = project.run("project", "check", env={} if value is None else {"TOKEN": value})
+    result = project.sh("project check", env={} if value is None else {"TOKEN": value})
     assert result.returncode == 1, result.stdout
     line = next(line for line in result.stdout.splitlines() if "main/TOKEN" in line)
     assert line.startswith("fail") and word in line
@@ -112,18 +105,18 @@ def test_check_exits_one_when_an_environment_secret_is_missing_or_empty(project,
 
 def test_check_never_prints_a_secret_value(project):
     project.write(spec(vaults=secret_vault("TOKEN")))
-    result = project.run("project", "check", env={"TOKEN": "hunter2-the-value"})
+    result = project.sh("project check", env={"TOKEN": "hunter2-the-value"})
     assert "hunter2-the-value" not in result.stdout + result.stderr
 
 
 def test_check_with_a_pass_entry_that_does_not_exist_exits_one(project):
     project.write(spec(vaults={"main": {"backend": "pass", "secrets": ["no/such/entry"]}}))
-    assert project.run("project", "check").returncode == 1
+    assert project.sh("project check").returncode == 1
 
 
 def test_check_resolved_prints_the_configuration_and_does_not_read_secrets(project):
     project.write(spec(vaults=secret_vault("TOKEN"), workspaces={"foo": {}}))
-    result = project.run("project", "check", "--resolved", env={})
+    result = project.sh("project check --resolved", env={})
     assert result.returncode == 0, result.stderr
     assert "path" not in result.yaml()["workspaces"]["foo"]
 
@@ -132,7 +125,7 @@ def test_drift_is_shown_but_is_not_an_error(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.write(spec(agents={"coder": custom(agent_image), "second": custom(agent_image)}))
     secrets = {"ANTHROPIC_API_KEY": "a", "GITHUB_TOKEN": "b", "DEPLOY_TOKEN": "c"}
-    result = live_project.run("project", "check", env=secrets)
+    result = live_project.sh("project check", env=secrets)
     assert result.returncode == 0, result.stdout + result.stderr
     assert any(line.startswith("warn") and "up --dry-run" in line for line in result.stdout.splitlines()), result.stdout
 
@@ -154,7 +147,7 @@ def test_system_check_says_what_it_found_about_git_in_the_image_and_asks_nothing
 
 def test_system_check_does_not_check_the_project(project, engine):
     project.write(spec(agents={"coder": agent(workspaces=["nope"])}))
-    result = project.run("system", "check", env=engine.env)
+    result = project.sh("system check", env=engine.env)
     assert result.returncode == 0 and "egzo.yaml" not in result.stdout
 
 
@@ -167,23 +160,23 @@ def test_agent_ls_lists_the_instances_and_not_the_sidecars(live_project, engine,
     live_project.spawn("coder")
     live_project.spawn("coder", "issue-7")
     assert sorted(instance_names(live_project)) == ["coder-1", "issue-7"]
-    ps_names = [row["NAME"] for row in table(live_project.run("ps").stdout)]
+    ps_names = [row["NAME"] for row in table(live_project.sh("ps").stdout)]
     assert any(name.endswith("control-1") for name in ps_names) and any(name.endswith("proxy-1") for name in ps_names)
 
 
 def test_agent_ls_json_is_a_list_of_the_instances(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    listed = json.loads(live_project.run("agent", "ls", "--json").stdout)
+    listed = json.loads(live_project.sh("agent ls --json").stdout)
     assert [row["name"] for row in listed] == ["coder-1"]
 
 
 def test_agent_rm_takes_names_or_filters_and_not_both_or_neither(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    neither = live_project.run("agent", "rm")
+    neither = live_project.sh("agent rm")
     assert neither.returncode != 0 and "--stale" in neither.stderr
-    both = live_project.run("agent", "rm", "coder-1", "--stopped")
+    both = live_project.sh("agent rm coder-1 --stopped")
     assert both.returncode != 0 and "not both" in both.stderr
     assert instance_names(live_project) == ["coder-1"]
 
@@ -191,9 +184,9 @@ def test_agent_rm_takes_names_or_filters_and_not_both_or_neither(live_project, e
 def test_agent_stop_and_start_are_the_top_level_commands(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    assert live_project.run("agent", "stop", "coder-1").returncode == 0
+    assert live_project.sh("agent stop coder-1").returncode == 0
     assert engine.instance(live_project.name, "coder-1").raw["State"]["Running"] is False
-    assert live_project.run("agent", "start", "coder-1").returncode == 0
+    assert live_project.sh("agent start coder-1").returncode == 0
     assert engine.instance(live_project.name, "coder-1").raw["State"]["Running"] is True
 
 
@@ -229,7 +222,7 @@ def test_message_ls_filters_by_kind_and_by_state(live_project, engine, agent_ima
     assert listed(live_project, "--kind", "question") == {}
     assert set(listed(live_project, "--state", "pending")) == {sent}
     assert listed(live_project, "--state", "resolved") == {}
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0  # fails what it still owed
+    assert live_project.sh("agent rm --force coder-1").returncode == 0  # fails what it still owed
     assert sent in listed(live_project, "--state", "resolved")
     assert sent not in listed(live_project, "--state", "pending")
 
@@ -243,7 +236,7 @@ def test_message_ls_refuses_a_filter_value_it_does_not_know(project):
 def test_message_reply_answers_what_message_ls_lists(live_project, engine, agent_image):
     started(live_project, agent_image)
     live_project.spawn("coder")
-    sent = live_project.run("msg", "send", "coder-1", "hello").stdout.split()[1]
+    sent = live_project.sh("msg send coder-1 hello").stdout.split()[1]
     assert sent in listed(live_project)
     unknown = live_project.run("message", "reply", "m" + "0" * 32, "x")
     assert unknown.returncode != 0
@@ -283,13 +276,13 @@ def test_workspace_ls_says_whether_a_directory_exists_and_whether_a_base_is_clon
 
 def test_workspace_ls_needs_the_engine_and_says_so(project):
     project.write(spec(workspaces={"docs": {}}))
-    result = project.run("workspace", "ls", env={"DOCKER_HOST": "unix:///nonexistent.sock"})
+    result = project.sh("workspace ls", env={"DOCKER_HOST": "unix:///nonexistent.sock"})
     assert result.returncode != 0 and "engine" in result.stderr.lower()
 
 
 def test_workspace_ls_json(live_project, engine):
     live_project.write(spec(workspaces={"docs": {}}))
-    [row] = json.loads(live_project.run("workspace", "ls", "--json").stdout)
+    [row] = json.loads(live_project.sh("workspace ls --json").stdout)
     assert (row["name"], row["kind"], row["volume"], row["state"]) == ("docs", "directory", live_project.volume("docs"), "missing")
     assert row["worktrees"] == []
 
@@ -316,8 +309,8 @@ def test_workspace_put_copies_a_file_and_a_directory_in_for_the_agent_user(live_
     live_project.up(spec(workspaces={"docs": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
     written(live_project, "a.txt", "alpha\n")
     written(live_project, "sub/b.txt", "beta\n")
-    assert live_project.run("workspace", "put", "docs", "inbox/a.txt", "a.txt").returncode == 0
-    assert live_project.run("workspace", "put", "docs", "inbox/sub", "sub").returncode == 0
+    assert live_project.sh("workspace put docs inbox/a.txt a.txt").returncode == 0
+    assert live_project.sh("workspace put docs inbox/sub sub").returncode == 0
     live_project.spawn("coder")
     name = engine.instance(live_project.name, "coder-1").name
     assert engine.exec(name, "sh", "-c", "cat /workspace/docs/a.txt /workspace/docs/sub/b.txt").stdout == "alpha\nbeta\n"
@@ -329,7 +322,7 @@ def test_workspace_put_copies_a_file_and_a_directory_in_for_the_agent_user(live_
 def test_workspace_put_works_before_up_and_up_then_keeps_what_was_put(live_project, engine, agent_image):
     live_project.write(spec(workspaces={"docs": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
     written(live_project, "a.txt", "alpha\n")
-    put = live_project.run("workspace", "put", "docs", "inbox/a.txt", "a.txt")
+    put = live_project.sh("workspace put docs inbox/a.txt a.txt")
     assert put.returncode == 0, put.stderr
     live_project.up()
     live_project.spawn("coder")
@@ -363,7 +356,7 @@ def test_workspace_put_and_get_refuse_names_that_are_not_directory_workspaces(li
     for command in (["put", "repo", "inbox/a.txt", "a.txt"], ["put", "ghost", "inbox/a.txt", "a.txt"], ["get", "ghost", str(tmp_path / "x")]):
         result = live_project.run("workspace", *command)
         assert result.returncode != 0 and command[1] in result.stderr, command
-    assert "git" in live_project.run("workspace", "put", "repo", "inbox/a.txt", "a.txt").stderr
+    assert "git" in live_project.sh("workspace put repo inbox/a.txt a.txt").stderr
 
 
 @pytest.mark.usefixtures("github")
@@ -378,17 +371,17 @@ def test_workspace_get_reads_the_worktree_of_an_instance(live_project, engine, a
 def test_workspace_rm_removes_a_directory_volume_and_refuses_one_an_instance_mounts(live_project, engine, agent_image):
     live_project.up(spec(workspaces={"docs": {}, "other": {}}, agents={"coder": custom(agent_image, workspaces=["docs"])}))
     live_project.spawn("coder")
-    refused = live_project.run("workspace", "rm", "docs")
+    refused = live_project.sh("workspace rm docs")
     assert refused.returncode != 0 and "coder-1" in refused.stderr
     assert engine.volume_exists(live_project.volume("docs"))
-    assert live_project.run("workspace", "rm", "other").returncode == 0
+    assert live_project.sh("workspace rm other").returncode == 0
     assert not engine.volume_exists(live_project.volume("other"))
-    assert live_project.run("workspace", "rm", "ghost").returncode != 0
+    assert live_project.sh("workspace rm ghost").returncode != 0
 
 
 def test_workspace_rm_all_removes_every_workspace_volume(live_project, engine, agent_image):
     live_project.up(spec(workspaces={"docs": {}, "other": {}}, agents={"coder": custom(agent_image)}))
-    result = live_project.run("workspace", "rm", "--all")
+    result = live_project.sh("workspace rm --all")
     assert result.returncode == 0, result.stderr
     assert not [r for r in engine.resources(live_project.name) if r.name.startswith(f"{live_project.name}_ws.")]
 
@@ -398,23 +391,23 @@ def test_project_unlock_breaks_a_lease_left_by_a_killed_command(live_project, en
     labels = ["--label", f"{LABEL_PREFIX}project={live_project.name}", "--label", f"{LABEL_PREFIX}kind=lock",
               "--label", f"{LABEL_PREFIX}lock-holder=killed-1234", "--label", f"{LABEL_PREFIX}lock-expires=9999999999"]
     assert engine.run("create", "--name", f"{live_project.name}.lock", *labels, engine.agent_image()).returncode == 0
-    assert live_project.run("project", "down").returncode != 0, "up and down refuse at once while the lease is held"
-    unlocked = live_project.run("project", "unlock")
+    assert live_project.sh("project down").returncode != 0, "up and down refuse at once while the lease is held"
+    unlocked = live_project.sh("project unlock")
     assert unlocked.returncode == 0 and "killed-1234" in unlocked.stdout
     assert live_project.spawn("coder", "free") == "free"
 
 
 def test_workspace_fetch_needs_the_project_up_and_says_so(live_project, engine, agent_image):
     live_project.write(spec(egress={"default": {"allow": ["github.com"]}}, workspaces={"repo": GIT}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
-    result = live_project.run("workspace", "fetch")
+    result = live_project.sh("workspace fetch")
     assert result.returncode != 0 and "project up" in result.stderr
 
 
 def test_workspace_fetch_refuses_a_name_that_is_not_a_git_workspace(live_project, engine, agent_image):
     live_project.up(spec(egress={"default": {"allow": ["github.com"]}}, workspaces={"repo": GIT, "docs": {}}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
-    result = live_project.run("workspace", "fetch", "docs")
+    result = live_project.sh("workspace fetch docs")
     assert result.returncode != 0 and "docs" in result.stderr
-    ghost = live_project.run("workspace", "fetch", "ghost")
+    ghost = live_project.sh("workspace fetch ghost")
     assert ghost.returncode != 0 and "ghost" in ghost.stderr
 
 
@@ -425,8 +418,8 @@ def test_workspace_fetch_clones_a_base_that_up_could_not_and_refreshes_one_that_
     assert not engine.volume_exists(live_project.base_volume("repo"))  # up could not reach github.com
     live_project.up(spec(egress=allow, workspaces={"repo": GIT}, agents={"coder": custom(agent_image, workspaces=["repo"])}))
     assert engine.run("volume", "rm", live_project.base_volume("repo")).returncode == 0  # the clone made by this up goes: the next command has to make it again
-    result = live_project.run("workspace", "fetch", timeout=300)
+    result = live_project.sh("workspace fetch", timeout=300)
     assert result.returncode == 0, result.stderr
     assert engine.in_volumes({live_project.base_volume("repo"): "/b"}, "test -d /b/.git").returncode == 0
-    again = live_project.run("workspace", "fetch", "repo", timeout=300)
+    again = live_project.sh("workspace fetch repo", timeout=300)
     assert again.returncode == 0, again.stderr

@@ -11,7 +11,8 @@ _trees = {}
 
 
 class Node:
-    def __init__(self, path, flags, children, aliases, alias_names):
+    def __init__(self, path, flags, children, aliases, alias_names, valued=frozenset()):
+        self.valued = valued  # the flags that take a value (`--file string`): the word after one is not a command
         self.alias_names = alias_names  # the other names this command answers to
         self.path = path
         self.flags = flags  # long names and short letters this command accepts, global ones included
@@ -31,11 +32,14 @@ def _section(text, title):
 def _walk(binary, path, inherited):
     text = _help(binary, path)
     flags = set(inherited)
+    valued = set()
     for line in (_section(text, "Flags") + "\n" + _section(text, "Global Flags")).splitlines():
         for short, long in re.findall(r"(?:^\s+-(\w), )?--([\w-]+)", line):
             flags.add("--" + long)
             if short:
                 flags.add("-" + short)
+            if re.search(rf"--{re.escape(long)} (?!\s)(string|int|duration|strings|stringArray|float)", line):
+                valued.update({"--" + long, "-" + short} if short else {"--" + long})
         found = re.match(r"\s+-(\w)[ ,]", line)
         if found:
             flags.add("-" + found.group(1))
@@ -48,7 +52,7 @@ def _walk(binary, path, inherited):
                 aliases[alias] = name
     found = re.search(r"^Aliases:\n\s+(.*)$", text, re.M)
     alias_names = [n.strip() for n in found.group(1).split(",")][1:] if found else []
-    return Node(path, flags, children, aliases, alias_names)
+    return Node(path, flags, children, aliases, alias_names, valued)
 
 
 def tree(binary):
@@ -61,8 +65,17 @@ def problem(binary, argv):
     """Why this command line is not one egzo has, or None. Only what the help tree can tell is checked: the command
     path (flags come after it), and that every `-x` or `--flag` before a `--` is one the command knows."""
     node = tree(binary)
+    skip = False
     for word in argv:
+        if skip:
+            skip = False
+            continue
+        if word.startswith("-") and word in node.valued:
+            skip = True
+            continue
         if word == "--" or word.startswith("-") or not node.children:
+            if word.startswith("-") and node.children and word != "--":
+                continue
             break
         name = node.aliases.get(word, word)
         if name not in node.children:

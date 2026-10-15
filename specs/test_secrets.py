@@ -123,7 +123,7 @@ def test_a_project_without_an_env_vault_gets_no_such_warning(project, fake_pass)
 
 def test_the_env_backend_reads_the_variable_of_the_same_name(project):
     project.write(spec(vaults=vault("env", "SET_ONE", "UNSET_ONE")))
-    result = project.run("project", "check", env={"SET_ONE": "env-secret-value", "UNSET_ONE": ""})
+    result = project.sh("project check", env={"SET_ONE": "env-secret-value", "UNSET_ONE": ""})
     assert result.returncode == 1, result.stderr  # a secret that cannot be read is an error
     found = rows(result)
     assert "set" in found["main/SET_ONE"] and "missing" in found["main/UNSET_ONE"]
@@ -136,7 +136,7 @@ def test_the_env_backend_reads_the_variable_of_the_same_name(project):
 def test_the_pass_backend_runs_pass_show_with_the_name_and_its_slashes(project, fake_pass):
     fake_pass.put("company/project/test", "pass-secret-value\n")
     project.write(spec(vaults=vault("pass", "company/project/test", "company/project/gone")))
-    result = project.run("project", "check", env=fake_pass.env)
+    result = project.sh("project check", env=fake_pass.env)
     assert result.returncode == 1, result.stderr  # one of the two entries is not in the store
     found = rows(result)
     assert "set" in found["main/company/project/test"] and "missing" in found["main/company/project/gone"]
@@ -148,14 +148,14 @@ def test_a_pass_directory_is_not_a_secret(project, fake_pass):
     """`pass show company` on a directory prints a tree and succeeds: its first line must not become the secret."""
     fake_pass.put("company/token", "value\n")
     project.write(spec(vaults=vault("pass", "company")))
-    found = rows(project.run("project", "check", env=fake_pass.env))
+    found = rows(project.sh("project check", env=fake_pass.env))
     assert "directory" in found["main/company"]
 
 
 def test_project_check_says_what_pass_said_about_a_secret_it_cannot_read(project, fake_pass):
     fake_pass.put("empty", "\n")
     project.write(spec(vaults=vault("pass", "empty", "gone")))
-    found = rows(project.run("project", "check", env=fake_pass.env))
+    found = rows(project.sh("project check", env=fake_pass.env))
     assert "empty" in found["main/empty"]
     assert "missing" in found["main/gone"] and "not in the password store" in found["main/gone"]
 
@@ -164,7 +164,7 @@ def test_pass_gets_the_environment_of_the_user_untouched(project, fake_pass):
     """Another store is the user's business: PASSWORD_STORE_DIR and the like are set in the shell, not the project."""
     fake_pass.put("token", "value\n")
     project.write(spec(vaults=vault("pass", "token")))
-    project.run("project", "check", env={**fake_pass.env, "PASSWORD_STORE_DIR": "/spec/other-store"})
+    project.sh("project check", env={**fake_pass.env, "PASSWORD_STORE_DIR": "/spec/other-store"})
     assert {store_dir for _, store_dir in fake_pass.calls()} == {"/spec/other-store"}
 
 
@@ -179,17 +179,9 @@ def test_a_missing_pass_program_is_named_in_the_error(project, tmp_path):
     empty = tmp_path / "empty-path"
     empty.mkdir()
     project.write(spec(vaults=vault("pass", "token")))
-    result = project.run("project", "check", env={"PATH": str(empty)})
+    result = project.sh("project check", env={"PATH": str(empty)})
     assert result.returncode != 0
     assert "pass" in result.stderr
-
-
-def test_egzo_never_writes_a_secret(project):
-    """Secrets are managed with the user's own password manager: there is no command to set or remove one."""
-    for command in ("set", "rm"):
-        result = project.run("secrets", command, "main/token")
-        assert result.returncode != 0
-        assert 'unknown command "secrets"' in result.stderr
 
 
 def test_a_secret_changed_in_pass_reaches_the_proxy_on_the_next_up(live_project, engine, agent_image, fake_pass):
@@ -201,8 +193,8 @@ def test_a_secret_changed_in_pass_reaches_the_proxy_on_the_next_up(live_project,
     live_project.write(document)
     live_project.env.update(fake_pass.env)
     fake_pass.put("api/key", "one\n")
-    assert live_project.run("project", "up", timeout=300).returncode == 0
-    assert "nothing to do" in live_project.run("project", "up", timeout=300).stdout
+    assert live_project.sh("project up", timeout=300).returncode == 0
+    assert "nothing to do" in live_project.sh("project up", timeout=300).stdout
     fake_pass.put("api/key", "two\n")
-    second = live_project.run("project", "up", timeout=300)
+    second = live_project.sh("project up", timeout=300)
     assert "load egress policy" in second.stdout

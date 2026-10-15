@@ -87,7 +87,7 @@ def test_agents_cannot_reach_each_other(live_project, engine, agent_image):
 
 def test_down_removes_the_agent_networks_too(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
-    assert live_project.run("project", "down", "--force").returncode == 0
+    assert live_project.sh("project down --force").returncode == 0
     assert not [r for r in engine.resources(live_project.name) if r.kind in ("container", "network")]
 
 
@@ -107,7 +107,7 @@ def test_a_directory_workspace_survives_down_and_a_new_up_finds_it(live_project,
     document = spec(workspaces={"scratch": {}}, agents={"coder": custom(agent_image, workspaces=["scratch"])})
     up(live_project, document)
     assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo kept > /workspace/scratch/note").returncode == 0
-    down = live_project.run("project", "down", "--force")
+    down = live_project.sh("project down --force")
     assert down.returncode == 0, down.stderr
     assert "scratch" in down.stdout, "down says which workspaces it keeps"
     assert [r.name for r in engine.resources(live_project.name)] == [live_project.volume("scratch")]
@@ -118,7 +118,7 @@ def test_a_directory_workspace_survives_down_and_a_new_up_finds_it(live_project,
 def test_rm_never_deletes_a_directory_workspace(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
     assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo mine > /workspace/data/f").returncode == 0
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
     assert engine.volume_exists(live_project.volume("data"))
     assert live_project.spawn("coder") == "coder-1"
     assert exec_as(engine, live_project, "coder-1", "cat", "/workspace/data/f").stdout == "mine\n"
@@ -127,8 +127,8 @@ def test_rm_never_deletes_a_directory_workspace(live_project, engine, agent_imag
 def test_agent_start_gives_a_stopped_agent_back_the_workspace_it_had(live_project, engine, agent_image):
     up(live_project, spec(workspaces={"data": {}}, agents={"coder": custom(agent_image, workspaces=["data"])}))
     assert exec_as(engine, live_project, "coder-1", "sh", "-c", "echo mine > /workspace/data/f").returncode == 0
-    assert live_project.run("agent", "stop", "coder-1").returncode == 0
-    started = live_project.run("agent", "start", "coder-1")
+    assert live_project.sh("agent stop coder-1").returncode == 0
+    started = live_project.sh("agent start coder-1")
     assert started.returncode == 0, started.stderr
     assert exec_as(engine, live_project, "coder-1", "cat", "/workspace/data/f").stdout == "mine\n"
 
@@ -164,8 +164,8 @@ def test_egzo_leaves_nothing_in_the_project_directory(live_project, engine, agen
     before = live_project.left_in_directory()
     up(live_project, document)
     live_project.spawn("coder", "second")
-    assert live_project.run("agent", "rm", "--force", "second").returncode == 0
-    assert live_project.run("project", "down", "--force").returncode == 0
+    assert live_project.sh("agent rm --force second").returncode == 0
+    assert live_project.sh("project down --force").returncode == 0
     assert live_project.left_in_directory() == before
 
 
@@ -307,8 +307,8 @@ def test_an_agent_cannot_fork_without_limit(live_project, engine, agent_image):
 def test_the_sidecars_still_work_unprivileged(live_project, engine, agent_image):
     """The control and proxy volumes belong to the sidecars' user: up converges, ps answers, a token is issued."""
     up(live_project, spec(agents={"coder": custom(agent_image)}))
-    assert live_project.run("ps").returncode == 0
-    assert live_project.run("proxy", "log").returncode == 0
-    assert live_project.run("events").returncode == 0
+    assert live_project.sh("ps").returncode == 0
+    assert live_project.sh("proxy log").returncode == 0
+    assert live_project.sh("events").returncode == 0
     live_project.up()  # a second `up` on existing volumes
     live_project.spawn("coder")  # and a second instance, whose token comes from the same control volume

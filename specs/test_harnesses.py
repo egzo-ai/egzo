@@ -44,7 +44,7 @@ def bring_up(project, document, timeout=900):
     of each named `<name>` (the addresses and container names the specs below use are the instance names)."""
     names = list(document["agents"])
     project.write({**document, "agents": {f"{name}-template": fields for name, fields in document["agents"].items()}})
-    result = project.run("project", "up", timeout=timeout)
+    result = project.sh("project up", timeout=timeout)
     assert result.returncode == 0, result.stderr
     for name in names:
         project.spawn(f"{name}-template", name, timeout=timeout)
@@ -149,14 +149,14 @@ def test_the_tui_reaches_its_prompt_with_no_first_run_question(launched, engine,
 def test_the_tui_keeps_its_conversation_home_across_a_stop_and_start(launched, engine):
     project = launched()
     engine.exec(container(engine, project).name, "sh", "-c", "echo kept > $HOME/marker")
-    assert project.run("stop", "coder").returncode == 0
-    assert project.run("start", "coder", timeout=300).returncode == 0
+    assert project.sh("stop coder").returncode == 0
+    assert project.sh("start coder", timeout=300).returncode == 0
     assert read_in_agent(engine, project, "$HOME/marker").strip() == "kept"
 
 
 def test_removing_an_instance_removes_its_conversation_home(launched, engine):
     project = launched()
-    assert project.run("agent", "rm", "--force", "coder").returncode == 0
+    assert project.sh("agent rm --force coder").returncode == 0
     assert not [r for r in engine.resources(project.name) if r.kind == "volume" and r.name.endswith("coder-home")]
 
 
@@ -317,7 +317,7 @@ def test_the_hook_command_posts_its_payload_as_a_hook_event(live_project, engine
         input='{"tool_name":"Bash"}', text=True, capture_output=True, env={**os.environ, **engine.env},
     )
     assert ran.returncode == 0, ran.stderr
-    hooks = [json.loads(l) for l in live_project.run("events").stdout.splitlines() if l.startswith("{")]
+    hooks = [json.loads(l) for l in live_project.sh("events").stdout.splitlines() if l.startswith("{")]
     found = [e for e in hooks if e["type"] == "hook" and e["text"] == "PreToolUse"]
     assert found and found[0]["agent"] == "coder"
 
@@ -335,7 +335,7 @@ def test_the_hook_command_never_blocks_or_fails_the_harness(live_project, engine
 
 
 def events_of(project):
-    out = project.run("events").stdout
+    out = project.sh("events").stdout
     return [json.loads(line) for line in out.splitlines() if line.startswith("{")]
 
 

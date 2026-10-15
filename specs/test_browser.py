@@ -88,7 +88,7 @@ def evaluate(function):
 
 
 def audit_events(project):
-    return [json.loads(line) for line in project.run("proxy", "log").stdout.splitlines() if line.startswith("{")]
+    return [json.loads(line) for line in project.sh("proxy log").stdout.splitlines() if line.startswith("{")]
 
 
 def events_for(project, host):
@@ -142,7 +142,7 @@ def set_server(engine, project, harness, name, entry):
 
 def restarted(engine, project, harness):
     """Restart the instance and wait until its harness is running again, so its configuration has been written."""
-    assert project.run("restart", "coder").returncode == 0
+    assert project.sh("restart coder").returncode == 0
     for _ in range(60):
         if engine.exec(instance(engine, project), "sh", "-c", "pgrep -x claude || pgrep -x opencode").returncode == 0:
             return

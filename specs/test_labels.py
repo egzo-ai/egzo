@@ -18,7 +18,7 @@ def up(live_project, image=None, **env):
     """`up`, and with an image one instance of a template `coder`: `coder-1`, whose resources are labelled too."""
     template = {"coder": agent(harness="custom", image=image)} if image else {}
     live_project.write(spec(agents=template))
-    result = live_project.run("project", "up", env=env, timeout=300)
+    result = live_project.sh("project up", env=env, timeout=300)
     assert result.returncode == 0, result.stderr
     if image:
         live_project.spawn("coder")
@@ -92,8 +92,8 @@ def test_two_instances_of_a_template_share_its_template_hash(live_project, engin
 def test_the_template_hash_changes_when_the_template_does(live_project, engine, agent_image):
     up(live_project, agent_image)
     before = engine.instance(live_project.name, "coder-1").labels[f"{LABEL_PREFIX}template-hash"]
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
     live_project.write(spec(agents={"coder": agent(harness="custom", image=agent_image, env={"CHANGED": "yes"})}))
-    assert live_project.run("project", "up", timeout=300).returncode == 0
+    assert live_project.sh("project up", timeout=300).returncode == 0
     live_project.spawn("coder")
     assert engine.instance(live_project.name, "coder-1").labels[f"{LABEL_PREFIX}template-hash"] != before

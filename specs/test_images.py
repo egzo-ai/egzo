@@ -21,7 +21,7 @@ def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_confi
     live_project, engine, session_image, registry
 ):
     """EGZO_HARNESS_PREFIX replaces ghcr.io/egzo-ai/egzo-harness-: the name is <prefix><harness>:<egzo version>."""
-    version = live_project.run("version").stdout.split()[-1]
+    version = live_project.sh("version").stdout.split()[-1]
     # a name of its own: the registry is shared, and this stand-in image must never replace a real harness image
     unique = f"egzo-spec-{secrets.token_hex(4)}"
     remote = registry.push(session_image, f"{unique}-opencode", version)
@@ -36,12 +36,12 @@ def test_a_harness_without_an_image_is_pulled_by_its_default_name_from_the_confi
 def test_an_unpullable_harness_image_stops_spawn_naming_the_image_and_the_override(live_project, engine):
     live_project.env["EGZO_HARNESS_PREFIX"] = "localhost:5000/does-not-exist-"
     live_project.up(spec(agents={"coder": agent(harness="opencode")}))
-    result = live_project.run("agent", "spawn", "coder", timeout=300)
+    result = live_project.sh("agent spawn coder", timeout=300)
     assert result.returncode != 0
     assert engine.instances(live_project.name) == []
     assert "localhost:5000/does-not-exist-opencode" in result.stderr and "EGZO_HARNESS_PREFIX" in result.stderr
 
 
 def test_version_prints_the_version(project):
-    result = project.run("version")
+    result = project.sh("version")
     assert result.returncode == 0 and result.stdout.strip()

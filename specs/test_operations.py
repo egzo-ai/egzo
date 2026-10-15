@@ -44,7 +44,7 @@ def container(engine, project, name):
 
 
 def test_system_check_checks_the_engine_and_exits_zero_when_nothing_fails(project, engine):
-    result = project.run("system", "check", env=engine.env)
+    result = project.sh("system check", env=engine.env)
     assert result.returncode == 0, result.stdout + result.stderr
     lines = [l for l in result.stdout.splitlines() if l.strip()]
     assert all(re.match(r"(ok|warn|fail)\s", l) for l in lines), result.stdout
@@ -52,14 +52,14 @@ def test_system_check_checks_the_engine_and_exits_zero_when_nothing_fails(projec
 
 
 def test_system_check_fails_loudly_when_no_engine_answers(project):
-    result = project.run("system", "check", env={"DOCKER_HOST": "unix:///nonexistent.sock"})
+    result = project.sh("system check", env={"DOCKER_HOST": "unix:///nonexistent.sock"})
     assert result.returncode != 0
     assert "fail" in result.stdout and "engine" in result.stdout
 
 
 def test_system_check_says_whether_the_engines_log_can_be_read_and_followed(live_project, engine):
     """egzo reads container logs (git jobs, `egzo logs`, the agents' status), so a driver that cannot be read is a problem."""
-    result = live_project.run("system", "check")
+    result = live_project.sh("system check")
     lines = [l for l in result.stdout.splitlines() if re.match(r"(ok|warn|fail)\s+logs?\b", l)]
     assert lines, f"no line about the engine's log:\n{result.stdout}"
     assert lines[0].startswith("ok"), lines
@@ -69,14 +69,14 @@ def test_system_check_says_whether_the_engines_log_can_be_read_and_followed(live
 
 def test_system_check_names_the_log_driver_even_when_it_cannot_try_it(project, engine):
     """With no egzo image on the engine there is nothing to run, so the check can only look at the driver."""
-    result = project.run("system", "check", env={**engine.env, "EGZO_IMAGE": "egzo-spec-no-such-image:0"})
+    result = project.sh("system check", env={**engine.env, "EGZO_IMAGE": "egzo-spec-no-such-image:0"})
     lines = [l for l in result.stdout.splitlines() if re.match(r"(ok|warn|fail)\s+logs?\b", l)]
     assert lines, f"no line about the engine's log:\n{result.stdout}"
     assert not lines[0].startswith("fail"), lines
 
 
 def test_system_check_reports_the_isolation_runtimes(project, engine):
-    out = project.run("system", "check", env=engine.env).stdout
+    out = project.sh("system check", env=engine.env).stdout
     assert re.search(r"(ok|warn)\s+.*gVisor|runsc", out), out
     assert re.search(r"(ok|warn)\s+.*(rootless|rootful)", out), out
 
@@ -84,7 +84,7 @@ def test_system_check_reports_the_isolation_runtimes(project, engine):
 def test_project_check_does_not_ask_for_a_gitignore_because_egzo_keeps_nothing_in_the_directory(project, engine):
     subprocess.run(["git", "init", "-q"], cwd=project.root, check=True)
     project.write(spec(vaults={}, workspaces={"scratch": {}}))
-    result = project.run("project", "check")
+    result = project.sh("project check")
     assert not re.search(r"warn\s+.*(\.egzo|workspaces/)", result.stdout), result.stdout
 
 
@@ -93,14 +93,14 @@ def test_project_check_does_not_ask_for_a_gitignore_because_egzo_keeps_nothing_i
 
 def test_up_dry_run_lists_what_up_would_do_and_exits_one_when_there_is_a_difference(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image)}))
-    result = live_project.run("project", "up", "--dry-run")
+    result = live_project.sh("project up --dry-run")
     assert result.returncode == 1
     assert "control" in result.stdout and "create" in result.stdout
 
 
 def test_up_dry_run_says_nothing_to_do_and_exits_zero_when_converged(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image)}))
-    result = live_project.run("project", "up", "--dry-run")
+    result = live_project.sh("project up --dry-run")
     assert result.returncode == 0, result.stdout
     assert result.stdout.strip().splitlines()[-1] == "nothing to do"
 
@@ -108,7 +108,7 @@ def test_up_dry_run_says_nothing_to_do_and_exits_zero_when_converged(live_projec
 def test_up_dry_run_names_the_instances_whose_template_changed(live_project, engine, agent_image):
     up(live_project, spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     live_project.write(spec(agents={"coder": custom(agent_image, env={"CHANGED": "yes"}), "reviewer": custom(agent_image)}))
-    result = live_project.run("project", "up", "--dry-run")
+    result = live_project.sh("project up --dry-run")
     assert result.returncode == 1
     assert "stale: coder-1" in result.stdout and "reviewer-1" not in result.stdout
 
@@ -124,17 +124,17 @@ def test_ca_rotate_issues_a_new_ca_and_restarts_the_agents_that_trust_it(live_pr
     up(live_project, spec(agents={"coder": custom(agent_image)}))
     old_ca = read_ca(engine, live_project)
     started = container(engine, live_project, "coder-1").raw["State"]["StartedAt"]
-    result = live_project.run("project", "rotate-ca", timeout=300)
+    result = live_project.sh("project rotate-ca", timeout=300)
     assert result.returncode == 0, result.stderr
     new_ca = read_ca(engine, live_project)
     assert new_ca.startswith("-----BEGIN CERTIFICATE-----") and new_ca != old_ca
     assert container(engine, live_project, "coder-1").raw["State"]["StartedAt"] != started
-    assert "nothing to do" in live_project.run("project", "up").stdout
+    assert "nothing to do" in live_project.sh("project up").stdout
 
 
 def test_after_rotating_the_proxy_still_serves_the_policy(live_project, engine, agent_image):
     up(live_project, spec(egress={"default": {"allow": ["example.com"]}}, agents={"coder": custom(agent_image)}))
-    assert live_project.run("project", "rotate-ca", timeout=300).returncode == 0
+    assert live_project.sh("project rotate-ca", timeout=300).returncode == 0
     reached = engine.exec(container(engine, live_project, "coder-1").name, "sh", "-c", 'curl -sS -m 20 -o /dev/null -w "%{http_code}" https://example.com/')
     assert reached.stdout.strip() == "200", reached.stderr
 
@@ -142,22 +142,14 @@ def test_after_rotating_the_proxy_still_serves_the_policy(live_project, engine, 
 # --- up takes no agent: there are templates, and nothing to select ----------------------------------------------
 
 
-def test_up_takes_no_agent_names(live_project, engine, agent_image):
-    live_project.write(spec(agents={"coder": custom(agent_image)}))
-    result = live_project.run("project", "up", "coder")
-    assert result.returncode != 0
-    assert "unexpected argument" in result.stderr or "unknown command" in result.stderr or "accepts 0 arg" in result.stderr
-    assert engine.containers(live_project.name) == []
-
-
 def test_up_starts_no_agent_and_publishes_the_templates(live_project, engine, agent_image):
     live_project.write(spec(agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
-    assert live_project.run("project", "up", timeout=300).returncode == 0
+    assert live_project.sh("project up", timeout=300).returncode == 0
     assert container(engine, live_project, "control") and container(engine, live_project, "proxy")
     assert engine.instances(live_project.name) == []
     # a published template can be spawned without the file's help
     (live_project.root / "egzo.yaml").write_text("# emptied after up\n")
-    assert live_project.run("agent", "spawn", "reviewer", timeout=300).returncode == 0
+    assert live_project.sh("agent spawn reviewer", timeout=300).returncode == 0
 
 
 # --- the proxy's audit trail and rules ---------------------------------------------------------------------------
@@ -167,9 +159,9 @@ def test_proxy_log_can_be_filtered_by_agent(live_project, engine, agent_image):
     up(live_project, spec(egress={"default": {"allow": []}}, agents={"coder": custom(agent_image), "reviewer": custom(agent_image)}))
     for name in ("coder-1", "reviewer-1"):
         live_project.run("exec", name, "--", "curl", "-sS", "-m", "10", "-o", "/dev/null", f"https://{name}.example.org/")
-    both = [json.loads(l) for l in live_project.run("proxy", "log").stdout.splitlines() if l.startswith("{")]
+    both = [json.loads(l) for l in live_project.sh("proxy log").stdout.splitlines() if l.startswith("{")]
     assert {e["agent"] for e in both} >= {"coder-1", "reviewer-1"}
-    only = [json.loads(l) for l in live_project.run("proxy", "log", "--agent", "coder-1").stdout.splitlines() if l.startswith("{")]
+    only = [json.loads(l) for l in live_project.sh("proxy log --agent coder-1").stdout.splitlines() if l.startswith("{")]
     assert only and {e["agent"] for e in only} == {"coder-1"}
 
 
@@ -184,11 +176,11 @@ def test_proxy_rules_show_what_each_agent_may_reach_without_any_secret(live_proj
         agents={"coder": custom(agent_image), "reviewer": custom(agent_image, egress="wide")},
     )
     up(live_project, document)
-    rules = live_project.run("proxy", "rules")
+    rules = live_project.sh("proxy rules")
     assert rules.returncode == 0, rules.stderr
     assert "docs.example.org" in rules.stdout and "api.test" in rules.stdout
     assert "very-secret-value" not in rules.stdout + rules.stderr
-    only = live_project.run("proxy", "rules", "--agent", "coder-1").stdout
+    only = live_project.sh("proxy rules --agent coder-1").stdout
     assert "docs.example.org" in only and "api.test" not in only
 
 
@@ -204,9 +196,9 @@ def injecting(image, **extra):
 
 def test_up_dry_run_sees_a_rotated_secret(live_project, engine, agent_image):
     live_project.write(injecting(agent_image))
-    assert live_project.run("project", "up", env={"DEPLOY_TOKEN": "first-value"}, timeout=300).returncode == 0
-    assert live_project.run("project", "up", "--dry-run", env={"DEPLOY_TOKEN": "first-value"}).returncode == 0
-    changed = live_project.run("project", "up", "--dry-run", env={"DEPLOY_TOKEN": "second-value"})
+    assert live_project.sh("project up", env={"DEPLOY_TOKEN": "first-value"}, timeout=300).returncode == 0
+    assert live_project.sh("project up --dry-run", env={"DEPLOY_TOKEN": "first-value"}).returncode == 0
+    changed = live_project.sh("project up --dry-run", env={"DEPLOY_TOKEN": "second-value"})
     assert changed.returncode == 1, changed.stdout
     assert "policy" in changed.stdout
     assert "second-value" not in changed.stdout + changed.stderr
@@ -217,26 +209,26 @@ def test_editing_a_prompt_makes_the_running_instances_stale_and_the_next_spawn_n
     prompt.write_text("be brief\n")
     up(live_project, spec(agents={"coder": custom(agent_image, prompt="./prompt.md")}))
     before = container(engine, live_project, "coder-1").labels[f"{LABEL_PREFIX}template-hash"]
-    assert live_project.run("project", "up", "--dry-run").returncode == 0
+    assert live_project.sh("project up --dry-run").returncode == 0
     prompt.write_text("be verbose\n")
-    changed = live_project.run("project", "up", "--dry-run")
+    changed = live_project.sh("project up --dry-run")
     assert changed.returncode == 1 and "stale: coder-1" in changed.stdout
-    assert live_project.run("agent", "rm", "--force", "coder-1").returncode == 0
-    assert live_project.run("project", "up", timeout=300).returncode == 0
+    assert live_project.sh("agent rm --force coder-1").returncode == 0
+    assert live_project.sh("project up", timeout=300).returncode == 0
     live_project.spawn("coder")
     assert container(engine, live_project, "coder-1").labels[f"{LABEL_PREFIX}template-hash"] != before
 
 
 def test_a_restarted_proxy_through_egzo_keeps_the_dry_run_clean(live_project, engine, agent_image):
     live_project.write(injecting(agent_image))
-    assert live_project.run("project", "up", env={"DEPLOY_TOKEN": "v"}, timeout=300).returncode == 0
+    assert live_project.sh("project up", env={"DEPLOY_TOKEN": "v"}, timeout=300).returncode == 0
     live_project.spawn("coder")
-    assert live_project.run("restart", "proxy", env={"DEPLOY_TOKEN": "v"}).returncode == 0
-    assert live_project.run("project", "up", "--dry-run", env={"DEPLOY_TOKEN": "v"}).returncode == 0
+    assert live_project.sh("restart proxy", env={"DEPLOY_TOKEN": "v"}).returncode == 0
+    assert live_project.sh("project up --dry-run", env={"DEPLOY_TOKEN": "v"}).returncode == 0
 
 
 def test_system_check_checks_that_the_engine_can_make_the_internal_networks_isolation_needs(project, engine):
-    result = project.run("system", "check", env=engine.env)
+    result = project.sh("system check", env=engine.env)
     assert "internal networks work" in result.stdout, result.stdout
 
 
@@ -256,14 +248,14 @@ def test_two_commands_do_not_change_one_project_at_once(live_project, engine, ag
         refused = live_project.run(*command, timeout=300)
         assert refused.returncode != 0 and "another egzo command" in refused.stderr and "another-command" in refused.stderr, (command, refused.returncode, refused.stderr)
     assert engine.run("rm", f"{live_project.name}.lock").returncode == 0
-    assert live_project.run("project", "up", timeout=300).returncode == 0, "the lock was not released"
+    assert live_project.sh("project up", timeout=300).returncode == 0, "the lock was not released"
 
 
 def test_the_lock_is_an_engine_side_lease_that_a_command_releases_when_it_ends(live_project, engine, agent_image):
     live_project.up(spec(agents={"coder": custom(agent_image)}))
     live_project.spawn("coder")
     assert lease(engine, live_project) is None, "a finished command leaves no lease"
-    failed = live_project.run("agent", "rm", "no-such-instance")
+    failed = live_project.sh("agent rm no-such-instance")
     assert failed.returncode != 0 and lease(engine, live_project) is None, "a failed command releases it too"
 
 

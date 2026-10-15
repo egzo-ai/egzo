@@ -114,6 +114,25 @@ class Project:
         assert result.returncode == 0, f"egzo {command} {' '.join(map(str, arguments))}\n{result.stderr}"
         return result
 
+    def ps(self, *args):
+        """`egzo ps` as {name: row}: the sidecars and the instances, by the columns a person reads."""
+        from support import table
+
+        return {row["NAME"]: row for row in table(self.ok("ps", *args).stdout)}
+
+    def ps_json(self):
+        """`egzo ps --json` as {name: object}."""
+        return {item["name"]: item for item in json.loads(self.ok("ps --json").stdout)}
+
+    def instance_names(self):
+        return sorted(item["name"] for item in json.loads(self.ok("agent ls --json").stdout))
+
+    def retire(self):
+        """Remove every instance, in one command, so the next spec of a shared project finds it as it was left by `up`."""
+        names = self.instance_names()
+        if names:
+            self.ok("agent rm --force", *names)
+
     def config(self, document, *args, **kwargs):
         """Write the file and run `egzo config`."""
         self.write(document)
