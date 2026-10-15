@@ -79,7 +79,7 @@ def test_proxy_log_can_be_filtered_by_agent_and_proxy_rules_show_what_each_agent
     p = sandbox
     coder, reviewer = p.spawn("coder"), p.spawn("reviewer")
     for name in (coder, reviewer):
-        p.ok(f"exec {name} -- curl -sS -m 10 -o /dev/null", f"https://{name}.example.org/")
+        p.sh(f"exec {name} -- curl -sS -m 10 -o /dev/null", f"https://{name}.example.org/")
     both = [json.loads(line) for line in p.ok("proxy log").stdout.splitlines() if line.startswith("{")]
     assert {e["agent"] for e in both} >= {coder, reviewer}
     only = [json.loads(line) for line in p.ok("proxy log --agent", coder).stdout.splitlines() if line.startswith("{")]
