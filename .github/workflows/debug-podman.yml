@@ -32,6 +32,7 @@ jobs:
               seen="$seen $id"
               pid=$(sudo podman inspect -f '{{.State.Pid}}' $id)
               name=$(sudo podman inspect -f '{{.Name}}' $id)
+              sudo nohup podman logs -f $id >> /tmp/proxy-logs.jsonl 2>&1 &
               sleep 12
               {
                 echo "##### $name pid=$pid at $(date +%T)"
@@ -58,11 +59,11 @@ jobs:
         run: |
           set -o pipefail
           ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py proxy/test_proxy_secrets.py 2>&1 | tee ../specs-debug.log
-      - name: What the watcher saw
+      - name: What the proxies logged that was not an allow or a challenge
         if: always()
-        run: cat /tmp/proxies.log
+        run: grep -v '"action":"\(allow\|challenge\|close\)"' /tmp/proxy-logs.jsonl | cut -c1-400 | head -80
       - name: Annotate
         if: always()
         run: |
-          { echo "---- specs"; tail -40 specs-debug.log; echo "---- proxies"; cut -c1-300 /tmp/proxies.log | head -150; } > debug-all.log
+          { echo "---- specs"; grep -E "^(FAILED|E  )" specs-debug.log | cut -c1-250 | head -25; echo "---- proxy events"; grep -v '"action":"\(allow\|challenge\|close\)"' /tmp/proxy-logs.jsonl | cut -c1-300 | head -40; } > debug-all.log
           scripts/ci-annotate.sh "debug" debug-all.log tail
