@@ -34,16 +34,23 @@ docker)
 	;;
 docker-gvisor)
 	docker_networks
-	# https://gvisor.dev/docs/user_guide/install/ : the binaries are checked against the published sums
-	arch=$(uname -m)
+	# https://gvisor.dev/docs/user_guide/install/ : one archive per architecture, checked against its published sum, with
+	# runsc and its containerd shim somewhere inside
+	case $(uname -m) in aarch64 | arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac
 	url=https://storage.googleapis.com/gvisor/releases/release/latest/$arch
 	tmp=$(mktemp -d)
 	(
 		cd "$tmp"
-		curl -fsSL -O "$url/runsc" -O "$url/runsc.sha512" -O "$url/containerd-shim-runsc-v1" -O "$url/containerd-shim-runsc-v1.sha512"
-		sha512sum -c runsc.sha512 -c containerd-shim-runsc-v1.sha512
-		chmod a+rx runsc containerd-shim-runsc-v1
-		sudo mv runsc containerd-shim-runsc-v1 /usr/local/bin
+		curl -fsSL -O "$url/gvisor.tar.bz2" -O "$url/gvisor.tar.bz2.sha512"
+		sha512sum -c gvisor.tar.bz2.sha512
+		mkdir x
+		tar -xjf gvisor.tar.bz2 -C x
+		find x -type f | head -20
+		for binary in runsc containerd-shim-runsc-v1; do
+			found=$(find x -type f -name "$binary" | head -1)
+			[ -n "$found" ] || { echo "$binary is not in the gVisor archive" >&2; exit 1; }
+			sudo install -m 0755 "$found" /usr/local/bin/"$binary"
+		done
 	)
 	rm -rf "$tmp"
 	# registers the runtime `runsc` in /etc/docker/daemon.json

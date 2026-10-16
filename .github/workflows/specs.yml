@@ -77,7 +77,9 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
           df -h /
       - name: The platform (${{ matrix.engine }})
-        run: scripts/ci-engine.sh ${{ matrix.engine }}
+        run: |
+          set -o pipefail
+          scripts/ci-engine.sh ${{ matrix.engine }} 2>&1 | tee engine-${{ matrix.name }}.log
       - name: Build egzo and install the specs' dependencies
         run: |
           make build
@@ -93,6 +95,12 @@ jobs:
         run: |
           set -o pipefail
           ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} -n "$SPEC_WORKERS" --dist loadfile --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
+      # The logs of a run need a login; annotations do not, so a failure is also written as annotations.
+      - name: Annotate the failure
+        if: failure()
+        run: |
+          scripts/ci-annotate.sh "${{ matrix.name }} platform" engine-${{ matrix.name }}.log tail
+          scripts/ci-annotate.sh "${{ matrix.name }} specs" specs-${{ matrix.name }}.log specs
       # The summary per area is at the end of the log: it is what shows a regression on one platform as a change of a column.
       - uses: actions/upload-artifact@v7
         if: always()
@@ -101,4 +109,5 @@ jobs:
           path: |
             specs-${{ matrix.name }}.log
             specs-${{ matrix.name }}.xml
+            engine-${{ matrix.name }}.log
           if-no-files-found: warn
