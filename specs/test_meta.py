@@ -174,7 +174,8 @@ def test_every_command_and_flag_of_egzo_is_used_by_a_spec(egzo):
         commands_used.add(tuple(path))
         for word in [*words, *later]:
             if word.startswith("-") and word != "--":
-                flags_used.add((tuple(path), word.split("=", 1)[0]))
+                flag = word.split("=", 1)[0]
+                flags_used.add((tuple(path), node.shorts.get(flag, flag)))
 
     missing = []
 

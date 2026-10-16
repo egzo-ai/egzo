@@ -1,7 +1,7 @@
 # Roadmap: overhaul the specs suite
 
-**Status.** Started: the messaging specs are the pilot (see "Pilot"). The rest is converted file by file. Specs stay pytest (a transcript format such as testscript or cram was considered and
-rejected: it would throw away the status model in `spec_status.py` and the `pexpect` session specs).
+**Status.** Done for the engine specs (see "What was done"); what is left is listed at the end. Specs stay pytest (a transcript format such
+as testscript or cram was considered and rejected: it would throw away the status model in `spec_status.py` and the `pexpect` session specs).
 
 ## Why
 
@@ -45,12 +45,24 @@ help (`specs/clitree.py`, and a spec in `test_meta.py` for every literal). Three
 - A rate limit left on a shared agent shows in every later spec: flooding specs take fresh agents.
 - `up` and `spawn` are about a second each, so the remaining cost of a module is its spawns: fresh agents are what to economise.
 
-## Not decided
+## What was done
 
-- Teardown. Today every spec runs `egzo project down --force` and then a per-resource sweep (about 0.6 s). With shared projects
-  this mostly disappears; a label-only sweep at the end of the session is the fallback.
-- Whether the old files are converted one at a time (heaviest first: `test_instances`, `test_proxy`, `test_messaging`,
-  `test_spawn`) or the new layout lands in one go. One at a time keeps the suite running throughout.
+Every engine spec was converted, file by file, to the layout above: `specs/` follows the CLI tree (`project/`, `agent/`, `message/`,
+`workspace/`, `service/`, `system/`, `session/`, `proxy/`, `harness/`, `browser/`), each module shares one project and scenarios follow a
+story. Deliberately wrong command lines (a removed command, a flag that must not exist) are gone: the two checks in `test_meta.py` cover
+them (every command line a spec writes is one egzo has; every command and flag of egzo is run by a spec, which fails until one does).
+`Project.pty` runs a command on a terminal (attach, exec) through the same check.
+
+## Left
+
+- The modules that build their own project per spec on purpose: `up`/`down` stories (`project/test_project_up_down.py`, the `down`
+  scenario of `agent/test_agent_stale.py`), the secrets that change the policy (`proxy/test_proxy_secrets.py`), git workspaces that change
+  what github.com may reach (`workspace/test_git_workspaces.py`). They need a project that starts from nothing.
+- `test_secrets.py`, `test_images.py` and the files that need no engine were only moved to command-literal lines.
+- The markers for tiers (`pure`, `sidecars`, `agents`, `real`) are not added yet.
+- A shared module accumulates networks (every instance is one, and the engine's pool is limited, around thirty): a module whose specs
+  spawn many instances removes them after each spec.
+- Teardown is still `project down --force` and a sweep once per module; a label-only sweep is the fallback if it shows in a profile.
 
 ## Related
 
