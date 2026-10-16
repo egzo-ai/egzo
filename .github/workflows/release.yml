@@ -14,7 +14,15 @@ env:
   PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
+  # Nothing is built or pushed unless the specs pass on the platforms that are required (see specs.yml), so a tag cannot
+  # publish half of a release for a build the specs reject.
+  specs:
+    uses: ./.github/workflows/specs.yml
+    with:
+      full: true
+
   binaries:
+    needs: specs
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
@@ -37,6 +45,7 @@ jobs:
           if-no-files-found: error
 
   images:
+    needs: specs
     runs-on: ubuntu-26.04
     permissions:
       contents: read
