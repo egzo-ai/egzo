@@ -10,24 +10,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: scripts/ci-engine.sh podman
-      - name: Forwarding after each step
+      - name: Reuse and parallel
         run: |
           set +e
-          show() { printf '%-46s' "$1"; for b in $(ip -br link | awk '/^(podman|docker0|br-)/{print $1}'); do printf '%s=%s ' $b $(cat /proc/sys/net/ipv4/conf/$b/forwarding); done; printf 'all=%s default=%s\n' $(cat /proc/sys/net/ipv4/conf/all/forwarding) $(cat /proc/sys/net/ipv4/conf/default/forwarding); }
-          show "start"
-          sudo podman network create a >/dev/null;                      show "podman network create a (external)"
-          sudo podman run --rm --network a docker.io/library/alpine:3 true; show "podman run on a"
-          sudo podman network create --internal b >/dev/null;            show "podman network create --internal b"
-          sudo podman run --rm --network b docker.io/library/alpine:3 true; show "podman run on b"
-          sudo podman run -d --name p1 --network a docker.io/library/alpine:3 sleep 300 >/dev/null; show "podman run -d on a"
-          sudo podman network connect b p1;                              show "podman network connect b p1"
-          sudo podman network create c >/dev/null;                       show "podman network create c"
-          sudo podman network connect c p1;                              show "podman network connect c p1"
-          sudo podman network disconnect c p1;                           show "podman network disconnect c p1"
-          sudo podman network rm c >/dev/null;                           show "podman network rm c"
-          docker run --rm docker.io/library/alpine:3 true;               show "docker run"
-          docker network create dn >/dev/null;                           show "docker network create"
-          docker run -d --name dr --network dn docker.io/library/alpine:3 sleep 300 >/dev/null; show "docker run -d on dn"
-          docker rm -f dr >/dev/null; docker network rm dn >/dev/null;  show "docker rm / network rm"
-          sudo podman run --rm --network a docker.io/library/alpine:3 true; show "podman run on a again"
-          sleep 20;                                                      show "20 s later"
+          IMG=docker.io/curlimages/curl:8.10.1
+          sudo podman pull -q $IMG >/dev/null
+          show() { printf '%-50s' "$1"; for b in $(ip -br link | awk '/^podman/{print $1}'); do printf '%s=%s(%s) ' $b $(cat /proc/sys/net/ipv4/conf/$b/forwarding) $(ip -br addr show $b | awk '{print $3}' | cut -d/ -f1); done; echo; }
+          probe() { sudo podman run --rm --network $1 $IMG -sS -o /dev/null -m 5 -w '%{http_code}' https://example.com/ 2>&1 | tail -c 40; }
+          echo "### 1. internal net, used, removed; then an external net"
+          sudo podman network create --internal i1 >/dev/null; sudo podman run --rm --network i1 $IMG true; show "internal created and used"
+          sudo podman network rm i1 >/dev/null; show "internal removed"
+          sudo podman network create e1 >/dev/null; show "external created"
+          echo "probe e1: $(probe e1)"; show "after probing e1"
+          sudo podman network rm e1 >/dev/null
+          echo "### 2. proxy-like container on [internal, external], then more internal networks connected and removed, repeated"
+          for round in 1 2 3 4; do
+            sudo podman network create --internal ctl$round >/dev/null; sudo podman network create ext$round >/dev/null
+            sudo podman run -d --name px$round --network ext$round $IMG sleep 600 >/dev/null
+            sudo podman network connect ctl$round px$round
+            sudo podman network create --internal inst$round >/dev/null; sudo podman network connect inst$round px$round
+            show "round $round proxy up"; echo "probe: $(sudo podman exec px$round curl -sS -o /dev/null -m 5 -w '%{http_code}' https://example.com/ 2>&1 | tail -c 40)"
+            sudo podman network disconnect inst$round px$round; sudo podman network rm inst$round >/dev/null
+            show "round $round inst removed"; echo "probe: $(sudo podman exec px$round curl -sS -o /dev/null -m 5 -w '%{http_code}' https://example.com/ 2>&1 | tail -c 40)"
+          done
+          echo "### 3. teardown of everything, then a fresh external network"
+          sudo podman rm -f $(sudo podman ps -aq) >/dev/null; for n in $(sudo podman network ls -q | grep -v '^podman$'); do sudo podman network rm -f $n >/dev/null; done
+          show "all removed"
+          sudo podman network create fresh >/dev/null; show "fresh external"; echo "probe fresh: $(probe fresh)"; show "after probing fresh"
+          echo "### 4. parallel: six networks and containers created at once"
+          for i in 1 2 3 4 5 6; do ( sudo podman network create par$i >/dev/null; sudo podman run -d --name par$i --network par$i $IMG sleep 600 >/dev/null ) & done; wait
+          show "parallel done"; for i in 1 2 3 4 5 6; do echo "par$i: $(sudo podman exec par$i curl -sS -o /dev/null -m 5 -w '%{http_code}' https://example.com/ 2>&1 | tail -c 40)"; done
+          show "after probing parallel"
