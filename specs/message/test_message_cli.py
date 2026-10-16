@@ -107,6 +107,10 @@ def test_an_agent_asks_a_question_the_operator_answers_and_the_answer_goes_back(
     assert next(r for r in table(p.ok("ps").stdout) if r["NAME"] == asker.name)["WAITING"] == ""
     assert p.sh("message reply", question_id, "again").returncode != 0, "an answer is final"
 
+    declined = asker.call("POST", f"/v1/messages/{message_id}/ask", {"text": "and the next one?"})[1]["id"]
+    p.ok("message reply --outcome declined", declined, "no, skip it")
+    assert next(e for e in team.events_of(declined, "resolved"))["data"]["outcome"] == "declined"
+
     # a reply only closes what was addressed to a person
     refused = p.sh("message reply", message_id, "I did it myself")
     assert refused.returncode != 0 and asker.address in refused.stderr
@@ -210,16 +214,19 @@ def test_what_an_agent_writes_never_acts_on_the_operators_terminal(pair, team):
 def test_message_ls_filters_by_recipient_sender_kind_and_state(pair, team):
     a, b = pair
     p = team.project
+
+    def ids(result):
+        return {row["ID"] for row in table(result.stdout)}
+
     first, second = team.send(a.name, "for the first"), team.send(b.name, "for the second")
-    assert set(team.messages("--to", a.name)) == {first}
-    assert set(team.messages("--to", b.address)) == {second}
-    assert {first, second} <= set(team.messages("--from", "operator"))
-    assert team.messages("--from", a.name) == {}
-    assert {first, second} <= set(team.messages("--kind", "request")) and first not in team.messages("--kind", "question")
-    assert {first, second} <= set(team.messages("--state", "pending")) and first not in team.messages("--state", "resolved")
+    assert ids(p.ok("message ls --to", a.name)) == {first}
+    assert ids(p.ok("message ls --to", b.address)) == {second}
+    assert {first, second} <= ids(p.ok("message ls --from operator")) and ids(p.ok("message ls --from", a.name)) == set()
+    assert {first, second} <= ids(p.ok("message ls --kind request")) and first not in ids(p.ok("message ls --kind question"))
+    assert {first, second} <= ids(p.ok("message ls --state pending")) and first not in ids(p.ok("message ls --state resolved"))
 
     p.ok("agent rm --force", a.name)  # fails what it still owed
-    assert first in team.messages("--state", "resolved") and first not in team.messages("--state", "pending")
+    assert first in ids(p.ok("message ls --state resolved")) and first not in ids(p.ok("message ls --state pending"))
     for flag, value in (("--kind", "rumor"), ("--state", "maybe")):
         refused = p.sh("message ls", flag, value)
         assert refused.returncode != 0 and value in refused.stderr

@@ -33,6 +33,11 @@ def test_logs_and_exec_work_on_instances_and_sidecars_by_name_and_say_when_it_is
     p.spawn("coder")
     assert p.sh("exec coder-1 -- sh -c", "echo hello-from-the-agent > /proc/1/fd/1").returncode == 0
     assert "hello-from-the-agent" in p.ok("logs coder-1").stdout
+    assert "hello-from-the-agent" in p.ok("logs --tail 5 coder-1").stdout
+    follower = p.pty("logs --follow coder-1")
+    p.sh("exec coder-1 -- sh -c", "echo followed-line > /proc/1/fd/1")
+    follower.expect(b"followed-line")
+    follower.close()
     p.ok("logs control")
     p.ok("logs proxy")
     p.ok("exec control -- true")
@@ -53,6 +58,10 @@ def test_logs_and_exec_work_on_instances_and_sidecars_by_name_and_say_when_it_is
     audit = [json.loads(line) for line in p.ok("proxy log").stdout.splitlines() if line.startswith("{")]
     denied = [e for e in audit if e["host"] == "example.org"]
     assert denied and denied[0]["action"] == "deny" and denied[0]["agent"] == "coder-1"
+    trail = p.pty("proxy log --follow")
+    p.sh("exec coder-1 -- curl -sS -m 10 -o /dev/null https://example.net/")
+    trail.expect(b"example.net")
+    trail.close()
     listing = p.ok("ps").stdout
     assert all(service in listing for service in ("control", "proxy", "coder", "coder-1"))
 

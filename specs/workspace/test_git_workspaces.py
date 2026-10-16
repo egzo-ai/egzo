@@ -161,7 +161,7 @@ def test_the_fetch_goes_through_the_proxy_as_the_instance_and_no_credential_or_h
     p = sandbox
     p.spawn("coder", "issue-9")
     assert "issue-9" in {e["agent"] for e in github_audit(p, "issue-9") if e["action"] == "allow"}, "the fetch has the instance's identity"
-    p.spawn("coder", "quiet", "--no-fetch")
+    p.ok("agent spawn coder quiet --no-fetch", timeout=400)
     assert has_file(engine, p, "README", "quiet") and not github_audit(p, "quiet"), "--no-fetch does not touch the network"
 
     # the fetch uses the url of the file, not the remote of the base (which may be ssh, which the proxy cannot serve)

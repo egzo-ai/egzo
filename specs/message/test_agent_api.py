@@ -8,8 +8,6 @@ One project is up for the whole module (the `team` fixture). A spec that counts 
 a rate limit left on `coder` would show in every later spec. The people's side (`egzo message ...`) is in test_message_cli.py."""
 
 import json
-import os
-import subprocess
 import time
 
 from agentapi import ID
@@ -172,21 +170,15 @@ def test_hooks_arrive_as_events_without_what_the_agent_read_or_said(team):
     reviewer.call("POST", "/v1/status", {"text": "from reviewer"})
     assert [e["text"] for e in team.events("--agent", reviewer.name) if e["type"] == "status"][-1] == "from reviewer"
     assert "from coder" not in [e.get("text") for e in team.events("--agent", reviewer.name)]
-    follower = subprocess.Popen(
-        [team.project.egzo.binary, "events", "-f"], cwd=team.project.root, env={**os.environ, **team.project.env},
-        stdout=subprocess.PIPE, text=True,
-    )
-    try:
-        time.sleep(1)
-        coder.call("POST", "/v1/status", {"text": "live event"})
-        while True:
-            line = follower.stdout.readline()
-            assert line, "the stream ended"
-            if json.loads(line).get("text") == "live event":
-                break
-    finally:
-        follower.kill()
-        follower.wait()
+    last = max(e["seq"] for e in team.events())
+    assert team.project.ok("events --after", last).stdout.strip() == "", "after the last event there is nothing yet"
+    follower = team.project.pty("events --follow", timeout=30)
+    time.sleep(1)
+    coder.call("POST", "/v1/status", {"text": "live event"})
+    follower.expect(b"live event")
+    follower.close()
+    newer = [json.loads(line) for line in team.project.ok("events --after", last, "--agent", coder.name).stdout.splitlines() if line.startswith("{")]
+    assert [e["text"] for e in newer if e["type"] == "status"] == ["live event"]
 
 
 def test_the_mcp_endpoint_offers_exactly_the_tools_and_acts_as_the_calling_agent(team):
