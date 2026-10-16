@@ -13,8 +13,6 @@ cd hub
 cp .env.example .env            # set EGZO_SECRET_KEY and EGZO_OIDC_CLIENT_SECRET: openssl rand -hex 32
 echo "127.0.0.1 dex" | sudo tee -a /etc/hosts      # a first try on one machine: the browser must reach Dex by the name the hub uses
 export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
-(cd .. && make hub-image)          # the hub image is not published yet: build it, tagged dev
-echo "EGZO_HUB_VERSION=dev" >> .env
 docker compose up -d
 ```
 
