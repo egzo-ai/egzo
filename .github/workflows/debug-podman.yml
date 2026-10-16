@@ -29,7 +29,7 @@ jobs:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py 2>&1 | tee ../specs-debug.log
+          ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py -k base_survives 2>&1 | tee ../specs-debug.log
       - name: Timeline
         if: always()
         run: sort /tmp/timeline.log > /tmp/timeline.sorted; grep -c . /tmp/timeline.sorted; cat /tmp/timeline.sorted | cut -c1-200

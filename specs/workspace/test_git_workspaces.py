@@ -237,7 +237,8 @@ def test_the_base_survives_failed_clones_failed_fetches_down_and_up_and_goes_wit
     assert not engine.volume_exists(p.worktree_volume("repo", "coder-1")) and p.sh("ps --json").returncode == 0
 
     p.write(document("github.com"))
-    p.ok("project up", timeout=400)
+    again = p.ok("project up", timeout=400)
+    assert engine.volume_exists(p.base_volume("repo")), f"the second up, which allows github.com, makes the base:\n{again.stdout}{again.stderr}\n{p.ok('proxy log').stdout[-1500:]}"
     assert git(engine, p, "remote", "get-url", "origin") == REPO
     other = spec(egress={"default": {"allow": ["github.com"]}}, workspaces={"repo": {"git": {"url": OTHER_REPO}}}, agents={"coder": custom(agent_image, workspaces=["repo"])})
     p.write(other)
