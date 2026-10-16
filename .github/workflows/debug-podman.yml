@@ -1,4 +1,4 @@
-# TEMPORARY: when a proxy loses its way out on rootful Podman. Removed once understood.
+# TEMPORARY: what switches off forwarding on Podman's bridges. Removed once understood.
 name: debug-podman
 on:
   push:
@@ -6,104 +6,28 @@ on:
 jobs:
   debug:
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
       - run: scripts/ci-engine.sh podman
-      - run: sudo apt-get install -y -qq tcpdump >/dev/null
-      - run: |
-          make build
-          python -m venv specs/.venv
-          specs/.venv/bin/pip install -r specs/requirements.txt
-      - run: docker run -d --name spec-registry -p 5000:5000 registry:2
-      - name: Sample every proxy while the specs run
+      - name: Forwarding after each step
         run: |
-          cat > /tmp/sample.sh <<'SH'
-          while true; do
-            for id in $(sudo podman ps -q --filter name=-proxy-1); do
-              pid=$(sudo podman inspect -f '{{.State.Pid}}' $id 2>/dev/null) || continue
-              name=$(sudo podman inspect -f '{{.Name}}' $id | sed 's/^spec-//; s/-proxy-1//')
-              nets=$(sudo nsenter -t $pid -n ip -br addr | awk '$1 ~ /^eth/ {printf "%s=%s ", $1, $3}')
-              route=$(sudo nsenter -t $pid -n ip route | awk '/^default/{print $3, $5}')
-              t=""
-              for ip in 140.82.114.3 104.20.23.154 100.56.179.159; do
-                if sudo nsenter -t $pid -n timeout 3 bash -c "exec 3<>/dev/tcp/$ip/443" 2>/dev/null; then t="$t $ip:ok"; else t="$t $ip:FAIL"; fi
-              done
-              echo "$(date +%T) $name default[$route] $nets $t" >> /tmp/samples.log
-              case "$t" in *FAIL*)
-                if ! grep -q "^$name" /tmp/dumped 2>/dev/null; then
-                  echo "$name" >> /tmp/dumped
-                  {
-                    echo "######## BAD PROXY $name at $(date +%T)  [$route] $nets"
-                    echo "--- podman networks"; sudo podman network ls --format '{{.Name}} {{.ID}} subnet={{range .Subnets}}{{.Subnet}}{{end}} internal={{.Internal}}'
-                    echo "--- host links"; ip -br link | awk '{print $1, $2}' | grep -E "podman|br-|veth|docker" | head -40
-                    echo "--- host addr 10.89"; ip -br addr | grep 10.89
-                    echo "--- host routes 10.89"; ip route | grep 10.89
-                    echo "--- ip rules"; ip rule
-                    echo "--- iptables nat POSTROUTING"; sudo iptables -t nat -S | grep -E "10.89|NETAVARK" | head -30
-                    echo "--- nft netavark tables"; sudo nft list tables; sudo nft list ruleset 2>/dev/null | grep -n -E "10\.89\.(0|3)\.0/24|netavark" | head -40
-                    echo "--- FORWARD chains with counters"; sudo iptables -L FORWARD -v -n --line-numbers | head -20; sudo iptables -S | grep -E "^-N|^-P" | head -30
-                    echo "--- per-bridge sysctls"; for b in $(ip -br link | awk '/^podman[0-9]/{print $1}'); do echo "$b forwarding=$(cat /proc/sys/net/ipv4/conf/$b/forwarding) rp_filter=$(cat /proc/sys/net/ipv4/conf/$b/rp_filter) accept_local=$(cat /proc/sys/net/ipv4/conf/$b/accept_local)"; done; echo "default forwarding=$(cat /proc/sys/net/ipv4/conf/default/forwarding) all=$(cat /proc/sys/net/ipv4/conf/all/forwarding) eth0=$(cat /proc/sys/net/ipv4/conf/eth0/forwarding)"
-                    echo "--- route get as the proxy would"; ip route get 140.82.114.3 from $(echo $nets | grep -o 'eth0@if[0-9]*=[0-9.]*' | cut -d= -f2) iif $(ip -br addr | awk -v g=$(echo $route | awk '{print $1}') '$3 ~ "^"g"/" {print $1}') 2>&1
-                    echo "--- raw / mangle / security tables"; sudo iptables -t raw -S 2>&1 | head; sudo iptables -t mangle -S 2>&1 | head; sudo nft list table ip raw 2>&1 | head -30
-                    echo "--- veth to bridge (host side)"; bridge link | cut -c1-150; ip -o link | awk -F': ' '{print $1, $2}' | grep -E "^(9|1)[0-9]* veth" | head -20
-                    echo "--- the proxy eth0 peer ifindex"; sudo nsenter -t $pid -n ip -o link | grep -o "eth[0-9]@if[0-9]*"
-                    echo "--- tcpdump of 3 packets from the proxy ns SYN to 140.82.114.3 on its gateway bridge"; ( sudo timeout 6 tcpdump -ni any -c 6 "host 140.82.114.3" 2>&1 & sleep 1; sudo nsenter -t $pid -n timeout 3 bash -c "exec 3<>/dev/tcp/140.82.114.3/443" 2>/dev/null; wait ) | cut -c1-170 | head -14
-                    echo "--- isolation chains"; for c in 1 2 3 4; do sudo iptables -L NETAVARK_ISOLATION_$c -v -n 2>&1 | head -14; done
-                    echo "--- bridge to podman network"; for b in $(ip -br link | awk '/^podman[0-9]/{print $1}'); do echo "$b $(ip -br addr show $b | awk '{print $3}')"; done
-                    echo "--- NETAVARK_FORWARD"; sudo iptables -L NETAVARK_FORWARD -v -n --line-numbers 2>&1 | head -20
-                    echo "--- DOCKER-USER / DOCKER-FORWARD"; sudo iptables -L DOCKER-USER -v -n 2>&1 | head -6; sudo iptables -L DOCKER-FORWARD -v -n 2>&1 | head -12
-                    echo "--- sysctl"; sysctl net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables net.ipv4.conf.all.rp_filter 2>&1
-                    echo "--- proxy ns arp/neigh"; sudo nsenter -t $pid -n ip neigh
-                    echo "--- ping gateway from the proxy ns"; sudo nsenter -t $pid -n ping -c 2 -W 1 $(echo $route | awk '{print $1}') 2>&1 | tail -3
-                  } >> /tmp/dump.log 2>&1
-                fi;;
-              esac
-            done
-            sleep 5
-          done
-          SH
-          nohup bash /tmp/sample.sh >/dev/null 2>&1 &
-          cat > /tmp/events.sh <<'SH'
-          seen=""
-          while true; do
-            for id in $(sudo podman ps -q --filter name=-proxy-1); do
-              case " $seen " in *" $id "*) continue;; esac
-              seen="$seen $id"
-              n=$(sudo podman inspect -f '{{.Name}}' $id | sed 's/^spec-//; s/-proxy-1//')
-              sudo nohup sh -c "podman logs -f $id 2>&1 | sed \"s/^/\$(date +%T) $n /\" " >> /tmp/events.log 2>&1 &
-            done
-            sleep 2
-          done
-          SH
-          nohup bash /tmp/events.sh >/dev/null 2>&1 &
-      - name: Specs
-        working-directory: specs
-        env:
-          EGZO_BIN: ${{ github.workspace }}/bin/egzo
-        run: |
-          set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py proxy/test_proxy_secrets.py 2>&1 | tee ../specs-debug.log
-      - name: Timeline
-        if: always()
-        run: |
-          grep -E '"action":"(error|deny)"' /tmp/events.log | grep -v "egress profile" | cut -c1-220
-          echo ----- samples with a failure, and the lines around
-          grep -n FAIL /tmp/samples.log | head -5
-          echo ----- per proxy: first and last sample, and every change
-          awk '{k=$2; sig=$0; sub(/^[0-9:]+ /,"",sig); if (sig != last[k]) {print; last[k]=sig}}' /tmp/samples.log | cut -c1-230 | head -120
-      - name: The dump
-        if: always()
-        run: cat /tmp/dump.log
-      - name: Annotate
-        if: always()
-        run: |
-          { head -c 6800 /tmp/dump.log | sed -n "/per-bridge sysctls/,/veth to bridge/p"; } > debug-dump.log; scripts/ci-annotate.sh "dump" debug-dump.log tail || true
-          { grep -E "^(FAILED)" specs-debug.log | cut -c1-200; echo ---- errors; grep -E '"action":"error"' /tmp/events.log | cut -c1-250 | head; echo ---- changes; awk '{k=$2; sig=$0; sub(/^[0-9:]+ /,"",sig); if (sig != last[k]) {print; last[k]=sig}}' /tmp/samples.log | cut -c1-200 | head -40; } > debug-all.log
-          scripts/ci-annotate.sh "debug" debug-all.log tail
+          set +e
+          show() { printf '%-46s' "$1"; for b in $(ip -br link | awk '/^(podman|docker0|br-)/{print $1}'); do printf '%s=%s ' $b $(cat /proc/sys/net/ipv4/conf/$b/forwarding); done; printf 'all=%s default=%s\n' $(cat /proc/sys/net/ipv4/conf/all/forwarding) $(cat /proc/sys/net/ipv4/conf/default/forwarding); }
+          show "start"
+          sudo podman network create a >/dev/null;                      show "podman network create a (external)"
+          sudo podman run --rm --network a docker.io/library/alpine:3 true; show "podman run on a"
+          sudo podman network create --internal b >/dev/null;            show "podman network create --internal b"
+          sudo podman run --rm --network b docker.io/library/alpine:3 true; show "podman run on b"
+          sudo podman run -d --name p1 --network a docker.io/library/alpine:3 sleep 300 >/dev/null; show "podman run -d on a"
+          sudo podman network connect b p1;                              show "podman network connect b p1"
+          sudo podman network create c >/dev/null;                       show "podman network create c"
+          sudo podman network connect c p1;                              show "podman network connect c p1"
+          sudo podman network disconnect c p1;                           show "podman network disconnect c p1"
+          sudo podman network rm c >/dev/null;                           show "podman network rm c"
+          docker run --rm docker.io/library/alpine:3 true;               show "docker run"
+          docker network create dn >/dev/null;                           show "docker network create"
+          docker run -d --name dr --network dn docker.io/library/alpine:3 sleep 300 >/dev/null; show "docker run -d on dn"
+          docker rm -f dr >/dev/null; docker network rm dn >/dev/null;  show "docker rm / network rm"
+          sudo podman run --rm --network a docker.io/library/alpine:3 true; show "podman run on a again"
+          sleep 20;                                                      show "20 s later"
