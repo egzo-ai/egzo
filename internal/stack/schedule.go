@@ -7,6 +7,8 @@ import (
 	"context"
 	"io"
 	"sync"
+
+	"github.com/egzo-ai/egzo/internal/engine"
 )
 
 // dependencies returns, for each action of the plan, the indexes of the actions that must finish
@@ -135,6 +137,23 @@ func runConcurrently(ctx context.Context, plan []Action, deps [][]int, fn func(c
 		return ctx.Err()
 	}
 	return first
+}
+
+// onePerTimeOnPodman makes fn run one action at a time when the engine is Podman. Netavark, Podman's network
+// stack, races when several bridges are set up at once: on some hosts a bridge is left with
+// net.ipv4.conf.<bridge>.forwarding = 0 while it is not internal, and the containers on it have no way out
+// (known-issues/podman-concurrent-network-setup.md). The dependencies between actions still apply: this only
+// stops two engine calls from running at the same moment.
+func onePerTimeOnPodman(c *engine.Client, fn func(context.Context, Action) error) func(context.Context, Action) error {
+	if !c.Podman {
+		return fn
+	}
+	var mu sync.Mutex
+	return func(ctx context.Context, a Action) error {
+		mu.Lock()
+		defer mu.Unlock()
+		return fn(ctx, a)
+	}
 }
 
 // lockedWriter serializes writes from concurrent actions.
