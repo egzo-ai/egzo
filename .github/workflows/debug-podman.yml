@@ -1,4 +1,4 @@
-# TEMPORARY: why the proxy cannot reach the internet on rootful Podman. Removed once understood.
+# TEMPORARY: which resolved addresses a rootful Podman container cannot reach. Removed once understood.
 name: debug-podman
 on:
   push:
@@ -6,64 +6,24 @@ on:
 jobs:
   debug:
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
       - run: scripts/ci-engine.sh podman
-      - run: |
-          make build
-          python -m venv specs/.venv
-          specs/.venv/bin/pip install -r specs/requirements.txt
-      - run: docker run -d --name spec-registry -p 5000:5000 registry:2
       - run: sudo apt-get install -y -qq dnsutils >/dev/null
-      - name: Watch the proxies while the specs run
+      - name: Addresses
         run: |
-          cat > /tmp/watch.sh <<'SH'
-          seen=""
-          while true; do
-            for id in $(sudo podman ps -q --filter name=-proxy-1); do
-              case " $seen " in *" $id "*) continue;; esac
-              seen="$seen $id"
-              pid=$(sudo podman inspect -f '{{.State.Pid}}' $id)
-              name=$(sudo podman inspect -f '{{.Name}}' $id)
-              sudo nohup podman logs -f $id >> /tmp/proxy-logs.jsonl 2>&1 &
-              sleep 12
-              {
-                echo "##### $name pid=$pid at $(date +%T)"
-                sudo podman inspect -f '{{json .NetworkSettings.Networks}}' $id | python3 -c 'import json,sys; [print(k, v.get("IPAddress"), v.get("Gateway")) for k,v in json.load(sys.stdin).items()]'
-                sudo nsenter -t $pid -n ip -br addr; sudo nsenter -t $pid -n ip route; sudo nsenter -t $pid -n ip -6 route
-                sudo nsenter -t $pid -m cat /etc/resolv.conf 2>&1
-                echo "--- each nameserver of the proxy asked for github.com from its namespace"
-                for ns in $(sudo nsenter -t $pid -m awk '/^nameserver/{print $2}' /etc/resolv.conf); do
-                  echo "@$ns:"; sudo nsenter -t $pid -n dig +time=3 +tries=1 github.com @$ns 2>&1 | grep -E "status:|ANSWER SECTION|^github.com|timed out|no servers" | head -4
-                done
-                echo "--- the networks: internal flag, dns_enabled"
-                sudo podman network ls --format '{{.Name}} internal={{.Internal}} dns={{.DNSEnabled}}' | grep "$(echo $name | sed 's/^\///; s/-proxy-1//')"
-                echo "--- proxy log"; sudo podman logs --tail 30 $id 2>&1
-              } >> /tmp/proxies.log 2>&1
+          set +e
+          resolvectl status 2>&1 | head -12; cat /etc/resolv.conf | grep -v '^#'
+          sudo podman network create probe >/dev/null
+          for host in github.com httpbin.org example.com; do
+            echo "=== $host: host resolver"; dig +short $host | tr '\n' ' '; echo
+            echo "=== $host: from a rootful podman container (aardvark)"
+            sudo podman run --rm --network probe docker.io/library/alpine:3 sh -c "nslookup $host 2>&1 | grep -E '^Address' | tail -n +2 | tr '\n' ' '"; echo
+            for ip in $(for i in 1 2 3; do dig +short $host; done | grep -E '^[0-9.]+$' | sort -u); do
+              h=$(timeout 5 curl -sS -o /dev/null -m 5 --resolve $host:443:$ip -w '%{http_code}' https://$host/ 2>&1 | tail -c 60)
+              p=$(sudo podman run --rm --network probe docker.io/curlimages/curl:8.10.1 -sS -o /dev/null -m 5 --resolve $host:443:$ip -w '%{http_code}' https://$host/ 2>&1 | tail -c 60)
+              d=$(docker run --rm docker.io/curlimages/curl:8.10.1 -sS -o /dev/null -m 5 --resolve $host:443:$ip -w '%{http_code}' https://$host/ 2>&1 | tail -c 60)
+              echo "$host $ip  host=[$h] podman=[$p] docker=[$d]"
             done
-            sleep 2
           done
-          SH
-          nohup bash /tmp/watch.sh >/dev/null 2>&1 &
-      - name: Specs
-        working-directory: specs
-        env:
-          EGZO_BIN: ${{ github.workspace }}/bin/egzo
-        run: |
-          set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py proxy/test_proxy_secrets.py 2>&1 | tee ../specs-debug.log
-      - name: What the proxies logged that was not an allow or a challenge
-        if: always()
-        run: grep -v '"action":"\(allow\|challenge\|close\)"' /tmp/proxy-logs.jsonl | cut -c1-400 | head -80
-      - name: Annotate
-        if: always()
-        run: |
-          { echo "---- specs"; grep -E "^(FAILED|E  )" specs-debug.log | cut -c1-250 | head -25; echo "---- proxy events"; grep -v '"action":"\(allow\|challenge\|close\)"' /tmp/proxy-logs.jsonl | cut -c1-300 | head -40; } > debug-all.log
-          scripts/ci-annotate.sh "debug" debug-all.log tail
