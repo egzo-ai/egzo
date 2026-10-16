@@ -39,7 +39,7 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages/{id}/update", a.authenticated(a.update))
 	mux.HandleFunc("POST /v1/messages/{id}/ask", a.authenticated(a.ask))
 	mux.HandleFunc("GET /v1/agents", a.authenticated(a.agents))
-	mux.HandleFunc("POST /v1/hooks/{name}", a.authenticatedLimit(maxHookPayload, a.hook))
+	mux.HandleFunc("POST /v1/state", a.authenticatedLimit(maxStatePayload, a.state))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
@@ -221,51 +221,54 @@ func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) 
 	reply(w, http.StatusOK, a.server.othersOf(agent))
 }
 
-// maxHookPayload is the largest hook payload read. A tool's output can be large and is of no interest
-// here: only the state change matters, and what is recorded is reduced to a few named fields.
-const maxHookPayload = 4 << 20
+// maxStatePayload is the largest state report read. A harness may forward a whole tool call with it; only
+// the state matters, and what is recorded is reduced to a few named fields.
+const maxStatePayload = 4 << 20
 
-// hook ingests a harness hook payload. The hook always drives the agent's activity; it is recorded as an
-// event, reduced to what the stream is for, within the agent's budget.
-func (a *agentAPI) hook(w http.ResponseWriter, r *http.Request, agent string) {
-	name := r.PathValue("name")
-	if !safeName.MatchString(name) {
-		http.Error(w, "invalid hook name", http.StatusBadRequest)
-		return
-	}
-	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHookPayload))
+// state ingests a state a harness reports: {state, reason?}, where state is one of the activities. The
+// state alone drives the agent's activity; the reason is for people and is never read for a decision. The
+// report is recorded as an event, reduced to what the stream is for, within the agent's budget.
+func (a *agentAPI) state(w http.ResponseWriter, r *http.Request, agent string) {
+	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxStatePayload))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if a.server.takeBudget(agent, "hook", time.Now()) {
-		event := Event{Type: "hook", Agent: agent, Actor: "agent:" + agent, Text: name, Data: summarizeHook(name, payload)}
+	var body struct {
+		State string `json:"state"`
+	}
+	if json.Unmarshal(payload, &body) != nil || !activities[body.State] {
+		http.Error(w, "state is one of starting, idle, working, blocked", http.StatusBadRequest)
+		return
+	}
+	if a.server.takeBudget(agent, "state", time.Now()) {
+		event := Event{Type: "state", Agent: agent, Actor: "agent:" + agent, Text: body.State, Data: summarizeState(payload)}
 		if _, err := a.server.events.append(event); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
-	if err := a.server.onHook(agent, name, payload); err != nil {
+	if err := a.server.onState(agent, body.State); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// hookFields are the only parts of a hook payload that are recorded: what happened, never what a tool
+// stateFields are the only parts of a state report that are recorded: what happened, never what a tool
 // returned or what the user typed (those can hold anything the agent read, secrets included).
-var hookFields = []string{"tool_name", "message", "hook_event_name", "source", "reason", "notification_type"}
+var stateFields = []string{"reason", "tool_name"}
 
 // announcement matches the lines control composes (see announceLine): fixed words and message ids.
 var announcement = regexp.MustCompile(`^(check )?egzo messages? m[0-9a-f]{32}`)
 
-func summarizeHook(name string, payload []byte) json.RawMessage {
+func summarizeState(payload []byte) json.RawMessage {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(payload, &fields) != nil {
 		return nil
 	}
 	summary := map[string]string{}
-	for _, field := range hookFields {
+	for _, field := range stateFields {
 		var text string
 		if raw, ok := fields[field]; ok && json.Unmarshal(raw, &text) == nil && text != "" {
 			if len(text) > 500 {

@@ -5,7 +5,7 @@
 
 A message is never typed into the terminal. The session holder asks the control sidecar when the agent is idle and nobody has typed
 for `inject.human_quiet`; control answers with a short fixed line that names the message ids, and the holder types it as one bracketed
-paste. The agent fetches the message through its tools (`get_message`); fetching is the acknowledgement. Harness hooks report the
+paste. The agent fetches the message through its tools (`get_message`); fetching is the acknowledgement. Harness state reports (`egzo state`) give the
 agent's activity. These specs drive that with a stand-in harness (fixtures/fake-tui.sh, mode `hooks`) that reads the typed line and calls
 the agent API the way a model calls its tools.
 
@@ -86,7 +86,7 @@ class View:
 
     def prompts(self, name):
         """The prompts the harness reports having received (the typed lines) for an instance, in order."""
-        return [e["data"]["prompt"] for e in self.events() if e["type"] == "hook" and e["text"] == "UserPromptSubmit" and e["agent"] == name]
+        return [e["data"]["prompt"] for e in self.events() if e["type"] == "state" and e.get("data", {}).get("prompt") and e["agent"] == name]
 
     def messages(self, *args):
         return {row["ID"]: row for row in table(self.project.ok("message ls", *args).stdout)}
@@ -145,19 +145,32 @@ def test_the_activity_of_an_agent_follows_its_harness_and_the_engine_and_a_messa
     wait_for(lambda: any(sent in line for line in view.prompts(name)), "the announcement after the restart", timeout=60)
 
 
-def test_hooks_drive_the_activity_of_an_agent(view):
+def test_reported_states_drive_the_activity_of_an_agent(view):
     name = view.spawn("plain")
     steps = [
-        ("SessionStart", {}, "idle"),
-        ("UserPromptSubmit", {"prompt": "work"}, "working"),
-        ("Notification", {"message": "Claude needs your permission to use Bash"}, "blocked"),
-        ("UserPromptSubmit", {"prompt": "yes"}, "working"),
-        ("Stop", {}, "idle"),
-        ("Notification", {"message": "Claude is waiting for your input"}, "idle"),
+        ({"state": "idle"}, "idle"),
+        ({"state": "working", "reason": "prompt"}, "working"),
+        ({"state": "blocked", "reason": "permission"}, "blocked"),
+        ({"state": "working"}, "working"),
+        ({"state": "idle"}, "idle"),
+        # the reason is for people: whatever it says, the state decides
+        ({"state": "idle", "reason": "waiting for your input"}, "idle"),
+        ({"state": "working", "reason": "permission"}, "working"),
     ]
-    for hook, payload, expected in steps:
-        assert view.api(name).call("POST", f"/v1/hooks/{hook}", payload)[0] == 204
-        assert view.activity(name) == expected, f"after {hook}"
+    for body, expected in steps:
+        assert view.api(name).call("POST", "/v1/state", body)[0] == 204
+        assert view.activity(name) == expected, f"after {body}"
+
+
+def test_an_unknown_state_is_refused_and_the_claude_code_hook_endpoint_is_gone(view):
+    name = view.spawn("plain")
+    api = view.api(name)
+    api.call("POST", "/v1/state", {"state": "idle"})
+    for body in ({"state": "stopped"}, {"state": "Stop"}, {"state": ""}, {"reason": "no state"}):
+        assert api.call("POST", "/v1/state", body)[0] == 400, body
+    assert view.activity(name) == "idle"
+    for hook in ("Stop", "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification"):
+        assert api.call("POST", f"/v1/hooks/{hook}", {})[0] in (404, 405), hook
 
 
 def test_a_request_is_announced_with_a_short_line_the_agent_fetches_and_resolves_it_and_the_text_is_never_typed(view, egzo):
@@ -249,7 +262,7 @@ def test_messages_that_pile_up_while_the_agent_works_are_announced_together_afte
     assert combined and list(combined.groups()) == later, prompts[1]
 
     all_events = [e for e in view.events() if e.get("agent") == name]  # nothing was announced while it worked
-    first_stop = next(e for e in all_events if e["type"] == "hook" and e["text"] == "Stop")
+    first_stop = next(e for e in all_events if e["type"] == "state" and e["text"] == "idle")
     second = [e for e in all_events if e["type"] == "announced"][-1]
     assert second["seq"] > first_stop["seq"] and when(second) - when(first_stop) < 15
 
@@ -263,7 +276,7 @@ def test_a_blocked_agent_is_told_nothing_until_a_person_unblocks_it(view):
     p.ok("message send", name, "waiting behind the dialog")
     time.sleep(4)
     assert len(view.of_type("announced", name)) == 1
-    assert view.api(name).call("POST", "/v1/hooks/Stop", {})[0] == 204  # the person answered, the turn ended
+    assert view.api(name).call("POST", "/v1/state", {"state": "idle"})[0] == 204  # the person answered, the turn ended
     wait_for(lambda: len(view.of_type("announced", name)) == 2, "the second announcement after unblocking")
 
 

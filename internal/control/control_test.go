@@ -172,21 +172,17 @@ func TestEmptyAndOversizedTextIsRefused(t *testing.T) {
 	}
 }
 
-func TestHooksBecomeEventsWithTheNameOfWhatHappened(t *testing.T) {
+func TestStateReportsBecomeEventsWithTheirReason(t *testing.T) {
 	r := newRig(t)
-	response := r.asAgent("coder", "POST", "/v1/hooks/PreToolUse", `{"tool_name":"Bash","tool_input":{"command":"ls"}}`)
+	response := r.asAgent("coder", "POST", "/v1/state", `{"state":"working","reason":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`)
 	response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("status %d", response.StatusCode)
 	}
 	events := r.srv.events.all()
-	if len(events) < 1 || events[0].Type != "hook" || events[0].Text != "PreToolUse" || !strings.Contains(string(events[0].Data), "Bash") {
+	if len(events) < 1 || events[0].Type != "state" || events[0].Text != "working" ||
+		!strings.Contains(string(events[0].Data), "PreToolUse") || !strings.Contains(string(events[0].Data), "Bash") || strings.Contains(string(events[0].Data), "ls") {
 		t.Errorf("events = %+v", events)
-	}
-	bad := r.asAgent("coder", "POST", "/v1/hooks/..%2Fx", `{}`)
-	bad.Body.Close()
-	if bad.StatusCode == http.StatusNoContent {
-		t.Error("an unsafe hook name was accepted")
 	}
 }
 

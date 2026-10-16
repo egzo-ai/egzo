@@ -21,12 +21,12 @@ import (
 func TestAFloodOfHooksIsBoundedButTheActivityStaysCorrect(t *testing.T) {
 	r := newRig(t)
 	for i := 0; i < 1000; i++ {
-		r.hook("coder", "PreToolUse", `{"tool_name":"Bash"}`)
+		r.report("coder", `{"state":"working","tool_name":"Bash"}`)
 	}
-	r.hook("coder", "Stop", `{}`)
+	r.report("coder", `{"state":"idle"}`)
 	hooks := 0
 	for _, e := range r.srv.events.all() {
-		if e.Type == "hook" {
+		if e.Type == "state" {
 			hooks++
 		}
 	}
@@ -99,7 +99,7 @@ func TestTheEventLogIsCompactedWhenItGrowsTooBig(t *testing.T) {
 	r.project("coder")
 	id := r.request("coder", "keep me")
 	r.srv.events.maxLogBytes = 20 << 10
-	appendMany(t, r.srv.events, 400, Event{Type: "hook", Agent: "coder", Text: "PostToolUse", Data: json.RawMessage(`{"tool_name":"Bash"}`)})
+	appendMany(t, r.srv.events, 400, Event{Type: "state", Agent: "coder", Text: "working", Data: json.RawMessage(`{"tool_name":"Bash"}`)})
 	appendMany(t, r.srv.events, 100, Event{Type: "status", Agent: "coder", Text: strings.Repeat("s", 100)})
 	last, _ := r.srv.events.append(Event{Type: "activity", Agent: "coder", Text: activityWorking})
 	info, _ := os.Stat(filepath.Join(r.srv.dir, "events.jsonl"))
@@ -134,20 +134,20 @@ func TestCompactionKeepsAnInterruptThatIsStillPending(t *testing.T) {
 	r.project("coder")
 	r.srv.events.maxLogBytes = 10 << 10
 	r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","text":"stop","interrupt":true}`).Body.Close()
-	appendMany(t, r.srv.events, 300, Event{Type: "hook", Agent: "other", Text: "PostToolUse"})
+	appendMany(t, r.srv.events, 300, Event{Type: "state", Agent: "other", Text: "working"})
 	if !r.srv.events.interruptPending("coder") {
 		t.Error("a pending interrupt was dropped by compaction")
 	}
 }
 
-// --- R-16: hooks record what happened, not what was in it ------------------------------------------------
+// --- R-16: state reports record what happened, not what was in it ------------------------------------------------
 
-func TestAHooksPayloadIsReducedToWhatTheSidecarNeeds(t *testing.T) {
+func TestAStateReportIsReducedToWhatTheSidecarNeeds(t *testing.T) {
 	r := newRig(t)
 	secret := "ghp_SECRETSECRETSECRETSECRET"
-	r.hook("coder", "PostToolUse", `{"tool_name":"Read","tool_input":{"file_path":"/x/.env"},"tool_response":{"content":"TOKEN=`+secret+`"}}`)
-	r.hook("coder", "UserPromptSubmit", `{"prompt":"my password is `+secret+`"}`)
-	r.hook("coder", "Notification", `{"message":"Claude needs your permission to use Bash","transcript_path":"/x"}`)
+	r.report("coder", `{"state":"working","tool_name":"Read","tool_input":{"file_path":"/x/.env"},"tool_response":{"content":"TOKEN=`+secret+`"}}`)
+	r.report("coder", `{"state":"working","prompt":"my password is `+secret+`"}`)
+	r.report("coder", `{"state":"blocked","reason":"permission","transcript_path":"/x"}`)
 	for _, e := range r.srv.events.all() {
 		if strings.Contains(string(e.Data)+e.Text, secret) {
 			t.Errorf("event %d (%s) holds what the tool or the user wrote: %s", e.Seq, e.Text, e.Data)
@@ -155,42 +155,42 @@ func TestAHooksPayloadIsReducedToWhatTheSidecarNeeds(t *testing.T) {
 	}
 	var seen []string
 	for _, e := range r.srv.events.all() {
-		if e.Type == "hook" {
+		if e.Type == "state" {
 			seen = append(seen, string(e.Data))
 		}
 	}
 	joined := strings.Join(seen, " ")
-	if !strings.Contains(joined, "Read") || !strings.Contains(joined, "needs your permission") {
-		t.Errorf("the tool name and the notification text are what the stream is for: %s", joined)
+	if !strings.Contains(joined, "Read") || !strings.Contains(joined, "permission") {
+		t.Errorf("the tool name and the reason are what the stream is for: %s", joined)
 	}
 	if got := r.srv.events.activity("coder"); got != activityBlocked {
 		t.Errorf("activity = %q: the full payload must still drive the state", got)
 	}
 }
 
-func TestSummarizeHookIgnoresUnusableAndHugeInput(t *testing.T) {
-	if got := summarizeHook("Stop", []byte("not json")); got != nil {
+func TestSummarizeStateIgnoresUnusableAndHugeInput(t *testing.T) {
+	if got := summarizeState([]byte("not json")); got != nil {
 		t.Errorf("summary = %s", got)
 	}
-	long := `{"message":"` + strings.Repeat("m", 5000) + `"}`
-	if got := summarizeHook("Notification", []byte(long)); len(got) > 700 {
+	long := `{"reason":"` + strings.Repeat("m", 5000) + `"}`
+	if got := summarizeState([]byte(long)); len(got) > 700 {
 		t.Errorf("summary is %d bytes", len(got))
 	}
-	if got := summarizeHook("Stop", []byte(`{"tool_name":["not","a","string"]}`)); strings.Contains(string(got), "not") {
+	if got := summarizeState([]byte(`{"tool_name":["not","a","string"]}`)); strings.Contains(string(got), "not") {
 		t.Errorf("a non-string field was copied: %s", got)
 	}
 }
 
-func TestAHookLargerThanTheBodyLimitStillDrivesTheActivity(t *testing.T) {
+func TestAStateReportLargerThanTheBodyLimitStillDrivesTheActivity(t *testing.T) {
 	r := newRig(t)
-	huge := `{"tool_name":"Read","tool_response":"` + strings.Repeat("x", 200<<10) + `"}`
-	response := r.asAgent("coder", "POST", "/v1/hooks/PreToolUse", huge)
+	huge := `{"state":"working","tool_name":"Read","tool_response":"` + strings.Repeat("x", 200<<10) + `"}`
+	response := r.asAgent("coder", "POST", "/v1/state", huge)
 	response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d", response.StatusCode)
 	}
 	if r.srv.events.activity("coder") != activityWorking {
-		t.Error("the hook was lost because its payload was large")
+		t.Error("the report was lost because its payload was large")
 	}
 }
 
@@ -532,7 +532,7 @@ func TestAVeryLongLineDoesNotStopTheSidecarFromStarting(t *testing.T) {
 
 func TestTheHolderCanReleaseAnAgentThatIsStuckWorking(t *testing.T) {
 	r := newRig(t)
-	r.hook("coder", "UserPromptSubmit", `{}`)
+	r.report("coder", `{"state":"working"}`)
 	response := r.asAgent("coder", "POST", "/v1/activity", `{"state":"idle","if":"working"}`)
 	response.Body.Close()
 	if got := r.srv.events.activity("coder"); got != activityIdle {
@@ -542,7 +542,7 @@ func TestTheHolderCanReleaseAnAgentThatIsStuckWorking(t *testing.T) {
 
 func TestAConditionalIdleNeverOverridesABlockedAgent(t *testing.T) {
 	r := newRig(t)
-	r.hook("coder", "Notification", `{"message":"Claude needs your permission"}`)
+	r.report("coder", `{"state":"blocked","message":"Claude needs your permission"}`)
 	response := r.asAgent("coder", "POST", "/v1/activity", `{"state":"idle","if":"working"}`)
 	response.Body.Close()
 	if got := r.srv.events.activity("coder"); got != activityBlocked {
@@ -557,7 +557,7 @@ func TestClaimAndFriendsStayFastWithALongHistory(t *testing.T) {
 	r.project("coder", "other")
 	r.srv.events.maxLogBytes = 1 << 40
 	for i := 0; i < 60000; i++ {
-		r.srv.events.memoryAppend(Event{Type: "hook", Agent: "other", Text: "PostToolUse"})
+		r.srv.events.memoryAppend(Event{Type: "state", Agent: "other", Text: "working"})
 	}
 	for i := 0; i < 6000; i++ {
 		id := fmt.Sprintf("m%032d", i)
@@ -607,11 +607,11 @@ func TestStartingNeverUndoesWhatTheHarnessAlreadyReported(t *testing.T) {
 
 func TestTheLineEgzoTypedIsRecordedButWhatAPersonTypedIsNot(t *testing.T) {
 	line := "check egzo message m0123456789abcdef0123456789abcdef and handle the request for me."
-	got := string(summarizeHook("UserPromptSubmit", []byte(`{"prompt":"`+line+`"}`)))
+	got := string(summarizeState([]byte(`{"prompt":"` + line + `"}`)))
 	if !strings.Contains(got, "check egzo message m0123456789abcdef") {
 		t.Errorf("the announcement is how the specs and the operator see what was typed: %s", got)
 	}
-	if got := summarizeHook("UserPromptSubmit", []byte(`{"prompt":"egzo message with my password hunter2"}`)); got != nil {
+	if got := summarizeState([]byte(`{"prompt":"egzo message with my password hunter2"}`)); got != nil {
 		t.Errorf("a person's text that merely starts alike was recorded: %s", got)
 	}
 }

@@ -48,7 +48,7 @@ var budgets = map[string]struct {
 	burst     float64
 	perSecond float64
 }{
-	"hook":   {200, 50},
+	"state":  {200, 50},
 	"status": {20, 1},
 	"update": {30, 0.5},
 }

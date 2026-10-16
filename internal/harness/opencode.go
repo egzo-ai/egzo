@@ -24,23 +24,22 @@ func (openCode) ContainerEnv(bool, bool) map[string]string {
 	return map[string]string{"ANTHROPIC_API_KEY": claudeKey}
 }
 
-// openCodePlugin reports OpenCode's life cycle to the control sidecar under the hook names the
-// control sidecar already understands from Claude Code.
-const openCodePlugin = `// Written by egzo: reports this agent's life cycle to the control sidecar. Do not edit.
+// openCodePlugin reports OpenCode's life cycle to the control sidecar as egzo's states.
+const openCodePlugin = `// Written by egzo: reports this agent's state to the control sidecar. Do not edit.
 const base = process.env.EGZO_CONTROL_URL
 const agent = process.env.EGZO_AGENT
 const token = process.env.EGZO_TOKEN
 
-async function hook(name, payload) {
+async function state(name, report) {
   if (!base || !agent || !token) return
   try {
-    await fetch(base + "/v1/hooks/" + name, {
+    await fetch(base + "/v1/state", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: "Basic " + Buffer.from(agent + ":" + token).toString("base64"),
       },
-      body: JSON.stringify(payload ?? {}),
+      body: JSON.stringify({ state: name, ...report }),
       signal: AbortSignal.timeout(2000),
     })
   } catch {}
@@ -53,22 +52,23 @@ export const EgzoPlugin = async () => {
   // moment the TUI is up and waiting.
   if (!started) {
     started = true
-    hook("SessionStart", {})
+    state("idle", { reason: "started" })
   }
   return {
   event: async ({ event }) => {
     switch (event.type) {
       case "session.idle":
-        return hook("Stop", {})
+        return state("idle", { reason: event.type })
       case "permission.asked":
       case "permission.updated":
+        return state("blocked", { reason: "permission" })
       case "question.asked":
-        return hook("Notification", { message: "opencode needs your permission or an answer (" + event.type + ")" })
+        return state("blocked", { reason: "question" })
     }
   },
   "chat.message": async (_input, output) => {
     const prompt = (output.parts || []).filter((part) => part.type === "text").map((part) => part.text).join("\n")
-    await hook("UserPromptSubmit", { prompt })
+    await state("working", { reason: "prompt", prompt })
   },
   }
 }

@@ -60,7 +60,7 @@ hooks) # a harness with hooks and tools: it reports its life cycle like Claude C
 	stty -echo
 	trap : INT
 	printf 'READY\r\n'
-	[ "${FAKE_HOOKS:-1}" = 1 ] && egzo hook SessionStart </dev/null
+	[ "${FAKE_HOOKS:-1}" = 1 ] && egzo state idle --reason SessionStart </dev/null
 	api() { curl -s -m 5 -u "$EGZO_AGENT:$EGZO_TOKEN" -H 'content-type: application/json' "$@"; }
 	buf=""
 	pasting=0
@@ -73,7 +73,7 @@ hooks) # a harness with hooks and tools: it reports its life cycle like Claude C
 		text=$(clean "$buf")
 		buf=""
 		[ -z "$text" ] && continue
-		[ "${FAKE_HOOKS:-1}" = 1 ] && printf '{"prompt":"%s"}' "$text" | egzo hook UserPromptSubmit
+		[ "${FAKE_HOOKS:-1}" = 1 ] && printf '{"prompt":"%s"}' "$text" | egzo state working --reason UserPromptSubmit
 		printf 'got:%s\r\n' "$text"
 		ids=$(printf '%s' "$text" | grep -o 'm[0-9a-f]\{32\}')
 		fetched=""
@@ -81,8 +81,8 @@ hooks) # a harness with hooks and tools: it reports its life cycle like Claude C
 			for id in $ids; do fetched="$fetched $(api "$EGZO_CONTROL_URL/v1/messages/$id")"; done
 		fi
 		case "$fetched" in
-		*ask-permission*) printf '{"message":"Claude needs your permission to use Bash"}' | egzo hook Notification; continue ;;
-		*idle-prompt*) printf '{"message":"Claude is waiting for your input"}' | egzo hook Notification; continue ;;
+		*ask-permission*) egzo state blocked --reason permission </dev/null; continue ;;
+		*idle-prompt*) egzo state idle --reason idle_prompt </dev/null; continue ;;
 		esac
 		case "$fetched" in
 		*needs-update*) for id in $ids; do api -X POST "$EGZO_CONTROL_URL/v1/messages/$id/update" -d '{"text":"working on it"}' >/dev/null; done ;;
@@ -96,7 +96,7 @@ hooks) # a harness with hooks and tools: it reports its life cycle like Claude C
 			fi
 			;;
 		esac
-		[ "${FAKE_HOOKS:-1}" = 1 ] && printf '{}' | egzo hook Stop
+		[ "${FAKE_HOOKS:-1}" = 1 ] && egzo state idle --reason Stop </dev/null
 	done
 	;;
 exit) # leaves straight away

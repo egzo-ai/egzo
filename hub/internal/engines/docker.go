@@ -287,7 +287,7 @@ func (d *Docker) Attach(ctx context.Context, project, agent string, term Termina
 }
 
 // noisy are the event types that are not worth a person's time, or that carry message texts, which the hub does not show.
-var noisy = map[string]bool{"hook": true}
+var noisy = map[string]bool{"state": true}
 
 // withText are the types whose text is shown: what the agent says about itself. The text of a message never is.
 var withText = map[string]bool{"status": true, "activity": true}

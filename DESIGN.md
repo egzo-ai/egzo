@@ -99,7 +99,7 @@ to work. There is no override flag; rename the project (`-p`, env or `name:`) or
   image tagged with its own version, so CLI and sidecars cannot drift. It includes git >= 2.47 for
   the prep role. `proxy.image` stays overridable. Harness images are separate:
   `ghcr.io/egzo-ai/egzo-harness-<name>`.
-- `egzo agent run`, `egzo agent browser` and `egzo hook` are the in-container roles (pty holder, hooks), the same binary, copied into
+- `egzo agent run`, `egzo agent browser` and `egzo state` are the in-container roles (pty holder, state reports), the same binary, copied into
   every harness image.
 - Config file `egzo.yaml`, env vars `EGZO_*`. egzo keeps nothing in the project directory.
 - Labels follow the DNS convention under our domain: `ai.egzo.*` (e.g. `ai.egzo.project`).
@@ -247,7 +247,7 @@ Commands are grouped by what they act on. There are no aliases for names that mo
   one session. It may return later as an optional driver for headless agents only.
   - Human -> agent: a message in the control sidecar; a short fixed line naming it is typed into the terminal
     (see "Messages"), and the agent fetches it with a tool.
-  - Agent state -> orchestrator: harness hooks call the control sidecar's agent API.
+  - Agent state -> orchestrator: a harness reports its state (`egzo state`, or `POST /v1/state`) to the control sidecar's agent API.
   - Agent -> human: MCP `egzo` tools (`resolve`, `update`, `ask`, `message`, `status`; see "Messages").
   - Attach (CLI and web UI) = `engine exec -it` into the Session backend.
 - Specs: pytest in `specs/`. A spec for an unbuilt feature fails (the failing specs are the todo list); strict
@@ -386,7 +386,7 @@ templates are declared and published by `up`.
 
 ## Control plane (decided)
 - The control sidecar holds status, event log, message queue and spec snapshots (volume).
-- Agent -> control: HTTP on the container network. MCP over streamable HTTP; hooks and a stdio-MCP
+- Agent -> control: HTTP on the container network. MCP over streamable HTTP; state reports and a stdio-MCP
   fallback go through the small static `egzo-agent` binary (also the candidate pty holder).
 - One network per agent; control and proxy join each agent's network, agents never share one, so
   agent-to-agent traffic only exists through control and policy. `NO_PROXY` covers the control host.
@@ -394,7 +394,7 @@ templates are declared and published by `up`.
   agent identity, not a provider secret; compromising an agent only lets it act as itself.
   The same token is the agent's proxy credential (`HTTPS_PROXY=http://agent:<token>@proxy:3128`).
 - Control has two listeners: an **agent API** (TCP, token auth, agent verbs only: the message tools,
-  status, agents, hook ingest) and an **operator API** on a unix socket inside the container,
+  status, agents, state ingest) and an **operator API** on a unix socket inside the container,
   reached only via `engine exec` by the CLI/hub (read spec, send and list messages, answer, interrupt).
   Operator verbs are never on the network.
 - To verify in a spike: per-agent `internal` networks on rootless podman; why not unix sockets:
@@ -661,14 +661,14 @@ The holder asks the control sidecar when the terminal is ready; control answers 
   A message pending when the harness starts is announced the same way once its TUI is ready.
 - **Fetching is the acknowledgement.** No fetch within `inject.ack_timeout` (60 s by default) announces
   again, safely, up to three times in all; then the message is `unconfirmed`, shown by `egzo message ls`, and
-  still found by `list_messages`. The `UserPromptSubmit` hook no longer acknowledges anything.
+  still found by `list_messages`. Reporting `working` no longer acknowledges anything.
 - **Interrupt:** `egzo message send --interrupt` makes the holder send the harness's interrupt key first, as before.
 - **Limits** (a loop between agents is easy to start): at most 20 open requests per recipient, a thread is
   at most 8 messages deep (`re` adds one hop), and a sender may send at most 30 messages a minute.
   Past a limit the tool answers with an error that says which.
 
 ### Agent status: what the harness does, and what the agent owes
-- **Activity** (from hooks, the holder and the engine): `starting`, `idle`, `working`, `blocked` (the
+- **Activity** (from the states a harness reports, the holder and the engine): `starting`, `idle`, `working`, `blocked` (the
   harness is stuck on its own UI: a permission dialog, a login: something only a person at the terminal can
   answer), `stopped` (the container is not running). `working`, `blocked`, `starting` and `stopped` hold back
   announcements; messages for a stopped agent wait and are announced when it is ready again.
@@ -677,8 +677,10 @@ The holder asks the control sidecar when the terminal is ready; control answers 
   usually ends its turn and goes `idle`, so `waiting` must not hold announcements back, or the answer
   could never arrive.
 - `egzo ps` shows ACTIVITY, OPEN and WAITING next to the status line.
-- Signals: harness hooks (Claude Code: SessionStart/Stop idle, UserPromptSubmit and the tool hooks working,
-  Notification blocked unless it says the agent waits for input; OpenCode through its plugin), the holder
+- Signals: the state a harness reports in egzo's own words (`idle`, `working`, `blocked`, with a `reason` for people that the
+  control never reads). Claude Code's hooks run `egzo state <state> --reason <hook>`; the mapping from its hook names (and its
+  notification kinds: `idle_prompt` idle, `permission_prompt` and `elicitation_dialog` blocked) lives in `internal/harness/claudecode.go`.
+  OpenCode's plugin posts the states itself. Then the holder
   (for harnesses without hooks, quiet output means idle: `inject.idle_signal: quiescence`), the engine.
 - If we interrupted, control marks idle itself; a human Esc may not fire Stop.
 
@@ -691,7 +693,7 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 - `egzo message reply ID TEXT [--outcome done|declined|failed]`: resolve a message addressed to a person: it
   answers a question, and closes a request an agent made of the operator.
 - `egzo events`: the raw typed stream (`message`, `announced`, `fetched`, `resolved`, `unconfirmed`,
-  `interrupt`, `interrupted`, `activity`, `hook`, `status`, `retired`).
+  `interrupt`, `interrupted`, `activity`, `state`, `status`, `retired`).
 
 ## Spec visibility (decided)
 - Labels stay small, flat, readable (see Reconciliation model); observed state (image, env, mounts,
@@ -755,7 +757,7 @@ compatible socket but is not exercised by the current suite): `project init|up|d
 (`up --dry-run`, `check --resolved`), `agent spawn|ls|rm|start|stop|attach`, `message send|ls|reply`,
 `workspace ls|put|get|fetch|rm`, `ps` (`--json`), `logs`, `exec`, `start|stop|restart`, `events`, `proxy log|rules`,
 `system check`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|browser`,
-`egzo hook`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
+`egzo state`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
 the egzo image with `make images`); `custom` runs any image.
 
 Decisions taken while building (reversible; each is covered by specs):
@@ -834,20 +836,19 @@ Decisions taken while building (reversible; each is covered by specs):
   produces files (merged into what the harness already keeps in the volume), a command line and the interrupt
   key. Claude Code starts with `--permission-mode bypassPermissions`, never with `permissions.defaultMode` in the settings (which makes it ask on its first start whether to make auto mode the default; nobody is there to answer in an unattended agent, and an injected Enter would). Claude Code: `~/.claude.json` (onboarding done, each workspace trusted, a placeholder API key
   pre-approved, the `egzo` MCP server), `~/.claude/settings.json` (its bypass prompt skipped, any earlier `defaultMode` removed, hooks
-  `egzo hook <Name>`), `--model`, `--append-system-prompt` with the platform instructions + the agent's prompt,
+  `egzo state <state> --reason <Name>`), `--model`, `--append-system-prompt` with the platform instructions + the agent's prompt,
   `IS_SANDBOX=1`. OpenCode: `opencode.json` (`permission: {"*": "allow"}`, the MCP server, model,
   instructions) and a plugin that reports `SessionStart` when it loads (OpenCode only creates a session on the
   first prompt), `UserPromptSubmit` from `chat.message` and `Stop` from `session.idle`. `permissions: default`
   undoes all of it explicitly, so an opt-out also fixes a home an earlier run configured.
 - **Messages and delivery** (`internal/control`, `internal/session`; the model is in "Messages"). The control
   sidecar keeps the messages and their states in memory, rebuilt from the event log, and derives the activity
-  (`starting | idle | working | blocked`) from hooks (`SessionStart`/`Stop` idle, `UserPromptSubmit` and the tool
-  hooks working, `Notification` blocked unless it says the agent waits for input). The holder asks
+  (`starting | idle | working | blocked`) from the states the harness reports (Claude Code's hooks run `egzo state`; OpenCode's plugin posts to `/v1/state`). The holder asks
   `POST /v1/claim` when the TUI is ready and nobody has typed (read-write clients only) for `inject.human_quiet`;
   control hands over an interrupt first, otherwise the announcement line for what is queued, but only to an idle
   agent with no announcement still awaiting its fetch. The line is composed in control from fixed words and ids and
   typed as one paste; fetching is the acknowledgement; no fetch by `inject.ack_timeout` announces again, three
-  times in all, then `unconfirmed`. Harnesses without hooks (`inject.idle_signal: quiescence`, the default for
+  times in all, then `unconfirmed`. Harnesses that report no state (`inject.idle_signal: quiescence`, the default for
   `custom`) are idle when their output has been quiet for `inject.quiescence`. `egzo ps` shows ACTIVITY, OPEN
   and WAITING next to the reported status.
 - **Git workspaces** (`internal/stack/git.go`, `internal/gitprep`): the CLI decides the layout (a base volume and a
@@ -882,14 +883,14 @@ Decisions taken while building (reversible; each is covered by specs):
 - **Messaging contract** (control sidecar). Agent API on `http://control:7777` (HTTP basic: agent name and
   its token, in `EGZO_CONTROL_URL`, `EGZO_AGENT` and `EGZO_TOKEN`): `GET|POST /v1/messages`,
   `GET /v1/messages/{id}`, `POST /v1/messages/{id}/resolve|update|ask`, `GET /v1/agents`, `POST /v1/status`,
-  `/v1/hooks/{name}`, `/v1/activity`, `/v1/claim`, and MCP at `/mcp` with the tools `list_messages`, `get_message`,
+  `/v1/state` (`{state, reason?}`), `/v1/activity`, `/v1/claim`, and MCP at `/mcp` with the tools `list_messages`, `get_message`,
   `resolve`, `update`, `ask`, `message`, `status` and `agents`. An agent can only act as itself and only sees
   messages addressed to it (an unknown id and someone else's answer alike: "no such message"), and the agent port
   serves no operator verb. Operator API (unix socket, exec only): `GET /events?after=&agent=&follow=1`,
   `POST /messages` (`interrupt: true` asks for the current turn to be stopped), `GET /messages?agent=&kind=&all=1`,
   `GET /messages/{id}`, `POST /messages/{id}/resolve`, `GET /agents`, `PUT|DELETE /v1/agents/{name}`, `PUT|GET /templates`. Event types: `status`,
   `message` (with `data.to`, `kind`, `re`, `hops`), `announced`, `fetched`, `resolved` (with the resolution's text and
-  `data.outcome`), `unconfirmed`, `interrupt`, `interrupted`, `activity`, `hook`, `retired` (an agent was unregistered: its status is forgotten).
+  `data.outcome`), `unconfirmed`, `interrupt`, `interrupted`, `activity`, `state`, `retired` (an agent was unregistered: its status is forgotten).
 - **Spec snapshot** is stored on the control volume at every `up` that changes it, keyed by hash,
   with the resolved config, the label contract version and the config hash of every container.
 
@@ -925,7 +926,7 @@ separate `egzo-hub` deliverable (see `roadmap/hub.md`). What that means for core
   and in all, closes idle connections, terminates Encrypted Client Hello instead of tunneling it, keeps bytes sent right behind CONNECT, truncates
   logged values, logs bytes and duration of a tunnel, bounds its certificate cache, and answers 503 "run `egzo project up`" when
   it has no policy; `egzo start|restart proxy` reloads the policy. The CA is only ever replaced by an explicit rotation.
-- **Control.** Verbs that write to the log have budgets per agent; hook payloads are reduced to a few named fields (plus
+- **Control.** Verbs that write to the log have budgets per agent; state reports are reduced to a few named fields (plus
   the line egzo typed); the log is compacted past 64 MB; the project key is created once, atomically, and never replaced;
   snapshots are verified against their hash and retired past 50; every recipient has at most 20 open requests; the
   holder releases an agent that sits at "working" while its screen is silent (`if: working`), and announces itself with

@@ -17,7 +17,7 @@ session holder (`egzo agent run`), so what you see on `egzo agent attach` is the
 - **No first-run friction.** Onboarding, theme and workspace-trust dialogs are pre-answered, so a fresh instance
   starts at a prompt.
 - **Credentials stay out.** The harness gets a placeholder credential; the proxy injects the real one.
-- **Status and messages.** Hooks report when the agent is working or idle, and an `egzo` MCP server gives it the tools
+- **Status and messages.** Each harness reports (Claude Code through hooks, OpenCode through a plugin) when the agent is working or idle, and an `egzo` MCP server gives it the tools
   to answer requests, ask a person, and message another agent. Messages ([messaging](messaging.md)) are announced by a short line typed into
   the terminal; the agent fetches the content with a tool.
 - **A browser.** Chromium and the Playwright MCP server are in the image and registered with the harness ([browsing](browser.md)).

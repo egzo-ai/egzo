@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -201,46 +202,65 @@ func withDefault(environment []string, key, value string) []string {
 	return append(environment, key+"="+value)
 }
 
-// newHookCommand is what a harness's hooks run: it posts the hook's payload to the control sidecar.
-// It never fails and never waits long, so it can never hold the harness up.
-func newHookCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:    "hook NAME",
-		Short:  "Report a harness hook to the control sidecar (reads the payload on stdin)",
+// newStateCommand is what a harness runs to report its state to the control sidecar. It never waits long
+// on the sidecar, so it can never hold the harness up. A harness that passes its own event on stdin (a
+// JSON object) has its tool_name and prompt forwarded; the control sidecar records no more than that.
+func newStateCommand() *cobra.Command {
+	var reason string
+	cmd := &cobra.Command{
+		Use:    "state STATE",
+		Short:  "Report the agent's state (starting, idle, working or blocked) to the control sidecar",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			payload := []byte("{}")
+			state := args[0]
+			if !validStates[state] {
+				return fmt.Errorf("state %q is not starting, idle, working or blocked", state)
+			}
+			report := map[string]any{"state": state}
+			if reason != "" {
+				report["reason"] = reason
+			}
 			if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice == 0 {
 				done := make(chan []byte, 1)
 				go func() { data, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<20)); done <- data }()
 				select {
 				case data := <-done:
-					if len(strings.TrimSpace(string(data))) > 0 {
-						payload = data
+					var event map[string]json.RawMessage
+					if json.Unmarshal(data, &event) == nil {
+						for _, field := range []string{"tool_name", "prompt"} {
+							if value, ok := event[field]; ok {
+								report[field] = value
+							}
+						}
 					}
 				case <-time.After(2 * time.Second):
 				}
 			}
+			payload, _ := json.Marshal(report)
 			api, err := agentclient.FromEnv()
 			if err != nil {
 				return nil
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
 			defer cancel()
-			postHook(ctx, api, args[0], payload)
+			postState(ctx, api, payload)
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&reason, "reason", "", "why, in a few words, for people (shown by `egzo ps`)")
+	return cmd
 }
 
-// postHook delivers a hook to the control sidecar, trying again for as long as the context allows when
-// the sidecar is busy or not reachable yet: a lost "Stop" would keep the agent "working" for good. It
+var validStates = map[string]bool{"starting": true, "idle": true, "working": true, "blocked": true}
+
+// postState delivers a state to the control sidecar, trying again for as long as the context allows when
+// the sidecar is busy or not reachable yet: a lost "idle" would keep the agent "working" for good. It
 // gives up at once on a refusal, which no retry would change.
-func postHook(ctx context.Context, api *agentclient.Client, name string, payload []byte) error {
+func postState(ctx context.Context, api *agentclient.Client, payload []byte) error {
 	delay := 100 * time.Millisecond
 	for {
-		_, err := api.Do(ctx, "POST", "/v1/hooks/"+name, payload)
+		_, err := api.Do(ctx, "POST", "/v1/state", payload)
 		if err == nil || !agentclient.Temporary(err) {
 			return err
 		}

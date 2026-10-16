@@ -1,6 +1,9 @@
 # Roadmap: egzo's own status vocabulary, no Claude Code names
 
-**Status.** Designed, not built. No backward compatibility: egzo is pre-release. A prerequisite of [non-tui-agents.md](non-tui-agents.md), and worth doing on its own.
+**Status.** Built (code, specs, unit tests). Decided on the way: the endpoint is `POST /v1/state`; `reason` is free text (at most 500 bytes
+recorded) and `egzo state` forwards `tool_name` and `prompt` from a JSON event on stdin; Claude Code's `Notification` is two hooks selected by
+Claude's own matcher (`idle_prompt` is idle, `permission_prompt|elicitation_dialog` is blocked), so no text is parsed anywhere; the `message`
+field is no longer recorded. No backward compatibility: egzo is pre-release. A prerequisite of [non-tui-agents.md](non-tui-agents.md), and worth doing on its own.
 
 ## The problem
 
@@ -53,12 +56,6 @@ The protocol belongs to egzo. A harness reports a **state change**, in egzo's wo
   `reason`, or the agent's own `status(text)` tool.
 - A harness without any reporting still uses quiescence (`inject.idle_signal: quiescence`). That does not change.
 - How an agent without a terminal receives work: [non-tui-agents.md](non-tui-agents.md).
-
-## Open
-
-- The path and name of the new endpoint, and whether `reason` is free text or a short list.
-- Whether the control should accept a state from a harness *and* an overlay, such as `blocked` that clears when the next `working`
-  arrives (it does today, by the order of hooks).
 
 ## Tests
 

@@ -115,15 +115,28 @@ func TestClaudeCodeOptOutOfBypassIsExplicitSoItUndoesAnEarlierRun(t *testing.T) 
 	}
 }
 
-func TestClaudeCodeReportsItsLifeCycleThroughHooks(t *testing.T) {
+func TestClaudeCodeHooksReportEgzosStates(t *testing.T) {
 	o := options(t)
 	plan, _ := claudeCode{}.Plan(o, nil)
 	settings := decode(t, plan, filepath.Join(o.Home, ".claude", "settings.json"))
-	for _, hook := range []string{"SessionStart", "UserPromptSubmit", "Stop", "Notification"} {
+	want := map[string]string{"SessionStart": "idle", "UserPromptSubmit": "working", "PreToolUse": "working", "PostToolUse": "working", "Stop": "idle"}
+	for hook, state := range want {
 		groups := get(t, settings, "hooks", hook).([]any)
 		command := get(t, groups[0], "hooks").([]any)[0].(map[string]any)["command"]
-		if command != "egzo hook "+hook {
+		if command != "egzo state "+state+" --reason "+hook {
 			t.Errorf("%s runs %v", hook, command)
+		}
+	}
+	commands := map[string]string{}
+	for _, group := range get(t, settings, "hooks", "Notification").([]any) {
+		commands[get(t, group, "matcher").(string)] = get(t, group, "hooks").([]any)[0].(map[string]any)["command"].(string)
+	}
+	if commands["idle_prompt"] != "egzo state idle --reason idle_prompt" || !strings.HasPrefix(commands["permission_prompt|elicitation_dialog"], "egzo state blocked ") {
+		t.Errorf("notifications run %v", commands)
+	}
+	for hook := range get(t, settings, "hooks").(map[string]any) {
+		if _, ok := want[hook]; !ok && hook != "Notification" {
+			t.Errorf("unexpected hook %s", hook)
 		}
 	}
 }
@@ -210,13 +223,18 @@ func TestOpenCodeModelInstructionsAndControlTools(t *testing.T) {
 	}
 }
 
-func TestOpenCodePluginReportsTheLifeCycleUnderClaudeCodesHookNames(t *testing.T) {
+func TestOpenCodePluginReportsEgzosStatesAndNoClaudeCodeNames(t *testing.T) {
 	o := options(t)
 	plan, _ := openCode{}.Plan(o, nil)
 	plugin := string(plan.Files[filepath.Join(o.Home, ".config", "opencode", "plugin", "egzo.js")].Content)
-	for _, want := range []string{`hook("SessionStart"`, `"session.idle"`, `hook("Stop"`, `hook("UserPromptSubmit"`, `"chat.message"`, `hook("Notification"`, "/v1/hooks/"} {
+	for _, want := range []string{`state("idle"`, `"session.idle"`, `state("working"`, `"chat.message"`, `state("blocked"`, `"permission.asked"`, `"question.asked"`, "/v1/state"} {
 		if !strings.Contains(plugin, want) {
 			t.Errorf("the plugin lacks %s", want)
+		}
+	}
+	for _, gone := range []string{"/v1/hooks", "Notification", "UserPromptSubmit", "SessionStart"} {
+		if strings.Contains(plugin, gone) {
+			t.Errorf("the plugin still says %s", gone)
 		}
 	}
 }

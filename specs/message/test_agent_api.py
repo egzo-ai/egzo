@@ -140,25 +140,27 @@ def test_agents_lists_the_others_with_their_activity_and_open_counts_and_status_
     assert "refactoring the parser" not in next(line for line in lines if b.name in line.split())
 
 
-def test_hooks_arrive_as_events_without_what_the_agent_read_or_said(team):
+def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team):
     coder, reviewer = team.coder, team.reviewer
     secret = "ghp_SPECSECRETSPECSECRETSPECSECRET"
-    assert coder.call("POST", "/v1/hooks/Stop", {"last_assistant_message": "all done"})[0] == 204
-    assert coder.call("POST", "/v1/hooks/PostToolUse", {"tool_name": "Read", "tool_response": {"content": f"TOKEN={secret}"}})[0] == 204
-    coder.call("POST", "/v1/hooks/UserPromptSubmit", {"prompt": f"my key is {secret}"})
-    hooks = [e for e in team.events("--agent", coder.name) if e["type"] == "hook"]
-    assert "Stop" in {e["text"] for e in hooks}
-    assert any(e.get("data", {}).get("tool_name") == "Read" for e in hooks), "the tool name is what the stream is for"
+    assert coder.call("POST", "/v1/state", {"state": "idle", "last_assistant_message": "all done"})[0] == 204
+    assert coder.call("POST", "/v1/state", {"state": "working", "reason": "PostToolUse", "tool_name": "Read", "tool_response": {"content": f"TOKEN={secret}"}})[0] == 204
+    coder.call("POST", "/v1/state", {"state": "working", "prompt": f"my key is {secret}"})
+    states = [e for e in team.events("--agent", coder.name) if e["type"] == "state"]
+    assert "idle" in {e["text"] for e in states}
+    assert any(e.get("data", {}).get("reason") == "PostToolUse" for e in states), "the reason is recorded"
+    assert any(e.get("data", {}).get("tool_name") == "Read" for e in states), "the tool name is what the stream is for"
+    assert not [e for e in team.events("--agent", coder.name) if e["type"] == "hook"], "the hook event type is gone"
     stream = team.project.ok("events").stdout
-    assert secret not in stream and "all done" not in stream, "tool output and prompts are not recorded, only that the hook happened"
+    assert secret not in stream and "all done" not in stream, "tool output and prompts are not recorded, only that the state was reported"
     on_volume = team.engine.exec(team.container("control").name, "sh", "-c", "cat /state/events.jsonl 2>/dev/null || true")
     assert secret not in on_volume.stdout
 
     # a large payload still counts
     big = (
-        "(printf '{\"prompt\":\"'; head -c 150000 /dev/zero | tr '\\0' x; printf '\"}') | "
+        "(printf '{\"state\":\"working\",\"prompt\":\"'; head -c 150000 /dev/zero | tr '\\0' x; printf '\"}') | "
         'curl -sS -m 20 -o /dev/null -w "%{http_code}" -u "$EGZO_AGENT:$EGZO_TOKEN" -X POST '
-        '-H "content-type: application/json" --data-binary @- "$EGZO_CONTROL_URL/v1/hooks/UserPromptSubmit"'
+        '-H "content-type: application/json" --data-binary @- "$EGZO_CONTROL_URL/v1/state"'
     )
     assert coder.exec(big).stdout.strip() == "204"
     team.project.ok("ps")

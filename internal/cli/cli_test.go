@@ -42,7 +42,7 @@ func TestRootCommandTree(t *testing.T) {
 	root := New()
 	want := []string{
 		"project", "agent", "message", "workspace", "system",
-		"ps", "logs", "exec", "start", "stop", "restart", "events", "proxy", "version", "control", "hook", "prep",
+		"ps", "logs", "exec", "start", "stop", "restart", "events", "proxy", "version", "control", "state", "prep",
 	}
 	removed := []string{"init", "config", "up", "down", "spawn", "rm", "prune", "send", "attach", "secrets", "doctor", "diff", "ca", "messages", "questions", "answer"}
 	have := map[string]bool{}
@@ -190,7 +190,7 @@ func TestTheSameProjectThroughASymlinkIsTheSameProject(t *testing.T) {
 	}
 }
 
-func TestAHookIsRetriedWhileTheControlSidecarIsNotReadyAndNotAfterARefusal(t *testing.T) {
+func TestAStateIsRetriedWhileTheControlSidecarIsNotReadyAndNotAfterARefusal(t *testing.T) {
 	var calls atomic.Int32
 	failures := int32(2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -204,8 +204,8 @@ func TestAHookIsRetriedWhileTheControlSidecarIsNotReadyAndNotAfterARefusal(t *te
 	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := postHook(ctx, api, "Stop", []byte("{}")); err != nil {
-		t.Fatalf("postHook: %v", err)
+	if err := postState(ctx, api, []byte(`{"state":"idle"}`)); err != nil {
+		t.Fatalf("postState: %v", err)
 	}
 	if calls.Load() != 3 {
 		t.Errorf("%d attempts, want 3", calls.Load())
@@ -219,20 +219,20 @@ func TestAHookIsRetriedWhileTheControlSidecarIsNotReadyAndNotAfterARefusal(t *te
 	}))
 	defer refuse.Close()
 	api.URL, api.HTTP = refuse.URL, refuse.Client()
-	if err := postHook(ctx, api, "Stop", nil); err == nil || calls.Load() != 1 {
+	if err := postState(ctx, api, []byte(`{"state":"idle"}`)); err == nil || calls.Load() != 1 {
 		t.Errorf("a refusal was retried: %d attempts, err = %v", calls.Load(), err)
 	}
 }
 
-func TestAHookGivesUpWhenTheSidecarNeverAnswersWithinTheBudget(t *testing.T) {
+func TestAStateGivesUpWhenTheSidecarNeverAnswersWithinTheBudget(t *testing.T) {
 	api := &agentclient.Client{URL: "http://127.0.0.1:1", Agent: "coder", Token: "t", HTTP: &http.Client{Timeout: 200 * time.Millisecond}}
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	if err := postHook(ctx, api, "Stop", nil); err == nil {
+	if err := postState(ctx, api, []byte(`{"state":"idle"}`)); err == nil {
 		t.Fatal("no error from an unreachable sidecar")
 	}
 	if time.Since(started) > 2*time.Second {
-		t.Error("the hook held the harness up")
+		t.Error("the state report held the harness up")
 	}
 }

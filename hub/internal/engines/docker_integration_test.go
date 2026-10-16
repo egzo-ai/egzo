@@ -235,8 +235,8 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range events {
-		if e.Type == "hook" {
-			t.Errorf("a hook event leaked into the timeline: %+v", e)
+		if e.Type == "state" {
+			t.Errorf("a state event leaked into the timeline: %+v", e)
 		}
 	}
 	spec, err := eng.Spec(ctx, name)

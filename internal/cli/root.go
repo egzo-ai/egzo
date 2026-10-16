@@ -51,7 +51,7 @@ func New() *cobra.Command {
 		newVersionCommand(),
 		newControlCommand(),
 		newPrepCommand(),
-		newHookCommand(),
+		newStateCommand(),
 	)
 	return root
 }

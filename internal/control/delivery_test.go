@@ -10,12 +10,12 @@ import (
 	"time"
 )
 
-func (r *rig) hook(agent, name, payload string) {
+func (r *rig) report(agent, payload string) {
 	r.t.Helper()
-	response := r.asAgent(agent, "POST", "/v1/hooks/"+name, payload)
+	response := r.asAgent(agent, "POST", "/v1/state", payload)
 	response.Body.Close()
 	if response.StatusCode != 204 {
-		r.t.Fatalf("hook %s: status %d", name, response.StatusCode)
+		r.t.Fatalf("state %s: status %d", payload, response.StatusCode)
 	}
 }
 
@@ -28,33 +28,55 @@ func (r *rig) claim(agent string, timeout time.Duration) claimResult {
 	return result
 }
 
-func (r *rig) idle(agent string) { r.hook(agent, "SessionStart", `{}`) }
+func (r *rig) idle(agent string) { r.report(agent, `{"state":"idle"}`) }
 
-func TestHooksDriveTheActivityOfAnAgent(t *testing.T) {
+func TestReportedStatesDriveTheActivityOfAnAgent(t *testing.T) {
 	r := newRig(t)
-	steps := []struct{ hook, payload, want string }{
-		{"SessionStart", `{}`, "idle"},
-		{"UserPromptSubmit", `{"prompt":"go"}`, "working"},
-		{"Notification", `{"message":"Claude needs your permission to use Bash"}`, "blocked"},
-		{"PostToolUse", `{}`, "working"},
-		{"Stop", `{}`, "idle"},
-		{"Notification", `{"message":"Claude is waiting for your input"}`, "idle"},
+	steps := []struct{ payload, want string }{
+		{`{"state":"idle"}`, "idle"},
+		{`{"state":"working","reason":"prompt"}`, "working"},
+		{`{"state":"blocked","reason":"permission"}`, "blocked"},
+		{`{"state":"working"}`, "working"},
+		{`{"state":"idle"}`, "idle"},
+		// the reason is for people: it never changes the decision
+		{`{"state":"idle","reason":"waiting for your input"}`, "idle"},
+		{`{"state":"working","reason":"permission"}`, "working"},
 	}
 	for _, step := range steps {
-		r.hook("coder", step.hook, step.payload)
+		r.report("coder", step.payload)
 		if got := r.srv.events.activity("coder"); got != step.want {
-			t.Fatalf("after %s: activity %q, want %q", step.hook, got, step.want)
+			t.Fatalf("after %s: activity %q, want %q", step.payload, got, step.want)
 		}
 	}
 	if r.srv.events.activity("reviewer") != "" {
-		t.Error("an agent's hooks changed another agent's activity")
+		t.Error("an agent's state changed another agent's activity")
+	}
+}
+
+func TestAnUnknownStateIsRefusedAndTheHookEndpointIsGone(t *testing.T) {
+	r := newRig(t)
+	r.report("coder", `{"state":"idle"}`)
+	for _, body := range []string{`{"state":"stopped"}`, `{"state":"Stop"}`, `{}`, `not json`} {
+		response := r.asAgent("coder", "POST", "/v1/state", body)
+		response.Body.Close()
+		if response.StatusCode != 400 {
+			t.Errorf("%s: status %d, want 400", body, response.StatusCode)
+		}
+	}
+	if r.srv.events.activity("coder") != "idle" {
+		t.Error("a refused state changed the activity")
+	}
+	response := r.asAgent("coder", "POST", "/v1/hooks/Stop", `{}`)
+	response.Body.Close()
+	if response.StatusCode != 404 && response.StatusCode != 405 {
+		t.Errorf("the hook endpoint answers %d", response.StatusCode)
 	}
 }
 
 func TestAnUnchangedActivityIsNotAnEvent(t *testing.T) {
 	r := newRig(t)
-	r.hook("coder", "Stop", `{}`)
-	r.hook("coder", "Stop", `{}`)
+	r.report("coder", `{"state":"idle"}`)
+	r.report("coder", `{"state":"idle"}`)
 	count := 0
 	for _, event := range r.srv.events.all() {
 		if event.Type == "activity" {
@@ -88,11 +110,11 @@ func TestOnlyAnIdleAgentIsAnnouncedAnything(t *testing.T) {
 		t.Fatalf("an agent that has not reported idle was announced %q", got.Line)
 	}
 	r.idle("coder")
-	r.hook("coder", "UserPromptSubmit", `{"prompt":"busy now"}`)
+	r.report("coder", `{"state":"working","prompt":"busy now"}`)
 	if got := r.claim("coder", time.Minute); got.Line != "" {
 		t.Fatalf("a working agent was announced %q", got.Line)
 	}
-	r.hook("coder", "Stop", `{}`)
+	r.report("coder", `{"state":"idle"}`)
 	if got := r.claim("coder", time.Minute); got.Line == "" || len(got.IDs) != 1 {
 		t.Fatalf("claim = %+v", got)
 	}
@@ -180,7 +202,7 @@ func TestFetchingIsTheAcknowledgement(t *testing.T) {
 	if m, _ := r.srv.events.message(id); m.State != stateFetched {
 		t.Fatalf("state = %s", m.State)
 	}
-	r.hook("coder", "Stop", `{}`)
+	r.report("coder", `{"state":"idle"}`)
 	other := r.request("coder", "next")
 	if got := r.claim("coder", time.Minute); got.Line == "" || got.IDs[0] != other {
 		t.Errorf("the next message was not announced after the fetch: %+v", got)
@@ -234,13 +256,13 @@ func TestAMessageForAnAgentThatIsNotReadyWaitsAndIsAnnouncedWhenItIs(t *testing.
 	r := newRig(t)
 	r.project("coder")
 	id := r.request("coder", "while you were away")
-	r.hook("coder", "SessionStart", `{}`)
-	r.hook("coder", "UserPromptSubmit", `{"prompt":"x"}`)
-	r.hook("coder", "Notification", `{"message":"needs permission"}`)
+	r.report("coder", `{"state":"idle"}`)
+	r.report("coder", `{"state":"working","prompt":"x"}`)
+	r.report("coder", `{"state":"blocked","message":"needs permission"}`)
 	if got := r.claim("coder", time.Minute); got.Line != "" {
 		t.Fatalf("a blocked agent was announced %q", got.Line)
 	}
-	r.hook("coder", "Stop", `{}`)
+	r.report("coder", `{"state":"idle"}`)
 	if got := r.claim("coder", time.Minute); len(got.IDs) != 1 || got.IDs[0] != id {
 		t.Errorf("claim = %+v", got)
 	}
@@ -249,7 +271,7 @@ func TestAMessageForAnAgentThatIsNotReadyWaitsAndIsAnnouncedWhenItIs(t *testing.
 func TestAnInterruptIsHandedOverOnceAndMarksTheAgentIdle(t *testing.T) {
 	r := newRig(t)
 	r.project("coder")
-	r.hook("coder", "UserPromptSubmit", `{"prompt":"long job"}`)
+	r.report("coder", `{"state":"working","prompt":"long job"}`)
 	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","text":"change of plan","interrupt":true}`)
 	response.Body.Close()
 	got := r.claim("coder", time.Minute)
@@ -282,7 +304,7 @@ func TestAgentsAreListedWithActivityAndStatus(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
 	r.asAgent("coder", "POST", "/v1/status", `{"text":"parsing"}`).Body.Close()
-	r.hook("coder", "UserPromptSubmit", `{"prompt":"x"}`)
+	r.report("coder", `{"state":"working","prompt":"x"}`)
 	response := r.asOperator("GET", "/v1/agents", "")
 	var agents []AgentStatus
 	decode(t, response, &agents)

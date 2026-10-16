@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Agent activity, derived from what the harness reports through its hooks and from the session
+// Agent activity, derived from the states the harness reports (`egzo state`) and from the session
 // holder: starting, idle, working, or blocked (stuck on the harness's own UI, which only a person at the
 // terminal can answer). Every change is an `activity` event, so clients follow it on the same stream as
 // everything else. stopped is not recorded: it is the engine's word, shown by `egzo ps`.
@@ -23,27 +23,6 @@ const (
 
 var activities = map[string]bool{activityStarting: true, activityIdle: true, activityWorking: true, activityBlocked: true}
 
-// hookActivity maps a harness hook to the activity it implies. The hook names are Claude Code's;
-// the OpenCode plugin reports the same names.
-func hookActivity(name string, payload []byte) (string, bool) {
-	switch name {
-	case "SessionStart", "Stop":
-		return activityIdle, true
-	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
-		return activityWorking, true
-	case "Notification":
-		var body struct {
-			Message string `json:"message"`
-		}
-		json.Unmarshal(payload, &body)
-		if strings.Contains(strings.ToLower(body.Message), "waiting for your input") {
-			return activityIdle, true
-		}
-		return activityBlocked, true
-	}
-	return "", false
-}
-
 // setActivity records a change of activity; an unchanged activity is not an event.
 func (s *server) setActivity(agent, state string) error {
 	if s.events.activity(agent) == state {
@@ -53,14 +32,11 @@ func (s *server) setActivity(agent, state string) error {
 	return err
 }
 
-// onHook updates the agent's activity from a hook.
-func (s *server) onHook(agent, name string, payload []byte) error {
+// onState updates the agent's activity from a state its harness reported.
+func (s *server) onState(agent, state string) error {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	if state, ok := hookActivity(name, payload); ok {
-		return s.setActivity(agent, state)
-	}
-	return nil
+	return s.setActivity(agent, state)
 }
 
 type claimResult struct {

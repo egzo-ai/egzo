@@ -21,7 +21,7 @@ import (
 type Event struct {
 	Seq   int             `json:"seq"`
 	Time  time.Time       `json:"time"`
-	Type  string          `json:"type"` // status, message, announced, fetched, resolved, unconfirmed, interrupt, interrupted, activity, hook
+	Type  string          `json:"type"` // status, message, announced, fetched, resolved, unconfirmed, interrupt, interrupted, activity, state
 	Agent string          `json:"agent,omitempty"`
 	Actor string          `json:"actor,omitempty"` // agent:<name> or user:<id>; operator for the CLI
 	ID    string          `json:"id,omitempty"`    // message id
@@ -53,7 +53,7 @@ type store struct {
 	waiting   map[string]int  // agent -> questions it asked that nobody has answered
 }
 
-// defaultMaxLogBytes is when the log is compacted: hook events, which are the bulk of it, and superseded
+// defaultMaxLogBytes is when the log is compacted: state events, which are the bulk of it, and superseded
 // status and activity lines are dropped; messages and everything that defines their state are kept.
 const defaultMaxLogBytes = 64 << 20
 
@@ -179,7 +179,7 @@ func (s *store) compact() error {
 	var kept []Event
 	for i, event := range s.events {
 		switch event.Type {
-		case "hook":
+		case "state":
 			continue
 		case "status", "activity":
 			if lastOf[event.Agent+"\x00"+event.Type] != i {

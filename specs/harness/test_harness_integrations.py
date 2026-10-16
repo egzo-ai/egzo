@@ -4,7 +4,7 @@
 """The harness integrations: Claude Code and OpenCode as images egzo runs, in their native TUI.
 
 Every integration must (design: bypass mode is a requirement): pre-configure the harness's own bypass mode, skip every first-run prompt,
-report its life cycle through hooks, reach the control sidecar's MCP tools, run as the invoking user, and never hold a real credential.
+report its life cycle through states they report, reach the control sidecar's MCP tools, run as the invoking user, and never hold a real credential.
 The images are the real ones from `harness/<name>/Dockerfile`; no model is called, so no credential is needed.
 
 One project is up for the whole module, with a template for each way these specs set a harness up (a workspace, two, a model, a prompt,
@@ -169,9 +169,12 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
     env = env_of(engine, p, scratch)
     assert env["ANTHROPIC_API_KEY"] and env["ANTHROPIC_API_KEY"] != API_KEY
 
-    for hook in ("SessionStart", "UserPromptSubmit", "Stop", "Notification"):
+    for hook, reported in (("SessionStart", "idle"), ("UserPromptSubmit", "working"), ("PreToolUse", "working"), ("PostToolUse", "working"), ("Stop", "idle")):
         commands = [h["command"] for group in settings["hooks"][hook] for h in group["hooks"]]
-        assert f"egzo hook {hook}" in commands, hook
+        assert f"egzo state {reported} --reason {hook}" in commands, hook
+    notifications = {group["matcher"]: [h["command"] for h in group["hooks"]] for group in settings["hooks"]["Notification"]}
+    assert any("egzo state idle" in c for c in notifications["idle_prompt"]) and any("egzo state blocked" in c for c in notifications["permission_prompt|elicitation_dialog"])
+    assert not any("egzo hook" in h["command"] for groups in settings["hooks"].values() for group in groups for h in group["hooks"])
     server = state["mcpServers"]["egzo"]
     assert server["type"] == "http" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
 
@@ -205,7 +208,8 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     assert server["type"] == "remote" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
     plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugin/egzo.js $HOME/.config/opencode/plugins/egzo.js 2>/dev/null").stdout
     assert "session.idle" in plugin
-    assert "UserPromptSubmit" in plugin and "Stop" in plugin and "SessionStart" in plugin
+    assert "/v1/state" in plugin and "blocked" in plugin and "working" in plugin and "idle" in plugin
+    assert "/v1/hooks" not in plugin and "Notification" not in plugin and "UserPromptSubmit" not in plugin
 
     configured = read_json(engine, p, model, "$HOME/.config/opencode/opencode.json")
     assert configured["model"] == "anthropic/claude-sonnet-5-5" and any("instructions.md" in path for path in configured["instructions"])
@@ -224,21 +228,23 @@ def test_claude_code_gets_an_oauth_placeholder_when_the_profile_injects_a_bearer
     assert OAUTH_TOKEN not in json.dumps(engine.instance(sandbox.name, name).raw["Config"])
 
 
-def test_the_hook_command_posts_its_payload_as_a_hook_event_and_never_blocks_or_fails_the_harness(sandbox, engine):
+def test_the_state_command_reports_a_state_and_never_blocks_or_fails_the_harness(sandbox, engine):
     p = sandbox
     name = p.spawn("emit", timeout=300)
     container = engine.instance(p.name, name).name
     ran = subprocess.run(
-        [engine.cli, "exec", "-i", container, "egzo", "hook", "PreToolUse"],
+        [engine.cli, "exec", "-i", container, "egzo", "state", "working", "--reason", "PreToolUse"],
         input='{"tool_name":"Bash"}', text=True, capture_output=True, env={**os.environ, **engine.env},
     )
     assert ran.returncode == 0, ran.stderr
-    found = [e for e in events(p) if e["type"] == "hook" and e["text"] == "PreToolUse" and e["agent"] == name]
+    found = [e for e in events(p) if e["type"] == "state" and e["text"] == "working" and e.get("data", {}).get("reason") == "PreToolUse" and e["agent"] == name]
     assert found
 
     start = time.time()
-    broken = engine.exec(container, "sh", "-c", "EGZO_CONTROL_URL=http://127.0.0.1:9 egzo hook Stop </dev/null; echo exit=$?")
+    broken = engine.exec(container, "sh", "-c", "EGZO_CONTROL_URL=http://127.0.0.1:9 egzo state idle </dev/null; echo exit=$?")
     assert "exit=0" in broken.stdout and time.time() - start < 6
+    assert engine.exec(container, "egzo", "state", "nonsense").returncode != 0, "a state egzo does not know is rejected on the command line"
+    assert engine.exec(container, "egzo", "hook", "Stop").returncode != 0, "egzo hook is gone"
 
 
 @pytest.mark.parametrize("harness", HARNESSES)
@@ -258,6 +264,6 @@ def test_the_real_tui_reports_idle_and_is_told_a_message_is_waiting(sandbox, har
         return "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events(p))
 
     wait_until(lambda: mine("announced"), "the message to be announced", 40, context=context)
-    typed = wait_until(lambda: [e["data"]["prompt"] for e in mine("hook") if e["text"] == "UserPromptSubmit"], "the TUI to submit the typed line", 40, context=context)
+    typed = wait_until(lambda: [e["data"]["prompt"] for e in mine("state") if e.get("data", {}).get("prompt")], "the TUI to submit the typed line", 40, context=context)
     assert typed[0] == f"check egzo message {sent} and handle the request for me."
     assert "TOP-SECRET-PAYLOAD" not in json.dumps(typed)

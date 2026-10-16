@@ -42,8 +42,25 @@ func (claudeCode) ContainerEnv(bypass, bearer bool) map[string]string {
 	return env
 }
 
-// claudeHooks are the hooks that report the agent's life cycle to the control sidecar.
-var claudeHooks = []string{"SessionStart", "UserPromptSubmit", "Stop", "Notification", "PreToolUse", "PostToolUse"}
+// claudeHooks maps each Claude Code hook that reports the agent's life cycle to the state it means.
+// This is the one place Claude Code's names are translated into egzo's states. Notification is not here:
+// it means idle or blocked by the kind of notification, see claudeNotifications.
+var claudeHooks = map[string]string{
+	"SessionStart":     "idle",
+	"UserPromptSubmit": "working",
+	"PreToolUse":       "working",
+	"PostToolUse":      "working",
+	"Stop":             "idle",
+}
+
+// claudeNotifications maps the kinds of Claude Code notification (the hook's matcher) to a state: the
+// agent waiting at its prompt is idle, one waiting for a permission or an answer is blocked.
+var claudeNotifications = []struct{ matcher, state string }{
+	{"idle_prompt", "idle"},
+	{"permission_prompt|elicitation_dialog", "blocked"},
+}
+
+func stateCommand(state, reason string) string { return "egzo state " + state + " --reason " + reason }
 
 func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	home := o.Home
@@ -81,9 +98,15 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	}
 
 	hooks := map[string]any{}
-	for _, name := range claudeHooks {
-		hooks[name] = []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "egzo hook " + name}}}}
+	for name, state := range claudeHooks {
+		hooks[name] = []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": stateCommand(state, name)}}}}
 	}
+	var notifications []any
+	for _, n := range claudeNotifications {
+		reason := strings.SplitN(n.matcher, "|", 2)[0]
+		notifications = append(notifications, map[string]any{"matcher": n.matcher, "hooks": []any{map[string]any{"type": "command", "command": stateCommand(n.state, reason)}}})
+	}
+	hooks["Notification"] = notifications
 	// Bypass mode comes from the command line, not from `permissions.defaultMode` in the settings: with
 	// that setting Claude Code asks on its first start "Make auto mode your default permission mode?", a
 	// question nobody is there to answer in an unattended agent. The key is removed (null deletes it when

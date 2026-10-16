@@ -113,7 +113,7 @@ func TestAnEventThatChangesNothingAReaderCanSeeIsNotALine(t *testing.T) {
 	waitForLines(t, out, 2)
 	// a hook that says "idle" again, and a status line repeated, move `updated` and nothing else
 	srv.setActivity("coder", "idle")
-	srv.events.append(Event{Type: "hook", Agent: "coder", Actor: "agent:coder", Text: "PreToolUse"})
+	srv.events.append(Event{Type: "state", Agent: "coder", Actor: "agent:coder", Text: "working"})
 	time.Sleep(200 * time.Millisecond)
 	if lines := out.lines(); len(lines) != 2 {
 		t.Errorf("lines = %d, want 2: %+v", len(lines), lines)

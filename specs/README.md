@@ -138,7 +138,7 @@ it covers and how the project it runs on is shared.
 | `agent/test_agent_containers.py` | the network, who an agent runs as, limits, runtimes (gVisor), and the workspace volumes it mounts |
 | `service/test_service_commands.py` | `logs`, `exec` (with and without a terminal), `start`, `stop`, `restart` on an instance or a sidecar |
 | `message/test_message_cli.py` | `message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
-| `message/test_agent_api.py` | what an agent does to the control sidecar: the HTTP tools, MCP, hooks, and the limits |
+| `message/test_agent_api.py` | what an agent does to the control sidecar: the HTTP tools, MCP, state reports, and the limits |
 | `message/test_message_announcements.py` | agent states, announcing queued messages, the human-quiet rule, acks, interrupt |
 | `session/test_session_attach.py` | `agent attach` and the session fidelity matrix, against a stand-in TUI |
 | `proxy/test_proxy_isolation.py` | how an agent reaches the proxy, private addresses, Encrypted Client Hello (no internet needed) |
@@ -152,7 +152,7 @@ it covers and how the project it runs on is shared.
 ## Not covered
 
 A model is never called: the harness specs stop at what egzo configures, what the TUI shows and what the
-harness reports through hooks (prompt submitted, session idle), which needs no credential. The specs that need
+harness reports as states (prompt submitted, session idle), which needs no credential. The specs that need
 the outside world (github.com, httpbin.org, example.com, the registry) fail when it is unreachable (a known weakness:
 `known-issues/specs-depend-on-online-services.md`).
 The harness specs build the real images from `harness/` (a few minutes the first time, cached by content).
