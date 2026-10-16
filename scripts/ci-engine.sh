@@ -41,6 +41,11 @@ docker-gvisor)
 	docker info --format '{{json .Runtimes}}'
 	docker run --rm --runtime=runsc alpine:3 dmesg | head -3
 	;;
+podman | podman-rootless)
+	# The specs' test registry on localhost:5000 speaks plain HTTP. Docker trusts localhost for that, Podman does not.
+	sudo mkdir -p /etc/containers/registries.conf.d
+	printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-spec-registry.conf
+	;;&
 podman)
 	# rootful Podman: the API service of root on /run/podman/podman.sock, which the runner user may use (the VM is thrown away).
 	# systemd's podman.socket makes /run/podman readable by root only, so the service is started here instead.

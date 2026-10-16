@@ -35,12 +35,12 @@ type Options struct {
 // Podman maps users itself (rootless container root is the invoking user), so it keeps the image's.
 func AgentUser(c *engine.Client) string { return agentUser(c, os.Getuid(), os.Getgid()) }
 
-// agentUser is the "uid:gid" agents run as. An engine that maps users itself (Podman, rootless Docker)
-// keeps the image's user. Root is never an agent's user: someone running egzo as root (sudo) still gets
+// agentUser is the "uid:gid" agents run as. A rootless engine maps users itself (the invoking user is
+// root of the container's user namespace) and keeps the image's user; rootful Podman does not. Root is never an agent's user: someone running egzo as root (sudo) still gets
 // agents that run unprivileged.
 func agentUser(c *engine.Client, uid, gid int) string {
 	switch {
-	case c.Podman || c.Rootless || uid < 0:
+	case c.Rootless || uid < 0:
 		return ""
 	case uid == 0:
 		return "1000:1000"

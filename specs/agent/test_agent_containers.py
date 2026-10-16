@@ -74,7 +74,7 @@ def test_an_instance_runs_unprivileged_as_the_invoking_user_with_limits_and_bind
     p = sandbox
     coder, small, limited, solo = p.spawn("coder"), p.spawn("small"), p.spawn("limited"), p.spawn("solo")
 
-    assert run_in(engine, p, coder, "sh", "-c", "echo $(id -u):$(id -g)").stdout.strip() == f"{os.getuid()}:{os.getgid()}"
+    assert run_in(engine, p, coder, "sh", "-c", "echo $(id -u):$(id -g)").stdout.strip() == f"{engine.uid}:{engine.gid}"
     status = run_in(engine, p, coder, "grep", "-E", "CapEff|NoNewPrivs", "/proc/self/status").stdout
     assert "CapEff:\t0000000000000000" in status and "NoNewPrivs:\t1" in status
 
@@ -97,7 +97,8 @@ def test_an_instance_runs_unprivileged_as_the_invoking_user_with_limits_and_bind
         assert user and user.split(":")[0] not in ("0", "root"), f"{service} runs as {user!r}"
         host = sidecar.raw["HostConfig"]
         assert host["Memory"] > 0 and host["PidsLimit"] and host["PidsLimit"] > 0, f"{service} is not limited"
-        assert host["ReadonlyRootfs"] and "ALL" in host["CapDrop"]
+        dropped = set(host["CapDrop"])  # Podman lists the default capabilities it drops instead of ALL
+        assert host["ReadonlyRootfs"] and ("ALL" in dropped or {"CAP_CHOWN", "CAP_KILL", "CAP_NET_BIND_SERVICE"} <= dropped)
     p.ok("proxy log")
     p.ok("events")
     p.up()  # a second `up` on existing volumes
@@ -109,7 +110,7 @@ def test_workspaces_are_volumes_that_instances_share_and_write_as_the_invoking_u
     volume = [r for r in engine.resources(p.name) if r.name == p.volume("scratch")]
     assert [(r.kind, r.labels[f"{LABEL_PREFIX}kind"], r.labels[f"{LABEL_PREFIX}service"]) for r in volume] == [("volume", "workspace", "scratch")]
     assert f"{LABEL_PREFIX}instance" not in volume[0].labels, "a directory workspace belongs to the project, not to an instance"
-    assert engine.in_volumes({p.volume("scratch"): "/w"}, "stat -c %u:%g /w").stdout.strip() == f"{os.getuid()}:{os.getgid()}"
+    assert engine.in_volumes({p.volume("scratch"): "/w"}, "stat -c %u:%g /w").stdout.strip() == f"{engine.uid}:{engine.gid}"
     assert not (p.root / "workspaces").exists(), "nothing is made in the project directory"
 
     coder, reviewer = p.spawn("coder"), p.spawn("reviewer")
@@ -117,7 +118,7 @@ def test_workspaces_are_volumes_that_instances_share_and_write_as_the_invoking_u
     both = run_in(engine, p, reviewer, "sh", "-c", "echo two >> /workspace/data/a && cat /workspace/data/a")
     assert both.stdout.split() == ["one", "two"], "two agents share a declared workspace, both writable"
     owner = engine.in_volumes({p.volume("data"): "/w"}, "stat -c %u /w/a")
-    assert owner.stdout.strip() == str(os.getuid())
+    assert owner.stdout.strip() == str(engine.uid)
 
     # removing or stopping an instance leaves the workspace
     p.ok("agent stop", coder)

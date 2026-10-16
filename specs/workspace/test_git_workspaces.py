@@ -98,7 +98,7 @@ def test_up_clones_the_base_for_the_workspaces_an_agent_lists_without_a_checkout
     [volume] = [r for r in engine.resources(p.name) if r.name == p.base_volume("repo")]
     assert volume.labels[f"{LABEL_PREFIX}kind"] == "workspace" and volume.labels[f"{LABEL_PREFIX}service"] == "repo"
     assert f"{LABEL_PREFIX}instance" not in volume.labels, "the base belongs to the project"
-    assert shell(engine, p, "stat -c %u /workspace/repo/.base/.git/HEAD").stdout.strip() == str(os.getuid()), "and to the invoking user"
+    assert shell(engine, p, "stat -c %u /workspace/repo/.base/.git/HEAD").stdout.strip() == str(engine.uid), "and to the invoking user"
     assert engine.volume_exists(p.base_volume("other")) and not engine.volume_exists(p.base_volume("unused")), "only workspaces an agent lists are cloned"
     assert p.left_in_directory() == [], "nothing is made in the project directory"
 
@@ -139,7 +139,7 @@ def test_spawn_gives_each_instance_its_own_worktree_volume_on_its_own_branch_of_
     assert "/workspace/repo/w1" in inside.stdout and "/workspace/repo/.base" in inside.stdout
 
     # the worktree is the invoking user's, the agent can commit, and what it writes is its own
-    assert shell(engine, p, "stat -c %u README", instance="w1").stdout.strip() == str(os.getuid())
+    assert shell(engine, p, "stat -c %u README", instance="w1").stdout.strip() == str(engine.uid)
     committed = in_agent(engine, p, "w1", "cd /workspace/repo/w1 && git config user.email a@b.c && git config user.name a && echo x > new && git add new && git commit -qm x && git log --oneline -1")
     assert committed.returncode == 0, committed.stderr
     assert git(engine, p, "log", "--oneline", "-1", instance="w1").endswith(" x")

@@ -174,7 +174,8 @@ func TestWhoAgentsRunAs(t *testing.T) {
 	}{
 		{"an ordinary user", engine.Client{}, 1000, 1000, "1000:1000"},
 		{"root is never an agent's user", engine.Client{}, 0, 0, "1000:1000"},
-		{"podman maps users itself", engine.Client{Podman: true}, 1000, 1000, ""},
+		{"rootful podman keeps the host ids like docker", engine.Client{Podman: true}, 1000, 1000, "1000:1000"},
+		{"rootless podman maps users itself", engine.Client{Podman: true, Rootless: true}, 1000, 1000, ""},
 		{"rootless docker maps users itself", engine.Client{Rootless: true}, 1000, 1000, ""},
 		{"no uid on this platform", engine.Client{}, -1, -1, ""},
 	}

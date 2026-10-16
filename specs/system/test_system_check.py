@@ -11,7 +11,8 @@ def lines_of(result):
 
 
 def test_system_check_reports_the_engine_its_isolation_its_log_and_git_and_needs_no_project(tmp_path, engine, egzo):
-    result = egzo.run("system", "check", cwd=tmp_path, env=engine.env)
+    # an image to try the log driver with: Podman cannot name its default driver without running something
+    result = egzo.run("system", "check", cwd=tmp_path, env={**engine.env, "EGZO_IMAGE": engine.image_for(egzo.binary)})
     assert result.returncode == 0, result.stdout + result.stderr
     lines = lines_of(result)
     assert all(re.match(r"(ok|warn|fail)\s", line) for line in lines), result.stdout

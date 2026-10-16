@@ -226,6 +226,10 @@ class Engine:
         self.gvisor = gvisor
         self.setup = setup
         self.env = {"DOCKER_HOST": host}
+        # The ids the invoking user has inside a container. A rootless engine maps that user to root
+        # of the container's user namespace; every other engine keeps the host ids.
+        self.uid = 0 if rootless else os.getuid()
+        self.gid = 0 if rootless else os.getgid()
 
     def __repr__(self):
         return self.name
