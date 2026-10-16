@@ -8,6 +8,12 @@
 # Podman API socket the platform names. For podman-rootless the socket's directory is exported through $GITHUB_ENV, as the specs look for it there.
 set -eu
 
+# The specs' test registry on localhost:5000 speaks plain HTTP. Docker trusts localhost for that, Podman does not.
+insecure_test_registry() {
+	sudo mkdir -p /etc/containers/registries.conf.d
+	printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-spec-registry.conf
+}
+
 platform=${1:?usage: ci-engine.sh docker|docker-gvisor|podman|podman-rootless}
 
 case "$platform" in
@@ -41,12 +47,8 @@ docker-gvisor)
 	docker info --format '{{json .Runtimes}}'
 	docker run --rm --runtime=runsc alpine:3 dmesg | head -3
 	;;
-podman | podman-rootless)
-	# The specs' test registry on localhost:5000 speaks plain HTTP. Docker trusts localhost for that, Podman does not.
-	sudo mkdir -p /etc/containers/registries.conf.d
-	printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-spec-registry.conf
-	;;&
 podman)
+	insecure_test_registry
 	# rootful Podman: the API service of root on /run/podman/podman.sock, which the runner user may use (the VM is thrown away).
 	# systemd's podman.socket makes /run/podman readable by root only, so the service is started here instead.
 	sudo systemctl disable --now podman.socket podman.service 2>/dev/null || true
@@ -60,6 +62,7 @@ podman)
 	sudo podman version
 	;;
 podman-rootless)
+	insecure_test_registry
 	# rootless Podman: a user socket in $XDG_RUNTIME_DIR/podman/podman.sock, served by `podman system service`
 	runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 	sudo mkdir -p "$runtime"
