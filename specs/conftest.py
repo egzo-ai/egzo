@@ -108,6 +108,19 @@ class Project:
             pytest.fail(f"this spec runs a command egzo does not have: egzo {command}\n{wrong}", pytrace=False)
         return self.run(*argv, **kwargs)
 
+    def pty(self, command, *arguments, dimensions=(24, 80), timeout=30, env=None):
+        """Run an egzo command line on a terminal, for what needs one (`agent attach`, `exec` without `-T`): returns the pexpect child.
+        The line is checked against the CLI's help like `sh`."""
+        import pexpect
+
+        argv = [*shlex.split(command), *map(str, arguments)]
+        wrong = clitree.problem(self.egzo.binary, argv)
+        if wrong:
+            pytest.fail(f"this spec runs a command egzo does not have: egzo {command}\n{wrong}", pytrace=False)
+        environment = {**os.environ, **self.env, **(env or {})}
+        environment.pop("EGZO_PROJECT_NAME", None)
+        return pexpect.spawn(self.egzo.binary, argv, cwd=self.root, env=environment, dimensions=dimensions, encoding=None, timeout=timeout)
+
     def ok(self, command, *arguments, **kwargs):
         """`sh`, which must exit 0."""
         result = self.sh(command, *arguments, **kwargs)

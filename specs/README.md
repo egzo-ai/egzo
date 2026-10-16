@@ -112,34 +112,42 @@ do not change the exit code. Changing this contract means changing these specs f
 
 ## Areas
 
+The specs are laid out by the command they are about, as the CLI is (`egzo project`, `egzo agent`, ...). A file's docstring says what
+it covers and how the project it runs on is shared.
+
 | File | Covers |
 |---|---|
-| `test_meta.py` | the status model itself |
-| `test_schema.py` | validation of `egzo.yaml` (`egzo project check --resolved`), no users in files, no secrets in output |
-| `test_init.py` | `egzo project init`: the scaffolded file |
-| `test_cli.py` | the shape of the command line: the groups (`project`, `agent`, `message`, `workspace`, `system`) and the top-level commands |
-| `test_project_name.py` | name resolution and the same-name-other-directory refusal |
-| `test_workspaces.py` | engine-volume workspaces (no `path`), references, mounts, working directory, `egzo workspace put|get|ls|rm`, the lock lease |
+| `test_meta.py` | the status model itself; every command line a spec writes is one egzo has; every command and flag of egzo is run by a spec |
+| `test_schema.py` | validation of `egzo.yaml` (`egzo project check --resolved`), no users in files, no secrets in output, the `inject` section |
 | `test_egress.py` | profiles, services (wildcards only without a secret), built-ins, extend, placeholders, by-host rules, reachability warnings |
-| `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`), the secrets `project check` and `proxy rules` report |
-| `test_labels.py` | the `ai.egzo.*` label contract |
-| `test_up_down.py` | `project up` (infrastructure and templates, no agent), `project down`, idempotency, workspace safety |
-| `test_spawn.py` | templates and `egzo agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
-| `test_instances.py` | `ps` and `ps --json`, `agent rm`, stale instances and the `project up` refusal |
-| `test_agents.py` | one container per instance, networks, isolation, who agents run as |
-| `test_proxy.py` | injection, placeholders, `inspect` and wildcard services, TLS, Encrypted Client Hello, deny unless allowed, per-agent policy, CA, audit |
-| `test_session.py` | `egzo agent attach` and the session fidelity matrix, against a stand-in TUI |
-| `test_injection.py` | agent states, delivering queued messages, the human-quiet rule, acks, interrupt |
-| `test_harnesses.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
-| `test_browser.py` | the Chromium and Playwright MCP server built into both harness images: registered with the harness, browsing through the proxy, a form login with a placeholder |
-| `test_git_workspaces.py` | the base clone at `up`, a worktree per instance at spawn, fetch, `--reuse`, removal with the instance (clones from github.com) |
-| `test_operations.py` | `system check` (including the log driver), `project up --dry-run`, `project rotate-ca`, `up` taking no agent, `proxy rules`, the engine-side project lock |
-| `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000) |
-| `test_daily.py` | `logs`, `exec`, `start`, `stop`, `restart`, `proxy log` |
-| `message/test_message_cli.py` | `egzo message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
+| `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`) |
+| `test_workspaces.py` | the declaration of workspaces: volumes, no `path`, references, mounts, working directory |
+| `test_init.py` | `egzo project init`: the scaffolded file |
+| `test_project_name.py` | name resolution and the same-name-other-directory refusal |
+| `test_project_check.py` | `egzo project check`, and `egzo msg` as the alias of `message` |
+| `test_images.py` | harness image names, pulled from a registry (`EGZO_SPEC_REGISTRY`, default localhost:5000), `egzo version` |
+| `project/test_project_up_down.py` | `project up` and `project down` in one story |
+| `project/test_project_operations.py` | `up --dry-run`, `rotate-ca`, `proxy log` and `rules`, the operator API under `/v1`, the project lock and `unlock` |
+| `project/test_project_labels.py` | the `ai.egzo.*` label contract |
+| `project/test_project_logs.py` | the engine's default logging; the control sidecar's JSON logs, status on standard output |
+| `project/test_project_snapshot.py` | the resolved project kept on the control volume, read through `/v1` |
+| `system/test_system_check.py` | `egzo system check`: engine, isolation, log driver, git |
+| `agent/test_agent_spawn.py` | `agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
+| `agent/test_agent_lifecycle.py` | `ps`, `agent ls`, `agent rm` and its filters, `start`, `stop`, what a removed container leaves |
+| `agent/test_agent_stale.py` | stale instances, the `up` refusal, `down` and a name that was an instance |
+| `agent/test_agent_containers.py` | the network, who an agent runs as, limits, runtimes (gVisor), and the workspace volumes it mounts |
+| `service/test_service_commands.py` | `logs`, `exec` (with and without a terminal), `start`, `stop`, `restart` on an instance or a sidecar |
+| `message/test_message_cli.py` | `message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
 | `message/test_agent_api.py` | what an agent does to the control sidecar: the HTTP tools, MCP, hooks, and the limits |
-| `test_logs.py` | the engine's default logging for every container; the control sidecar's JSON logs, status on standard output |
-| `test_snapshot.py` | the resolved project kept on the control volume, read through `/v1` |
+| `message/test_message_announcements.py` | agent states, announcing queued messages, the human-quiet rule, acks, interrupt |
+| `session/test_session_attach.py` | `agent attach` and the session fidelity matrix, against a stand-in TUI |
+| `proxy/test_proxy_isolation.py` | how an agent reaches the proxy, private addresses, Encrypted Client Hello (no internet needed) |
+| `proxy/test_proxy_egress.py` | profiles, the audit trail, `inspect` and wildcard services, bindings of instances (needs the internet) |
+| `proxy/test_proxy_secrets.py` | injection, placeholders, rotation, refused secrets (needs httpbin.org) |
+| `harness/test_harness_integrations.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
+| `browser/test_browser.py` | the Chromium and Playwright MCP server built into both harness images, browsing through the proxy, a form login with a placeholder |
+| `workspace/test_workspace_commands.py` | `workspace ls|put|get|rm|fetch` |
+| `workspace/test_git_workspaces.py` | the base clone at `up`, a worktree per instance at spawn, fetch, `--reuse`, removal with the instance (clones from github.com) |
 
 ## Not covered
 

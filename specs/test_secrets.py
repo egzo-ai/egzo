@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""Vaults and secrets: the two backends (`env` and `pass`), what is refused, and `egzo secrets ls`.
+"""Vaults and secrets: the two backends (`env` and `pass`), what is refused, and what `egzo project check` says about a secret it cannot read.
 
 A vault is a backend and the names of the secrets in it. Nothing says where a secret is: the backend knows."""
 

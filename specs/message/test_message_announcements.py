@@ -121,12 +121,6 @@ def wait_for(check, what, timeout=30):
     raise AssertionError(f"timed out waiting for {what}")
 
 
-def attach(project, egzo, *args):
-    environment = {**os.environ, **project.env}
-    environment.pop("EGZO_PROJECT_NAME", None)
-    return pexpect.spawn(egzo.binary, ["agent", "attach", *args], cwd=project.root, env=environment, encoding=None, timeout=30)
-
-
 def send_and_wait(project, egzo, name, text):
     return subprocess.run(
         [egzo.binary, "message", "send", "--wait", "--timeout", "60s", name, text], cwd=project.root,
@@ -285,11 +279,11 @@ def test_a_message_the_agent_never_fetches_is_announced_again_then_unconfirmed(v
     assert [m["id"] for m in view.api(name).call("GET", "/v1/messages")[1]] == [sent], "still found by an agent that asks"
 
 
-def test_a_message_is_never_announced_while_a_person_is_typing_and_a_read_only_observer_does_not_hold_it_back(view, egzo):
+def test_a_message_is_never_announced_while_a_person_is_typing_and_a_read_only_observer_does_not_hold_it_back(view):
     p = view.project
     typing = view.spawn("typed-at")
     view.wait_activity(typing, "idle")
-    client = attach(p, egzo, typing)
+    client = p.pty("agent attach", typing)
     client.expect(b"READY")
     client.send(b"typing")
     typed = time.time()
@@ -301,7 +295,7 @@ def test_a_message_is_never_announced_while_a_person_is_typing_and_a_read_only_o
 
     watched = view.spawn("observed")
     view.wait_activity(watched, "idle")
-    observer = attach(p, egzo, "--read-only", watched)
+    observer = p.pty("agent attach --read-only", watched)
     observer.expect(b"READY")
     observer.send(b"keys the observer typed")
     p.ok("message send", watched, "hello observer")

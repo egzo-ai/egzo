@@ -11,7 +11,8 @@ _trees = {}
 
 
 class Node:
-    def __init__(self, path, flags, children, aliases, alias_names, valued=frozenset()):
+    def __init__(self, path, flags, children, aliases, alias_names, valued=frozenset(), shorts=None):
+        self.shorts = shorts or {}  # `-m` -> `--message`
         self.valued = valued  # the flags that take a value (`--file string`): the word after one is not a command
         self.alias_names = alias_names  # the other names this command answers to
         self.path = path
@@ -33,11 +34,13 @@ def _walk(binary, path, inherited):
     text = _help(binary, path)
     flags = set(inherited)
     valued = set()
+    shorts = {}
     for line in (_section(text, "Flags") + "\n" + _section(text, "Global Flags")).splitlines():
         for short, long in re.findall(r"(?:^\s+-(\w), )?--([\w-]+)", line):
             flags.add("--" + long)
             if short:
                 flags.add("-" + short)
+                shorts["-" + short] = "--" + long
             if re.search(rf"--{re.escape(long)} (?!\s)(string|int|duration|strings|stringArray|float)", line):
                 valued.update({"--" + long, "-" + short} if short else {"--" + long})
         found = re.match(r"\s+-(\w)[ ,]", line)
@@ -52,7 +55,9 @@ def _walk(binary, path, inherited):
                 aliases[alias] = name
     found = re.search(r"^Aliases:\n\s+(.*)$", text, re.M)
     alias_names = [n.strip() for n in found.group(1).split(",")][1:] if found else []
-    return Node(path, flags, children, aliases, alias_names, valued)
+    for child in children.values():
+        child.shorts = {**shorts, **child.shorts}
+    return Node(path, flags, children, aliases, alias_names, valued, shorts)
 
 
 def tree(binary):

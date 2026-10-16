@@ -129,9 +129,7 @@ def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_cre
     assert leaked.stdout.strip() == "", "no real credential is inside the agent"
 
     # first run: nothing to answer
-    environment = {**os.environ, **p.env}
-    environment.pop("EGZO_PROJECT_NAME", None)
-    client = pexpect.spawn(egzo.binary, ["agent", "attach", name], cwd=p.root, env=environment, dimensions=(40, 120), encoding=None, timeout=90)
+    client = p.pty("agent attach", name, dimensions=(40, 120), timeout=90)
     client.expect(PROMPT_READY[harness], timeout=90)
     time.sleep(1)
     screen = client.before + client.after

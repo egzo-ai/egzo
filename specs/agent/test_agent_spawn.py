@@ -247,13 +247,9 @@ def test_wait_times_out_with_exit_5_and_leaves_the_instance_and_the_message_open
     assert any("never answered" in row["TEXT"] for row in sandbox.messages_to("slow"))
 
 
-def test_attach_opens_the_terminal_of_the_new_instance_and_delivers_the_first_message(sandbox, engine, egzo):
+def test_attach_opens_the_terminal_of_the_new_instance_and_delivers_the_first_message(sandbox, engine):
     p = sandbox.project
-    environment = {**os.environ, **p.env}
-    environment.pop("EGZO_PROJECT_NAME", None)
-    client = pexpect.spawn(
-        egzo.binary, ["agent", "spawn", "tui", "pair", "-m", "please look at this", "--attach"], cwd=p.root, env=environment, encoding=None, timeout=120,
-    )
+    client = p.pty("agent spawn tui pair -m", "please look at this", "--attach", timeout=120)
     client.expect(b"READY")
     client.send(b"typed in the new instance")
     client.expect(b"typed in the new instance")

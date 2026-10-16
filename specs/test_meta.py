@@ -117,29 +117,78 @@ def test_skipped_spec_is_not_counted_as_done(suite):
     result.stdout.fnmatch_lines(["area *0 *0 *0 *1"])
 
 
-def test_every_command_line_a_spec_writes_is_a_command_egzo_has(egzo):
-    """The specs write commands as the shell would take them (`project.sh("agent spawn coder -m hi")`). Each one written as a
-    literal is checked against the CLI's own help, so a spec cannot name a command or a flag that was renamed or removed."""
+def command_lines_in_the_specs():
+    """Every command line the specs write with `sh` or `ok`: (file, line, the words of the first argument, the flags among the other
+    arguments). An f-string counts as one word where something is substituted; an argument that is not written out cannot be read."""
     import ast
+    import shlex
     from pathlib import Path
 
-    import clitree
-
-    problems = []
+    found = []
     for path in sorted(Path(__file__).parent.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("sh", "ok") and node.args):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ("sh", "ok", "pty") and node.args):
                 continue
             first = node.args[0]
-            if isinstance(first, ast.JoinedStr):  # an f-string: what is substituted is one word
+            if isinstance(first, ast.JoinedStr):
                 text = "".join(v.value if isinstance(v, ast.Constant) else "X" for v in first.values)
             elif isinstance(first, ast.Constant) and isinstance(first.value, str):
                 text = first.value
             else:
                 continue
-            import shlex
+            later = [a.value for a in node.args[1:] if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.startswith("-")]
+            found.append((path.name, node.lineno, text, shlex.split(text), later))
+    return found
 
-            wrong = clitree.problem(egzo.binary, shlex.split(text))
-            if wrong:
-                problems.append(f"{path.name}:{node.lineno}: egzo {text}: {wrong}")
+
+def test_every_command_line_a_spec_writes_is_a_command_egzo_has(egzo):
+    """The specs write commands as the shell would take them (`project.sh("agent spawn coder -m hi")`). Each one written as a literal is
+    checked against the CLI's own help, so a spec cannot name a command or a flag that was renamed or removed."""
+    import clitree
+
+    problems = []
+    for name, line, text, words, later in command_lines_in_the_specs():
+        wrong = clitree.problem(egzo.binary, [*words, *later])
+        if wrong:
+            problems.append(f"{name}:{line}: egzo {text}: {wrong}")
     assert not problems, "\n".join(problems)
+
+
+def test_every_command_and_flag_of_egzo_is_used_by_a_spec(egzo):
+    """The todo list of the command line: each command egzo has, and each flag of each command, appears in the command line of at least
+    one spec (`sh` or `ok`). A command or flag that no spec runs fails here until one does."""
+    import clitree
+
+    root = clitree.tree(egzo.binary)
+    commands_used, flags_used = set(), set()
+    for _, _, _, words, later in command_lines_in_the_specs():
+        node, path = root, []
+        for word in words:
+            if word.startswith("-") or not node.children:
+                break
+            name = node.aliases.get(word, word)
+            if name not in node.children:
+                break
+            node = node.children[name]
+            path.append(name)
+        commands_used.add(tuple(path))
+        for word in [*words, *later]:
+            if word.startswith("-") and word != "--":
+                flags_used.add((tuple(path), word.split("=", 1)[0]))
+
+    missing = []
+
+    def walk(node, path):
+        if not node.children:
+            if tuple(path) not in commands_used:
+                missing.append("egzo " + " ".join(path))
+            for flag in sorted(f for f in node.flags if f.startswith("--") and f != "--help" and f not in root.flags):
+                if (tuple(path), flag) not in flags_used:
+                    missing.append(f"egzo {' '.join(path)} {flag}")
+        for name, child in node.children.items():
+            walk(child, [*path, name])
+
+    for name, child in root.children.items():
+        if name not in ("help", "completion"):
+            walk(child, [name])
+    assert not missing, "no spec runs:\n  " + "\n  ".join(missing)

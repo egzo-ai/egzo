@@ -5,8 +5,8 @@
 
 A workspace is declared once, at the top of the project file, and belongs to the project. It lives in an engine
 volume, never on the host: it is an empty directory (`{}`) or a git repository (`git`, a base clone and one worktree
-per instance). An agent lists declared names only. The volumes themselves are specified in `test_agents.py` and
-`test_git_workspaces.py`.
+per instance). An agent lists declared names only. The volumes themselves are specified in `agent/test_agent_containers.py` and
+`workspace/test_git_workspaces.py`, and the commands that fill them in `workspace/test_workspace_commands.py`.
 """
 
 import pytest

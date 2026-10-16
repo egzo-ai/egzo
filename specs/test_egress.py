@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""Egress profiles: deny by default, services, extend, built-ins, validation."""
+"""Egress profiles in the project file: deny by default, services, extend, built-ins, validation. What the proxy does with them is in `proxy/`."""
 
 import pytest
 

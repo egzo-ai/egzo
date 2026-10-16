@@ -5,8 +5,6 @@
 `start`, `stop`, `restart`, and `ps`. One project is up for the whole module (`sandbox`) and every spec starts from no instance."""
 
 import json
-import os
-
 import pexpect
 import pytest
 
@@ -28,15 +26,6 @@ def start_from_no_instance(sandbox):
 
 def state(engine, project, instance):
     return next(r for r in engine.containers(project.name) if r.labels.get(f"{LABEL_PREFIX}instance") == instance).raw["State"]
-
-
-def terminal(project, egzo, *command, dimensions=(24, 80)):
-    environment = {**os.environ, **project.env, "TERM": "xterm-256color", "NO_COLOR": "1"}
-    environment.pop("EGZO_PROJECT_NAME", None)
-    return pexpect.spawn(
-        egzo.binary, ["exec", "coder-1", "--", *command], cwd=project.root, env=environment,
-        dimensions=dimensions, encoding="utf-8", timeout=30,
-    )
 
 
 def test_logs_and_exec_work_on_instances_and_sidecars_by_name_and_say_when_it_is_a_template_or_unknown(sandbox, engine):
@@ -68,9 +57,9 @@ def test_logs_and_exec_work_on_instances_and_sidecars_by_name_and_say_when_it_is
     assert all(service in listing for service in ("control", "proxy", "coder", "coder-1"))
 
 
-def test_exec_with_a_terminal_is_interactive_follows_resizes_and_passes_control_characters(sandbox, egzo):
+def test_exec_with_a_terminal_is_interactive_follows_resizes_and_passes_control_characters(sandbox):
     sandbox.spawn("coder")
-    shell = terminal(sandbox, egzo, "sh")
+    shell = sandbox.pty("exec coder-1 -- sh")
     shell.sendline("echo $((6*7))")
     shell.expect("42")
     shell.sendline("tty")

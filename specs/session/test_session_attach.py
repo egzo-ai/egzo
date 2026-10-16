@@ -38,16 +38,6 @@ def start_from_no_instance(sandbox):
     yield
 
 
-def attach(project, *args, name, dimensions=(24, 80), timeout=30):
-    environment = dict(os.environ)
-    environment.pop("EGZO_PROJECT_NAME", None)
-    environment.update(project.env)
-    return pexpect.spawn(
-        project.egzo.binary, ["agent", "attach", *args, name], cwd=project.root, env=environment,
-        dimensions=dimensions, encoding=None, timeout=timeout,
-    )
-
-
 def detach(client):
     client.send(CTRL_RIGHT_BRACKET)
     client.expect(pexpect.EOF)
@@ -58,7 +48,7 @@ def detach(client):
 def test_attach_passes_every_key_byte_a_large_paste_and_nothing_else_and_detaches_leaving_the_program_running(sandbox):
     p = sandbox
     name = p.spawn("cat")
-    client = attach(p, name=name)
+    client = p.pty("agent attach", name)
     client.expect(b"READY")
     client.send(b"hello there")
     client.expect(b"hello there")
@@ -93,7 +83,7 @@ def test_attach_passes_every_key_byte_a_large_paste_and_nothing_else_and_detache
 def test_clients_share_a_session_a_custom_detach_key_works_and_an_observer_types_nothing(sandbox):
     p = sandbox
     name = p.spawn("cat")
-    one, two = attach(p, name=name), attach(p, name=name)
+    one, two = p.pty("agent attach", name), p.pty("agent attach", name)
     one.expect(b"READY")
     two.expect(b"READY")
     one.send(b"from-one")
@@ -101,7 +91,7 @@ def test_clients_share_a_session_a_custom_detach_key_works_and_an_observer_types
     two.expect(b"from-one")
     two.send(b"from-two")
     one.expect(b"from-two")
-    observer = attach(p, "--read-only", name=name)
+    observer = p.pty("agent attach --read-only", name)
     observer.expect(b"READY")
     observer.send(b"ignored-input")
     one.send(b"real-input")
@@ -112,7 +102,7 @@ def test_clients_share_a_session_a_custom_detach_key_works_and_an_observer_types
     detach(two)
     detach(one)
 
-    custom_key = attach(p, "--detach-keys", "ctrl-q", name=name)
+    custom_key = p.pty("agent attach --detach-keys ctrl-q", name)
     custom_key.expect(b"READY")
     custom_key.send(b"\x1d")  # no longer the detach key: it goes to the program
     custom_key.expect(b"\x1d")
@@ -125,7 +115,7 @@ def test_clients_share_a_session_a_custom_detach_key_works_and_an_observer_types
 def test_the_window_size_reaches_the_program_and_a_reattach_repaints_at_the_new_size(sandbox):
     p = sandbox
     sized = p.spawn("resize")
-    client = attach(p, name=sized, dimensions=(30, 100))
+    client = p.pty("agent attach", sized, dimensions=(30, 100))
     client.expect(rb"READY size:24 80")  # what it printed before anyone attached
     client.expect(rb"size:30 100")  # then the size of this terminal
     client.setwinsize(45, 160)
@@ -133,21 +123,21 @@ def test_the_window_size_reaches_the_program_and_a_reattach_repaints_at_the_new_
     detach(client)
 
     drawn = p.spawn("draw")
-    first = attach(p, name=drawn, dimensions=(24, 80))
+    first = p.pty("agent attach", drawn, dimensions=(24, 80))
     first.expect(rb"FRAME:\d+")
     detach(first)
-    second = attach(p, name=drawn, dimensions=(30, 100))
+    second = p.pty("agent attach", drawn, dimensions=(30, 100))
     second.expect(rb"FRAME:\d+ size:30 100")  # a fresh frame at the new size, not stale bytes
     detach(second)
 
 
 def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_and_the_modes_it_set_are_reset_on_detach(sandbox):
     p = sandbox
-    environment = attach(p, name=p.spawn("env"))
+    environment = p.pty("agent attach", p.spawn("env"))
     environment.expect(rb"READY TERM=xterm-256color COLORTERM=truecolor")
     detach(environment)
 
-    sigint = attach(p, name=p.spawn("sigint"))
+    sigint = p.pty("agent attach", p.spawn("sigint"))
     sigint.expect(b"READY")
     sigint.send(b"\x03")
     sigint.expect(b"got-int")
@@ -156,13 +146,13 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
     detach(sigint)
 
     lines = p.spawn("lines")
-    eof = attach(p, name=lines)
+    eof = p.pty("agent attach", lines)
     eof.expect(b"READY")
     eof.send(b"\x04")  # end of input at the start of a line
     eof.expect(b"eof-seen")
     detach(eof)
 
-    emit = attach(p, name=p.spawn("emit"))
+    emit = p.pty("agent attach", p.spawn("emit"))
     emit.expect(rb"wide:\xe4\xbd\xa0\xe5\xa5\xbd\xf0\x9f\x98\x80")
     seen = emit.before
     assert b"\x1b]52;c;" + base64.b64encode(b"hello") + b"\x07" in seen  # OSC 52 clipboard
@@ -171,7 +161,7 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
     detach(emit)
 
     # a TUI that enabled mouse tracking, bracketed paste or focus events cannot reset them once the user has detached
-    modes = attach(p, name=p.spawn("modes"))
+    modes = p.pty("agent attach", p.spawn("modes"))
     modes.expect(b"READY")
     modes.send(CTRL_RIGHT_BRACKET)
     modes.expect(pexpect.EOF)
@@ -181,7 +171,7 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
         assert off in tail, f"{off!r} missing after detach: {tail!r}"
 
     # when the program exits, attach exits and the instance is exited
-    client = attach(p, name=lines)
+    client = p.pty("agent attach", lines)
     client.expect(b"READY")
     p.sh(f"exec {lines} -- sh -c", "pkill -9 -f '^/bin/sh /usr/local/bin/fake-tui'")
     client.expect(pexpect.EOF, timeout=30)
@@ -195,13 +185,13 @@ def test_attach_is_refused_without_a_terminal_for_an_unknown_agent_and_for_an_ag
     result = p.sh("agent attach", name, input="")
     assert result.returncode != 0 and "terminal" in result.stderr
 
-    unknown = attach(p, name="nobody")
+    unknown = p.pty("agent attach", "nobody")
     unknown.expect(pexpect.EOF)
     unknown.close()
     assert unknown.exitstatus != 0 and b"nobody" in unknown.before and name.encode() in unknown.before, "it names the known ones"
 
     plain = p.spawn("plain")
-    sessionless = attach(p, name=plain)
+    sessionless = p.pty("agent attach", plain)
     sessionless.expect(pexpect.EOF)
     sessionless.close()
     assert sessionless.exitstatus != 0 and b"session" in sessionless.before

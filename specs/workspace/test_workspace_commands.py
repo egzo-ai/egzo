@@ -66,10 +66,10 @@ def test_put_and_get_refuse_what_is_outside_the_workspace_and_names_that_are_not
     for destination in ("../escape.txt", "/etc/escape.txt", "a/../../escape.txt"):
         result = p.sh("workspace put docs inbox/a.txt", destination)
         assert result.returncode != 0 and "outside" in result.stderr, destination
-    for command, word in (("put repo inbox/a.txt a.txt", "repo"), ("put ghost inbox/a.txt a.txt", "ghost")):
-        result = p.sh(f"workspace {command}")
-        assert result.returncode != 0 and word in result.stderr, command
-    assert "git" in p.sh("workspace put repo inbox/a.txt a.txt").stderr
+    onto_git = p.sh("workspace put repo inbox/a.txt a.txt")
+    assert onto_git.returncode != 0 and "repo" in onto_git.stderr and "git" in onto_git.stderr
+    unknown = p.sh("workspace put ghost inbox/a.txt a.txt")
+    assert unknown.returncode != 0 and "ghost" in unknown.stderr
     result = p.sh("workspace get ghost", tmp_path / "x")
     assert result.returncode != 0 and "ghost" in result.stderr
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""`egzo config`: validating egzo.yaml and printing the resolved configuration."""
+"""`egzo project check --resolved`: validating egzo.yaml and printing the resolved configuration."""
 
 import pytest
 

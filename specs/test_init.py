@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""`egzo init`: scaffolding a small, explicit egzo.yaml."""
+"""`egzo project init`: scaffolding a small, explicit egzo.yaml."""
 
 import subprocess
 
