@@ -1,0 +1,33 @@
+# TEMPORARY: the rootful Podman failures of the specs, without the 50 minutes. Removed once they are fixed.
+name: debug-podman
+on:
+  push:
+    branches: [ci-spec-matrix]
+jobs:
+  debug:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: scripts/ci-engine.sh podman
+      - run: |
+          make build
+          python -m venv specs/.venv
+          specs/.venv/bin/pip install -r specs/requirements.txt
+      - run: docker run -d --name spec-registry -p 5000:5000 registry:2
+      - name: Specs
+        working-directory: specs
+        env:
+          EGZO_BIN: ${{ github.workspace }}/bin/egzo
+        run: |
+          set -o pipefail
+          ../specs/.venv/bin/pytest --engine podman -q agent/test_agent_containers.py workspace harness/test_harness_integrations.py browser service session/test_session_attach.py proxy/test_proxy_secrets.py message project/test_project_operations.py 2>&1 | tee ../specs-debug.log
+      - name: Annotate
+        if: failure()
+        run: scripts/ci-annotate.sh "debug specs" specs-debug.log specs

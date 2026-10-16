@@ -234,8 +234,12 @@ class Engine:
     def __repr__(self):
         return self.name
 
+    def command(self, *args):
+        """The CLI's argv for talking to this engine's socket (Podman only in remote mode: its local storage is another one)."""
+        return [self.cli, *args] if self.cli == "docker" else [self.cli, "--remote", "--url", self.host, *args]
+
     def run(self, *args):
-        command = [self.cli, *args] if self.cli == "docker" else [self.cli, "--remote", "--url", self.host, *args]
+        command = self.command(*args)
         # Build output from remote Podman is not always valid UTF-8.
         completed = subprocess.run(
             command, env={**os.environ, **self.env}, capture_output=True, text=True, errors="replace"

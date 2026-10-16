@@ -199,7 +199,7 @@ def test_a_request_is_announced_with_a_short_line_the_agent_fetches_and_resolves
     sidecar = next(c for c in view.engine.containers(p.name) if c.labels.get("ai.egzo.service") == "control").name
     body = json.dumps({"to": f"agent:{name}", "from": "user:cedric", "text": "from the hub"})
     done = subprocess.run(
-        [view.engine.cli, "exec", "-i", sidecar, "/egzo", "control", "request", "POST", "/v1/messages"],
+        view.engine.command("exec", "-i", sidecar, "/egzo", "control", "request", "POST", "/v1/messages"),
         input=body, text=True, capture_output=True, env={**os.environ, **view.engine.env},
     )
     assert done.returncode == 0, done.stderr

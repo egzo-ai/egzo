@@ -231,7 +231,7 @@ def test_the_state_command_reports_a_state_and_never_blocks_or_fails_the_harness
     name = p.spawn("emit", timeout=300)
     container = engine.instance(p.name, name).name
     ran = subprocess.run(
-        [engine.cli, "exec", "-i", container, "egzo", "state", "working", "--reason", "PreToolUse"],
+        engine.command("exec", "-i", container, "egzo", "state", "working", "--reason", "PreToolUse"),
         input='{"tool_name":"Bash"}', text=True, capture_output=True, env={**os.environ, **engine.env},
     )
     assert ran.returncode == 0, ran.stderr
