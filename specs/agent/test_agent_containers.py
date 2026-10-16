@@ -110,10 +110,11 @@ def test_workspaces_are_volumes_that_instances_share_and_write_as_the_invoking_u
     volume = [r for r in engine.resources(p.name) if r.name == p.volume("scratch")]
     assert [(r.kind, r.labels[f"{LABEL_PREFIX}kind"], r.labels[f"{LABEL_PREFIX}service"]) for r in volume] == [("volume", "workspace", "scratch")]
     assert f"{LABEL_PREFIX}instance" not in volume[0].labels, "a directory workspace belongs to the project, not to an instance"
-    assert engine.in_volumes({p.volume("scratch"): "/w"}, "stat -c %u:%g /w").stdout.strip() == f"{engine.uid}:{engine.gid}"
     assert not (p.root / "workspaces").exists(), "nothing is made in the project directory"
 
     coder, reviewer = p.spawn("coder"), p.spawn("reviewer")
+    # looked at from the agent: Podman gives a volume to whichever container mounts it, so a helper container would only see itself
+    assert run_in(engine, p, coder, "stat", "-c", "%u:%g", "/workspace/data").stdout.strip() == f"{engine.uid}:{engine.gid}"
     assert run_in(engine, p, coder, "sh", "-c", "echo one > /workspace/data/a").returncode == 0
     both = run_in(engine, p, reviewer, "sh", "-c", "echo two >> /workspace/data/a && cat /workspace/data/a")
     assert both.stdout.split() == ["one", "two"], "two agents share a declared workspace, both writable"

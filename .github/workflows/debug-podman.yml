@@ -21,22 +21,29 @@ jobs:
           python -m venv specs/.venv
           specs/.venv/bin/pip install -r specs/requirements.txt
       - run: docker run -d --name spec-registry -p 5000:5000 registry:2
-      - name: Volume ownership
+      - name: Egress from a custom network
         run: |
           set +e
-          sudo podman volume create v1 >/dev/null
-          sudo podman run --rm -v v1:/volume0 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --security-opt no-new-privileges alpine:3 sh -c 'stat -c %u:%g /volume0; chown 1001:1001 /volume0; stat -c %u:%g /volume0'
-          echo "--- second container, no user"; sudo podman run --rm -v v1:/w alpine:3 stat -c %u:%g /w
-          echo "--- second container, user 1001"; sudo podman run --rm --user 1001:1001 -v v1:/w alpine:3 stat -c %u:%g /w
-          echo "--- again"; sudo podman run --rm -v v1:/w alpine:3 stat -c %u:%g /w
-          sudo podman volume inspect v1 | head -30
+          sudo iptables -S FORWARD | head -5; sudo iptables -L FORWARD -n | head -3; sudo nft list tables
+          attempt() {
+            ok=0
+            for i in 1 2 3 4 5 6 7 8; do
+              sudo podman network create n$i-$1 >/dev/null
+              sudo podman run --rm --network n$i-$1 docker.io/curlimages/curl:8.10.1 -sS -o /dev/null -m 8 -w '%{http_code}' https://example.com/ >/tmp/o 2>&1 && ok=$((ok+1))
+              sudo podman network rm n$i-$1 >/dev/null
+            done
+            echo "$1: $ok of 8 worked"
+          }
+          attempt before
+          sudo iptables -P FORWARD ACCEPT
+          attempt accept
       - name: Specs
         working-directory: specs
         env:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q harness/test_harness_integrations.py agent/test_agent_containers.py 2>&1 | tee ../specs-debug.log
+          ../specs/.venv/bin/pytest --engine podman -q agent/test_agent_containers.py 2>&1 | tee ../specs-debug.log
       - name: Annotate
         if: failure()
         run: scripts/ci-annotate.sh "debug specs" specs-debug.log specs
