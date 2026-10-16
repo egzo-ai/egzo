@@ -1,4 +1,4 @@
-# TEMPORARY: which resolved addresses a rootful Podman container cannot reach. Removed once understood.
+# TEMPORARY: when a proxy loses its way out on rootful Podman. Removed once understood.
 name: debug-podman
 on:
   push:
@@ -6,24 +6,70 @@ on:
 jobs:
   debug:
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
       - run: scripts/ci-engine.sh podman
-      - run: sudo apt-get install -y -qq dnsutils >/dev/null
-      - name: Addresses
+      - run: |
+          make build
+          python -m venv specs/.venv
+          specs/.venv/bin/pip install -r specs/requirements.txt
+      - run: docker run -d --name spec-registry -p 5000:5000 registry:2
+      - name: Sample every proxy while the specs run
         run: |
-          set +e
-          resolvectl status 2>&1 | head -12; cat /etc/resolv.conf | grep -v '^#'
-          sudo podman network create probe >/dev/null
-          for host in github.com httpbin.org example.com; do
-            echo "=== $host: host resolver"; dig +short $host | tr '\n' ' '; echo
-            echo "=== $host: from a rootful podman container (aardvark)"
-            sudo podman run --rm --network probe docker.io/library/alpine:3 sh -c "nslookup $host 2>&1 | grep -E '^Address' | tail -n +2 | tr '\n' ' '"; echo
-            for ip in $(for i in 1 2 3; do dig +short $host; done | grep -E '^[0-9.]+$' | sort -u); do
-              h=$(timeout 5 curl -sS -o /dev/null -m 5 --resolve $host:443:$ip -w '%{http_code}' https://$host/ 2>&1 | tail -c 60)
-              p=$(sudo podman run --rm --network probe docker.io/curlimages/curl:8.10.1 -sS -o /dev/null -m 5 --resolve $host:443:$ip -w '%{http_code}' https://$host/ 2>&1 | tail -c 60)
-              d=$(docker run --rm docker.io/curlimages/curl:8.10.1 -sS -o /dev/null -m 5 --resolve $host:443:$ip -w '%{http_code}' https://$host/ 2>&1 | tail -c 60)
-              echo "$host $ip  host=[$h] podman=[$p] docker=[$d]"
+          cat > /tmp/sample.sh <<'SH'
+          while true; do
+            for id in $(sudo podman ps -q --filter name=-proxy-1); do
+              pid=$(sudo podman inspect -f '{{.State.Pid}}' $id 2>/dev/null) || continue
+              name=$(sudo podman inspect -f '{{.Name}}' $id | sed 's/^spec-//; s/-proxy-1//')
+              nets=$(sudo nsenter -t $pid -n ip -br addr | awk '$1 ~ /^eth/ {printf "%s=%s ", $1, $3}')
+              route=$(sudo nsenter -t $pid -n ip route | awk '/^default/{print $3, $5}')
+              t=""
+              for ip in 140.82.114.3 104.20.23.154 100.56.179.159; do
+                if sudo nsenter -t $pid -n timeout 3 bash -c "exec 3<>/dev/tcp/$ip/443" 2>/dev/null; then t="$t $ip:ok"; else t="$t $ip:FAIL"; fi
+              done
+              echo "$(date +%T) $name default[$route] $nets $t" >> /tmp/samples.log
             done
+            sleep 5
           done
+          SH
+          nohup bash /tmp/sample.sh >/dev/null 2>&1 &
+          cat > /tmp/events.sh <<'SH'
+          seen=""
+          while true; do
+            for id in $(sudo podman ps -q --filter name=-proxy-1); do
+              case " $seen " in *" $id "*) continue;; esac
+              seen="$seen $id"
+              n=$(sudo podman inspect -f '{{.Name}}' $id | sed 's/^spec-//; s/-proxy-1//')
+              sudo nohup sh -c "podman logs -f $id 2>&1 | sed \"s/^/\$(date +%T) $n /\" " >> /tmp/events.log 2>&1 &
+            done
+            sleep 2
+          done
+          SH
+          nohup bash /tmp/events.sh >/dev/null 2>&1 &
+      - name: Specs
+        working-directory: specs
+        env:
+          EGZO_BIN: ${{ github.workspace }}/bin/egzo
+        run: |
+          set -o pipefail
+          ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py proxy/test_proxy_secrets.py 2>&1 | tee ../specs-debug.log
+      - name: Timeline
+        if: always()
+        run: |
+          grep -E '"action":"(error|deny)"' /tmp/events.log | grep -v "egress profile" | cut -c1-220
+          echo ----- samples with a failure, and the lines around
+          grep -n FAIL /tmp/samples.log | head -5
+          echo ----- per proxy: first and last sample, and every change
+          awk '{k=$2; sig=$0; sub(/^[0-9:]+ /,"",sig); if (sig != last[k]) {print; last[k]=sig}}' /tmp/samples.log | cut -c1-230 | head -120
+      - name: Annotate
+        if: always()
+        run: |
+          { grep -E "^(FAILED)" specs-debug.log | cut -c1-200; echo ---- errors; grep -E '"action":"error"' /tmp/events.log | cut -c1-250 | head; echo ---- changes; awk '{k=$2; sig=$0; sub(/^[0-9:]+ /,"",sig); if (sig != last[k]) {print; last[k]=sig}}' /tmp/samples.log | cut -c1-200 | head -40; } > debug-all.log
+          scripts/ci-annotate.sh "debug" debug-all.log tail
