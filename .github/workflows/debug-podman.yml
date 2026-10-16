@@ -24,20 +24,19 @@ jobs:
       - name: Who runs what
         run: |
           set +e
-          for engine in "sudo podman" docker; do
-            echo "=== $engine"
-            $engine run --rm --init --user 1001:1001 --cap-drop ALL --security-opt no-new-privileges alpine:3 sh -c 'id; ps -o user,pid,ppid,args; ls -ln /proc/1/ | head -3; ls -ln /proc/1/fd/1; echo x > /proc/1/fd/1'
+          probe='ls -l /run/podman-init; ls -ln /proc/1/exe; echo x > /proc/1/fd/1 && echo WRITE-OK; grep -E "Cap(Eff|Bnd)|NoNewPrivs|Seccomp" /proc/self/status; cat /proc/1/attr/current /proc/self/attr/current'
+          for flags in "" "--security-opt no-new-privileges" "--cap-drop ALL" "--cap-drop ALL --security-opt no-new-privileges" "--cap-drop ALL --security-opt no-new-privileges --security-opt apparmor=unconfined" "--cap-drop ALL --security-opt no-new-privileges --security-opt seccomp=unconfined" "--cap-drop ALL --security-opt no-new-privileges --read-only"; do
+            echo "=== sudo podman run --init --user 1001:1001 $flags"
+            sudo podman run --rm --init --user 1001:1001 $flags alpine:3 sh -c "$probe" 2>&1 | tr '\n' '|'; echo
           done
-          echo "=== podman exec"
-          sudo podman run -d --name d1 --init --user 1001:1001 --cap-drop ALL alpine:3 sleep 300
-          sudo podman exec d1 sh -c 'id; ps -o user,pid,args; echo x > /proc/1/fd/1; ls -ln /proc/1/fd/1'
+          aa-status 2>&1 | head -5; sudo podman info --format '{{.Host.Security}}'
       - name: Specs
         working-directory: specs
         env:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q harness/test_harness_integrations.py -k "invoking" session/test_session_attach.py service browser 2>&1 | tee ../specs-debug.log
+          ../specs/.venv/bin/pytest --engine podman -q harness/test_harness_integrations.py -k "invoking" session/test_session_attach.py 2>&1 | tee ../specs-debug.log
       - name: Annotate
         if: failure()
         run: scripts/ci-annotate.sh "debug specs" specs-debug.log specs
