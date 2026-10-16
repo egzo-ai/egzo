@@ -10,7 +10,7 @@ sidecar at `http://control:7777/mcp`. So a harness has to be able to talk MCP ov
 fixed header for the agent's credentials, to be integrated.
 
 - **Claude Code** and **OpenCode**, the two integrated harnesses, both do, and the specs cover it
-  (`test_harnesses.py`: the `egzo` MCP server is in each one's configuration).
+  (`harness/test_harness_integrations.py`: the `egzo` MCP server is in each one's configuration).
 - **pi** (Mario Zechner's coding agent) has no MCP support, deliberately: its design leaves it out, and
   people reach MCP servers through a bridge (`mcporter` or an extension). It is still an accepted harness
   name in `egzo.yaml`, but it has no image and no integration, so it cannot be used today.

@@ -69,5 +69,5 @@ No upstream issue matches the exact behavior.
 ## Effect on the specs
 
 The rootful `podman` engine is required, so these proxy specs fail on this host when the flake hits.
-Everything else in `test_agents.py`, `test_up_down.py` and the rest of `test_proxy.py` passed on it
-(38 passed, 3 failed, 4 skipped, 1 xfail in one run).
+Everything else in the agent, project and proxy specs passed on it (38 passed, 3 failed, 4 skipped, 1 xfail in one run, before
+the specs were reorganised: the three proxy specs above are now scenarios of `proxy/`).

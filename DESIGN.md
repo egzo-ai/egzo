@@ -595,7 +595,7 @@ scrollback, clipboard (OSC 52), hyperlinks, truecolor, Shift+Enter and mouse. Wh
   size (a real size change, or a one-column wobble when the size is the same: the kernel only signals on a change);
 - it types injected messages (bracketed paste, then Enter) and the interrupt key, and watches the output for
   quiescence-based harnesses.
-The fidelity matrix is `specs/test_session.py`, run against a stand-in TUI (`specs/fixtures/fake-tui.sh`) so
+The fidelity matrix is `specs/session/test_session_attach.py`, run against a stand-in TUI (`specs/fixtures/fake-tui.sh`) so
 every row is observable: all byte values both ways, a 36 KB bracketed paste, resize, truecolor, no alternate
 screen, Ctrl-C and Ctrl-D reaching the program, OSC 52 / OSC 8, detach and reattach, two clients, observers.
 Known limit: a detach-key byte inside pasted data detaches. tmux was not built: it takes the outer alternate
@@ -734,32 +734,16 @@ talk to real hosts (they fail when offline) and a registry for the image-name sp
     specs/
       spec_status.py       # plugin: per-area table, --spec-json
       select_platform.py   # picks the reference platform on a developer machine
-      conftest.py          # egzo binary, project dirs, engine matrix, images, cleanup
+      conftest.py          # egzo binary, project dirs (live_project, shared_project, team), engine matrix, images, cleanup
       support.py           # builders so specs read as the YAML they describe
-      test_meta.py         # the status model itself
-      test_schema.py       # egzo.yaml validation, no users in files, no secrets in output
-      test_project_name.py # name resolution, same-name-other-directory refusal
-      test_workspaces.py   # declaration, mounts, workdir rule, https git, no `path`, cross-agent refs
-      test_egress.py       # profiles, services, built-ins, extend, placeholders, reachability warnings
-      test_secrets.py      # vaults, the env and pass backends, `egzo project check`
-      test_init.py         # egzo project init
-      test_labels.py       # ai.egzo.* contract, label size/format, no secrets in resources
-      test_up_down.py      # up/down, --dry-run, no -d, idempotency, workspace dirs survive down
-      test_agents.py       # one container per agent, own internal network, isolation, workspaces
-      test_proxy.py        # injection, deny unless allowed, auth, per-agent policy, CA, audit
-      test_snapshot.py     # spec snapshot on the control volume
-      test_daily.py        # logs, exec (with a terminal), start/stop/restart, proxy log
-      test_messaging.py    # status, say, questions, queue and inbox, hooks, typed event stream
-      test_logs.py         # the engine's default logging, control's JSON logs: status on stdout, the rest on stderr
+      clitree.py           # the command tree of the real binary, so a spec's command line is checked against it
+      agentapi.py          # an agent as the control sidecar sees it; a team of agents sharing one project
+      proxykit.py          # the proxy specs' profiles and probe
+      test_*.py            # what needs no engine: schema, egress profiles, secrets, workspaces, init, project name, meta
+      project/ agent/ service/ system/ message/ workspace/ session/ proxy/ harness/ browser/
+                           # what runs on the engine, laid out like the CLI; one project per module, scenarios that follow a story
 
-    test_session.py      # attach and the session fidelity matrix (P0 rows block release)
-    test_injection.py    # states, human-quiet rule, header ack, no blind retry, queue combine, interrupt
-    test_harnesses.py    # Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, real TUIs
-    test_git_workspaces.py # volumes: base clone at up, worktree per instance, fetch, reuse, removal, workspace rm
-    test_operations.py   # system check, up --dry-run, rotate-ca, proxy rules
-    test_spawn.py        # spawn: templates, names, exit code 17, first message, --wait, labels, errors
-    test_instances.py    # ps, agent rm, stale instances, down, registration in control and proxy
-    test_images.py       # harness image names and pulling them from a registry
+`specs/README.md` lists every file and what it covers, and how the specs are written.
 
 Security specs are the differentiator: assert secrets never appear in `engine inspect`,
 agent env, agent filesystem, or logs; assert direct egress fails.
