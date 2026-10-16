@@ -48,6 +48,8 @@ jobs:
                     echo "--- iptables nat POSTROUTING"; sudo iptables -t nat -S | grep -E "10.89|NETAVARK" | head -30
                     echo "--- nft netavark tables"; sudo nft list tables; sudo nft list ruleset 2>/dev/null | grep -n -E "10\.89\.(0|3)\.0/24|netavark" | head -40
                     echo "--- FORWARD chains with counters"; sudo iptables -L FORWARD -v -n --line-numbers | head -20; sudo iptables -S | grep -E "^-N|^-P" | head -30
+                    echo "--- isolation chains"; for c in 1 2 3 4; do sudo iptables -L NETAVARK_ISOLATION_$c -v -n 2>&1 | head -14; done
+                    echo "--- bridge to podman network"; for b in $(ip -br link | awk '/^podman[0-9]/{print $1}'); do echo "$b $(ip -br addr show $b | awk '{print $3}')"; done
                     echo "--- NETAVARK_FORWARD"; sudo iptables -L NETAVARK_FORWARD -v -n --line-numbers 2>&1 | head -20
                     echo "--- DOCKER-USER / DOCKER-FORWARD"; sudo iptables -L DOCKER-USER -v -n 2>&1 | head -6; sudo iptables -L DOCKER-FORWARD -v -n 2>&1 | head -12
                     echo "--- sysctl"; sysctl net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables net.ipv4.conf.all.rp_filter 2>&1
@@ -95,6 +97,6 @@ jobs:
       - name: Annotate
         if: always()
         run: |
-          { head -c 6800 /tmp/dump.log | sed -n "/FORWARD chains/,/proxy ns arp/p"; } > debug-dump.log; scripts/ci-annotate.sh "dump" debug-dump.log tail || true
+          { head -c 6800 /tmp/dump.log | sed -n "/isolation chains/,/NETAVARK_FORWARD/p"; } > debug-dump.log; scripts/ci-annotate.sh "dump" debug-dump.log tail || true
           { grep -E "^(FAILED)" specs-debug.log | cut -c1-200; echo ---- errors; grep -E '"action":"error"' /tmp/events.log | cut -c1-250 | head; echo ---- changes; awk '{k=$2; sig=$0; sub(/^[0-9:]+ /,"",sig); if (sig != last[k]) {print; last[k]=sig}}' /tmp/samples.log | cut -c1-200 | head -40; } > debug-all.log
           scripts/ci-annotate.sh "debug" debug-all.log tail
