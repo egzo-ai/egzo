@@ -260,7 +260,8 @@ def test_messages_that_pile_up_while_the_agent_works_are_announced_together_afte
     assert combined and list(combined.groups()) == later, prompts[1]
 
     all_events = [e for e in view.events() if e.get("agent") == name]  # nothing was announced while it worked
-    first_stop = next(e for e in all_events if e["type"] == "state" and e["text"] == "idle")
+    started = next(e for e in all_events if e["type"] == "state" and e["text"] == "working")
+    first_stop = next(e for e in all_events if e["type"] == "state" and e["text"] == "idle" and e["seq"] > started["seq"])
     second = [e for e in all_events if e["type"] == "announced"][-1]
     assert second["seq"] > first_stop["seq"] and when(second) - when(first_stop) < 15
 
