@@ -9,7 +9,7 @@ paste. The agent fetches the message through its tools (`get_message`); fetching
 agent's activity. These specs drive that with a stand-in harness (fixtures/fake-tui.sh, mode `reporting`) that reads the typed line and calls
 the agent API the way a model calls its tools.
 
-One project is up for the whole module, with a template for each way the stand-in is set up (it works for five seconds, it never
+One project is up for the whole module, with a template for each way the stand-in is set up (it works for twelve seconds, long enough for a slow engine to take three sends, it never
 fetches, a person types for six seconds, ...). A spec spawns the instances it needs under names of its own and leaves them for
 the module to remove: everything below is scoped to the instance or to the message it is about."""
 
@@ -43,7 +43,7 @@ def sandbox(shared_project, engine, egzo):
     image = engine.session_image(egzo.binary)
     shared_project.up(spec(agents={
         "quick": harness(image),
-        "works": harness(image, FAKE_WORK="5"),
+        "works": harness(image, FAKE_WORK="12"),
         "works-long": harness(image, FAKE_WORK="40"),
         "deaf": harness(image, inject={"ack_timeout": "2s"}, FAKE_FETCH="0"),
         "typed-at": harness(image, inject={"human_quiet": "6s"}),

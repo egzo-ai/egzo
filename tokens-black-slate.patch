@@ -1,0 +1,241 @@
+From edeb5ac2b784413b80410c6b217f64de4b615f6a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 01:32:45 +0000
+Subject: [PATCH] Hub web: black dark theme and slate light theme tokens
+
+Neutrals are no longer tinted toward the accent, which turned surfaces,
+borders and muted text brown. Dark is true black with pure greys; light
+is a mid slate grey. Orange stays the only warm colour, and in light mode
+it is used only for fills, rules and underlines, never as text or a tint.
+Every text token still passes 4.5:1 on every surface.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Fys117xMwAHcAd5xJDtTou
+---
+ hub/web/src/styles/tokens.css | 158 +++++++++++++++++-----------------
+ 1 file changed, 79 insertions(+), 79 deletions(-)
+
+diff --git a/hub/web/src/styles/tokens.css b/hub/web/src/styles/tokens.css
+index 1ce614d..d7348c9 100644
+--- a/hub/web/src/styles/tokens.css
++++ b/hub/web/src/styles/tokens.css
+@@ -7,44 +7,44 @@
+ :root {
+   color-scheme: dark;
+ 
+-  /* ── Surfaces: warm CRT black, each step a little lighter ─────────── */
+-  --bg:            #0f0d0b;  /* page */
+-  --surface-1:     #161310;  /* panels, tables, tab strip */
+-  --surface-2:     #1e1a16;  /* hover, raised rows, inputs */
+-  --surface-3:     #28221c;  /* selected, pressed, menus */
+-  --overlay:       rgb(5 4 3 / 0.72);  /* behind dialogs */
++  /* ── Surfaces: true black and pure grey. Neutrals are never tinted toward the orange ─────────── */
++  --bg:            #000000;  /* page */
++  --surface-1:     #0a0a0a;  /* panels, tables, tab strip */
++  --surface-2:     #121212;  /* hover, raised rows, inputs */
++  --surface-3:     #1c1c1c;  /* selected, pressed, menus */
++  --overlay:       rgb(0 0 0 / 0.72);  /* behind dialogs */
+ 
+   /* ── Text ─────────────────────────────────────────────────────────── */
+-  --text:          #f1e5d1;  /* 15.6:1 on bg */
+-  --text-2:        #c4b29a;  /* 9.4:1  secondary */
+-  --text-3:        #9a8a75;  /* 5.8:1  muted, timestamps; still AA */
+-  --text-invert:   #1b1200;
++  --text:          #f5f5f5;  /* 16:1 on bg */
++  --text-2:        #b3b3b3;  /* 9:1  secondary */
++  --text-3:        #8a8a8a;  /* ≥4.5:1 on every surface: muted, timestamps */
++  --text-invert:   #000000;
+ 
+   /* ── Borders ──────────────────────────────────────────────────────── */
+-  --border:        #3a3128;  /* hairlines between rows (decorative) */
+-  --border-strong: #75634f;  /* inputs, controls: ≥3:1 */
+-
+-  /* ── Accent: P3 amber phosphor ────────────────────────────────────── */
+-  --accent:        #ffb000;  /* fills: primary buttons, active tab rule, cursor */
+-  --accent-hover:  #ffc23d;
+-  --accent-text:   #ffb000;  /* accent used as text/links on bg (10.6:1) */
+-  --on-accent:     #1b1200;  /* text on accent fills (10.1:1) */
+-  --accent-soft:   rgb(255 176 0 / 0.12);  /* selected row, active tab bg */
+-  --accent-line:   rgb(255 176 0 / 0.45);
+-  --focus:         #ffd27a;  /* focus ring, always 2px + 2px offset */
+-  --brand:         #ffb000;  /* the logo is amber, the same phosphor as the UI */
+-  --logo-front:    #ffb000;  /* front container */
+-  --logo-prompt:   #0f0d0b;  /* the >_ knocked out of it */
+-  --logo-line-1:   #7b5606;  /* back container outline */
+-  --logo-line-2:   #c38703;  /* middle container outline */
++  --border:        #262626;  /* hairlines between rows (decorative) */
++  --border-strong: #6b6b6b;  /* inputs, controls: ≥3:1 */
++
++  /* ── Accent: orange. The only warm colour in the UI ────────────────────────────────────── */
++  --accent:        #ff9500;  /* fills: primary buttons, active tab rule, cursor */
++  --accent-hover:  #ffaa33;
++  --accent-text:   #ff9f1f;  /* accent used as text/links (≥9:1) */
++  --on-accent:     #140a00;  /* text on accent fills (9:1) */
++  --accent-soft:   rgb(245 245 245 / 0.08);  /* selected row bg: a neutral lift (an orange wash reads brown in dark, peach in light) */
++  --accent-line:   rgb(255 149 0 / 0.62);
++  --focus:         #ffc061;  /* focus ring, always 2px + 2px offset */
++  --brand:         #ff9500;  /* the logo's orange, same as the UI */
++  --logo-front:    #ff9500;  /* front container */
++  --logo-prompt:   #000000;  /* the >_ knocked out of it */
++  --logo-line-1:   #6b6b6b;  /* back container outline (neutral) */
++  --logo-line-2:   #b3b3b3;  /* middle container outline (neutral) */
+ 
+   /* ── Status (each paired with a glyph; never colour alone) ─────────── */
+   --status-running:      #7fd67f;  /* ● running / working */
+   --status-running-soft: rgb(127 214 127 / 0.12);
+   --status-waiting:      #5cc8ff;  /* ? waiting on a human answer */
+   --status-waiting-soft: rgb(92 200 255 / 0.13);
+-  --status-stopped:      #9a8a75;  /* ■ stopped / exited */
+-  --status-stopped-soft: rgb(154 138 117 / 0.12);
++  --status-stopped:      #8a8a8a;  /* ■ stopped / exited */
++  --status-stopped-soft: rgb(138 138 138 / 0.12);
+   --status-error:        #ff6464;  /* ✕ error / unhealthy / refused */
+   --status-error-soft:   rgb(255 100 100 / 0.12);
+   --status-unreachable:  #b99cff;  /* ⌁ engine unreachable (dashed outline) */
+@@ -53,25 +53,25 @@
+   --status-warn-soft:    rgb(245 215 110 / 0.12);
+ 
+   /* ── Terminal theme (xterm.js ITheme; read at runtime, see docs) ──── */
+-  --term-bg:          #0b0907;
+-  --term-fg:          #ecdfc9;
+-  --term-cursor:      #ffb000;
+-  --term-cursor-accent: #0b0907;
+-  --term-selection:   rgb(255 176 0 / 0.28);
+-  --term-black:       #1e1a16;  --term-bright-black:   #6b5d4d;
++  --term-bg:          #000000;
++  --term-fg:          #f0f0f0;
++  --term-cursor:      #ff9500;
++  --term-cursor-accent: #000000;
++  --term-selection:   rgb(255 149 0 / 0.3);
++  --term-black:       #121212;  --term-bright-black:   #777777;
+   --term-red:         #ff6b5e;  --term-bright-red:     #ff9a8f;
+   --term-green:       #8fd18a;  --term-bright-green:   #b6e8a8;
+   --term-yellow:      #ffc53d;  --term-bright-yellow:  #ffdd85;
+   --term-blue:        #6fa8ff;  --term-bright-blue:    #9fc4ff;
+   --term-magenta:     #d39cff;  --term-bright-magenta: #e6c2ff;
+   --term-cyan:        #5cc8ff;  --term-bright-cyan:    #9edfff;
+-  --term-white:       #d9cbb5;  --term-bright-white:   #fff6e6;
++  --term-white:       #cccccc;  --term-bright-white:   #ffffff;
+ 
+-  /* ── Phosphor glow on amber rules (dark only; set to none to disable) ─ */
+-  --glow-accent:   0 0 6px rgb(255 176 0 / 0.45);
++  /* ── Faint glow on orange rules (dark only; set to none to disable) ─ */
++  --glow-accent:   0 0 6px rgb(255 149 0 / 0.45);
+ 
+   /* ── Elevation: borders, not shadows; one shadow for floating layers ─ */
+-  --shadow-float:  0 10px 30px rgb(0 0 0 / 0.55), 0 0 0 1px var(--border);
++  --shadow-float:  0 10px 30px rgb(0 0 0 / 0.6), 0 0 0 1px var(--border);
+ 
+   /* ── Type ─────────────────────────────────────────────────────────── */
+   --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+@@ -140,66 +140,66 @@
+   --z-hud:    80;   /* leader-key overlay */
+ }
+ 
+-/* ── Light: "printout" — warm paper grey, ink text, the same amber keys ── */
++/* ── Light: mid slate grey, near-black text. Orange only as fills, rules and underlines, never as text or a tint ── */
+ @media (prefers-color-scheme: light) {
+   :root:not([data-theme="dark"]) {
+     color-scheme: light;
+-    --bg: #f3f0ea; --surface-1: #fbfaf7; --surface-2: #ebe6dd; --surface-3: #e1d9cc;
+-    --overlay: rgb(29 24 18 / 0.45);
+-    --text: #1d1812; --text-2: #4b4135; --text-3: #6b5e4e; --text-invert: #fbfaf7;
+-    --border: #d6cdbf; --border-strong: #968670;
+-    --accent: #ffb000; --accent-hover: #f0a400; --accent-text: #8a5300; --on-accent: #1b1200;
+-    --accent-soft: rgb(255 176 0 / 0.18); --accent-line: rgb(179 122 0 / 0.55);
+-    --focus: #8a5300; --brand: #ffb000;
+-    --logo-front: #1d1812; --logo-prompt: #ffb000; --logo-line-1: #d9b066; --logo-line-2: #b37a00;
+-    --status-running: #27702b; --status-running-soft: rgb(39 112 43 / 0.10);
+-    --status-waiting: #09649a; --status-waiting-soft: rgb(9 100 154 / 0.10);
+-    --status-stopped: #6b5e4e; --status-stopped-soft: rgb(107 94 78 / 0.10);
+-    --status-error: #b8242b;   --status-error-soft: rgb(184 36 43 / 0.09);
+-    --status-unreachable: #6544b8; --status-unreachable-soft: rgb(101 68 184 / 0.09);
+-    --status-warn: #7a5d00;    --status-warn-soft: rgb(196 150 0 / 0.14);
+-    --term-bg: #fbf9f5; --term-fg: #1d1812; --term-cursor: #b37a00; --term-cursor-accent: #fbf9f5;
+-    --term-selection: rgb(255 176 0 / 0.30);
+-    --term-black: #1d1812; --term-bright-black: #6b5e4e;
++    --bg: #dfe5e5; --surface-1: #eef2f2; --surface-2: #d3dbdb; --surface-3: #c6d0d0;
++    --overlay: rgb(11 18 18 / 0.45);
++    --text: #0b1212; --text-2: #2f3c3c; --text-3: #4b5858; --text-invert: #eef2f2;
++    --border: #b4c0c0; --border-strong: #667272;
++    --accent: #ff9500; --accent-hover: #eb8900; --accent-text: #0b1212; --on-accent: #140a00;
++    --accent-soft: rgb(11 18 18 / 0.07); --accent-line: #ff9500;
++    --focus: #0b1212; --brand: #ff9500;
++    --logo-front: #0b1212; --logo-prompt: #ff9500; --logo-line-1: #667272; --logo-line-2: #2f3c3c;
++    --status-running: #226024; --status-running-soft: rgb(39 112 43 / 0.10);
++    --status-waiting: #095888; --status-waiting-soft: rgb(9 100 154 / 0.10);
++    --status-stopped: #4b5858; --status-stopped-soft: rgb(75 88 88 / 0.12);
++    --status-error: #a32125;   --status-error-soft: rgb(184 36 43 / 0.09);
++    --status-unreachable: #5d3eaa; --status-unreachable-soft: rgb(101 68 184 / 0.09);
++    --status-warn: #6b5200;    --status-warn-soft: rgb(255 204 0 / 0.28);
++    --term-bg: #f4f7f7; --term-fg: #0b1212; --term-cursor: #ff9500; --term-cursor-accent: #f4f7f7;
++    --term-selection: rgb(255 149 0 / 0.3);
++    --term-black: #0b1212; --term-bright-black: #4f5e5e;
+     --term-red: #b8242b; --term-bright-red: #d1453f;
+     --term-green: #27702b; --term-bright-green: #3a8a3c;
+-    --term-yellow: #8a5300; --term-bright-yellow: #a86a00;
++    --term-yellow: #8a5a00; --term-bright-yellow: #a86e00;
+     --term-blue: #1f5fbf; --term-bright-blue: #3b78d4;
+     --term-magenta: #8a3fb8; --term-bright-magenta: #a35ad0;
+     --term-cyan: #09649a; --term-bright-cyan: #1a7fb8;
+-    --term-white: #d6cdbf; --term-bright-white: #fbfaf7;
++    --term-white: #c6d0d0; --term-bright-white: #ffffff;
+     --glow-accent: none;
+-    --shadow-float: 0 10px 28px rgb(60 45 25 / 0.18), 0 0 0 1px var(--border);
++    --shadow-float: 0 10px 28px rgb(11 18 18 / 0.14), 0 0 0 1px var(--border);
+   }
+ }
+ :root[data-theme="light"] {
+   color-scheme: light;
+-  --bg: #f3f0ea; --surface-1: #fbfaf7; --surface-2: #ebe6dd; --surface-3: #e1d9cc;
+-  --overlay: rgb(29 24 18 / 0.45);
+-  --text: #1d1812; --text-2: #4b4135; --text-3: #6b5e4e; --text-invert: #fbfaf7;
+-  --border: #d6cdbf; --border-strong: #968670;
+-  --accent: #ffb000; --accent-hover: #f0a400; --accent-text: #8a5300; --on-accent: #1b1200;
+-  --accent-soft: rgb(255 176 0 / 0.18); --accent-line: rgb(179 122 0 / 0.55);
+-  --focus: #8a5300; --brand: #ffb000;
+-  --logo-front: #1d1812; --logo-prompt: #ffb000; --logo-line-1: #d9b066; --logo-line-2: #b37a00;
+-  --status-running: #27702b; --status-running-soft: rgb(39 112 43 / 0.10);
+-  --status-waiting: #09649a; --status-waiting-soft: rgb(9 100 154 / 0.10);
+-  --status-stopped: #6b5e4e; --status-stopped-soft: rgb(107 94 78 / 0.10);
+-  --status-error: #b8242b;   --status-error-soft: rgb(184 36 43 / 0.09);
+-  --status-unreachable: #6544b8; --status-unreachable-soft: rgb(101 68 184 / 0.09);
+-  --status-warn: #7a5d00;    --status-warn-soft: rgb(196 150 0 / 0.14);
+-  --term-bg: #fbf9f5; --term-fg: #1d1812; --term-cursor: #b37a00; --term-cursor-accent: #fbf9f5;
+-  --term-selection: rgb(255 176 0 / 0.30);
+-  --term-black: #1d1812; --term-bright-black: #6b5e4e;
++  --bg: #dfe5e5; --surface-1: #eef2f2; --surface-2: #d3dbdb; --surface-3: #c6d0d0;
++  --overlay: rgb(11 18 18 / 0.45);
++  --text: #0b1212; --text-2: #2f3c3c; --text-3: #4b5858; --text-invert: #eef2f2;
++  --border: #b4c0c0; --border-strong: #667272;
++  --accent: #ff9500; --accent-hover: #eb8900; --accent-text: #0b1212; --on-accent: #140a00;
++  --accent-soft: rgb(11 18 18 / 0.07); --accent-line: #ff9500;
++  --focus: #0b1212; --brand: #ff9500;
++  --logo-front: #0b1212; --logo-prompt: #ff9500; --logo-line-1: #667272; --logo-line-2: #2f3c3c;
++  --status-running: #226024; --status-running-soft: rgb(39 112 43 / 0.10);
++  --status-waiting: #095888; --status-waiting-soft: rgb(9 100 154 / 0.10);
++  --status-stopped: #4b5858; --status-stopped-soft: rgb(75 88 88 / 0.12);
++  --status-error: #a32125;   --status-error-soft: rgb(184 36 43 / 0.09);
++  --status-unreachable: #5d3eaa; --status-unreachable-soft: rgb(101 68 184 / 0.09);
++  --status-warn: #6b5200;    --status-warn-soft: rgb(255 204 0 / 0.28);
++  --term-bg: #f4f7f7; --term-fg: #0b1212; --term-cursor: #ff9500; --term-cursor-accent: #f4f7f7;
++  --term-selection: rgb(255 149 0 / 0.3);
++  --term-black: #0b1212; --term-bright-black: #4f5e5e;
+   --term-red: #b8242b; --term-bright-red: #d1453f;
+   --term-green: #27702b; --term-bright-green: #3a8a3c;
+-  --term-yellow: #8a5300; --term-bright-yellow: #a86a00;
++  --term-yellow: #8a5a00; --term-bright-yellow: #a86e00;
+   --term-blue: #1f5fbf; --term-bright-blue: #3b78d4;
+   --term-magenta: #8a3fb8; --term-bright-magenta: #a35ad0;
+   --term-cyan: #09649a; --term-bright-cyan: #1a7fb8;
+-  --term-white: #d6cdbf; --term-bright-white: #fbfaf7;
++  --term-white: #c6d0d0; --term-bright-white: #ffffff;
+   --glow-accent: none;
+-  --shadow-float: 0 10px 28px rgb(60 45 25 / 0.18), 0 0 0 1px var(--border);
++  --shadow-float: 0 10px 28px rgb(11 18 18 / 0.14), 0 0 0 1px var(--border);
+ }
+ :root[data-theme="dark"] { color-scheme: dark; }
+ 
+-- 
+2.43.0
+
