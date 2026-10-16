@@ -50,7 +50,7 @@ hub-web-test:
 	else docker run --rm -u $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/hub:/w -w /w/web docker.io/library/node:22-alpine sh -c "npm run check && npm test"; fi
 
 hub-build: hub-web
-	cd hub && CGO_ENABLED=0 $(GO) build -trimpath -o ../bin/egzo-hub ./cmd/egzo-hub
+	cd hub && CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=$(VERSION)" -o ../bin/egzo-hub ./cmd/egzo-hub
 
 hub-test:
 	cd hub && $(GO) vet ./... && $(GO) test -race ./...

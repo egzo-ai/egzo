@@ -17,7 +17,7 @@ RUN cd hub && go mod download
 COPY . .
 COPY --from=web /src/hub/internal/web/dist hub/internal/web/dist
 ARG VERSION=dev
-RUN cd hub && CGO_ENABLED=0 go build -trimpath -o /egzo-hub ./cmd/egzo-hub
+RUN cd hub && CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=${VERSION}" -o /egzo-hub ./cmd/egzo-hub
 
 FROM docker.io/library/alpine:3
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 hub && mkdir /data && chown hub /data

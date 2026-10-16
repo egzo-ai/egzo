@@ -21,9 +21,14 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/secretbox"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
+	"github.com/egzo-ai/egzo/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Println("egzo-hub", version.Version)
+		return
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(log); err != nil {
 		log.Error("egzo-hub stopped", "err", err)
@@ -76,7 +81,7 @@ func run(log *slog.Logger) error {
 		defer cancel()
 		server.Shutdown(shutdown)
 	}()
-	log.Info("egzo-hub listening", "addr", cfg.Listen)
+	log.Info("egzo-hub listening", "addr", cfg.Listen, "version", version.Version)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listen: %w", err)
 	}

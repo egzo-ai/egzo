@@ -20,10 +20,12 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 
 - [ ] **Check the releases.** `0.4.0` has a tag but no GitHub release and no images, and `0.1.0` and `0.0.1-rc1` have images
       but no release: find out why, and make sure a tag cannot half-publish.
-- [ ] **TODO: publish the hub image.** `hub/compose.yaml` pulls `ghcr.io/egzo-ai/egzo-hub`, which `release.yml` does not build and ghcr does not
-      have, so the hub quick start only works after `make hub-image` and `EGZO_HUB_VERSION=dev`. Add the image to the release (and make the
-      package public), then drop those two lines from the quick start in `hub/docs/README.md`.
-- [ ] `ci.yml` should also build the images without pushing, so a broken Dockerfile shows before a tag does.
+- [x] The hub image (`ghcr.io/egzo-ai/egzo-hub`) is built and pushed by `release.yml` with the other images, and `egzo-hub --version`
+      reports the tag. **Still to do by hand, once:** push a pre-release tag (`0.4.2-rc1`), make the new package public, check both
+      architectures with `docker buildx imagetools inspect`, then drop the `make hub-image` and `EGZO_HUB_VERSION=dev` lines from the
+      quick start in `hub/docs/README.md`.
+- [x] `ci.yml` builds the sidecar and hub images for amd64 and arm64 without pushing (QEMU, GHA cache) and the harness images for amd64,
+      so a broken Dockerfile shows before a tag does. The harness images are not built for arm64 in CI: they need the egzo image from a registry.
 - [ ] **arm64 has to be run**, not only built: no spec runs on arm64, and the browser has not been tried there. Until then do not
       claim arm64 support beyond "builds".
 - [ ] Optional: keyless cosign signing of the images and the binaries.

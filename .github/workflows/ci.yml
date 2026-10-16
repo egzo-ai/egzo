@@ -45,3 +45,35 @@ jobs:
         run: make hub-e2e
       - name: The whole stack (hub image, Dex, a real project)
         run: make hub-stack
+
+  # Every image builds for both architectures without being pushed, so a broken Dockerfile shows on the pull request
+  # and not when a tag is pushed. The arm64 builds run under QEMU, with a cache.
+  images:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: egzo (sidecar) image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=egzo
+          cache-to: type=gha,scope=egzo,mode=max
+      - name: hub image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: hub/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=hub
+          cache-to: type=gha,scope=hub,mode=max
+      # The harness images copy the binary out of the egzo image, which is not pushed here, so they build on the runner's
+      # own engine (amd64 only) against a locally built egzo image.
+      - name: harness images
+        run: |
+          docker build -t egzo-ci:local .
+          for h in claude-code opencode; do
+            docker build --build-arg EGZO_IMAGE=egzo-ci:local harness/$h
+          done

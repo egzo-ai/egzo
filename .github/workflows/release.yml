@@ -54,7 +54,7 @@ jobs:
         id: tags
         run: |
           # `latest` only for a full release, never for a pre-release tag
-          for image in egzo egzo-harness-claude-code egzo-harness-opencode; do
+          for image in egzo egzo-harness-claude-code egzo-harness-opencode egzo-hub; do
             tags="$REGISTRY/$image:$GITHUB_REF_NAME"
             case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags,$REGISTRY/$image:latest" ;; esac
             echo "$image=$tags" >> "$GITHUB_OUTPUT"
@@ -95,6 +95,21 @@ jobs:
           provenance: mode=max
           build-args: EGZO_IMAGE=${{ env.REGISTRY }}/egzo:${{ github.ref_name }}
           tags: ${{ steps.tags.outputs['egzo-harness-opencode'] }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+      # The hub imports core as source, so it does not wait for the images above.
+      - name: hub image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: hub/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          provenance: mode=max
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs['egzo-hub'] }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ github.ref_name }}
