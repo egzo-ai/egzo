@@ -16,6 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: scripts/ci-engine.sh podman
+      - run: sudo apt-get install -y -qq tcpdump >/dev/null
       - run: |
           make build
           python -m venv specs/.venv
@@ -48,6 +49,9 @@ jobs:
                     echo "--- iptables nat POSTROUTING"; sudo iptables -t nat -S | grep -E "10.89|NETAVARK" | head -30
                     echo "--- nft netavark tables"; sudo nft list tables; sudo nft list ruleset 2>/dev/null | grep -n -E "10\.89\.(0|3)\.0/24|netavark" | head -40
                     echo "--- FORWARD chains with counters"; sudo iptables -L FORWARD -v -n --line-numbers | head -20; sudo iptables -S | grep -E "^-N|^-P" | head -30
+                    echo "--- veth to bridge (host side)"; bridge link | cut -c1-150; ip -o link | awk -F': ' '{print $1, $2}' | grep -E "^(9|1)[0-9]* veth" | head -20
+                    echo "--- the proxy eth0 peer ifindex"; sudo nsenter -t $pid -n ip -o link | grep -o "eth[0-9]@if[0-9]*"
+                    echo "--- tcpdump of 3 packets from the proxy ns SYN to 140.82.114.3 on its gateway bridge"; ( sudo timeout 6 tcpdump -ni any -c 6 "host 140.82.114.3" 2>&1 & sleep 1; sudo nsenter -t $pid -n timeout 3 bash -c "exec 3<>/dev/tcp/140.82.114.3/443" 2>/dev/null; wait ) | cut -c1-170 | head -14
                     echo "--- isolation chains"; for c in 1 2 3 4; do sudo iptables -L NETAVARK_ISOLATION_$c -v -n 2>&1 | head -14; done
                     echo "--- bridge to podman network"; for b in $(ip -br link | awk '/^podman[0-9]/{print $1}'); do echo "$b $(ip -br addr show $b | awk '{print $3}')"; done
                     echo "--- NETAVARK_FORWARD"; sudo iptables -L NETAVARK_FORWARD -v -n --line-numbers 2>&1 | head -20
@@ -97,6 +101,6 @@ jobs:
       - name: Annotate
         if: always()
         run: |
-          { head -c 6800 /tmp/dump.log | sed -n "/isolation chains/,/NETAVARK_FORWARD/p"; } > debug-dump.log; scripts/ci-annotate.sh "dump" debug-dump.log tail || true
+          { head -c 6800 /tmp/dump.log | sed -n "/veth to bridge/,/isolation chains/p"; } > debug-dump.log; scripts/ci-annotate.sh "dump" debug-dump.log tail || true
           { grep -E "^(FAILED)" specs-debug.log | cut -c1-200; echo ---- errors; grep -E '"action":"error"' /tmp/events.log | cut -c1-250 | head; echo ---- changes; awk '{k=$2; sig=$0; sub(/^[0-9:]+ /,"",sig); if (sig != last[k]) {print; last[k]=sig}}' /tmp/samples.log | cut -c1-200 | head -40; } > debug-all.log
           scripts/ci-annotate.sh "debug" debug-all.log tail
