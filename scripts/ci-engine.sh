@@ -4,17 +4,36 @@
 #
 #   scripts/ci-engine.sh docker | docker-gvisor | podman | podman-rootless
 #
-# Docker and Podman come with the runner image; this registers gVisor with Docker and starts the Podman API socket the
-# platform names. For podman-rootless the socket's directory is exported through $GITHUB_ENV, as the specs look for it there.
+# Docker and Podman come with the runner image; this widens Docker's network pool, registers gVisor with Docker and starts the
+# Podman API socket the platform names. For podman-rootless the socket's directory is exported through $GITHUB_ENV, as the specs look for it there.
 set -eu
 
 platform=${1:?usage: ci-engine.sh docker|docker-gvisor|podman|podman-rootless}
 
+# Docker gives each project and each instance a network of its own out of a default pool that holds about 30 subnets, and the
+# specs run in several workers at once (see specs.yml): "all predefined address pools have been fully subnetted". Give Docker a
+# pool of 2048 /24 networks, from a range the runner does not use (its own address is printed to check), and merge it into
+# whatever /etc/docker/daemon.json holds (gVisor's runtime is added to the same file below).
+docker_networks() {
+	ip -4 route show | sed 's/^/runner route: /'
+	sudo mkdir -p /etc/docker
+	[ -s /etc/docker/daemon.json ] || echo '{}' | sudo tee /etc/docker/daemon.json >/dev/null
+	sudo jq '. + {"default-address-pools": [{"base": "10.200.0.0/13", "size": 24}]}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new >/dev/null
+	sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+	sudo systemctl restart docker
+	docker info >/dev/null
+	docker network create ci-pool-check >/dev/null
+	docker network inspect ci-pool-check --format 'new networks come from {{(index .IPAM.Config 0).Subnet}}'
+	docker network rm ci-pool-check >/dev/null
+}
+
 case "$platform" in
 docker)
+	docker_networks
 	docker version
 	;;
 docker-gvisor)
+	docker_networks
 	# https://gvisor.dev/docs/user_guide/install/ : the binaries are checked against the published sums
 	arch=$(uname -m)
 	url=https://storage.googleapis.com/gvisor/releases/release/latest/$arch

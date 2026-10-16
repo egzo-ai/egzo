@@ -22,7 +22,7 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
 
   | Event | Platforms | Blocks? |
   |---|---|---|
-  | `pull_request` | `docker` | yes, once it is a required check |
+  | `pull_request` | `docker` (the whole matrix while the workflow is tried out, `PR_FULL` in `specs.yml`) | yes, once it is a required check |
   | `merge_group` (the merge queue) | all | yes: the gate in front of `main` |
   | nightly, and by hand | all | no; a red night is a finding |
   | a release tag (`release.yml` calls it first) | all | yes: nothing is built or pushed if a required cell fails |
@@ -34,11 +34,15 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
   start. `docker-gvisor`, `podman`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history, by
   removing the flag in `specs.yml` and adding the check to the branch rules. Rootful Podman has a known intermittent failure
   (`known-issues/rootful-podman-intermittent-egress.md`) and must not block merges until that is understood.
-- **Not parallel.** One run is serial, as the suite is written (`specs-overhaul.md` rejects xdist). A local try with four workers
-  (`-n 4 --dist loadfile`) took 3 minutes instead of about 12, and 54 specs failed on `all predefined address pools have been fully
-  subnetted`: every project and instance is a network and Docker's default pool holds about 30. If parallel runs are ever wanted,
-  the lever on a runner is `default-address-pools` in `/etc/docker/daemon.json` (a fresh VM can restart its daemon freely); it
-  is not needed for a serial run and not done.
+- **Parallel.** Each cell runs the specs with four `pytest-xdist` workers, `--dist loadfile`: a module keeps one worker, so the
+  project it shares is never used by two. A local try (`-n 4 --dist loadfile`, Docker with gVisor) took 3 minutes instead of about
+  12, and 54 specs failed on `all predefined address pools have been fully subnetted`: every project and instance is a network and
+  Docker's default pool holds about 30. `scripts/ci-engine.sh` therefore gives Docker a pool of 2048 `/24` networks from
+  `10.200.0.0/13` (merged into `daemon.json`, and checked by creating a network) before the specs. Podman's default pool is larger
+  and was not changed; if a Podman cell shows the same error, that is the place. This replaces the decision of
+  [specs-overhaul.md](specs-overhaul.md) not to use xdist, which was taken for a developer machine where the pool belongs to
+  other work; a cell is a machine of its own. Whether the specs hold under four workers on every platform is what the first runs
+  show: a module that is not independent of the others fails there, and gets fixed or its own worker.
 - **Artifacts.** Each cell uploads the log of its run (the summary per area is its last lines) and a JUnit file.
 
 ## To do before the matrix is a gate

@@ -36,9 +36,12 @@ jobs:
       - id: cells
         env:
           FULL: ${{ github.event_name != 'pull_request' || inputs.full == true }}
+          # TEMPORARY, while this workflow is tried out: the whole matrix on pull requests too, so every platform runs without
+          # a merge. Delete this line (and the `|| [ "$PR_FULL" = true ]` below) to go back to docker only on pull requests.
+          PR_FULL: 'true'
         run: |
           docker='{"name":"docker","engine":"docker","runner":"ubuntu-26.04","experimental":false}'
-          if [ "$FULL" = true ]; then
+          if [ "$FULL" = true ] || [ "$PR_FULL" = true ]; then
             cells="[$docker,
               {\"name\":\"docker-gvisor\",\"engine\":\"docker-gvisor\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
               {\"name\":\"podman\",\"engine\":\"podman\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
@@ -80,13 +83,16 @@ jobs:
           make build
           python -m venv specs/.venv
           specs/.venv/bin/pip install -r specs/requirements.txt
+      # The workers (pytest-xdist) share a module: a module brings one project up for all its specs (`--dist loadfile`), so
+      # two workers never use the same project. The runner has 4 vCPU.
       - name: Specs on ${{ matrix.engine }}
         working-directory: specs
         env:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
+          SPEC_WORKERS: '4'
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
+          ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} -n "$SPEC_WORKERS" --dist loadfile --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
       # The summary per area is at the end of the log: it is what shows a regression on one platform as a change of a column.
       - uses: actions/upload-artifact@v7
         if: always()
