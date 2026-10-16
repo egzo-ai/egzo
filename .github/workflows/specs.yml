@@ -85,16 +85,17 @@ jobs:
           make build
           python -m venv specs/.venv
           specs/.venv/bin/pip install -r specs/requirements.txt
-      # The workers (pytest-xdist) share a module: a module brings one project up for all its specs (`--dist loadfile`), so
-      # two workers never use the same project. The runner has 4 vCPU.
+      # The registry the image specs push to and pull from (test_images.py): localhost:5000, no login. It runs on the runner's
+      # Docker, which every runner has, for the Podman platforms too.
+      - name: Test registry
+        run: docker run -d --name spec-registry -p 5000:5000 registry:2
       - name: Specs on ${{ matrix.engine }}
         working-directory: specs
         env:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
-          SPEC_WORKERS: '4'
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} -n "$SPEC_WORKERS" --dist loadfile --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
+          ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
       # The logs of a run need a login; annotations do not, so a failure is also written as annotations.
       - name: Annotate the failure
         if: failure()
