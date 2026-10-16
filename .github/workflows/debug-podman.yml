@@ -21,6 +21,7 @@ jobs:
           python -m venv specs/.venv
           specs/.venv/bin/pip install -r specs/requirements.txt
       - run: docker run -d --name spec-registry -p 5000:5000 registry:2
+      - run: sudo apt-get install -y -qq dnsutils >/dev/null
       - name: Watch the proxies while the specs run
         run: |
           cat > /tmp/watch.sh <<'SH'
@@ -37,10 +38,12 @@ jobs:
                 sudo podman inspect -f '{{json .NetworkSettings.Networks}}' $id | python3 -c 'import json,sys; [print(k, v.get("IPAddress"), v.get("Gateway")) for k,v in json.load(sys.stdin).items()]'
                 sudo nsenter -t $pid -n ip -br addr; sudo nsenter -t $pid -n ip route; sudo nsenter -t $pid -n ip -6 route
                 sudo nsenter -t $pid -m cat /etc/resolv.conf 2>&1
-                echo "--- host curl inside the proxy's netns"
-                sudo nsenter -t $pid -n curl -sS -o /dev/null -m 6 -w 'github http=%{http_code}\n' https://github.com/octocat/Hello-World.git/info/refs?service=git-upload-pack 2>&1
-                sudo nsenter -t $pid -n curl -sS -o /dev/null -m 6 -w 'example http=%{http_code}\n' https://example.com/ 2>&1
-                sudo nsenter -t $pid -n getent hosts github.com 2>&1 | head -2
+                echo "--- each nameserver of the proxy asked for github.com from its namespace"
+                for ns in $(sudo nsenter -t $pid -m awk '/^nameserver/{print $2}' /etc/resolv.conf); do
+                  echo "@$ns:"; sudo nsenter -t $pid -n dig +time=3 +tries=1 github.com @$ns 2>&1 | grep -E "status:|ANSWER SECTION|^github.com|timed out|no servers" | head -4
+                done
+                echo "--- the networks: internal flag, dns_enabled"
+                sudo podman network ls --format '{{.Name}} internal={{.Internal}} dns={{.DNSEnabled}}' | grep "$(echo $name | sed 's/^\///; s/-proxy-1//')"
                 echo "--- proxy log"; sudo podman logs --tail 30 $id 2>&1
               } >> /tmp/proxies.log 2>&1
             done
