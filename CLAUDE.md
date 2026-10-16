@@ -30,3 +30,10 @@ host; it does not ask egzo for anything. See `specs/README.md`.
 - Docker is the engine to run the specs against day to day; do not run the whole suite more than needed
   (about 12 minutes).
 - Commit when something meaningful works.
+
+## Intended behaviour that surprises an agent
+
+- **Auto-chosen instance names skip numbers.** In a project with a git workspace, every instance gets a branch `egzo/<name>` in the
+  base clone, and `agent rm` / `project down` keep it so what the agent committed survives. A name is taken as long as its branch
+  exists, so after `agent-1` and `agent-2` are removed, the next unnamed agent is `agent-3`, not `agent-1`. This is intended: do not
+  "fix" it, and do not write a spec that expects a number to be reused. Specs that need a known name pass one.
