@@ -21,29 +21,29 @@ jobs:
           python -m venv specs/.venv
           specs/.venv/bin/pip install -r specs/requirements.txt
       - run: docker run -d --name spec-registry -p 5000:5000 registry:2
-      - name: Egress from a custom network
+      - name: Two networks, one of them internal
         run: |
           set +e
-          sudo iptables -S FORWARD | head -5; sudo iptables -L FORWARD -n | head -3; sudo nft list tables
-          attempt() {
-            ok=0
-            for i in 1 2 3 4 5 6 7 8; do
-              sudo podman network create n$i-$1 >/dev/null
-              sudo podman run --rm --network n$i-$1 docker.io/curlimages/curl:8.10.1 -sS -o /dev/null -m 8 -w '%{http_code}' https://example.com/ >/tmp/o 2>&1 && ok=$((ok+1))
-              sudo podman network rm n$i-$1 >/dev/null
-            done
-            echo "$1: $ok of 8 worked"
-          }
-          attempt before
-          sudo iptables -P FORWARD ACCEPT
-          attempt accept
+          sudo podman network create --internal ctl >/dev/null; sudo podman network create ext >/dev/null
+          ok=0
+          for i in $(seq 1 12); do
+            out=$(sudo podman run --rm --network ctl --network ext docker.io/curlimages/curl:8.10.1 sh -c 'ip route | tr "\n" ";"; curl -sS -o /dev/null -m 8 -w " http=%{http_code}" https://example.com/' 2>&1)
+            echo "$i: $out"; case "$out" in *http=200) ok=$((ok+1));; esac
+          done
+          echo "both-networks: $ok of 12 worked"
+          ok=0
+          for i in $(seq 1 12); do
+            out=$(sudo podman run --rm --network ctl:metric=900 --network ext docker.io/curlimages/curl:8.10.1 sh -c 'ip route | tr "\n" ";"; curl -sS -o /dev/null -m 8 -w " http=%{http_code}" https://example.com/' 2>&1)
+            echo "$i: $out"; case "$out" in *http=200) ok=$((ok+1));; esac
+          done
+          echo "with-metric: $ok of 12 worked"
       - name: Specs
         working-directory: specs
         env:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q agent/test_agent_containers.py 2>&1 | tee ../specs-debug.log
+          ../specs/.venv/bin/pytest --engine podman -q agent/test_agent_containers.py -k nothing 2>&1 | tee ../specs-debug.log
       - name: Annotate
         if: failure()
         run: scripts/ci-annotate.sh "debug specs" specs-debug.log specs
