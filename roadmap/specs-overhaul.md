@@ -17,8 +17,8 @@ as testscript or cram was considered and rejected: it would throw away the statu
 
 - **Shared project per module** (or class) for specs that only need running sidecars: brought up once, each spec spawns its own
   agents under unique names and leaves nothing that another spec sees. Specs about `up`, `down`, stale instances, the lock and
-  anything that changes the project keep a fresh one. Expect more than a 2x gain. Parallel runs (`pytest-xdist`) were rejected for
-  a developer machine; CI uses them, see [ci-test-matrix.md](ci-test-matrix.md).
+  anything that changes the project keep a fresh one. Expect more than a 2x gain. Parallel runs (`pytest-xdist`) are rejected for
+  now.
 - **More scenarios, fewer isolated checks.** A spec may follow one story across several commands (spawn, ps, message, stop,
   rm) and assert at each step, where the checks are read-only or are steps of one flow. Where a spec is about one rule, it stays
   small.

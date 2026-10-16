@@ -34,15 +34,18 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
   start. `docker-gvisor`, `podman`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history, by
   removing the flag in `specs.yml` and adding the check to the branch rules. Rootful Podman has a known intermittent failure
   (`known-issues/rootful-podman-intermittent-egress.md`) and must not block merges until that is understood.
-- **Parallel.** Each cell runs the specs with four `pytest-xdist` workers, `--dist loadfile`: a module keeps one worker, so the
-  project it shares is never used by two. A local try (`-n 4 --dist loadfile`, Docker with gVisor) took 3 minutes instead of about
-  12, and 54 specs failed on `all predefined address pools have been fully subnetted`: every project and instance is a network and
-  Docker's default pool holds about 30. `scripts/ci-engine.sh` therefore gives Docker a pool of 2048 `/24` networks from
-  `10.200.0.0/13` (merged into `daemon.json`, and checked by creating a network) before the specs. Podman's default pool is larger
-  and was not changed; if a Podman cell shows the same error, that is the place. This replaces the decision of
-  [specs-overhaul.md](specs-overhaul.md) not to use xdist, which was taken for a developer machine where the pool belongs to
-  other work; a cell is a machine of its own. Whether the specs hold under four workers on every platform is what the first runs
-  show: a module that is not independent of the others fails there, and gets fixed or its own worker.
+- **Serial.** Each cell runs the specs one at a time. Four `pytest-xdist` workers (`--dist loadfile`) were tried on the first
+  runs: locally with Docker and gVisor they took 3 minutes instead of about 12, but 54 specs failed on `all predefined address
+  pools have been fully subnetted` (every project and instance is a network and Docker's default pool holds about 30), and with
+  the pool widened the timing-sensitive specs (a terminal's colours, the pty attach, the browser, the stand-in agents' timings)
+  failed on three platforms. Serial passes on every Docker cell. Stable runs are preferred to fast ones, so xdist and the pool
+  setting are gone; [specs-overhaul.md](specs-overhaul.md) stands ("not for now").
+- **Podman cells.** Things the first runs found that are about the host, not egzo, and that `scripts/ci-engine.sh` sets up:
+  the rootful socket is served by `podman system service` in a `/run/podman` the runner user can enter (systemd leaves it
+  root-only); the test registry on `localhost:5000` is declared insecure (Podman does not trust localhost for plain HTTP as Docker
+  does); and the rootful cell runs without Ubuntu's AppArmor container profile
+  (`known-issues/rootful-podman-apparmor-stacking.md`). gVisor comes from its release archive (`gvisor.tar.bz2`), as the separate
+  `runsc` files are gone. Podman 5.7 refuses the `uid=` option of a tmpfs mount, so egzo's sidecar tmpfs use `mode=1777`.
 - **Artifacts.** Each cell uploads the log of its run (the summary per area is its last lines) and a JUnit file.
 
 ## To do before the matrix is a gate
