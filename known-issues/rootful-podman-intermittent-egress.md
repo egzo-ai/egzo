@@ -1,6 +1,34 @@
 # Rootful Podman: intermittent loss of outbound connectivity
 
-Status: **open, set aside** (found 2026-10-04). Host-level, not an egzo bug as far as we can tell.
+Status: **diagnosed 2026-10-16, mitigated in egzo, not gone** (found 2026-10-04). Podman/netavark race, not an egzo bug.
+
+## Diagnosis (2026-10-16, GitHub runner, Ubuntu 26.04, Podman 5.7.0, netavark 1.16.1)
+
+A proxy that cannot dial out is on a bridge whose IPv4 forwarding is off. Netavark switches
+`net.ipv4.conf.<bridge>.forwarding` off on the bridges of **internal** networks and on for the others. When
+several networks and containers are set up at once, some **non-internal** bridges are left at `0`: the packets
+of the containers on them arrive on the bridge (`tcpdump` shows the SYN on `podmanN`) and are never forwarded
+(not counted in the `FORWARD` chain, no NAT, no reply). Everything else is in order in that state: routes,
+addresses, `aardvark-dns` answers, netavark's isolation and masquerade rules.
+
+- A failing proxy, for example: `podman1..podman5` with `forwarding=0` except `podman2`; the proxy's `eth0` on
+  `podman3` (an egress network, not internal).
+- Reproduces without egzo: six `podman network create X; podman run -d --network X ...` started at the same
+  time left three of the six bridges at `forwarding=0` and three containers without egress. The same sequence
+  one at a time (four rounds of an internal network, an external network and a container on both) left every
+  external bridge at `1`.
+- The setup and the teardown of containers (conmon's `container cleanup`) also run netavark outside any call
+  of the API, so serializing the calls lowers the odds and does not remove the race: a run with the calls
+  serialized still lost the egress of one project in one of three runs.
+- `docker` on the same host, the host firewall's `FORWARD` policy (DROP, set by Docker) and the order of the
+  nameservers were checked and are not the cause: with the bridge forwarding on, Podman containers reach the
+  internet through the same rules.
+
+What egzo does: on Podman it runs the engine calls of an `up`, `spawn` and `down` one at a time
+(`onePerTimeOnPodman` in `internal/stack/schedule.go`). What is left is an upstream bug to report to
+containers/netavark with the reproduction above.
+
+## Earlier notes (before the diagnosis)
 
 ## Symptom
 
@@ -57,7 +85,7 @@ immediately. Other engines (docker, docker-gvisor, podman-rootless) did not show
 
 No upstream issue matches the exact behavior.
 
-## Next steps (need root)
+## Next steps (need root) (partly done by the diagnosis above)
 
 1. In a failing state, compare `sudo nft list ruleset` and `sudo iptables -S FORWARD` with a working
    run. A missing masquerade or forward rule for the failing network's bridge confirms rule loss.
