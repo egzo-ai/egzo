@@ -20,7 +20,7 @@ type claudeCode struct{}
 func init() { register(claudeCode{}) }
 
 func (claudeCode) Name() string       { return "claude-code" }
-func (claudeCode) IdleSignal() string { return "hook" }
+func (claudeCode) IdleSignal() string { return "state" }
 
 // The footer under Claude Code's prompt names the permission mode, or offers the shortcuts.
 func (claudeCode) ReadyMarkers() []string { return []string{"for shortcuts", "shift+tab to cycle"} }

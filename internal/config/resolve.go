@@ -61,13 +61,13 @@ type ResolvedInject struct {
 	Quiescence string `yaml:"quiescence"`
 }
 
-// harnessesWithHooks report their own state through hooks; the others are watched by their output.
-var harnessesWithHooks = map[string]bool{"claude-code": true, "opencode": true}
+// harnessesThatReportState report their own state (`egzo state`); the others are watched by their output.
+var harnessesThatReportState = map[string]bool{"claude-code": true, "opencode": true}
 
 func resolveInject(name string, agent Agent, p *problems) ResolvedInject {
 	inject := ResolvedInject{HumanQuiet: "30s", AckTimeout: "60s", IdleSignal: "quiescence", Quiescence: "5s"}
-	if harnessesWithHooks[agent.Harness] {
-		inject.IdleSignal = "hook"
+	if harnessesThatReportState[agent.Harness] {
+		inject.IdleSignal = "state"
 	}
 	if agent.Inject == nil {
 		return inject
@@ -87,10 +87,10 @@ func resolveInject(name string, agent Agent, p *problems) ResolvedInject {
 	duration("quiescence", agent.Inject.Quiescence, &inject.Quiescence)
 	switch agent.Inject.IdleSignal {
 	case "":
-	case "hook", "quiescence":
+	case "state", "quiescence":
 		inject.IdleSignal = agent.Inject.IdleSignal
 	default:
-		p.addf("agent %q: inject.idle_signal %q is not hook or quiescence", name, agent.Inject.IdleSignal)
+		p.addf("agent %q: inject.idle_signal %q is not state or quiescence", name, agent.Inject.IdleSignal)
 	}
 	return inject
 }

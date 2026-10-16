@@ -33,7 +33,7 @@ const (
 	// defaultStatusInterval is the heartbeat. It is a trade: the log grows by one line per interval, the reader is
 	// that stale at worst when it joins an idle sidecar and has to wait for a line.
 	defaultStatusInterval = 30 * time.Second
-	// statusCoalesce is how long a change waits for more, so a burst of hooks is one line.
+	// statusCoalesce is how long a change waits for more, so a burst of state reports is one line.
 	statusCoalesce = 300 * time.Millisecond
 	// EnvStatusInterval sets the heartbeat, in seconds, for tests and for a sysadmin who wants it tighter or looser.
 	EnvStatusInterval = "EGZO_STATUS_INTERVAL"
@@ -90,7 +90,7 @@ func newStatusLog(s *server, out io.Writer, project string, interval time.Durati
 	return &statusLog{server: s, out: out, project: project, interval: interval, coalesce: statusCoalesce}
 }
 
-// sameState compares what matters to a reader. `updated` moves with every event of an agent, including the hooks that
+// sameState compares what matters to a reader. `updated` moves with every event of an agent, including the state reports that
 // change nothing it can see, so it is left out: the line is for changes of state.
 func sameState(a, b []AgentStatus) bool {
 	strip := func(in []AgentStatus) []AgentStatus {

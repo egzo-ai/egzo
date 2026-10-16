@@ -55,12 +55,12 @@ emit) # escape sequences a terminal passes on: OSC 52, OSC 8, truecolor, wide ch
 	printf 'wide:\344\275\240\345\245\275\360\237\230\200\r\n'
 	while :; do sleep 1; done
 	;;
-hooks) # a harness with hooks and tools: it reports its life cycle like Claude Code does, and when a line
+reporting) # a harness with state reports and tools: it reports its life cycle like Claude Code does, and when a line
 	# announces egzo messages it fetches them through the agent API (the way a model calls get_message)
 	stty -echo
 	trap : INT
 	printf 'READY\r\n'
-	[ "${FAKE_HOOKS:-1}" = 1 ] && egzo state idle --reason SessionStart </dev/null
+	[ "${FAKE_REPORTS:-1}" = 1 ] && egzo state idle --reason SessionStart </dev/null
 	api() { curl -s -m 5 -u "$EGZO_AGENT:$EGZO_TOKEN" -H 'content-type: application/json' "$@"; }
 	buf=""
 	pasting=0
@@ -73,7 +73,7 @@ hooks) # a harness with hooks and tools: it reports its life cycle like Claude C
 		text=$(clean "$buf")
 		buf=""
 		[ -z "$text" ] && continue
-		[ "${FAKE_HOOKS:-1}" = 1 ] && printf '{"prompt":"%s"}' "$text" | egzo state working --reason UserPromptSubmit
+		[ "${FAKE_REPORTS:-1}" = 1 ] && printf '{"prompt":"%s"}' "$text" | egzo state working --reason UserPromptSubmit
 		printf 'got:%s\r\n' "$text"
 		ids=$(printf '%s' "$text" | grep -o 'm[0-9a-f]\{32\}')
 		fetched=""
@@ -96,7 +96,7 @@ hooks) # a harness with hooks and tools: it reports its life cycle like Claude C
 			fi
 			;;
 		esac
-		[ "${FAKE_HOOKS:-1}" = 1 ] && egzo state idle --reason Stop </dev/null
+		[ "${FAKE_REPORTS:-1}" = 1 ] && egzo state idle --reason Stop </dev/null
 	done
 	;;
 exit) # leaves straight away

@@ -252,6 +252,6 @@ def test_inject_settings_are_validated(project):
 
 def test_inject_defaults_are_resolved(project):
     resolved = project.resolved(spec(agents={"coder": {"harness": "claude-code"}}, egress={"default": {"allow": ["x.test"]}}))
-    assert resolved["agents"]["coder"]["inject"] == {"human_quiet": "30s", "ack_timeout": "60s", "idle_signal": "hook", "quiescence": "5s"}
+    assert resolved["agents"]["coder"]["inject"] == {"human_quiet": "30s", "ack_timeout": "60s", "idle_signal": "state", "quiescence": "5s"}
     resolved = project.resolved(spec(agents={"coder": {"harness": "custom", "image": "alpine"}}))
     assert resolved["agents"]["coder"]["inject"]["idle_signal"] == "quiescence"

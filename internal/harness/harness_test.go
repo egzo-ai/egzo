@@ -134,11 +134,6 @@ func TestClaudeCodeHooksReportEgzosStates(t *testing.T) {
 	if commands["idle_prompt"] != "egzo state idle --reason idle_prompt" || !strings.HasPrefix(commands["permission_prompt|elicitation_dialog"], "egzo state blocked ") {
 		t.Errorf("notifications run %v", commands)
 	}
-	for hook := range get(t, settings, "hooks").(map[string]any) {
-		if _, ok := want[hook]; !ok && hook != "Notification" {
-			t.Errorf("unexpected hook %s", hook)
-		}
-	}
 }
 
 func TestClaudeCodeGetsTheControlToolsOverMCPWithTheAgentsCredentials(t *testing.T) {
@@ -223,18 +218,13 @@ func TestOpenCodeModelInstructionsAndControlTools(t *testing.T) {
 	}
 }
 
-func TestOpenCodePluginReportsEgzosStatesAndNoClaudeCodeNames(t *testing.T) {
+func TestOpenCodePluginReportsEgzosStates(t *testing.T) {
 	o := options(t)
 	plan, _ := openCode{}.Plan(o, nil)
 	plugin := string(plan.Files[filepath.Join(o.Home, ".config", "opencode", "plugin", "egzo.js")].Content)
 	for _, want := range []string{`state("idle"`, `"session.idle"`, `state("working"`, `"chat.message"`, `state("blocked"`, `"permission.asked"`, `"question.asked"`, "/v1/state"} {
 		if !strings.Contains(plugin, want) {
 			t.Errorf("the plugin lacks %s", want)
-		}
-	}
-	for _, gone := range []string{"/v1/hooks", "Notification", "UserPromptSubmit", "SessionStart"} {
-		if strings.Contains(plugin, gone) {
-			t.Errorf("the plugin still says %s", gone)
 		}
 	}
 }

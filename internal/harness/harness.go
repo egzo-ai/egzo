@@ -167,7 +167,7 @@ type File struct {
 // Integration is one harness.
 type Integration interface {
 	Name() string
-	// IdleSignal is "hook" when the harness reports its state through hooks.
+	// IdleSignal is "state" when the harness reports its state to the control sidecar.
 	IdleSignal() string
 	// ReadyMarkers are texts the TUI draws once it takes input: nothing is typed before one shows.
 	ReadyMarkers() []string

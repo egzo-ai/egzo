@@ -681,7 +681,7 @@ The holder asks the control sidecar when the terminal is ready; control answers 
   control never reads). Claude Code's hooks run `egzo state <state> --reason <hook>`; the mapping from its hook names (and its
   notification kinds: `idle_prompt` idle, `permission_prompt` and `elicitation_dialog` blocked) lives in `internal/harness/claudecode.go`.
   OpenCode's plugin posts the states itself. Then the holder
-  (for harnesses without hooks, quiet output means idle: `inject.idle_signal: quiescence`), the engine.
+  (for harnesses that report no state, quiet output means idle: `inject.idle_signal: quiescence`), the engine.
 - If we interrupted, control marks idle itself; a human Esc may not fire Stop.
 
 ### The human side (CLI)

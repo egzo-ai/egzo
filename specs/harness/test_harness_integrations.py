@@ -174,7 +174,6 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
         assert f"egzo state {reported} --reason {hook}" in commands, hook
     notifications = {group["matcher"]: [h["command"] for h in group["hooks"]] for group in settings["hooks"]["Notification"]}
     assert any("egzo state idle" in c for c in notifications["idle_prompt"]) and any("egzo state blocked" in c for c in notifications["permission_prompt|elicitation_dialog"])
-    assert not any("egzo hook" in h["command"] for groups in settings["hooks"].values() for group in groups for h in group["hooks"])
     server = state["mcpServers"]["egzo"]
     assert server["type"] == "http" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
 
@@ -209,7 +208,6 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugin/egzo.js $HOME/.config/opencode/plugins/egzo.js 2>/dev/null").stdout
     assert "session.idle" in plugin
     assert "/v1/state" in plugin and "blocked" in plugin and "working" in plugin and "idle" in plugin
-    assert "/v1/hooks" not in plugin and "Notification" not in plugin and "UserPromptSubmit" not in plugin
 
     configured = read_json(engine, p, model, "$HOME/.config/opencode/opencode.json")
     assert configured["model"] == "anthropic/claude-sonnet-5-5" and any("instructions.md" in path for path in configured["instructions"])
@@ -244,7 +242,6 @@ def test_the_state_command_reports_a_state_and_never_blocks_or_fails_the_harness
     broken = engine.exec(container, "sh", "-c", "EGZO_CONTROL_URL=http://127.0.0.1:9 egzo state idle </dev/null; echo exit=$?")
     assert "exit=0" in broken.stdout and time.time() - start < 6
     assert engine.exec(container, "egzo", "state", "nonsense").returncode != 0, "a state egzo does not know is rejected on the command line"
-    assert engine.exec(container, "egzo", "hook", "Stop").returncode != 0, "egzo hook is gone"
 
 
 @pytest.mark.parametrize("harness", HARNESSES)

@@ -53,7 +53,7 @@ func TestReportedStatesDriveTheActivityOfAnAgent(t *testing.T) {
 	}
 }
 
-func TestAnUnknownStateIsRefusedAndTheHookEndpointIsGone(t *testing.T) {
+func TestAnUnknownStateIsRefused(t *testing.T) {
 	r := newRig(t)
 	r.report("coder", `{"state":"idle"}`)
 	for _, body := range []string{`{"state":"stopped"}`, `{"state":"Stop"}`, `{}`, `not json`} {
@@ -65,11 +65,6 @@ func TestAnUnknownStateIsRefusedAndTheHookEndpointIsGone(t *testing.T) {
 	}
 	if r.srv.events.activity("coder") != "idle" {
 		t.Error("a refused state changed the activity")
-	}
-	response := r.asAgent("coder", "POST", "/v1/hooks/Stop", `{}`)
-	response.Body.Close()
-	if response.StatusCode != 404 && response.StatusCode != 405 {
-		t.Errorf("the hook endpoint answers %d", response.StatusCode)
 	}
 }
 

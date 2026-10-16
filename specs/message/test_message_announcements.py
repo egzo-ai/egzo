@@ -6,7 +6,7 @@
 A message is never typed into the terminal. The session holder asks the control sidecar when the agent is idle and nobody has typed
 for `inject.human_quiet`; control answers with a short fixed line that names the message ids, and the holder types it as one bracketed
 paste. The agent fetches the message through its tools (`get_message`); fetching is the acknowledgement. Harness state reports (`egzo state`) give the
-agent's activity. These specs drive that with a stand-in harness (fixtures/fake-tui.sh, mode `hooks`) that reads the typed line and calls
+agent's activity. These specs drive that with a stand-in harness (fixtures/fake-tui.sh, mode `reporting`) that reads the typed line and calls
 the agent API the way a model calls its tools.
 
 One project is up for the whole module, with a template for each way the stand-in is set up (it works for five seconds, it never
@@ -33,8 +33,8 @@ REPLY = re.compile(rf"^egzo message ({ID}) is the reply to your earlier request:
 
 
 def harness(image, *, inject=None, **env):
-    fields = {"harness": "custom", "image": image, "env": {"FAKE_TUI": "hooks", **env}}
-    fields["inject"] = {"human_quiet": "1s", "ack_timeout": "20s", "idle_signal": "hook", **(inject or {})}
+    fields = {"harness": "custom", "image": image, "env": {"FAKE_TUI": "reporting", **env}}
+    fields["inject"] = {"human_quiet": "1s", "ack_timeout": "20s", "idle_signal": "state", **(inject or {})}
     return agent(**fields)
 
 
@@ -48,7 +48,7 @@ def sandbox(shared_project, engine, egzo):
         "deaf": harness(image, inject={"ack_timeout": "2s"}, FAKE_FETCH="0"),
         "typed-at": harness(image, inject={"human_quiet": "6s"}),
         "observed": harness(image, inject={"human_quiet": "30s"}),
-        "nohooks": agent(harness="custom", image=image, env={"FAKE_TUI": "cat"},
+        "silent": agent(harness="custom", image=image, env={"FAKE_TUI": "cat"},
                          inject={"idle_signal": "quiescence", "quiescence": "2s", "human_quiet": "1s", "ack_timeout": "15s"}),
         "plain": custom(engine.agent_image()),
     }))
@@ -162,15 +162,13 @@ def test_reported_states_drive_the_activity_of_an_agent(view):
         assert view.activity(name) == expected, f"after {body}"
 
 
-def test_an_unknown_state_is_refused_and_the_claude_code_hook_endpoint_is_gone(view):
+def test_an_unknown_state_is_refused(view):
     name = view.spawn("plain")
     api = view.api(name)
     api.call("POST", "/v1/state", {"state": "idle"})
     for body in ({"state": "stopped"}, {"state": "Stop"}, {"state": ""}, {"reason": "no state"}):
         assert api.call("POST", "/v1/state", body)[0] == 400, body
     assert view.activity(name) == "idle"
-    for hook in ("Stop", "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification"):
-        assert api.call("POST", f"/v1/hooks/{hook}", {})[0] in (404, 405), hook
 
 
 def test_a_request_is_announced_with_a_short_line_the_agent_fetches_and_resolves_it_and_the_text_is_never_typed(view, egzo):
@@ -328,9 +326,9 @@ def test_send_interrupt_stops_the_current_turn_and_then_announces(view):
     assert view.of_type("interrupt", name)
 
 
-def test_without_hooks_quiet_output_means_idle_and_a_message_is_still_announced(view):
-    name = view.spawn("nohooks")
+def test_without_state_reports_quiet_output_means_idle_and_a_message_is_still_announced(view):
+    name = view.spawn("silent")
     view.wait_activity(name, "idle")
-    view.project.ok("message send", name, "no hooks here")
+    view.project.ok("message send", name, "nothing reported here")
     wait_for(lambda: view.of_type("announced", name), "the announcement by quiescence", timeout=40)
     view.wait_activity(name, "idle")

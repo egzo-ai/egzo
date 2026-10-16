@@ -432,27 +432,27 @@ agents:
 func TestInjectDefaultsDependOnHowTheHarnessReportsItsState(t *testing.T) {
 	resolved, _ := mustResolve(t, t.TempDir(), `
 agents:
-  hooked: {harness: claude-code}
+  reporting: {harness: claude-code}
   plain: {harness: custom, image: x}
 egress:
   default: {allow: [platform.claude.com]}
 `)
-	hooked, plain := resolved.Agents["hooked"].Inject, resolved.Agents["plain"].Inject
-	if hooked.IdleSignal != "hook" || plain.IdleSignal != "quiescence" {
-		t.Errorf("hooked = %+v plain = %+v", hooked, plain)
+	reporting, plain := resolved.Agents["reporting"].Inject, resolved.Agents["plain"].Inject
+	if reporting.IdleSignal != "state" || plain.IdleSignal != "quiescence" {
+		t.Errorf("reporting = %+v plain = %+v", reporting, plain)
 	}
-	if hooked.HumanQuiet != "30s" || hooked.AckTimeout != "60s" || hooked.Quiescence != "5s" {
-		t.Errorf("defaults = %+v", hooked)
+	if reporting.HumanQuiet != "30s" || reporting.AckTimeout != "60s" || reporting.Quiescence != "5s" {
+		t.Errorf("defaults = %+v", reporting)
 	}
 }
 
 func TestInjectSettingsOverrideTheDefaultsAndAreValidated(t *testing.T) {
 	resolved, _ := mustResolve(t, t.TempDir(), `
 agents:
-  coder: {harness: custom, image: x, inject: {human_quiet: 2m, idle_signal: hook}}
+  coder: {harness: custom, image: x, inject: {human_quiet: 2m, idle_signal: state}}
 `)
 	inject := resolved.Agents["coder"].Inject
-	if inject.HumanQuiet != "2m" || inject.IdleSignal != "hook" || inject.AckTimeout != "60s" {
+	if inject.HumanQuiet != "2m" || inject.IdleSignal != "state" || inject.AckTimeout != "60s" {
 		t.Errorf("inject = %+v", inject)
 	}
 	for _, bad := range []string{"human_quiet: soon", "ack_timeout: -3s", "idle_signal: vibes", "quiescence: 0s"} {

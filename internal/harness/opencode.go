@@ -14,7 +14,7 @@ type openCode struct{}
 func init() { register(openCode{}) }
 
 func (openCode) Name() string       { return "opencode" }
-func (openCode) IdleSignal() string { return "hook" }
+func (openCode) IdleSignal() string { return "state" }
 
 // OpenCode's prompt box says "Ask anything…" until the first message.
 func (openCode) ReadyMarkers() []string { return []string{"Ask anything"} }

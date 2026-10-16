@@ -422,13 +422,13 @@ func TestHarnessAgentsCarryTheirIntegrationInTheirDefinition(t *testing.T) {
 	coder.Image = ""
 	coder.Model = "claude-sonnet-5-5"
 	coder.Permissions = "bypass"
-	coder.Inject = config.ResolvedInject{HumanQuiet: "30s", AckTimeout: "60s", IdleSignal: "hook", Quiescence: "5s"}
+	coder.Inject = config.ResolvedInject{HumanQuiet: "30s", AckTimeout: "60s", IdleSignal: "state", Quiescence: "5s"}
 	project.Agents["coder"] = coder
 	d := desire(t, project)
 	spec := findContainer(t, d, "proj-coder")
 	for _, want := range []string{
 		"EGZO_HARNESS=claude-code", "EGZO_MODEL=claude-sonnet-5-5", "EGZO_PERMISSIONS=bypass", "IS_SANDBOX=1",
-		"EGZO_HUMAN_QUIET=30s", "EGZO_ACK_TIMEOUT=60s", "EGZO_IDLE_SIGNAL=hook", "EGZO_WORKSPACES=/workspace/shared",
+		"EGZO_HUMAN_QUIET=30s", "EGZO_ACK_TIMEOUT=60s", "EGZO_IDLE_SIGNAL=state", "EGZO_WORKSPACES=/workspace/shared",
 	} {
 		if !slices.Contains(spec.Env, want) {
 			t.Errorf("env lacks %s\n%v", want, spec.Env)

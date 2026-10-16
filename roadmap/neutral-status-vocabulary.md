@@ -30,7 +30,7 @@ harness would have to do the same. Three costs:
 
 The protocol belongs to egzo. A harness reports a **state change**, in egzo's words, and the control does no mapping.
 
-- **One endpoint of states**: `POST /v1/agent/state` (name to be decided; it may stay under `/v1/hooks/`) with
+- **One endpoint of states**: `POST /v1/state` with
   `{state, reason?}`, where `state` is one of the activities the control already has: `starting`, `idle`, `working`,
   `blocked`. `reason` is a short text for people (`permission`, `question`, `login`, `a tool name`), shown by `egzo ps`
   and the hub and recorded in the event. The control never parses it for a decision: today's "waits for your input" match goes away
@@ -42,8 +42,8 @@ The protocol belongs to egzo. A harness reports a **state change**, in egzo's wo
   Claude Code's integration, not to the control.
 - **OpenCode** reports states straight from its plugin: `session.idle` is `idle`, `permission.asked` is `blocked` with a
   reason, `chat.message` is `working`. No fake `Notification` text.
-- **The old endpoint is removed**: `/v1/hooks/<Name>` and its six Claude names go away in the same change. Egzo is pre-release, so
-  there is no alias and no compatibility window; harness images are rebuilt with the egzo that ships the new endpoint.
+- **The old endpoint is removed outright**: `/v1/hooks/<Name>` and its six Claude names went in the same change, with no alias or
+  compatibility window; harness images are rebuilt with the egzo that ships the new endpoint.
 - **The event stream** keeps `activity` events as they are (the hub and the adapters read them). The `hook` event type is
   the raw record of what a harness sent. It becomes `state` events with the reason; the `hook` event type goes away.
   The `tool_name` and `message` fields stay the only payload fields kept (see `hookFields` in `internal/control/agentapi.go`).
@@ -60,6 +60,6 @@ The protocol belongs to egzo. A harness reports a **state change**, in egzo's wo
 ## Tests
 
 - Core: specs first (`specs/message/test_agent_api.py`, `specs/harness/test_harness_integrations.py`): each state is accepted and
-  changes the activity; an unknown state is refused; the reason is shown and never changes the decision; the old hook endpoint and `egzo hook` no longer exist. Claude Code's settings declare hooks that report the new states. OpenCode's plugin reports them
+  changes the activity; an unknown state is refused; the reason is shown and never changes the decision. Claude Code's settings declare hooks that report the new states. OpenCode's plugin reports them
   without a `Notification`.
 - Unit (Go): the Claude Code mapping lives in `internal/harness` and is tested without a container; `hookActivity` is gone from the control.

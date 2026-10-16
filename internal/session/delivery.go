@@ -19,7 +19,7 @@ type Delivery struct {
 	// AckTimeout is how long the control sidecar waits for the agent to fetch an announced message before it
 	// announces it again.
 	AckTimeout time.Duration
-	// IdleSignal is "hook" (the harness reports its state through hooks) or "quiescence" (quiet
+	// IdleSignal is "state" (the harness reports its state) or "quiescence" (quiet
 	// output means idle).
 	IdleSignal string
 	// Quiescence is how long the output stays quiet before the agent counts as idle.
@@ -44,8 +44,8 @@ type Delivery struct {
 	ReadyMarkers []string
 	ReadyTimeout time.Duration
 	// StuckAfter is how long the program's output may stay silent while the control sidecar still says
-	// the agent is working (a harness that hooks its turns) before the agent is released: a harness
-	// whose hook never reported the end of a turn (an interrupt with Esc, a crash of the hook) would
+	// the agent is working (a harness that reports its turns) before the agent is released: a harness
+	// that never reported the end of a turn (an interrupt with Esc, a crash of its reporter) would
 	// otherwise keep its messages waiting forever. A working TUI draws continuously, so a long silence
 	// means it is not working. It defaults to three minutes. Only "working" is released: an agent that
 	// is blocked on a dialog stays blocked.
@@ -125,7 +125,7 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 			}
 		}
 
-		if cfg.IdleSignal == "hook" {
+		if cfg.IdleSignal == "state" {
 			if quiet := h.LastOutput(); time.Since(quiet) >= cfg.StuckAfter && quiet.After(released) {
 				if _, err := api.Do(ctx, "POST", "/v1/activity", map[string]string{"state": "idle", "if": "working"}); err == nil {
 					released = time.Now()

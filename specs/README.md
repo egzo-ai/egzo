@@ -144,7 +144,7 @@ it covers and how the project it runs on is shared.
 | `proxy/test_proxy_isolation.py` | how an agent reaches the proxy, private addresses, Encrypted Client Hello (no internet needed) |
 | `proxy/test_proxy_egress.py` | profiles, the audit trail, `inspect` and wildcard services, bindings of instances (needs the internet) |
 | `proxy/test_proxy_secrets.py` | injection, placeholders, rotation, refused secrets (needs httpbin.org) |
-| `harness/test_harness_integrations.py` | the Claude Code and OpenCode images: bypass, first-run state, hooks, MCP, the real TUIs |
+| `harness/test_harness_integrations.py` | the Claude Code and OpenCode images: bypass, first-run state, state reports, MCP, the real TUIs |
 | `browser/test_browser.py` | the Chromium and Playwright MCP server built into both harness images, browsing through the proxy, a form login with a placeholder |
 | `workspace/test_workspace_commands.py` | `workspace ls|put|get|rm|fetch` |
 | `workspace/test_git_workspaces.py` | the base clone at `up`, a worktree per instance at spawn, fetch, `--reuse`, removal with the instance (clones from github.com) |

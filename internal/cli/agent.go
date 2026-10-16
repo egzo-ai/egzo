@@ -164,7 +164,7 @@ func runAgent(args []string) error {
 		idle = integration.IdleSignal()
 		readyMarkers = integration.ReadyMarkers()
 	}
-	if value := os.Getenv("EGZO_IDLE_SIGNAL"); value == "hook" || value == "quiescence" {
+	if value := os.Getenv("EGZO_IDLE_SIGNAL"); value == "state" || value == "quiescence" {
 		idle = value
 	}
 	if api, err := agentclient.FromEnv(); err == nil {

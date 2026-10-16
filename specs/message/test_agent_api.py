@@ -2,7 +2,7 @@
 # Copyright (C) Neopeak Internet Solutions inc.
 
 """What an agent can do to the control sidecar, from inside its container with its own credentials: the HTTP tools, the MCP
-endpoint, the hooks, and the limits that stop an agent from burying a person or another agent.
+endpoint, the state reports, and the limits that stop an agent from burying a person or another agent.
 
 One project is up for the whole module (the `team` fixture). A spec that counts or floods takes fresh agents with `pair`:
 a rate limit left on `coder` would show in every later spec. The people's side (`egzo message ...`) is in test_message_cli.py."""
@@ -150,7 +150,6 @@ def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team
     assert "idle" in {e["text"] for e in states}
     assert any(e.get("data", {}).get("reason") == "PostToolUse" for e in states), "the reason is recorded"
     assert any(e.get("data", {}).get("tool_name") == "Read" for e in states), "the tool name is what the stream is for"
-    assert not [e for e in team.events("--agent", coder.name) if e["type"] == "hook"], "the hook event type is gone"
     stream = team.project.ok("events").stdout
     assert secret not in stream and "all done" not in stream, "tool output and prompts are not recorded, only that the state was reported"
     on_volume = team.engine.exec(team.container("control").name, "sh", "-c", "cat /state/events.jsonl 2>/dev/null || true")

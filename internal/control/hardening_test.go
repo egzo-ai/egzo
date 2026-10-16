@@ -18,20 +18,20 @@ import (
 
 // --- R-15: an agent cannot fill the control sidecar ------------------------------------------------------
 
-func TestAFloodOfHooksIsBoundedButTheActivityStaysCorrect(t *testing.T) {
+func TestAFloodOfStateReportsIsBoundedButTheActivityStaysCorrect(t *testing.T) {
 	r := newRig(t)
 	for i := 0; i < 1000; i++ {
 		r.report("coder", `{"state":"working","tool_name":"Bash"}`)
 	}
 	r.report("coder", `{"state":"idle"}`)
-	hooks := 0
+	reports := 0
 	for _, e := range r.srv.events.all() {
 		if e.Type == "state" {
-			hooks++
+			reports++
 		}
 	}
-	if hooks > 400 {
-		t.Errorf("%d hook events were recorded from one burst", hooks)
+	if reports > 400 {
+		t.Errorf("%d state events were recorded from one burst", reports)
 	}
 	if got := r.srv.events.activity("coder"); got != activityIdle {
 		t.Errorf("activity = %q: dropping hook events must not lose the state change", got)
