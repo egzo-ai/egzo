@@ -42,12 +42,15 @@ docker-gvisor)
 	docker run --rm --runtime=runsc alpine:3 dmesg | head -3
 	;;
 podman)
-	# rootful Podman: the system socket, readable by the runner user (the VM is thrown away)
-	sudo mkdir -p /etc/systemd/system/podman.socket.d
-	printf '[Socket]\nSocketMode=0666\nDirectoryMode=0755\n' | sudo tee /etc/systemd/system/podman.socket.d/ci.conf >/dev/null
-	sudo systemctl daemon-reload
-	sudo systemctl enable podman.socket
-	sudo systemctl restart podman.socket
+	# rootful Podman: the API service of root on /run/podman/podman.sock, which the runner user may use (the VM is thrown away).
+	# systemd's podman.socket makes /run/podman readable by root only, so the service is started here instead.
+	sudo systemctl disable --now podman.socket podman.service 2>/dev/null || true
+	sudo rm -rf /run/podman
+	sudo mkdir -m 0755 /run/podman
+	sudo nohup podman system service --time=0 unix:///run/podman/podman.sock >/tmp/podman-service.log 2>&1 &
+	for _ in $(seq 1 30); do [ -S /run/podman/podman.sock ] && break; sleep 1; done
+	[ -S /run/podman/podman.sock ] || { cat /tmp/podman-service.log; echo "the Podman socket did not appear" >&2; exit 1; }
+	sudo chmod 0666 /run/podman/podman.sock
 	ls -ld /run/podman /run/podman/podman.sock
 	sudo podman version
 	;;
