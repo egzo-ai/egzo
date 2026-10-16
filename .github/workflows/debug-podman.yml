@@ -21,22 +21,22 @@ jobs:
           python -m venv specs/.venv
           specs/.venv/bin/pip install -r specs/requirements.txt
       - run: docker run -d --name spec-registry -p 5000:5000 registry:2
-      - name: Who runs what
+      - name: Volume ownership
         run: |
           set +e
-          probe='ls -l /run/podman-init; ls -ln /proc/1/exe; echo x > /proc/1/fd/1 && echo WRITE-OK; grep -E "Cap(Eff|Bnd)|NoNewPrivs|Seccomp" /proc/self/status; cat /proc/1/attr/current /proc/self/attr/current'
-          for flags in "" "--security-opt no-new-privileges" "--cap-drop ALL" "--cap-drop ALL --security-opt no-new-privileges" "--cap-drop ALL --security-opt no-new-privileges --security-opt apparmor=unconfined" "--cap-drop ALL --security-opt no-new-privileges --security-opt seccomp=unconfined" "--cap-drop ALL --security-opt no-new-privileges --read-only"; do
-            echo "=== sudo podman run --init --user 1001:1001 $flags"
-            sudo podman run --rm --init --user 1001:1001 $flags alpine:3 sh -c "$probe" 2>&1 | tr '\n' '|'; echo
-          done
-          aa-status 2>&1 | head -5; sudo podman info --format '{{.Host.Security}}'
+          sudo podman volume create v1 >/dev/null
+          sudo podman run --rm -v v1:/volume0 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --security-opt no-new-privileges alpine:3 sh -c 'stat -c %u:%g /volume0; chown 1001:1001 /volume0; stat -c %u:%g /volume0'
+          echo "--- second container, no user"; sudo podman run --rm -v v1:/w alpine:3 stat -c %u:%g /w
+          echo "--- second container, user 1001"; sudo podman run --rm --user 1001:1001 -v v1:/w alpine:3 stat -c %u:%g /w
+          echo "--- again"; sudo podman run --rm -v v1:/w alpine:3 stat -c %u:%g /w
+          sudo podman volume inspect v1 | head -30
       - name: Specs
         working-directory: specs
         env:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest --engine podman -q harness/test_harness_integrations.py -k "invoking" session/test_session_attach.py 2>&1 | tee ../specs-debug.log
+          ../specs/.venv/bin/pytest --engine podman -q harness/test_harness_integrations.py agent/test_agent_containers.py 2>&1 | tee ../specs-debug.log
       - name: Annotate
         if: failure()
         run: scripts/ci-annotate.sh "debug specs" specs-debug.log specs
