@@ -1,0 +1,65 @@
+# TEMPORARY: why the proxy cannot reach the internet on rootful Podman. Removed once understood.
+name: debug-podman
+on:
+  push:
+    branches: [ci-spec-matrix]
+jobs:
+  debug:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: scripts/ci-engine.sh podman
+      - run: |
+          make build
+          python -m venv specs/.venv
+          specs/.venv/bin/pip install -r specs/requirements.txt
+      - run: docker run -d --name spec-registry -p 5000:5000 registry:2
+      - name: Watch the proxies while the specs run
+        run: |
+          cat > /tmp/watch.sh <<'SH'
+          seen=""
+          while true; do
+            for id in $(sudo podman ps -q --filter name=-proxy-1); do
+              case " $seen " in *" $id "*) continue;; esac
+              seen="$seen $id"
+              pid=$(sudo podman inspect -f '{{.State.Pid}}' $id)
+              name=$(sudo podman inspect -f '{{.Name}}' $id)
+              sleep 12
+              {
+                echo "##### $name pid=$pid at $(date +%T)"
+                sudo podman inspect -f '{{json .NetworkSettings.Networks}}' $id | python3 -c 'import json,sys; [print(k, v.get("IPAddress"), v.get("Gateway")) for k,v in json.load(sys.stdin).items()]'
+                sudo nsenter -t $pid -n ip -br addr; sudo nsenter -t $pid -n ip route; sudo nsenter -t $pid -n ip -6 route
+                sudo nsenter -t $pid -m cat /etc/resolv.conf 2>&1
+                echo "--- host curl inside the proxy's netns"
+                sudo nsenter -t $pid -n curl -sS -o /dev/null -m 6 -w 'github http=%{http_code}\n' https://github.com/octocat/Hello-World.git/info/refs?service=git-upload-pack 2>&1
+                sudo nsenter -t $pid -n curl -sS -o /dev/null -m 6 -w 'example http=%{http_code}\n' https://example.com/ 2>&1
+                sudo nsenter -t $pid -n getent hosts github.com 2>&1 | head -2
+                echo "--- proxy log"; sudo podman logs --tail 30 $id 2>&1
+              } >> /tmp/proxies.log 2>&1
+            done
+            sleep 2
+          done
+          SH
+          nohup bash /tmp/watch.sh >/dev/null 2>&1 &
+      - name: Specs
+        working-directory: specs
+        env:
+          EGZO_BIN: ${{ github.workspace }}/bin/egzo
+        run: |
+          set -o pipefail
+          ../specs/.venv/bin/pytest --engine podman -q workspace/test_git_workspaces.py proxy/test_proxy_secrets.py 2>&1 | tee ../specs-debug.log
+      - name: What the watcher saw
+        if: always()
+        run: cat /tmp/proxies.log
+      - name: Annotate
+        if: always()
+        run: |
+          { echo "---- specs"; tail -40 specs-debug.log; echo "---- proxies"; cut -c1-300 /tmp/proxies.log | head -150; } > debug-all.log
+          scripts/ci-annotate.sh "debug" debug-all.log tail
