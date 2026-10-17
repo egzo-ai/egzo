@@ -67,7 +67,7 @@ why a rootless engine and gVisor matter.)
 $ egzo system check
 ```
 
-It tells you whether the engine answers, whether it is rootless, whether gVisor is the engine's default runtime, whether the engine
+It tells you whether the engine answers, whether it is rootless, which OCI runtime the engine's containers run under (`runsc` is gVisor), whether the engine
 creates internal networks (the sandbox depends on it), whether the engine's default log driver can be read back and
 followed, and whether the egzo image can run git. Each line is ok, warn or fail, and the exit code is non-zero if any check fails.
 

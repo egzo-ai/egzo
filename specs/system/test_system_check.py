@@ -18,7 +18,11 @@ def test_system_check_reports_the_engine_its_isolation_its_log_and_git_and_needs
     assert all(re.match(r"(ok|warn|fail)\s", line) for line in lines), result.stdout
     assert any(line.startswith("ok") and "engine" in line for line in lines)
     assert "internal networks work" in result.stdout, "the engine can make the internal networks isolation needs"
-    assert re.search(r"(ok|warn)\s+.*gVisor|runsc", result.stdout) and re.search(r"(ok|warn)\s+.*(rootless|rootful)", result.stdout)
+    assert re.search(r"(ok|warn)\s+.*(rootless|rootful)", result.stdout)
+    # the runtime is shown so anyone can confirm what they run on, and is never a warning: runc is what most engines have
+    runtime = re.search(r"^(\w+)\s+runtime: containers run under (\S+),", result.stdout, re.M)
+    assert runtime and runtime.group(1) == "ok", result.stdout
+    assert (runtime.group(2) == "runsc") == engine.gvisor, "it names runsc exactly on a gVisor platform"
     assert not re.search(r"^(ok|warn|fail)\s+git.*host", result.stdout, re.M), "it asks nothing of the host's git"
     assert re.search(r"^(ok|warn|fail)\s+git.*(image|prep)", result.stdout, re.M), "it says what it found about git in the image"
 
