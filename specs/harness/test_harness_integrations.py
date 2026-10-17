@@ -111,7 +111,7 @@ def wait_until(check, what, timeout, context=None):
 def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_credential_and_keeps_its_home(sandbox, engine, egzo, harness):
     p = sandbox
     name = p.spawn(harness, f"{harness}-1", timeout=900)
-    assert in_instance(engine, p, name, "id -u").stdout.strip() == str(os.getuid())
+    assert in_instance(engine, p, name, "id -u").stdout.strip() == str(engine.uid)
     version = in_instance(engine, p, name, f"{BINARY[harness]} --version")
     assert version.returncode == 0 and re.search(r"\d+\.\d+", version.stdout), version.stderr
     for tool in ("egzo", "git", "curl", "rg", "node"):
@@ -119,7 +119,7 @@ def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_cre
 
     find = (
         "for p in /proc/[0-9]*; do c=$(tr '\\0' ' ' < $p/cmdline 2>/dev/null); "
-        "case \"$c\" in sh*|/usr/local/bin/egzo*) ;; *claude*|*opencode*) readlink $p/cwd; break;; esac; done"
+        "case \"$c\" in sh*|/usr/local/bin/egzo*|*-init\\ --*) ;; *claude*|*opencode*) readlink $p/cwd; break;; esac; done"
     )
     assert in_instance(engine, p, name, find).stdout.strip() == "/workspace/scratch", "it starts in its workspace and stays up"
     assert engine.instance(p.name, name).raw["State"]["Running"]
@@ -231,7 +231,7 @@ def test_the_state_command_reports_a_state_and_never_blocks_or_fails_the_harness
     name = p.spawn("emit", timeout=300)
     container = engine.instance(p.name, name).name
     ran = subprocess.run(
-        [engine.cli, "exec", "-i", container, "egzo", "state", "working", "--reason", "PreToolUse"],
+        engine.command("exec", "-i", container, "egzo", "state", "working", "--reason", "PreToolUse"),
         input='{"tool_name":"Bash"}', text=True, capture_output=True, env={**os.environ, **engine.env},
     )
     assert ran.returncode == 0, ran.stderr

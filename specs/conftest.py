@@ -8,9 +8,9 @@ The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it 
 A run tests egzo on ONE reference platform (ENGINES below), chosen with `--engine NAME` or EGZO_ENGINE,
 or, when neither is given, by select_platform.py from what this machine has (the report is printed in
 the header of the run). A platform says what the host is like: a rootful Docker host, a Docker host that
-has gVisor registered, rootful or rootless Podman. It does not ask egzo for anything: specs that use a
-feature the platform lacks (an agent with `runtime: runsc` on a host without gVisor) are expected to
-fail there, and are marked so. Nothing is probed or skipped for them: egzo is asked, and fails or not.
+has gVisor as its default runtime, rootful or rootless Podman. It does not ask egzo for anything: egzo never
+chooses a runtime, so the platform is what makes agents run under gVisor. A spec that needs a feature a platform
+lacks is expected to fail there, and is marked so. Nothing is probed or skipped for it: egzo is asked, and fails or not.
 """
 
 import copy
@@ -221,22 +221,35 @@ class Engine:
         self.cli = cli
         self.host = host
         self.rootless = rootless
-        # Whether this reference platform has gVisor (runsc) registered. It only describes the host:
-        # no agent runs under it unless a spec asks for `runtime: runsc`.
+        # Whether gVisor (runsc) is this reference platform's default runtime. It describes the host: egzo does
+        # not choose a runtime, so every container the engine starts runs under it.
         self.gvisor = gvisor
         self.setup = setup
         self.env = {"DOCKER_HOST": host}
+        # The ids the invoking user has inside a container. A rootless engine maps that user to root
+        # of the container's user namespace; every other engine keeps the host ids.
+        self.uid = 0 if rootless else os.getuid()
+        self.gid = 0 if rootless else os.getgid()
 
     def __repr__(self):
         return self.name
 
-    def run(self, *args):
-        command = [self.cli, *args] if self.cli == "docker" else [self.cli, "--remote", "--url", self.host, *args]
+    def command(self, *args):
+        """The CLI's argv for talking to this engine's socket (Podman only in remote mode: its local storage is another one)."""
+        return [self.cli, *args] if self.cli == "docker" else [self.cli, "--remote", "--url", self.host, *args]
+
+    def run(self, *args, input=None):
+        command = self.command(*args)
         # Build output from remote Podman is not always valid UTF-8.
         completed = subprocess.run(
-            command, env={**os.environ, **self.env}, capture_output=True, text=True, errors="replace"
+            command, env={**os.environ, **self.env}, capture_output=True, text=True, errors="replace", input=input
         )
         return Result(completed.returncode, completed.stdout, completed.stderr)
+
+    def put_file(self, container, source, destination):
+        """Put a text file into a running container. Through the container's own shell, not `cp`: a sandboxed runtime such as
+        gVisor keeps its own view of the root filesystem, and what `cp` writes behind its back is not there."""
+        return self.run("exec", "-i", container, "sh", "-c", f"cat > {destination}", input=Path(source).read_text())
 
     def problem(self):
         """Why this host cannot run the specs against this engine, or None when it can."""
@@ -263,10 +276,10 @@ class Engine:
         problem = self.problem()
         if problem:
             return False, problem
-        if self.gvisor and not self.has_runtime("runsc"):
-            return False, f"the engine at {self.host} has no runsc (gVisor) runtime registered"
-        if not self.gvisor and self.has_runtime("runsc"):
-            return True, "has gVisor registered too (docker-gvisor is the better match)"
+        if self.cli == "docker" and (self.default_runtime() == "runsc") != self.gvisor:
+            return False, f"the engine at {self.host} has {self.default_runtime()!r} as its default runtime" + (
+                ": it is a docker-gvisor host" if not self.gvisor else ", not runsc (gVisor)"
+            )
         return True, ""
 
     def image_for(self, binary):
@@ -337,13 +350,10 @@ class Engine:
         assert built.returncode == 0, f"could not build the {name} harness image:\n{built.stderr[-3000:]}"
         return tag
 
-    def has_runtime(self, name):
-        """Whether the engine has an OCI runtime registered (for example runsc for gVisor)."""
-        if self.cli == "docker":
-            info = self.run("info", "--format", "{{json .Runtimes}}")
-            return info.returncode == 0 and f'"{name}"' in info.stdout
-        info = self.run("info", "--format", "{{json .Host.OCIRuntime}}")
-        return info.returncode == 0 and name in info.stdout
+    def default_runtime(self):
+        """The engine's default OCI runtime (Docker only): runsc on a gVisor platform, usually runc."""
+        info = self.run("info", "--format", "{{.DefaultRuntime}}")
+        return info.stdout.strip() if info.returncode == 0 else ""
 
     def exec(self, container, *command, detach=False):
         flags = ["-d"] if detach else []
@@ -413,10 +423,12 @@ def _rootless_podman_socket():
 
 
 DOCKER_SETUP = "install Docker Engine and make /var/run/docker.sock usable by this user (docker group)"
-GVISOR_SETUP = 'install gVisor and register it: {"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}} in /etc/docker/daemon.json'
+GVISOR_SETUP = (
+    'install gVisor, register it and make it the default: {"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}, "default-runtime": "runsc"} '
+    "in /etc/docker/daemon.json"
+)
 
-# The supported reference platforms. A run tests exactly one. There is no podman-gvisor: Podman's
-# Docker-compatible API cannot select a runtime (known-issues/podman-gvisor-unsupported.md).
+# The supported reference platforms. A run tests exactly one.
 ENGINES = [
     Engine("docker", "docker", "unix:///var/run/docker.sock", setup=DOCKER_SETUP),
     Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", gvisor=True, setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
@@ -470,14 +482,6 @@ def engine(request):
             pytrace=False,
         )
     return chosen.engine
-
-
-@pytest.fixture
-def gvisor_agents(request, engine):
-    """For specs that use the gVisor feature of egzo: they need a platform with gVisor, and are expected
-    to fail without it. Strict, so a pass on a platform said to lack it is reported as well."""
-    if not engine.gvisor:
-        request.applymarker(pytest.mark.xfail(strict=True, reason=f"{engine.name} is a platform without gVisor"))
 
 
 @pytest.fixture

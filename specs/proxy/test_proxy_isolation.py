@@ -37,7 +37,7 @@ def start_from_no_instance(sandbox):
 def hello(probe, name, host, *flags):
     """What a bare TLS client sees after sending one ClientHello through the proxy (fixtures/tls_client.py)."""
     container = probe.container(name).name
-    copied = probe.engine.run("cp", str(FIXTURES / "tls_client.py"), f"{container}:/tmp/tls_client.py")
+    copied = probe.engine.put_file(container, FIXTURES / "tls_client.py", "/tmp/tls_client.py")
     assert copied.returncode == 0, copied.stderr
     return probe.engine.exec(container, "python3", "/tmp/tls_client.py", host, *flags).stdout.strip()
 

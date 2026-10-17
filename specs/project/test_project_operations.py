@@ -99,7 +99,7 @@ def test_the_operator_api_lives_under_v1_and_the_unversioned_paths_are_gone(sand
 
     def request(path):
         return subprocess.run(
-            [engine.cli, "exec", sidecar(engine, p, "control").name, "/egzo", "control", "request", "GET", path],
+            engine.command("exec", sidecar(engine, p, "control").name, "/egzo", "control", "request", "GET", path),
             text=True, capture_output=True, env={**os.environ, **engine.env},
         )
 
