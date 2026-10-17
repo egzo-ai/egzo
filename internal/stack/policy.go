@@ -7,9 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/proxy"
@@ -38,6 +41,12 @@ func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]stri
 			}
 			entry.Services = append(entry.Services, service2)
 		}
+		for _, serverName := range sortedKeys(profile.SSH) {
+			server := profile.SSH[serverName]
+			entry.SSH = append(entry.SSH, proxy.SSHServer{
+				Name: serverName, Host: server.Host, Port: server.Port, User: server.User, Key: secrets[server.Key], HostKey: server.HostKey,
+			})
+		}
 		policy.Profiles[name] = entry
 	}
 	data, _ := json.Marshal(policy)
@@ -57,10 +66,12 @@ func usedProfiles(project *config.Resolved) []string {
 	return sortedKeys(seen)
 }
 
-// BindingFor is what the proxy needs to let an instance through: its credentials and the profile of
-// its template. It holds no secret.
+// BindingFor is what the proxy needs to let an instance through: its credentials, the profile of its template and
+// the public half of its ssh identity. It holds no secret.
 func BindingFor(token, profile string) proxy.Binding {
-	return proxy.Binding{Token: token, Profile: profile}
+	// The ssh identity is derived from the token, so it needs nothing more; an instance without a token has none.
+	identity, _ := proxy.IdentityPublicKey(token)
+	return proxy.Binding{Token: token, Profile: profile, SSHKey: identity}
 }
 
 // ResolveSecrets reads the value of every secret an agent's profile injects. A secret that cannot
@@ -74,8 +85,26 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 			}
 		}
 	}
+	keys := map[string]bool{}
+	for _, agent := range project.Agents {
+		for _, server := range project.Egress[agent.Egress].SSH {
+			keys[server.Key] = true
+		}
+	}
 	values := map[string]string{}
 	var problems []string
+	for _, ref := range sortedKeys(keys) {
+		value, err := ReadSecretText(project.Secrets[ref], dir)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("secret %s: %v", ref, err))
+			continue
+		}
+		if reason := sshKeyProblem(value); reason != "" {
+			problems = append(problems, fmt.Sprintf("secret %s is not usable as an ssh key: %s", ref, reason))
+			continue
+		}
+		values[ref] = value
+	}
 	refs := make([]string, 0, len(needed))
 	for ref := range needed {
 		refs = append(refs, ref)
@@ -94,6 +123,19 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 		return nil, fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
 	return values, nil
+}
+
+// sshKeyProblem says why a secret cannot be the private key of an ssh server, or returns "". It never quotes the value.
+func sshKeyProblem(value string) string {
+	_, err := ssh.ParsePrivateKey([]byte(value))
+	var missing *ssh.PassphraseMissingError
+	switch {
+	case err == nil:
+		return ""
+	case errors.As(err, &missing):
+		return "it is protected by a passphrase, which is not supported: use a key without one (a dedicated key, for a low-privilege account)"
+	}
+	return "it is not an unencrypted private key in PEM or OpenSSH format"
 }
 
 // checkCredentialKinds catches the one mix-up that is certain to fail and is easy to make: a Claude

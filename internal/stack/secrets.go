@@ -23,6 +23,16 @@ var ErrPassNotFound = errors.New("`pass` was not found on PATH")
 // ReadSecret reads the value of a secret from its backend. dir is the project directory.
 // An error never contains a value.
 func ReadSecret(ref config.SecretRef, dir string) (string, error) {
+	return readSecret(ref, dir, false)
+}
+
+// ReadSecretText is ReadSecret for a secret that is text of several lines, such as an ssh private key: a pass entry is
+// read whole instead of by its first line (the other lines are notes for any other secret).
+func ReadSecretText(ref config.SecretRef, dir string) (string, error) {
+	return readSecret(ref, dir, true)
+}
+
+func readSecret(ref config.SecretRef, dir string, whole bool) (string, error) {
 	switch ref.Backend {
 	case "env":
 		value, ok := os.LookupEnv(ref.Name)
@@ -31,7 +41,7 @@ func ReadSecret(ref config.SecretRef, dir string) (string, error) {
 		}
 		return value, nil
 	case "pass":
-		return readPass(ref.Name)
+		return readPass(ref.Name, whole)
 	}
 	return "", fmt.Errorf("unknown backend %q", ref.Backend)
 }
@@ -47,7 +57,7 @@ func (e *PassError) Error() string { return "pass: " + e.Message }
 // readPass runs `pass show <name>` with the environment, stdin and terminal of egzo untouched (so gpg-agent can
 // prompt) and returns the first line of its output; the other lines are notes. There is no timeout: a pinentry
 // prompt may wait for the user.
-func readPass(name string) (string, error) {
+func readPass(name string, whole bool) (string, error) {
 	path, err := exec.LookPath("pass")
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrPassNotFound, err)
@@ -71,6 +81,13 @@ func readPass(name string) (string, error) {
 	}
 	if isPassTree(stdout.String()) {
 		return "", fmt.Errorf("%w: %s is a directory in the password store, not a secret", ErrNotASecret, name)
+	}
+	if whole {
+		text := strings.TrimRight(stdout.String(), "\r\n")
+		if text == "" {
+			return "", fmt.Errorf("%w: pass entry %s is empty", ErrEmptySecret, name)
+		}
+		return text + "\n", nil
 	}
 	first, _, _ := strings.Cut(stdout.String(), "\n")
 	first = strings.TrimRight(first, "\r")
