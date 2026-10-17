@@ -21,7 +21,7 @@ RUN apt-get update \
 
 FROM docker.io/library/node:22-bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl procps ripgrep libcurl4 zlib1g libexpat1 \
+ && apt-get install -y --no-install-recommends ca-certificates curl procps ripgrep libcurl4 zlib1g libexpat1 openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=git /usr/local/ /usr/local/

@@ -55,7 +55,7 @@ def test_agents_are_pointed_at_the_proxy_trust_its_ca_and_cannot_use_it_without_
     assert "control" in env["NO_PROXY"]
 
     container = probe.container(name).name
-    assert sorted(engine.exec(container, "ls", "/etc/egzo/ca").stdout.split()) == ["ca-bundle.crt", "ca.crt"]
+    assert sorted(engine.exec(container, "ls", "/etc/egzo/ca").stdout.split()) == ["ca-bundle.crt", "ca.crt", "ssh_config", "ssh_known_hosts"]
     assert "PRIVATE KEY" not in engine.exec(container, "cat", "/etc/egzo/ca/ca.crt", "/etc/egzo/ca/ca-bundle.crt").stdout
     assert engine.exec(container, "touch", "/etc/egzo/ca/planted").returncode != 0
     private = {m["Destination"]: m["Name"] for m in proxy.raw["Mounts"]}["/ca-private"]
