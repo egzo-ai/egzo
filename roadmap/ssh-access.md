@@ -1,39 +1,26 @@
-# Roadmap: ssh access for agents (idea, not decided, not built)
+# Roadmap: ssh access for agents (built; sftp open)
 
-Need: an agent that can ssh to a remote server (or git over ssh) without a default route and without ever
-holding the private key. Today the proxy is CONNECT-only on port 443 and git sources are https-only.
+Built as option B below (the proxy terminates ssh and re-originates it): the design and what it does are in DESIGN.md ("ssh through the proxy") and
+[docs/sandboxing.md](../docs/sandboxing.md#ssh-to-servers). Specs: `specs/test_egress_ssh.py` (the config) and `specs/proxy/test_proxy_ssh.py` (end to end, against
+a real sshd that the specs start, `specs/sshd.py`).
 
-Options considered:
-- **A. ssh-agent signing oracle.** Key in a sidecar; `egzo-agent` exposes `SSH_AUTH_SOCK` inside the agent
-  container and relays over TCP (host-created unix sockets are doubtful under gVisor). Small, but a sign request
-  names no destination host, so no per-host policy, and a compromised agent can sign while the sidecar runs.
-  Still needs raw TCP to port 22 through the proxy.
-- **B. The proxy terminates ssh and re-originates it (preferred).** The ssh analogue of TLS `inject`. The agent
-  ssh's to a proxy listener, authenticated by a per-instance identity key that `agent spawn` generates and binds in the
-  policy (an identity, not a secret). The proxy dials the real server with the vault key and a **pinned host key**
-  (required, no trust on first use) and relays channels (shell, exec, sftp). Port and agent forwarding refused.
-  Key never leaves the proxy, per-host policy, audit of sessions and exec commands, no default route, no CONNECT
-  change. Sketch: `egress.<profile>.ssh.<name>: {host, user, key: <vault>/<secret>, host_key}`.
-- **C. Short-lived ssh certificates** from an egzo CA. Needs the server owner to trust the CA. Add-on, later.
-- **Direct default route** (`Internal: false`): rejected for general use. Loses the proxy, the audit log and the
-  private-address and metadata protection. Only acceptable as an explicit "trusted agent" template option.
+Still open:
+- **sftp / scp.** Subsystems are refused today. Low priority.
+- **Short-lived ssh certificates (option C)**, an add-on that needs the server owner to trust an egzo CA.
+- **FIDO (`sk-*`) keys and passphrase-protected keys** (golang/go#69904 for the first).
+- **IPv6 literal hosts** in `host`.
+- **Interactive session recording**: the audit has sessions and exec commands, not what is typed in a shell.
+- Keep `golang.org/x/crypto` current and `govulncheck` clean (`make lint`): the proxy now holds an ssh server and client.
 
-Library: `golang.org/x/crypto/ssh` (server and client halves, raw channels). New direct dependency. Reference for
-the relay (read, not vendored): `tg123/sshpiper` (MIT), also Teleport's forwarding node (not yet read).
+## Options that were considered
+- **A. ssh-agent signing oracle.** Key in a sidecar; the agent gets `SSH_AUTH_SOCK`. A sign request names no destination host, so no per-host policy.
+- **B. The proxy terminates ssh and re-originates it (built).** Key never leaves the proxy, per-host policy, audit, no default route.
+- **C. Short-lived ssh certificates** from an egzo CA. Later.
+- **Direct default route**: rejected for general use (loses the proxy, the audit and the address protections).
 
-Drawbacks found (research, 2026-10):
-- A protocol terminator: anything not relayed does not work. We must add our own dial timeouts, keepalives and
-  idle timeouts; x/crypto/ssh has open reports of `Dial` hangs and rekey deadlocks.
-- No FIDO (`sk-*`) private keys in x/crypto/ssh (golang/go#69904), so file keys only.
-- OpenSSH 7.4 rekey/ext-info quirk (golang/go#51808); stdlib `knownhosts` gap for hosts with another key type.
-- Steady stream of x/crypto advisories (Terrapin CVE-2023-48795, CVE-2025-58181, early-2026 fixes for
-  PartialSuccessError and agent-constraint handling). Adds an ssh server to the component holding the keys, so
-  track x/crypto closely and run `govulncheck`. `PublicKeyCallback` must compare against the bound instance key only
-  (CVE-2024-45337).
-- Proxy restart kills live ssh sessions (same as sshpiper#515); acceptable, the policy is already in memory.
-- The key being safe does not limit what the agent runs on the server: use a dedicated low-privilege remote user
-  or a forced command.
-
-Open: whether sshpiper relays sftp and `window-change`/`signal`/half-close correctly; keepalive support in
-x/crypto/ssh. Read sshpiper's relay code before building. No specs yet: add them when it is scheduled, so the
-suite does not go red for a feature nobody has started.
+## Drawbacks found when this was researched (2026-10)
+- A protocol terminator: anything not relayed does not work. Own dial timeouts, keepalives and idle timeouts were needed (x/crypto/ssh has reports of `Dial` hangs and rekey deadlocks).
+- OpenSSH 7.4 rekey/ext-info quirk (golang/go#51808); stdlib `knownhosts` gap for hosts with another key type (the pin is a fingerprint or key line, tried by type).
+- A steady stream of x/crypto advisories (Terrapin CVE-2023-48795, CVE-2025-58181, early-2026 fixes): track closely. `PublicKeyCallback` decides on the key that signed (CVE-2024-45337).
+- A proxy restart kills live ssh sessions (like sshpiper#515); acceptable, the policy is reloaded by `up`.
+- The key being safe does not limit what the agent runs on the server: a dedicated low-privilege account or a forced command.
