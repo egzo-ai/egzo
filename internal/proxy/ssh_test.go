@@ -712,3 +712,55 @@ func TestSSHHostKeyIsKept(t *testing.T) {
 		t.Fatalf("mode %v", info.Mode().Perm())
 	}
 }
+
+func TestSSHClientFilesNameEveryServerAndTrustOnlyTheProxy(t *testing.T) {
+	dir := t.TempDir()
+	hostKey, _ := newKey(t)
+	policy := &Policy{Profiles: map[string]Profile{
+		"a": {SSH: []SSHServer{{Name: "prod"}, {Name: "db"}}},
+		"b": {SSH: []SSHServer{{Name: "prod"}}},
+	}}
+	if err := PublishSSHClientFiles(dir, hostKey.PublicKey(), policy); err != nil {
+		t.Fatal(err)
+	}
+	config := readFile(t, dir+"/ssh_config")
+	if strings.Count(config, "\nHost prod\n") != 1 || !strings.Contains(config, "\nHost db\n") {
+		t.Fatalf("config:\n%s", config)
+	}
+	for _, line := range []string{"HostName proxy", "Port 2222", "User prod", "StrictHostKeyChecking yes", "ForwardAgent no", "IdentitiesOnly yes"} {
+		if !strings.Contains(config, "    "+line+"\n") {
+			t.Errorf("missing %q", line)
+		}
+	}
+	known := readFile(t, dir+"/ssh_known_hosts")
+	if !strings.HasPrefix(known, "egzo-proxy ssh-ed25519 ") || !strings.Contains(known, strings.Fields(string(ssh.MarshalAuthorizedKey(hostKey.PublicKey())))[1]) {
+		t.Fatalf("known_hosts %q", known)
+	}
+	// With no policy there is nothing to name, and the host key is still published.
+	if err := PublishSSHClientFiles(dir, hostKey.PublicKey(), nil); err != nil || strings.Contains(readFile(t, dir+"/ssh_config"), "Host ") {
+		t.Fatalf("empty: %v", err)
+	}
+}
+
+func TestSSHIdentityIsDerivedFromTheTokenAlone(t *testing.T) {
+	line, err := IdentityPublicKey("token-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ := IdentityPublicKey("token-1")
+	other, _ := IdentityPublicKey("token-2")
+	if line != again || line == other || !strings.HasPrefix(line, "ssh-ed25519 ") {
+		t.Fatalf("%q %q %q", line, again, other)
+	}
+	if _, err := IdentityPublicKey(""); err == nil {
+		t.Fatal("an empty token has an identity")
+	}
+	private, _ := IdentityPrivateKey("token-1")
+	signer, err := ssh.ParsePrivateKey(private)
+	if err != nil || strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))) != line {
+		t.Fatalf("private half: %v", err)
+	}
+	if err := checkIdentityKey(line); err != nil {
+		t.Fatalf("the proxy refuses what it derives: %v", err)
+	}
+}

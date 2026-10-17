@@ -335,6 +335,35 @@ class Engine:
         assert built.returncode == 0, f"could not build the session image with {self.cli}:\n{built.stderr}"
         return tag
 
+    def ssh_agent_image(self, binary):
+        """An agent image with an ssh client, the ssh wrapper of the harness base image (so that an arbitrary uid can run ssh), and
+        the egzo session holder as entrypoint running the fake TUI: what a harness image is, minus Chromium."""
+        root = Path(__file__).parent
+        wrapper = root.parent / "harness" / "base" / "egzo-ssh"
+        script = root / "fixtures" / "fake-tui.sh"
+        dockerfile = (
+            "FROM docker.io/library/debian:bookworm-slim\n"
+            "RUN apt-get update && apt-get install -y --no-install-recommends openssh-client libnss-wrapper ca-certificates curl \\\n"
+            " && rm -rf /var/lib/apt/lists/*\n"
+            "COPY egzo-ssh /usr/local/bin/ssh\n"
+            "COPY fake-tui /usr/local/bin/fake-tui\n"
+            "COPY egzo /usr/local/bin/egzo\n"
+            'ENTRYPOINT ["/usr/local/bin/egzo", "agent", "run", "--"]\n'
+            'CMD ["/usr/local/bin/fake-tui"]\n'
+        )
+        digest = hashlib.sha256(Path(binary).read_bytes() + wrapper.read_bytes() + script.read_bytes() + dockerfile.encode()).hexdigest()[:12]
+        tag = f"egzo-spec-ssh-agent:{digest}"
+        if self.run("image", "inspect", tag).returncode == 0:
+            return tag
+        with tempfile.TemporaryDirectory() as context:
+            shutil.copy(wrapper, Path(context) / "egzo-ssh")
+            shutil.copy(script, Path(context) / "fake-tui")
+            shutil.copy(binary, Path(context) / "egzo")
+            (Path(context) / "Dockerfile").write_text(dockerfile)
+            built = self.run("build", "-t", tag, context)
+        assert built.returncode == 0, f"could not build the ssh agent image with {self.cli}:\n{built.stderr[-3000:]}"
+        return tag
+
     def harness_image(self, name, binary):
         """The real harness image of the repository (harness/<name>), on the real base image (harness/base), with the egzo
         binary of this run in it."""
@@ -499,6 +528,11 @@ def agent_image(engine):
 @pytest.fixture
 def session_image(engine, egzo):
     return engine.session_image(egzo.binary)
+
+
+@pytest.fixture(scope="session")
+def ssh_agent_image(engine, egzo):
+    return engine.ssh_agent_image(egzo.binary)
 
 
 @pytest.fixture

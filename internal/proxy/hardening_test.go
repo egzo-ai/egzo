@@ -809,7 +809,11 @@ func operatorFor(t *testing.T, cfg Config) (http.Handler, *Server, *CA) {
 		t.Fatal(err)
 	}
 	server := NewServer(ca, NewAudit(io.Discard))
-	return operatorHandler(server, ca, cfg), server, ca
+	hostKey, err := LoadOrCreateSSHHostKey(cfg.CADir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return operatorHandler(server, ca, cfg, hostKey), server, ca
 }
 
 func call(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {

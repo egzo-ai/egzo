@@ -21,7 +21,7 @@ RUN apt-get update \
 
 FROM docker.io/library/node:22-bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl procps ripgrep libcurl4 zlib1g libexpat1 \
+ && apt-get install -y --no-install-recommends ca-certificates curl procps ripgrep libcurl4 zlib1g libexpat1 openssh-client libnss-wrapper \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=git /usr/local/ /usr/local/
@@ -52,5 +52,7 @@ ENV HOME=/home/agent
 RUN mkdir -p /home/agent /workspace && chmod 0777 /home/agent /workspace
 
 COPY --from=egzo /egzo /usr/local/bin/egzo
+# ssh for the servers of the egress profile (the proxy holds the keys); the wrapper gives the agent's uid a passwd entry.
+COPY egzo-ssh /usr/local/bin/ssh
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/egzo", "agent", "run", "--"]

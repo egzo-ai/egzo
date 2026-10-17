@@ -32,19 +32,19 @@ class SshServer:
         # Published on the host's own address, which every engine lets a container reach (a rootless Podman gives
         # containers no address of their own that another container can use).
         self.port = int(engine.run("port", name, "22/tcp").stdout.splitlines()[0].rsplit(":", 1)[1])
-        self.private_key = self.sh("cat /home/ops/.ssh/id_ed25519").stdout
-        self.public_key = self.sh("cat /home/ops/.ssh/id_ed25519.pub").stdout.strip()
-        self.host_key = self.sh("cat /etc/ssh/ssh_host_ed25519_key.pub").stdout.strip()
+        self.private_key = self.inside("cat /home/ops/.ssh/id_ed25519").stdout
+        self.public_key = self.inside("cat /home/ops/.ssh/id_ed25519.pub").stdout.strip()
+        self.host_key = self.inside("cat /etc/ssh/ssh_host_ed25519_key.pub").stdout.strip()
         # `256 SHA256:... root@x (ED25519)`: the second field is what `ssh-keygen -lf` and ssh print.
-        self.fingerprint = self.sh("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub").stdout.split()[1]
+        self.fingerprint = self.inside("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub").stdout.split()[1]
 
-    def sh(self, script, user="root"):
+    def inside(self, script, user="root"):
         """A shell command inside the server, as root unless told otherwise."""
         return self.engine.run("exec", "-u", user, self.name, "sh", "-c", script)
 
     def keygen(self):
         """A key pair the server does not know: (private, public, fingerprint)."""
-        made = self.sh("d=$(mktemp -d) && ssh-keygen -q -t ed25519 -N '' -f $d/k && cat $d/k $d/k.pub && ssh-keygen -lf $d/k.pub && rm -rf $d")
+        made = self.inside("d=$(mktemp -d) && ssh-keygen -q -t ed25519 -N '' -f $d/k && cat $d/k $d/k.pub && ssh-keygen -lf $d/k.pub && rm -rf $d")
         lines = made.stdout.splitlines()
         private = "\n".join(lines[:-2]) + "\n"
         return private, lines[-2], lines[-1].split()[1]
