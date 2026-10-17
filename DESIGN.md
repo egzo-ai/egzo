@@ -553,13 +553,13 @@ egress:
   each type is tried in turn; a public key line fixes it. A failure reaches the agent as ssh itself would show it (stderr, exit status 255) and never
   quotes the key; the audit records the key the server presented.
 - Relayed: exec, shell, pty, window-change, env, signal, stderr, exit status, end of input. Refused and audited: direct-tcpip, tcpip-forward, agent and
-  X11 forwarding, every subsystem. Bounded: 10 sessions per connection, per-agent and global connection limits, 64 handshakes at once, keepalive both
+  X11 forwarding, every subsystem but `sftp`. Bounded: 10 sessions per connection, per-agent and global connection limits, 64 handshakes at once, keepalive both
   ways, one hour idle. Unbinding an agent or changing its identity closes its connections.
 - The proxy publishes `ssh_config` (one `Host` per server name of the policy, all the proxy's listener, told apart by the user) and `ssh_known_hosts`
   (its host key under the alias `egzo-proxy`, strict checking) in the shared CA volume whenever a policy is loaded. The agent copies the servers into a
   managed block at the top of `~/.ssh/config` (copied, not included: ssh refuses an included file owned by neither the user nor root).
 - ssh needs a passwd entry for its uid and takes `~/.ssh` from it, and egzo runs agents as the invoking user's uid, which an image does not know: the
-  harness base image has an `ssh` wrapper that supplies one with nss_wrapper.
+  harness base image has an `ssh`/`scp`/`sftp` wrapper that supplies one with nss_wrapper.
 - Config: `egress.<profile>.ssh.<name>: {host, port?, user, key, host_key}` (see Egress policy). Keys are unencrypted (no passphrase, no FIDO).
 
 ## Egress proxy and TLS (decided)

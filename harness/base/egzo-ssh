@@ -1,13 +1,15 @@
 #!/bin/sh
-# ssh looks up its user in the passwd database, and takes the home directory (hence ~/.ssh) from there, not from $HOME. egzo runs
-# an agent as the uid of the person who started the project: an image does not know it ("No user exists for uid"), and an engine
-# that invents an entry gives it a home the agent cannot use. nss_wrapper gives the uid an entry whose home is $HOME for the length
-# of this command. The real ssh is /usr/bin/ssh; this one comes first in PATH, so scp, sftp and git reach it too.
-uid=$(id -u)
-dir=${TMPDIR:-/tmp}/.egzo-nss-$uid
-mkdir -p "$dir" && chmod 700 "$dir"
-printf 'agent:x:%s:%s:agent:%s:/bin/sh\n' "$uid" "$(id -g)" "${HOME:-/tmp}" >"$dir/passwd"
-printf 'agent:x:%s:\n' "$(id -g)" >"$dir/group"
-export NSS_WRAPPER_PASSWD="$dir/passwd" NSS_WRAPPER_GROUP="$dir/group"
-export LD_PRELOAD="libnss_wrapper.so${LD_PRELOAD:+ $LD_PRELOAD}"
-exec /usr/bin/ssh "$@"
+# ssh, scp and sftp look up their user in the passwd database, and ssh takes the home directory (hence ~/.ssh) from there, not from
+# $HOME. egzo runs an agent as the uid of the person who started the project: an image does not know it ("No user exists for uid"),
+# and an engine that invents an entry gives it a home the agent cannot use. nss_wrapper gives the uid an entry whose home is $HOME
+# for the length of this command. Installed as ssh, scp and sftp in /usr/local/bin, so it comes first in PATH, and git and rsync reach it too.
+if [ -z "${NSS_WRAPPER_PASSWD:-}" ]; then
+    uid=$(id -u)
+    dir=${TMPDIR:-/tmp}/.egzo-nss-$uid
+    mkdir -p "$dir" && chmod 700 "$dir"
+    printf 'agent:x:%s:%s:agent:%s:/bin/sh\n' "$uid" "$(id -g)" "${HOME:-/tmp}" >"$dir/passwd"
+    printf 'agent:x:%s:\n' "$(id -g)" >"$dir/group"
+    export NSS_WRAPPER_PASSWD="$dir/passwd" NSS_WRAPPER_GROUP="$dir/group"
+    export LD_PRELOAD="libnss_wrapper.so${LD_PRELOAD:+ $LD_PRELOAD}"
+fi
+exec "/usr/bin/${0##*/}" "$@"

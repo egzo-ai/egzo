@@ -175,8 +175,8 @@ What happens: the agent signs in to the proxy with an identity egzo makes for th
 - **Only the servers of its profile.** An agent of another profile gets "Permission denied" and the server is never contacted.
 - **The host key is required.** There is no trust on first use; a mismatch is a failure the audit records with the key the server presented. With a
   fingerprint, a server with several host key types works; with a public key line the type is fixed.
-- **Sessions only.** Port forwarding (`-L`, `-R`, `-W`), agent forwarding and X11 are refused, and so is every subsystem (so `scp` and `sftp`
-  do not work yet).
+- **Sessions only, and sftp.** Port forwarding (`-L`, `-R`, `-W`), agent forwarding and X11 are refused, and so is every subsystem but `sftp`: `scp`,
+  `sftp` and `rsync -e ssh` work.
 - **It does not limit what the agent runs on the server.** Use a dedicated low-privilege account, or a forced command in `authorized_keys`,
   on the server. The audit records every session and every command (`ssh-exec`), and not what is typed in a shell.
 - The proxy never connects to loopback or a cloud metadata address, and gives up on a server that does not answer, or goes quiet, after the
@@ -184,8 +184,8 @@ What happens: the agent signs in to the proxy with an identity egzo makes for th
 - A key with a passphrase is refused by `egzo project up`; FIDO (`sk-`) keys are not supported.
 
 The harness images carry the ssh client. An image of your own needs `openssh-client`; run `egzo agent ssh-setup` at its start if its
-entrypoint is not `egzo agent run`, and, if the agent's uid has no passwd entry, a wrapper like `harness/base/egzo-ssh`
-(ssh refuses to run without one). See [images](images.md).
+entrypoint is not `egzo agent run`, and a wrapper like `harness/base/egzo-ssh`, installed as `ssh`, `scp` and `sftp`
+(they refuse to run for a uid with no passwd entry). See [images](images.md).
 
 ## Full internet
 
@@ -226,7 +226,7 @@ Each event has a `host`, an `action` and, where it applies, the `agent` and a `r
 | `request` | one request to such a host: method, path (never the query) and status |
 | `intercept`, then `close` | a client that sent Encrypted Client Hello was terminated instead of tunneled ([browsing](browser.md)) |
 | `ssh-open`, `ssh-close` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one); `ssh-close` carries the bytes and the duration |
-| `ssh-exec`, `ssh-shell` | a command (`command`) or a shell the agent started on the server |
+| `ssh-exec`, `ssh-shell`, `ssh-sftp` | a command (`command`), a shell or an sftp session (`scp`, `sftp`) the agent started on the server |
 | `ssh-deny`, `ssh-error` | refused (forwarding, a subsystem, an identity or server that is not the agent's, too many connections) or failed (the server did not answer, refused the key, or presented another host key than the pinned one) |
 | `error`, `aborted` | the connection failed (the `reason` says where) or the client left before the handshake |
 
