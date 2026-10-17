@@ -42,6 +42,18 @@ printf 'agents:\n  coder:\n    harness: custom\n    image: %s\n    env:\n      F
 
 $COMPOSE up -d --wait --wait-timeout 90 >/dev/null
 
+# `--wait` only waits for a container to run, and Dex has no health check: wait until it and the hub answer what the login needs
+wait_for() {
+	for _ in $(seq 1 60); do
+		curl -fsS -o /dev/null "$1" 2>/dev/null && return 0
+		sleep 1
+	done
+	echo "hub-stack: $1 did not answer in 60s" >&2
+	exit 1
+}
+wait_for http://localhost:5556/dex/.well-known/openid-configuration
+wait_for http://localhost:8080/healthz
+
 docker build -q -t egzo-hub-e2e hub/e2e >/dev/null
 docker run --rm --network host --ipc=host --add-host dex:127.0.0.1 -v "$ROOT/hub:/hub" \
 	-e HUB_STACK_URL=http://localhost:8080 -e HUB_STACK_PROJECT="$NAME" \
