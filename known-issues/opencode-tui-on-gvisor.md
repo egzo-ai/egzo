@@ -15,6 +15,5 @@ Narrowed down without egzo, in a plain `runsc` container with the OpenCode image
 | `docker exec -it … script -qfc opencode /dev/null` (a pty made inside the sandbox) | 205 bytes, no prompt, even when every palette query is answered |
 | the same two under runc | both draw the prompt |
 
-So it is the pty made inside the sandbox, which is what egzo and any terminal multiplexer do. Not found upstream (searched gVisor and
-OpenCode trackers 2026-10-17); worth a report to google/gvisor with the `script` reproduction. The two specs are strict xfail on the
+So it is the pty made inside the sandbox, which is what egzo and any terminal multiplexer do. No upstream report turned up in a web search (2026-10-17, the trackers themselves were not searched); worth a report to google/gvisor with the `script` reproduction. The two specs are strict xfail on the
 gVisor platform until it is fixed.
