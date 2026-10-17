@@ -8,8 +8,8 @@ green, hide it, or soften it:
 - **Never** mark a spec `xfail` (marker or `pytest.xfail()`), `skip` or `todo` because the feature is not
   implemented, not decided, or blocked. A blocked spec fails with a message that says what it is blocked on
   (`pytest.fail("blocked on ...")`).
-- `xfail` is for **unsupported platforms only**: a spec that uses a feature a reference platform lacks, such as
-  gVisor on a platform without it (the `gvisor_agents` fixture). It says "this platform cannot do it", never
+- `xfail` is for **unsupported platforms only**: a spec that uses a feature a reference platform lacks,
+  marked as a strict xfail on that platform. It says "this platform cannot do it", never
   "we have not written it yet".
 - `skip` is for specs that do not apply to the platform (a spec about Podman on Docker).
 - A red suite after you add specs is the correct state. Say which specs fail and why; do not make them pass by

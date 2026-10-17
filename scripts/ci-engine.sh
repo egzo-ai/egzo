@@ -4,7 +4,7 @@
 #
 #   scripts/ci-engine.sh docker | docker-gvisor | podman | podman-rootless
 #
-# Docker and Podman come with the runner image; this registers gVisor with Docker and starts the
+# Docker and Podman come with the runner image; this installs gVisor as Docker's default runtime and starts the
 # Podman API socket the platform names. For podman-rootless the socket's directory is exported through $GITHUB_ENV, as the specs look for it there.
 set -eu
 
@@ -40,12 +40,15 @@ docker-gvisor)
 		done
 	)
 	rm -rf "$tmp"
-	# registers the runtime `runsc` in /etc/docker/daemon.json
+	# registers the runtime `runsc` in /etc/docker/daemon.json and makes it the engine's default: egzo never chooses a runtime,
+	# so gVisor is what the host is, and every container the engine starts runs under it
 	sudo runsc install
+	sudo jq '. + {"default-runtime": "runsc"}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new
+	sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
 	sudo systemctl restart docker
 	runsc --version
-	docker info --format '{{json .Runtimes}}'
-	docker run --rm --runtime=runsc alpine:3 dmesg | head -3
+	docker info --format '{{.DefaultRuntime}} {{json .Runtimes}}'
+	docker run --rm alpine:3 dmesg | head -3
 	;;
 podman)
 	insecure_test_registry

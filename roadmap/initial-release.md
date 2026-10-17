@@ -43,7 +43,6 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
       forwarding off on a reused bridge name; fix proposed in #1498). Before 1.0.0: see whether the fix is released, run the `podman`
       cell on a Podman and netavark that have it, and either support rootful Podman with a stated minimum version of both
       (`known-issues/rootful-podman-intermittent-egress.md`) or keep it unsupported and say so in the README and `docs/install.md`.
-      Podman cannot run agents under gVisor either (`known-issues/podman-gvisor-unsupported.md`).
 - [ ] Retire [`review-leftovers.md`](review-leftovers.md): file its concrete items as GitHub issues (the `errcheck` sweep, a fake
       `client.APIClient` for `Up`/`Apply`/`Down`/`RunPrep` unit tests, audit-log sampling of repeated denials, and a link to
       `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost

@@ -40,7 +40,7 @@ engine setting in `egzo.yaml`.
 | engine | status |
 |---|---|
 | Docker (rootful) | the engine the specs run against; use this first |
-| Docker with gVisor | supported; register `runsc` and set `runtime: runsc` on agents |
+| Docker with gVisor | supported; make `runsc` the engine's default runtime |
 | Rootless Podman | supported; works through the user socket, see below; no gVisor |
 | Rootful Podman | not supported for now: a netavark bug can leave a project without outbound connectivity (`known-issues/rootful-podman-intermittent-egress.md`); to be decided for 1.0.0, probably with a minimum Podman and netavark version |
 
@@ -51,9 +51,9 @@ $ systemctl --user enable --now podman.socket
 $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 ```
 
-gVisor on Docker: install `runsc`, add it under `"runtimes"` in `/etc/docker/daemon.json`, restart Docker, then
-`runtime: runsc` on an agent. Podman's API cannot select or verify a runtime, so a project that asks for one there
-fails at `egzo project up` instead of silently starting in the default runtime.
+gVisor on Docker: install `runsc`, register it under `"runtimes"` in `/etc/docker/daemon.json` and set
+`"default-runtime": "runsc"`, then restart Docker. egzo never chooses a container runtime: everything the engine
+starts, agents and sidecars, runs under its default one, which is the host administrator's choice.
 
 Agents run as your uid and gid, and egzo never mounts the engine socket into an agent. Anything that can reach the
 engine socket is root-equivalent on a rootful engine, so a rootless engine is the safer host.
@@ -67,7 +67,7 @@ why a rootless engine and gVisor matter.)
 $ egzo system check
 ```
 
-It tells you whether the engine answers, whether it is rootless, whether gVisor is registered, whether the engine
+It tells you whether the engine answers, whether it is rootless, whether gVisor is the engine's default runtime, whether the engine
 creates internal networks (the sandbox depends on it), whether the engine's default log driver can be read back and
 followed, and whether the egzo image can run git. Each line is ok, warn or fail, and the exit code is non-zero if any check fails.
 

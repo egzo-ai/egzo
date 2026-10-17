@@ -243,7 +243,6 @@ func TestDesireResources(t *testing.T) {
 	project := desireProject()
 	agent := project.Agents["coder"]
 	agent.Resources = config.Resources{CPUs: 1.5, Memory: "2g"}
-	agent.Runtime = "runsc"
 	project.Agents["coder"] = agent
 	coder := findContainer(t, desire(t, project), "proj-coder")
 
@@ -252,9 +251,6 @@ func TestDesireResources(t *testing.T) {
 	}
 	if coder.Memory != 2<<30 {
 		t.Errorf("Memory = %d", coder.Memory)
-	}
-	if coder.Runtime != "runsc" {
-		t.Errorf("Runtime = %q", coder.Runtime)
 	}
 	if review := findContainer(t, desire(t, project), "proj-review"); review.NanoCPUs != 0 || review.Memory != 0 {
 		t.Errorf("unset resources should stay zero: %+v", review)

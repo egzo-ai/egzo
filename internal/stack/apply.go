@@ -142,7 +142,6 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		ReadonlyRootfs: spec.ReadonlyRootfs,
 		CapDrop:        strslice.StrSlice{"ALL"},
 		SecurityOpt:    []string{"no-new-privileges"},
-		Runtime:        spec.Runtime,
 		Init:           &spec.Init,
 		Resources:      container.Resources{NanoCPUs: spec.NanoCPUs, Memory: spec.Memory, MemorySwap: spec.MemorySwap},
 	}
@@ -163,9 +162,6 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 
 	created, err := c.API.ContainerCreate(ctx, config, host, networking, nil, spec.Name)
 	if err != nil {
-		if spec.Runtime != "" && strings.Contains(strings.ToLower(err.Error()), "runtime") {
-			return "", fmt.Errorf("%w\nthe engine must have the %q runtime registered (Docker: \"runtimes\" in /etc/docker/daemon.json)", err, spec.Runtime)
-		}
 		return "", err
 	}
 	if err := chownVolumes(ctx, c, prepImage, spec.User, spec.OwnedVolumes, spec.Identity); err != nil {

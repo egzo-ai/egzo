@@ -9,7 +9,7 @@ The specs test egzo on one reference platform per run (see conftest.py). On a CI
 named (`--engine` or EGZO_ENGINE). On a developer machine, with none named, this picks the most capable
 platform the machine can be, in this order:
 
-    docker-gvisor     Docker with gVisor (runsc) registered
+    docker-gvisor     Docker with gVisor (runsc) as its default runtime
     podman-rootless   rootless Podman
     docker            Docker
     podman            rootful Podman

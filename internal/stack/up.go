@@ -423,15 +423,3 @@ func markFresh(fresh map[string]bool, plan []Action) {
 		}
 	}
 }
-
-// refuseRuntime stops a spawn that asks for an OCI runtime on Podman. Podman's Docker-compatible
-// API cannot select a runtime, so egzo could neither apply nor verify it, and the runtime is
-// usually a security boundary (gVisor): starting the agent without it would be a silent downgrade.
-func refuseRuntime(c *engine.Client, agent, runtime string) error {
-	if !c.Podman || runtime == "" {
-		return nil
-	}
-	return fmt.Errorf("agent %q asks for the %s runtime, but Podman's Docker-compatible API cannot select a runtime, "+
-		"so egzo can neither apply nor verify it and will not start the agent without it: "+
-		"remove runtime: from the agent, or use Docker with the runtime registered", agent, runtime)
-}

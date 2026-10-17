@@ -75,7 +75,6 @@ type ContainerSpec struct {
 	Network      string
 	WorkingDir   string
 	Harness      string
-	Runtime      string
 	NanoCPUs     int64
 	Memory       int64
 	Healthcheck  []string
@@ -406,7 +405,6 @@ func agentContainer(
 	}
 	spec.WorkingDir = instanceWorkdir(project, agent, name)
 
-	spec.Runtime = agent.Runtime
 	if agent.Resources.CPUs > 0 {
 		spec.NanoCPUs = int64(agent.Resources.CPUs * 1e9)
 	}

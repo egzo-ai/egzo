@@ -44,8 +44,7 @@ $ systemctl --user enable --now podman.socket
 $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 ```
 
-gVisor: register `runsc` with Docker and set `runtime: runsc` on an agent. Podman's API cannot select a runtime, so
-egzo refuses to start such an agent there. Docker is the engine the specs run against today.
+gVisor: make `runsc` the default runtime of the engine; egzo does not choose a runtime. Docker is the engine the specs run against today.
 
 Run `egzo system check` to check the engine and its isolation. [Installing](install.md) has the details, and
 [the security model](security.md) says what the isolation does and does not give you.

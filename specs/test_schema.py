@@ -190,6 +190,13 @@ def test_an_unknown_key_says_where_it_is_and_what_the_valid_keys_are(project):
     assert "worktree" not in result.stderr  # no story about what the key used to do
 
 
+def test_egzo_has_no_runtime_key_the_engine_decides(project):
+    """A container runtime (gVisor, say) is the host's choice, the engine's default: an agent cannot ask for one."""
+    result = project.config(spec(agents={"coder": agent(runtime="runsc")}))
+    assert result.returncode != 0
+    assert 'agents.coder: unknown key "runtime"' in result.stderr
+
+
 def test_a_typo_gets_a_suggestion(project):
     result = project.config(spec(agents={"coder": agent(imge="x")}))
     assert result.returncode != 0

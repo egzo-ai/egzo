@@ -72,20 +72,20 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
 | operating system | the distributions we choose to support (to be decided: for example Ubuntu LTS, Debian stable, Fedora) |
 | kernel, cgroup version, firewall backend | whatever each OS ships; record it in the run output, since it changes how rootful Podman and rootless networking behave |
 
-`podman-gvisor` is not in the matrix: Podman's API cannot select a runtime (`known-issues/podman-gvisor-unsupported.md`).
+`podman-gvisor` is not in the matrix: egzo never chooses a runtime, so it would be Podman with `runsc` as the default in `containers.conf`, which nobody has set up yet.
 
 A cell provides what its scenario names and nothing else: a `docker` cell has no `runsc`; a `docker-gvisor` cell has
-it registered; `podman-rootless` has a user socket and no rootful one.
+`runsc` as the engine's default runtime; `podman-rootless` has a user socket and no rootful one.
 
 ## What a cell must show
 
-- The suite runs to the end with the platform's expected result. Specs that need a feature the platform lacks (today:
-  `runtime: runsc` without gVisor) are strict xfail there, so a cell that **unexpectedly passes or fails is a finding**,
+- The suite runs to the end with the platform's expected result. Specs that need a feature the platform lacks (none
+  today) are strict xfail there, so a cell that **unexpectedly passes or fails is a finding**,
   not noise.
 - The summary per area (one area per `test_<area>.py`) is kept as an artifact, so a regression on one platform shows as
   a change in a column.
-- gVisor is checked on a pair of platforms: a project that asks for `runtime: runsc` starts and really runs under gVisor
-  where it is registered, and cannot start where it is not.
+- gVisor is checked on a pair of platforms: an agent really runs under gVisor where it is the engine's default runtime,
+  and does not where it is not (`test_agents_run_under_the_engines_default_runtime…`).
 - Known host-level problems stay visible: the rootful Podman intermittent egress failure
   (`known-issues/rootful-podman-intermittent-egress.md`) should show up as a flaky cell and not be hidden by retries.
 
