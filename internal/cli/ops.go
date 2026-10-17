@@ -32,8 +32,8 @@ func newSystemCommand() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "check",
 		Short: "Check the engine, its isolation and git",
-		Long: "Check what egzo depends on, with no project file: that the engine answers, whether it runs rootless, whether\n" +
-			"gVisor is registered, that internal networks work, that the engine's default log driver can be read back and\n" +
+		Long: "Check what egzo depends on, with no project file: that the engine answers, whether it runs rootless,\n" +
+			"which OCI runtime containers run under (the engine's default), that internal networks work, that the engine's default log driver can be read back and\n" +
 			"followed (egzo uses the engine's own logging and reads it), and git (in the egzo image, which makes the worktrees,\n" +
 			"and on this host, where the worktrees are read; both need 2.48 or later for relative worktree links).\n" +
 			"Each line starts with ok, warn or fail; egzo exits non-zero when any check fails.",
@@ -137,14 +137,12 @@ func checkEngine(ctx context.Context, c *engine.Client, report func(level, forma
 	if rootless {
 		report("ok", "engine runs rootless: a compromised container is only you")
 	} else {
-		report("ok", "engine runs rootful: agents run as your user without capabilities, but a container escape is root; consider rootless or gVisor")
+		report("ok", "engine runs rootful: agents run as your user without capabilities, but a container escape is root; consider rootless, or a sandboxed runtime such as gVisor as the engine's default")
 	}
 	checkInternalNetworks(ctx, c, report)
-	if _, ok := info.Runtimes["runsc"]; ok {
-		report("ok", "gVisor (runsc) is registered: set runtime: runsc on an agent to sandbox it further")
-	} else {
-		report("warn", "gVisor (runsc) is not registered: agents run under %s, the engine's own runtime", info.DefaultRuntime)
-	}
+	// egzo never chooses a runtime: containers run under the engine's default one, which is the sysadmin's choice.
+	// Shown so that anyone can confirm what they run on (runsc is gVisor); never a warning, most engines run runc.
+	report("ok", "runtime: containers run under %s, the engine's default OCI runtime", info.DefaultRuntime)
 }
 
 // --- ca rotate ------------------------------------------------------------------------------------

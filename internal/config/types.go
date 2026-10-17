@@ -117,7 +117,6 @@ type Agent struct {
 	Model       string            `yaml:"model,omitempty"`
 	Prompt      string            `yaml:"prompt,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty"`
-	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      *AgentInject      `yaml:"inject,omitempty"`

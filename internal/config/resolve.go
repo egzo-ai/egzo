@@ -47,7 +47,6 @@ type ResolvedAgent struct {
 	Model       string            `yaml:"model,omitempty"`
 	Prompt      string            `yaml:"prompt,omitempty"`
 	Resources   Resources         `yaml:"resources,omitempty"`
-	Runtime     string            `yaml:"runtime,omitempty"`
 	Permissions string            `yaml:"permissions"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      ResolvedInject    `yaml:"inject"`
@@ -250,7 +249,6 @@ func resolveAgent(
 		Model:       agent.Model,
 		Prompt:      agent.Prompt,
 		Resources:   agent.Resources,
-		Runtime:     agent.Runtime,
 		Permissions: permissions,
 		Env:         agent.Env,
 		Inject:      resolveInject(name, agent, p),

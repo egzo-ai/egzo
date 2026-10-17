@@ -92,9 +92,6 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 		return Spawned{}, fmt.Errorf("no template %q is published (templates: %s); a template added to egzo.yaml needs `egzo project up`",
 			req.Template, templateNamesList(published))
 	}
-	if err := refuseRuntime(c, req.Template, template.Agent.Runtime); err != nil {
-		return Spawned{}, err
-	}
 	env := PrepEnv{Image: published.Image, User: published.User}
 	if dir == "" {
 		dir = published.Dir
