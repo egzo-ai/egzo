@@ -5,6 +5,8 @@
 `start`, `stop`, `restart`, and `ps`. One project is up for the whole module (`sandbox`) and every spec starts from no instance."""
 
 import json
+import time
+
 import pexpect
 import pytest
 
@@ -71,8 +73,8 @@ def test_exec_with_a_terminal_is_interactive_follows_resizes_and_passes_control_
     shell = sandbox.pty("exec coder-1 -- sh")
     shell.sendline("echo $((6*7))")
     shell.expect("42")
-    shell.sendline("tty")
-    shell.expect("/dev/pts/")
+    shell.sendline("[ -t 0 ] && [ -t 1 ] && echo $((40+2))terminal")  # not `tty`: gVisor's terminal is a host fd, not a /dev/pts entry
+    shell.expect("42terminal")
     shell.sendline("stty size")
     shell.expect("24 80")
     shell.setwinsize(40, 132)
@@ -80,6 +82,7 @@ def test_exec_with_a_terminal_is_interactive_follows_resizes_and_passes_control_
     shell.expect("40 132")
     shell.sendline("echo $((20+22))started; sleep 100")  # computed output cannot be confused with the echoed command line
     shell.expect("42started")
+    time.sleep(1)  # the echo is printed before the shell has started the sleep, and an interrupt sent too early finds only the shell
     shell.sendcontrol("c")  # interrupts the sleep inside the container, not egzo
     shell.sendline("echo $((1+1))alive")
     shell.expect("2alive")

@@ -18,11 +18,12 @@ the host is like; it does not ask egzo for anything:
 | platform | the host is | socket |
 |---|---|---|
 | `docker` | a rootful Docker host | `/var/run/docker.sock` |
-| `docker-gvisor` | the same, with `runsc` (gVisor) registered | `/var/run/docker.sock` |
+| `docker-gvisor` | the same, with `runsc` (gVisor) as the engine's default runtime | `/var/run/docker.sock` |
 | `podman` | a rootful Podman host | `/run/podman/podman.sock` (this user needs access to it) |
 | `podman-rootless` | a rootless Podman host | `$XDG_RUNTIME_DIR/podman/podman.sock` |
 
-There is no `podman-gvisor`: Podman's API cannot select a runtime (`known-issues/podman-gvisor-unsupported.md`).
+egzo never chooses a runtime: containers run under the engine's default one, so gVisor is a property of the host, which
+`docker-gvisor` makes true. A `podman-gvisor` platform would be Podman with `runsc` as its default in `containers.conf`; there is none yet.
 
 Name the platform with `--engine NAME` (or `EGZO_ENGINE`), as CI does, one machine per platform. With none
 named, `select_platform.py` picks the first one this machine can be, in the order `docker-gvisor`,
@@ -30,10 +31,9 @@ named, `select_platform.py` picks the first one this machine can be, in the orde
 (`python specs/select_platform.py` prints just that). A platform that is named but missing fails the engine
 specs with what to set up.
 
-Specs that use a feature the platform lacks, which today is only gVisor (`runtime: runsc`), are marked to
-fail there (strict xfail), so they show as unsupported on `docker`, `podman` and `podman-rootless` and done on
-`docker-gvisor`; one spec requires that a project asking for gVisor cannot start without it. Nothing is
-probed or skipped: egzo is asked, and the outcome is the result. The specs have so far only run on one
+A spec that needs a feature a platform lacks is marked to fail there (strict xfail), so it shows as unsupported on
+that platform. Today none does: the one gVisor spec checks, from inside an agent, that it runs under gVisor exactly
+when the platform says so. Nothing is probed or skipped: egzo is asked, and the outcome is the result. The specs have so far only run on one
 developer machine: see `known-issues/reference-platform-ci-matrix.md`.
 
 Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootstrap pip with
@@ -135,7 +135,7 @@ it covers and how the project it runs on is shared.
 | `agent/test_agent_spawn.py` | `agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
 | `agent/test_agent_lifecycle.py` | `ps`, `agent ls`, `agent rm` and its filters, `start`, `stop`, what a removed container leaves |
 | `agent/test_agent_stale.py` | stale instances, the `up` refusal, `down` and a name that was an instance |
-| `agent/test_agent_containers.py` | the network, who an agent runs as, limits, runtimes (gVisor), and the workspace volumes it mounts |
+| `agent/test_agent_containers.py` | the network, who an agent runs as, limits, whether it runs under gVisor on a gVisor platform, and the workspace volumes it mounts |
 | `service/test_service_commands.py` | `logs`, `exec` (with and without a terminal), `start`, `stop`, `restart` on an instance or a sidecar |
 | `message/test_message_cli.py` | `message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
 | `message/test_agent_api.py` | what an agent does to the control sidecar: the HTTP tools, MCP, state reports, and the limits |

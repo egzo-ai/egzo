@@ -2,7 +2,7 @@
 # Copyright (C) Neopeak Internet Solutions inc.
 
 """What an instance is made of: one container on an internal network of its own, joined only by the control sidecar and the proxy;
-who it runs as and what it may do; its limits and its runtime; and the workspace volumes it mounts.
+who it runs as and what it may do; its limits; and the workspace volumes it mounts.
 
 One project is up for the whole module (`sandbox`), with templates for each kind of agent these specs need, and every spec starts
 from no instance. What goes in and out of a workspace (`workspace put|get`, git) is in the workspace specs."""
@@ -29,8 +29,6 @@ def sandbox(shared_project, engine):
             "limited": custom(image, resources={"cpus": 1, "memory": "256m"}),
             "small": custom(image, resources={"pids": 64, "memory": "256m"}),
             "plain": custom(image),
-            "gvisor": custom(image, runtime="runsc"),
-            "bogus": custom(image, runtime="no-such-runtime"),
         },
     ))
     return shared_project
@@ -74,7 +72,7 @@ def test_an_instance_runs_unprivileged_as_the_invoking_user_with_limits_and_bind
     p = sandbox
     coder, small, limited, solo = p.spawn("coder"), p.spawn("small"), p.spawn("limited"), p.spawn("solo")
 
-    assert run_in(engine, p, coder, "sh", "-c", "echo $(id -u):$(id -g)").stdout.strip() == f"{os.getuid()}:{os.getgid()}"
+    assert run_in(engine, p, coder, "sh", "-c", "echo $(id -u):$(id -g)").stdout.strip() == f"{engine.uid}:{engine.gid}"
     status = run_in(engine, p, coder, "grep", "-E", "CapEff|NoNewPrivs", "/proc/self/status").stdout
     assert "CapEff:\t0000000000000000" in status and "NoNewPrivs:\t1" in status
 
@@ -97,7 +95,8 @@ def test_an_instance_runs_unprivileged_as_the_invoking_user_with_limits_and_bind
         assert user and user.split(":")[0] not in ("0", "root"), f"{service} runs as {user!r}"
         host = sidecar.raw["HostConfig"]
         assert host["Memory"] > 0 and host["PidsLimit"] and host["PidsLimit"] > 0, f"{service} is not limited"
-        assert host["ReadonlyRootfs"] and "ALL" in host["CapDrop"]
+        dropped = set(host["CapDrop"])  # Podman lists the default capabilities it drops instead of ALL
+        assert host["ReadonlyRootfs"] and ("ALL" in dropped or {"CAP_CHOWN", "CAP_KILL", "CAP_NET_BIND_SERVICE"} <= dropped)
     p.ok("proxy log")
     p.ok("events")
     p.up()  # a second `up` on existing volumes
@@ -109,15 +108,16 @@ def test_workspaces_are_volumes_that_instances_share_and_write_as_the_invoking_u
     volume = [r for r in engine.resources(p.name) if r.name == p.volume("scratch")]
     assert [(r.kind, r.labels[f"{LABEL_PREFIX}kind"], r.labels[f"{LABEL_PREFIX}service"]) for r in volume] == [("volume", "workspace", "scratch")]
     assert f"{LABEL_PREFIX}instance" not in volume[0].labels, "a directory workspace belongs to the project, not to an instance"
-    assert engine.in_volumes({p.volume("scratch"): "/w"}, "stat -c %u:%g /w").stdout.strip() == f"{os.getuid()}:{os.getgid()}"
     assert not (p.root / "workspaces").exists(), "nothing is made in the project directory"
 
     coder, reviewer = p.spawn("coder"), p.spawn("reviewer")
+    # looked at from the agent: Podman gives a volume to whichever container mounts it, so a helper container would only see itself
+    assert run_in(engine, p, coder, "stat", "-c", "%u:%g", "/workspace/data").stdout.strip() == f"{engine.uid}:{engine.gid}"
     assert run_in(engine, p, coder, "sh", "-c", "echo one > /workspace/data/a").returncode == 0
     both = run_in(engine, p, reviewer, "sh", "-c", "echo two >> /workspace/data/a && cat /workspace/data/a")
     assert both.stdout.split() == ["one", "two"], "two agents share a declared workspace, both writable"
     owner = engine.in_volumes({p.volume("data"): "/w"}, "stat -c %u /w/a")
-    assert owner.stdout.strip() == str(os.getuid())
+    assert owner.stdout.strip() == str(engine.uid)
 
     # removing or stopping an instance leaves the workspace
     p.ok("agent stop", coder)
@@ -156,38 +156,10 @@ def test_a_directory_workspace_survives_down_and_a_new_up_finds_it_and_egzo_leav
     assert live_project.left_in_directory() == before
 
 
-def test_an_agent_with_runtime_runsc_really_runs_under_gvisor(sandbox, engine, gvisor_agents):
-    """Proved from inside the agent, not from what egzo asked for: an engine that drops the runtime would still say `runsc` in `inspect`."""
+def test_agents_run_under_the_engines_default_runtime_which_is_gvisor_only_on_a_gvisor_platform(sandbox, engine):
+    """egzo never picks a runtime: an agent runs under whatever the engine's default is. Proved from inside the agent."""
     p = sandbox
-    under = p.spawn("gvisor")
-    assert "gvisor" in run_in(engine, p, under, "cat", "/proc/version").stdout.lower()
-    assert "Starting gVisor" in run_in(engine, p, under, "dmesg").stdout
-
-
-def test_an_agent_without_a_runtime_does_not_run_under_gvisor(sandbox, engine):
-    """The control for the spec above: on a platform that has gVisor, agents only get it when they ask."""
-    plain = sandbox.spawn("plain")
-    assert "gvisor" not in run_in(engine, sandbox, plain, "cat", "/proc/version").stdout.lower()
-
-
-def test_a_runtime_that_cannot_be_applied_never_starts_the_agent(sandbox, engine):
-    p = sandbox
-    if not engine.gvisor:
-        refused = p.sh("agent spawn gvisor", timeout=300)
-        assert refused.returncode != 0, "the agent started without the runtime it asked for: this host has gVisor or egzo dropped it"
-        assert "runsc" in refused.stderr
-    unknown = p.sh("agent spawn bogus", timeout=300)
-    assert unknown.returncode != 0 and "no-such-runtime" in unknown.stderr
-    assert not [r for r in engine.containers(p.name) if r.labels.get(f"{LABEL_PREFIX}kind") == "agent"]
-    assert not [r for r in engine.resources(p.name) if r.name.endswith("_bogus-1")], "a failed spawn left its network behind"
-    if engine.cli == "docker":
-        assert "daemon.json" in unknown.stderr  # how to register a runtime
-
-
-def test_podman_refuses_a_runtime_because_it_cannot_apply_or_verify_it(sandbox, engine):
-    """Podman's Docker-compatible API cannot select a runtime: egzo must not start the agent without it."""
-    if engine.cli != "podman":
-        pytest.skip("this is about Podman")
-    result = sandbox.sh("agent spawn gvisor", timeout=300)
-    assert result.returncode != 0 and "Podman" in result.stderr and "runsc" in result.stderr
-    assert not engine.instances(sandbox.name)
+    plain = p.spawn("plain")
+    assert ("gvisor" in run_in(engine, p, plain, "cat", "/proc/version").stdout.lower()) == engine.gvisor
+    if engine.gvisor:
+        assert "Starting gVisor" in run_in(engine, p, plain, "dmesg").stdout

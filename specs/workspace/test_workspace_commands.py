@@ -50,7 +50,7 @@ def test_put_copies_files_in_for_the_agent_user_and_get_copies_paths_out(sandbox
     name = engine.instance(p.name, p.spawn("coder")).name
     assert engine.exec(name, "sh", "-c", "cat /workspace/docs/a.txt /workspace/docs/sub/b.txt").stdout == "alpha\nbeta\n"
     owner = engine.in_volumes({p.volume("docs"): "/w"}, "stat -c %u:%g /w/a.txt /w/sub /w/sub/b.txt")
-    assert set(owner.stdout.split()) == {f"{os.getuid()}:{os.getgid()}"}
+    assert set(owner.stdout.split()) == {f"{engine.uid}:{engine.gid}"}
     assert engine.exec(name, "sh", "-c", "echo more >> /workspace/docs/a.txt").returncode == 0, "the agent can write what was put"
 
     assert engine.exec(name, "sh", "-c", "mkdir -p /workspace/docs/out && echo result > /workspace/docs/out/r.txt").returncode == 0
