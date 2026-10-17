@@ -55,9 +55,6 @@ func Run(cfg Config, audit io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("ssh host key: %w", err)
 	}
-	if err := PublishSSHHostKey(hostKey, cfg.PubDir); err != nil {
-		return fmt.Errorf("publish ssh host key: %w", err)
-	}
 	server.SetSSHHostKey(hostKey)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

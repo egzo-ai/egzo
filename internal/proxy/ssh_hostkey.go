@@ -17,11 +17,10 @@ import (
 
 const (
 	sshHostKeyFile = "ssh_host_ed25519_key"
-	sshHostPubFile = "ssh_host_key.pub"
 )
 
 // LoadOrCreateSSHHostKey returns the key the proxy's ssh listener identifies itself with, made on first use and kept in
-// the private volume. Agents trust it through the public half, which Publish writes into the shared volume.
+// the private volume. Agents will trust its public half, which the proxy publishes in the shared volume.
 func LoadOrCreateSSHHostKey(dir string) (ssh.Signer, error) {
 	path := filepath.Join(dir, sshHostKeyFile)
 	data, err := os.ReadFile(path)
@@ -50,12 +49,4 @@ func LoadOrCreateSSHHostKey(dir string) (ssh.Signer, error) {
 		return nil, err
 	}
 	return ssh.NewSignerFromKey(private)
-}
-
-// PublishSSHHostKey writes the public half where agents read it, as a line they can put in known_hosts after a host name.
-func PublishSSHHostKey(signer ssh.Signer, dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	return writeAtomic(filepath.Join(dir, sshHostPubFile), ssh.MarshalAuthorizedKey(signer.PublicKey()), 0o644)
 }
