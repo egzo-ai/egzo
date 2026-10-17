@@ -53,6 +53,8 @@ Rules for a derived image:
 - **Prefer the image to a runtime install.** Anything an agent installs into its home volume survives, but
   anything it installs system-wide does not, and an image gives every instance the same tools.
 
+A `build:` key that makes egzo build the Dockerfile on `egzo project up` is planned: [`roadmap/build-images.md`](../roadmap/build-images.md).
+
 After changing the image tag, the template changes, so running instances become stale: `egzo project up`, `egzo agent rm`, spawn again.
 
 ## Pin it
