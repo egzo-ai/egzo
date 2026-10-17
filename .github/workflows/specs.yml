@@ -89,6 +89,9 @@ jobs:
           specs/.venv/bin/pip install -r specs/requirements.txt
       # The registry the image specs push to and pull from (test_images.py): localhost:5000, no login. It runs on the runner's
       # Docker, which every runner has, for the Podman platforms too.
+      - name: TEMP gVisor DNS diagnostics
+        if: matrix.engine == 'docker-gvisor'
+        run: scripts/debug-gvisor.sh 2>&1 | tee engine-debug.log; scripts/ci-annotate.sh "gvisor dns" engine-debug.log tail
       - name: Test registry
         run: |
           docker run -d --name spec-registry -p 5000:5000 registry:2 2>registry-${{ matrix.name }}.log || {
