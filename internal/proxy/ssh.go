@@ -475,8 +475,18 @@ func (c *sshConn) forward(request *ssh.Request, remote ssh.Channel) {
 		}
 		ok, err := remote.SendRequest(request.Type, request.WantReply, request.Payload)
 		c.reply(request, ok && err == nil)
+	case "subsystem":
+		var subsystem struct{ Name string }
+		if ssh.Unmarshal(request.Payload, &subsystem) != nil || subsystem.Name != "sftp" {
+			c.audit(Event{Action: "ssh-deny", Reason: "request refused: subsystem"})
+			c.reply(request, false)
+			return
+		}
+		c.audit(Event{Action: "ssh-sftp"})
+		ok, err := remote.SendRequest(request.Type, request.WantReply, request.Payload)
+		c.reply(request, ok && err == nil)
 	default:
-		// subsystem (sftp is not relayed yet), x11-req, auth-agent-req@openssh.com and anything unknown.
+		// x11-req, auth-agent-req@openssh.com and anything unknown.
 		c.audit(Event{Action: "ssh-deny", Reason: "request refused: " + request.Type})
 		c.reply(request, false)
 	}
