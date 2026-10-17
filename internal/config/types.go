@@ -46,6 +46,29 @@ type Profile struct {
 	Extend   string                  `yaml:"extend,omitempty"`
 	Allow    []string                `yaml:"allow,omitempty"`
 	Services map[string]ServiceEntry `yaml:"services,omitempty"`
+	SSH      map[string]SSHServer    `yaml:"ssh,omitempty"`
+}
+
+// SSHServer is a server an agent of the profile may ssh to. The proxy holds the key and re-originates the connection;
+// the agent only types the name. HostKey is required: there is no trust on first use.
+type SSHServer struct {
+	Host    string  `yaml:"host"`
+	Port    SSHPort `yaml:"port,omitempty"`
+	User    string  `yaml:"user"`
+	Key     string  `yaml:"key"`
+	HostKey string  `yaml:"host_key"`
+}
+
+// SSHPort is a port number; zero is "not given" (22).
+type SSHPort int
+
+func (p *SSHPort) UnmarshalYAML(node *yaml.Node) error {
+	var n int
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!int" || node.Decode(&n) != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("line %d: ssh port must be a number from 1 to 65535", node.Line)
+	}
+	*p = SSHPort(n)
+	return nil
 }
 
 // ServiceEntry is either a secret reference for a service that already resolves (Ref), or

@@ -525,6 +525,13 @@ egress:
   `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Basic` with the token as password, which git over HTTPS needs), more later
   (openai, google-ai, package registries). An object with a built-in's name replaces it.
   `egzo project check --resolved` prints each profile fully resolved.
+- **ssh servers** (`ssh:` in a profile, a map by name) are the ssh analogue of `inject`: the agent runs `ssh <name>`, the proxy
+  holds the key and re-originates the connection (see `roadmap/ssh-access.md`). A server has `host` (one exact name or address, no
+  wildcard, no port), `port` (default 22), `user` (fixed here: the agent never picks the remote account), `key` (a
+  `<vault>/<secret>` holding an unencrypted private key) and `host_key` (required: a `SHA256:` fingerprint or a public key line,
+  and there is no value that means trust on first use). The name is a lowercase label (the agent's `Host` alias; not `root`).
+  No other key exists, so nothing weakens the checks. `extend` merges ssh servers by name, the child winning. A server opens no HTTPS
+  host. `--resolved` shows the key's reference, never the key.
 - Reachability for an agent = its profile's `allow` plus the hosts of its services (after extend).
 - Validation: unknown profile, unknown parent, cycle, unknown service name (suggest close names),
   unknown vault secret, two services in one profile sharing a host with different injection
