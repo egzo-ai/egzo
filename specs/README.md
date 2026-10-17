@@ -103,7 +103,8 @@ agents:
     workspaces:
       - { name, mount, mode: rw|ro }
 egress:
-  <profile>: { allow: [...], services: { <name>: { hosts, inject?, secret?, placeholder?, inspect? } } }
+  <profile>: { allow: [...], services: { <name>: { hosts, inject?, secret?, placeholder?, inspect? } },
+               ssh: { <name>: { host, port, user, key, host_key } } }
 ```
 
 `agents:` entries are templates; there is no `depends_on`, no cross-agent workspace reference and no host path.
@@ -119,6 +120,7 @@ it covers and how the project it runs on is shared.
 |---|---|
 | `test_meta.py` | the status model itself; every command line a spec writes is one egzo has; every command and flag of egzo is run by a spec |
 | `test_schema.py` | validation of `egzo.yaml` (`egzo project check --resolved`), no users in files, no secrets in output, the `inject` section |
+| `test_egress_ssh.py` | ssh servers in a profile: fields, the pinned host key, the key reference, extend |
 | `test_egress.py` | profiles, services (wildcards only without a secret), built-ins, extend, placeholders, by-host rules, reachability warnings |
 | `test_secrets.py` | vaults, the `env` and `pass` backends (with a stand-in `pass`) |
 | `test_workspaces.py` | the declaration of workspaces: volumes, no `path`, references, mounts, working directory |
