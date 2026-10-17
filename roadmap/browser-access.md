@@ -127,14 +127,6 @@ refusals, wildcard `inspect` and injection side by side), `test_egress.py` (wild
 
 ## Related ideas (not Chrome-specific)
 
-- **`build:` on an agent** (Compose style): egzo builds the user's Dockerfile on `project up` or `agent spawn`, tags it by content hash,
-  records it in the template hash so a changed Dockerfile shows as a stale instance, and passes the harness image as a
-  build arg.
 - **Authenticating agents by source address** on their own network, so a client needs no proxy credentials (the Playwright
   wrapper exists only because Chromium cannot send them in the proxy URL). A separate decision.
-- **Image contract** (for `custom` or from-scratch images): the `egzo` binary at `/usr/local/bin/egzo`, entrypoint
-  `egzo agent run -- <cmd>`, `HOME=/home/agent`, writable `/workspace` for any uid, `git`, `ca-certificates`,
-  `procps`, the CA bundle path, and the `PATH` entries that switch on integrations such as the browser. Maybe
-  `egzo system check --image X` to check it.
 - **General per-template sidecars**: only if something needs a separate runtime or limits, never one feature per tool.
-- Rejected: declarative `packages:` or `setup:` (egzo would become a package manager).
