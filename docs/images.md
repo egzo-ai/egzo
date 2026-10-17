@@ -1,6 +1,6 @@
 # Overriding base images
 
-The stock harness images ([harnesses](harnesses.md)) are small: Node, git, ripgrep, curl and the harness. If your agents need a compiler, a
+The stock harness images ([harnesses](harnesses.md)) are small: Node, git, ripgrep, curl, a browser and the harness. They all share one base image, `egzo-harness-base`, which carries everything but the harness itself. If your agents need a compiler, a
 language runtime, `psql` or a linter, build an image of your own on top of the stock one and name it in the template.
 
 ## Extend a stock image
@@ -82,6 +82,8 @@ agents:
     image: docker.io/library/alpine:3
 ```
 
-The sandbox still applies in full (own network, proxy only, no secrets, your uid, resources, gVisor if the engine's default runtime is), but
-there is no harness integration: no hooks, no MCP tools and no home volume, and activity is judged from output
-quietness instead of hooks. Use it to run a script or a tool egzo has no integration for yet, such as `pi`.
+The sandbox still applies in full: the agent has its own network with the proxy as its only way out, no secrets, your uid and the
+resource limits, and it runs under whatever runtime the engine defaults to (gVisor, if that is what you set).
+
+What you do not get is the harness integration. There are no hooks, no MCP tools and no home volume, so egzo judges activity from
+how quiet the output is. Use `custom` to run a script, or a tool egzo has no integration for yet, such as `pi`.

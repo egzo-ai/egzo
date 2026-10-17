@@ -336,17 +336,21 @@ class Engine:
         return tag
 
     def harness_image(self, name, binary):
-        """The real harness image of the repository (harness/<name>), with the egzo binary of this run in it."""
+        """The real harness image of the repository (harness/<name>), on the real base image (harness/base), with the egzo
+        binary of this run in it."""
+        base = self._build_harness_dir("base", "EGZO_IMAGE", self.image_for(binary), binary)
+        return self._build_harness_dir(name, "BASE_IMAGE", base, binary)
+
+    def _build_harness_dir(self, name, argument, image, binary):
         root = Path(__file__).parent.parent / "harness" / name
         assert (root / "Dockerfile").exists(), f"there is no harness image for {name}: harness/{name}/Dockerfile"
-        sidecar = self.image_for(binary)
         digest = hashlib.sha256(
-            Path(binary).read_bytes() + b"".join(p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file())
+            image.encode() + Path(binary).read_bytes() + b"".join(p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file())
         ).hexdigest()[:12]
         tag = f"egzo-harness-{name}:spec-{digest}"
         if self.run("image", "inspect", tag).returncode == 0:
             return tag
-        built = self.run("build", "--build-arg", f"EGZO_IMAGE={sidecar}", "-t", tag, str(root))
+        built = self.run("build", "--build-arg", f"{argument}={image}", "-t", tag, str(root))
         assert built.returncode == 0, f"could not build the {name} harness image:\n{built.stderr[-3000:]}"
         return tag
 

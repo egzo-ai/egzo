@@ -63,7 +63,7 @@ jobs:
         id: tags
         run: |
           # `latest` only for a full release, never for a pre-release tag
-          for image in egzo egzo-harness-claude-code egzo-harness-opencode egzo-hub; do
+          for image in egzo egzo-harness-base egzo-harness-claude-code egzo-harness-opencode egzo-hub; do
             tags="$REGISTRY/$image:$GITHUB_REF_NAME"
             case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags,$REGISTRY/$image:latest" ;; esac
             echo "$image=$tags" >> "$GITHUB_OUTPUT"
@@ -81,7 +81,20 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.licenses=AGPL-3.0-only
-      # The harness images copy the binary out of the egzo image pushed just above.
+      # The harness base copies the binary out of the egzo image pushed just above; the harness images build on the base.
+      - name: harness base image
+        uses: docker/build-push-action@v7
+        with:
+          context: harness/base
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          provenance: mode=max
+          build-args: EGZO_IMAGE=${{ env.REGISTRY }}/egzo:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs['egzo-harness-base'] }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
       - name: claude-code harness image
         uses: docker/build-push-action@v7
         with:
@@ -89,7 +102,7 @@ jobs:
           platforms: ${{ env.PLATFORMS }}
           push: true
           provenance: mode=max
-          build-args: EGZO_IMAGE=${{ env.REGISTRY }}/egzo:${{ github.ref_name }}
+          build-args: BASE_IMAGE=${{ env.REGISTRY }}/egzo-harness-base:${{ github.ref_name }}
           tags: ${{ steps.tags.outputs['egzo-harness-claude-code'] }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -102,7 +115,7 @@ jobs:
           platforms: ${{ env.PLATFORMS }}
           push: true
           provenance: mode=max
-          build-args: EGZO_IMAGE=${{ env.REGISTRY }}/egzo:${{ github.ref_name }}
+          build-args: BASE_IMAGE=${{ env.REGISTRY }}/egzo-harness-base:${{ github.ref_name }}
           tags: ${{ steps.tags.outputs['egzo-harness-opencode'] }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}

@@ -2,9 +2,8 @@
 
 ## Supported platforms
 
-**Linux** with Docker or rootless Podman is the supported host today. Rootful Podman is not supported for now (see the table below). The specs describe reference platforms, and so far they
-have run on one developer machine only (`known-issues/reference-platform-ci-matrix.md`), so read "supported" as
-"built and tried on Linux with Docker", not as a tested matrix.
+**Linux** with Docker or rootless Podman is the supported host today. Rootful Podman is not supported for now (see the table below). The specs run on a set of reference platforms in CI; only Docker is a required check so far, and the others are
+reported but cannot fail the run yet (`known-issues/reference-platform-ci-matrix.md`).
 
 **Planned:** Windows through WSL2 (the Linux binary inside a WSL2 distro, with Docker Desktop) and macOS (with Docker
 Desktop, Colima or OrbStack). Neither is supported yet; see
@@ -34,33 +33,52 @@ own version, so the CLI and the sidecars cannot drift. To pull from another regi
 
 ## Pick an engine
 
-Egzo uses the engine `DOCKER_HOST` points at, like the docker CLI (default `/var/run/docker.sock`). There is no
-engine setting in `egzo.yaml`.
+Egzo uses the engine `DOCKER_HOST` points at, like the docker CLI (default `/var/run/docker.sock`). There is no engine
+setting in `egzo.yaml`, and egzo takes your engine as it is: whatever runtime, log driver, storage or network defaults you
+configured are used without complaint. A few configurations are tested and officially supported, and others may well work.
 
 | engine | status |
 |---|---|
 | Docker (rootful) | the engine the specs run against; use this first |
-| Docker with gVisor | supported; make `runsc` the engine's default runtime |
-| Rootless Podman | supported; works through the user socket, see below; no gVisor |
-| Rootful Podman | not supported for now: a netavark bug can leave a project without outbound connectivity (`known-issues/rootful-podman-intermittent-egress.md`); to be decided for 1.0.0, probably with a minimum Podman and netavark version |
+| Docker with gVisor | supported, with a tradeoff; see [Using gVisor](#using-gvisor) |
+| Rootless Podman | supported; see [Using rootless Podman](#using-rootless-podman) |
+| Rootful Podman | not supported for now; to be decided for 1.0.0 |
 
-Rootless Podman:
+Agents run as your uid and gid, and egzo never mounts the engine socket into an agent. Anything that can reach the engine
+socket is root-equivalent on a rootful engine, so a rootless engine is the safer host.
+
+For why rootful Podman is not supported yet, see
+[`known-issues/rootful-podman-intermittent-egress.md`](../known-issues/rootful-podman-intermittent-egress.md).
+
+### Using rootless Podman
+
+Start Podman's user socket and point `DOCKER_HOST` at it:
 
 ```console
 $ systemctl --user enable --now podman.socket
 $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 ```
 
-gVisor on Docker: install `runsc`, register it under `"runtimes"` in `/etc/docker/daemon.json` and set
-`"default-runtime": "runsc"`, then restart Docker. Register it with `--network=host` (`runsc install -- --network=host`, or `runtimeArgs`
-in the `daemon.json` entry): gVisor's own network stack cannot reach Docker's embedded DNS, so without it no container finds another
-by name. The cost is real and gVisor documents it: the sandbox then uses the host's network stack and "decreases the isolation to
-the host". egzo's own network isolation (an internal network per agent, the proxy as its only way out) does not depend on it; see
-[`known-issues/gvisor-docker-embedded-dns.md`](../known-issues/gvisor-docker-embedded-dns.md). egzo never chooses a container runtime: everything the engine
-starts, agents and sidecars, runs under its default one, which is the host administrator's choice.
+gVisor on rootless Podman is untested.
 
-Agents run as your uid and gid, and egzo never mounts the engine socket into an agent. Anything that can reach the
-engine socket is root-equivalent on a rootful engine, so a rootless engine is the safer host.
+### Using gVisor
+
+gVisor is a choice for the engine, not for egzo: egzo never picks a container runtime. Everything the engine starts, agents and
+sidecars, runs under its default runtime, which is the host administrator's decision. `egzo system check` shows which one that is.
+
+To run it under gVisor on Docker:
+
+1. Install `runsc` (use a recent release: the OpenCode TUI needs `release-20261012` or later).
+2. Register it with the host network option: `runsc install -- --network=host`.
+3. Set `"default-runtime": "runsc"` in `/etc/docker/daemon.json` and restart Docker.
+
+The host network option has a cost. gVisor's own network stack cannot reach Docker's embedded DNS, so without it no container
+can find another by name. With it, the sandbox uses the host's network stack, which gVisor documents as decreasing the isolation
+from the host. egzo's own network isolation (an internal network per agent, the proxy as its only way out) does not depend on
+it.
+
+For more details, see [`known-issues/gvisor-docker-embedded-dns.md`](../known-issues/gvisor-docker-embedded-dns.md) and
+[`known-issues/gvisor-terminal-quirks.md`](../known-issues/gvisor-terminal-quirks.md).
 
 ## Check the setup
 
