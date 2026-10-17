@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/egzo-ai/egzo/internal/operator"
 )
 
@@ -56,6 +58,9 @@ func Run(cfg Config, audit io.Writer) error {
 		return fmt.Errorf("ssh host key: %w", err)
 	}
 	server.SetSSHHostKey(hostKey)
+	if err := PublishSSHClientFiles(cfg.PubDir, hostKey.PublicKey(), nil); err != nil {
+		return fmt.Errorf("publish ssh client files: %w", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -81,7 +86,7 @@ func Run(cfg Config, audit io.Writer) error {
 	go server.ServeSSH(sshListener)
 
 	operatorDone := make(chan error, 1)
-	go func() { operatorDone <- operator.Serve(cfg.Socket, operatorHandler(server, ca, cfg)) }()
+	go func() { operatorDone <- operator.Serve(cfg.Socket, operatorHandler(server, ca, cfg, hostKey)) }()
 
 	select {
 	case err := <-failed:
@@ -99,7 +104,7 @@ var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
 // operatorHandler is the proxy's operator API: load a policy, report which one is loaded, bind agents
 // to its profiles.
-func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
+func operatorHandler(server *Server, ca *CA, cfg Config, hostKey ssh.Signer) http.Handler {
 	mux := http.NewServeMux()
 	var mu sync.Mutex // the CA in use, and rotating it
 	current := ca
@@ -162,6 +167,10 @@ func operatorHandler(server *Server, ca *CA, cfg Config) http.Handler {
 			return
 		}
 		server.SetPolicy(&policy)
+		if err := PublishSSHClientFiles(cfg.PubDir, hostKey.PublicKey(), &policy); err != nil {
+			http.Error(w, "publish ssh client files: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux

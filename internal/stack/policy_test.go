@@ -4,12 +4,17 @@
 package stack
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"slices"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 	"reflect"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/proxy"
@@ -222,4 +227,88 @@ func TestPlaceholderRefsAndStandIns(t *testing.T) {
 	if len(placeholderStandIn) != len("egzo-ph-")+32 {
 		t.Errorf("stand-in %q has the wrong shape", placeholderStandIn)
 	}
+}
+
+func TestBuildPolicyCarriesTheSSHServersOfAProfileWithTheirKey(t *testing.T) {
+	project := policyProject()
+	project.Egress["default"].SSH = map[string]*config.ResolvedSSH{
+		"prod": {Host: "prod.example", Port: 22, User: "deploy", Key: "main/SSH", HostKey: "SHA256:x"},
+	}
+	policy := BuildPolicy(project, map[string]string{"main/SSH": "KEY-TEXT"}, nil)
+	want := []proxy.SSHServer{{Name: "prod", Host: "prod.example", Port: 22, User: "deploy", Key: "KEY-TEXT", HostKey: "SHA256:x"}}
+	if !reflect.DeepEqual(policy.Profiles["default"].SSH, want) {
+		t.Errorf("ssh = %+v", policy.Profiles["default"].SSH)
+	}
+	if len(policy.Profiles["tight"].SSH) != 0 {
+		t.Error("another profile got a server")
+	}
+}
+
+func TestTheBindingOfAnInstanceCarriesItsSSHIdentityDerivedFromItsToken(t *testing.T) {
+	binding := BindingFor("tok", "default")
+	want, _ := proxy.IdentityPublicKey("tok")
+	if binding.SSHKey == "" || binding.SSHKey != want {
+		t.Errorf("ssh key = %q", binding.SSHKey)
+	}
+	if other := BindingFor("other", "default"); other.SSHKey == binding.SSHKey {
+		t.Error("two tokens share an identity")
+	}
+}
+
+func sshProject(vaultName string) *config.Resolved {
+	project := policyProject()
+	project.Agents = map[string]config.ResolvedAgent{"coder": {Egress: "default"}}
+	project.Egress = map[string]*config.ResolvedProfile{"default": {SSH: map[string]*config.ResolvedSSH{"prod": {Host: "h", Port: 22, User: "u", Key: "main/" + vaultName, HostKey: "SHA256:x"}}}}
+	project.Secrets = map[string]config.SecretRef{"main/" + vaultName: {Vault: "main", Name: vaultName, Backend: "env"}}
+	return project
+}
+
+func TestResolveSecretsReadsAnSSHKeyWithAllItsLines(t *testing.T) {
+	_, pem := newTestKey(t)
+	t.Setenv("SPEC_SSH_KEY", pem)
+	values, err := ResolveSecrets(sshProject("SPEC_SSH_KEY"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["main/SPEC_SSH_KEY"] != pem {
+		t.Error("the key was altered")
+	}
+}
+
+func TestResolveSecretsRefusesAKeyItCannotUseWithoutQuotingIt(t *testing.T) {
+	for name, value := range map[string]string{
+		"garbage":      "not-a-key-but-secret-material",
+		"half a key":   "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n",
+		"a public key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMGFJIY0eOCEYAre+qhPAFyN2YPymAD03FxBn1v6yyZz",
+	} {
+		t.Setenv("SPEC_SSH_KEY", value)
+		_, err := ResolveSecrets(sshProject("SPEC_SSH_KEY"), t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), "main/SPEC_SSH_KEY") || strings.Contains(err.Error(), "secret-material") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestResolveSecretsRefusesAKeyWithAPassphrase(t *testing.T) {
+	_, private, _ := ed25519.GenerateKey(rand.Reader)
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(private, "", []byte("hunter2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPEC_SSH_KEY", string(pem.EncodeToMemory(block)))
+	_, err = ResolveSecrets(sshProject("SPEC_SSH_KEY"), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func newTestKey(t *testing.T) (ssh.Signer, string) {
+	t.Helper()
+	_, private, _ := ed25519.GenerateKey(rand.Reader)
+	block, err := ssh.MarshalPrivateKey(private, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, _ := ssh.NewSignerFromKey(private)
+	return signer, string(pem.EncodeToMemory(block))
 }
