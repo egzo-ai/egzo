@@ -7,7 +7,7 @@ import copy
 import os
 import stat
 
-VAULT = {"main": {"backend": "env", "secrets": ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DEPLOY_TOKEN", "PROD_SSH_KEY"]}}
+VAULT = {"main": {"backend": "env", "secrets": ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DEPLOY_TOKEN"]}}
 
 GIT_WORKSPACE = {"repo": {"git": {"url": "https://github.com/acme/shop.git"}}}
 
