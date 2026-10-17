@@ -27,6 +27,8 @@ def profiles(server):
         "pubkey": {"ssh": {"prod": entry(host_key=server.host_key)}},
         "wrongkey": {"ssh": {"prod": entry(host_key=other_fingerprint)}},
         "metadata": {"ssh": {"prod": entry(host="169.254.169.254", port=22)}},
+        "refused": {"ssh": {"prod": entry(key="main/OTHER_SSH_KEY")}},
+        "dead": {"ssh": {"prod": entry(port=1)}},
         "none": {},
     }
 
@@ -34,11 +36,12 @@ def profiles(server):
 @pytest.fixture(scope="module")
 def sandbox(shared_project, engine, egzo, ssh_server):
     shared_project.env["PROD_SSH_KEY"] = ssh_server.private_key
+    shared_project.env["OTHER_SSH_KEY"] = ssh_server.keygen()[0]  # a key the server does not know
     image = engine.ssh_agent_image(egzo.binary)
     egress = profiles(ssh_server)
     shared_project.up(
         spec(
-            vaults={"main": {"backend": "env", "secrets": ["PROD_SSH_KEY"]}},
+            vaults={"main": {"backend": "env", "secrets": ["PROD_SSH_KEY", "OTHER_SSH_KEY"]}},
             egress=egress,
             agents={name: agent(harness="custom", image=image, egress=name, env={"FAKE_TUI": "cat", "HOME": HOME}) for name in egress},
         )
@@ -151,6 +154,17 @@ def test_the_proxy_never_connects_to_a_cloud_metadata_address(ssh_of):
     refused = a.ssh("prod", "true")
     assert refused.returncode == 255
     assert any(e["action"] == "ssh-error" and "metadata" in e["reason"] for e in a.audit())
+
+
+def test_a_server_that_refuses_the_key_or_does_not_answer_is_reported_the_way_ssh_would_and_audited(ssh_of):
+    refused = ssh_of("refused").ssh("prod", "true")
+    assert refused.returncode == 255 and "refused the key" in refused.stderr
+    assert "PRIVATE KEY" not in refused.stderr
+
+    a = ssh_of("dead")
+    dead = a.ssh("prod", "true")
+    assert dead.returncode == 255 and "could not connect" in dead.stderr
+    assert any(e["action"] == "ssh-error" and "could not connect" in e["reason"] for e in a.audit())
 
 
 def test_forwarding_and_subsystems_are_refused(ssh_of):
