@@ -50,6 +50,14 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
       `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost
       notes into `DESIGN.md` or drop them, then delete the file and this link. Its R-nn and T-nn ids refer to the deleted
       `TODO.md` and mean nothing to outsiders.
+- [ ] **Address the CodeQL alerts and adjust its configuration.** 17 alerts are open on `main` (Security, Code scanning), none
+      triaged. Review the real ones: archive extraction in `internal/stack/workspaces.go` (`go/zipslip`, `go/unsafe-unzip-symlink`;
+      probably false positives behind the `filepath.Rel` and `linkLeaves` guards, but it unpacks what a container wrote, so prove
+      it with a spec), the key derivation in `hub/internal/secretbox` (`go/weak-sensitive-data-hashing`: one SHA-256 of
+      `EGZO_SECRET_KEY`; use HKDF or scrypt, or require a random key), and `safeNext` in `hub/internal/web/server.go`
+      (`go/bad-redirect-check`). Dismiss the rest with a reason. Then configure the scan: `paths-ignore` for `specs/` and
+      `roadmap/` (11 of the 17 are URL-substring checks in specs and the design mockups), decide whether the `python` analysis is
+      worth a runner, and keep it out of the required checks.
 
 ## Documentation review against the published artifacts
 
