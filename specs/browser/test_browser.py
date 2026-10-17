@@ -96,7 +96,7 @@ def call_tools(engine, project, name, harness, calls):
     With no calls, the names of the tools the server offers."""
     container = engine.instance(project.name, name).name
     server = servers_of(engine, project, name, harness)["playwright"]
-    copied = engine.run("cp", str(FIXTURES / "mcp_client.mjs"), f"{container}:/tmp/mcp_client.mjs")
+    copied = engine.put_file(container, FIXTURES / "mcp_client.mjs", "/tmp/mcp_client.mjs")
     assert copied.returncode == 0, copied.stderr
     ran = engine.exec(container, "node", "/tmp/mcp_client.mjs", json.dumps(launch_command(server)), json.dumps(calls))
     assert ran.returncode == 0, ran.stderr

@@ -238,13 +238,18 @@ class Engine:
         """The CLI's argv for talking to this engine's socket (Podman only in remote mode: its local storage is another one)."""
         return [self.cli, *args] if self.cli == "docker" else [self.cli, "--remote", "--url", self.host, *args]
 
-    def run(self, *args):
+    def run(self, *args, input=None):
         command = self.command(*args)
         # Build output from remote Podman is not always valid UTF-8.
         completed = subprocess.run(
-            command, env={**os.environ, **self.env}, capture_output=True, text=True, errors="replace"
+            command, env={**os.environ, **self.env}, capture_output=True, text=True, errors="replace", input=input
         )
         return Result(completed.returncode, completed.stdout, completed.stderr)
+
+    def put_file(self, container, source, destination):
+        """Put a text file into a running container. Through the container's own shell, not `cp`: a sandboxed runtime such as
+        gVisor keeps its own view of the root filesystem, and what `cp` writes behind its back is not there."""
+        return self.run("exec", "-i", container, "sh", "-c", f"cat > {destination}", input=Path(source).read_text())
 
     def problem(self):
         """Why this host cannot run the specs against this engine, or None when it can."""

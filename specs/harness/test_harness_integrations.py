@@ -107,8 +107,15 @@ def wait_until(check, what, timeout, context=None):
     raise AssertionError(f"timed out waiting for {what}" + (f"\n{context()}" if context else ""))
 
 
+def opencode_needs_a_pty_gvisor_cannot_give(request, engine, harness):
+    """OpenCode's TUI draws nothing on a pty made inside a gVisor sandbox (known-issues/opencode-tui-on-gvisor.md): this platform cannot do it."""
+    if engine.gvisor and harness == "opencode":
+        request.applymarker(pytest.mark.xfail(strict=True, reason="OpenCode's TUI does not start on a pty inside gVisor"))
+
+
 @pytest.mark.parametrize("harness", HARNESSES)
-def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_credential_and_keeps_its_home(sandbox, engine, egzo, harness):
+def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_credential_and_keeps_its_home(sandbox, engine, egzo, request, harness):
+    opencode_needs_a_pty_gvisor_cannot_give(request, engine, harness)
     p = sandbox
     name = p.spawn(harness, f"{harness}-1", timeout=900)
     assert in_instance(engine, p, name, "id -u").stdout.strip() == str(engine.uid)
@@ -245,7 +252,8 @@ def test_the_state_command_reports_a_state_and_never_blocks_or_fails_the_harness
 
 
 @pytest.mark.parametrize("harness", HARNESSES)
-def test_the_real_tui_reports_idle_and_is_told_a_message_is_waiting(sandbox, harness):
+def test_the_real_tui_reports_idle_and_is_told_a_message_is_waiting(sandbox, engine, request, harness):
+    opencode_needs_a_pty_gvisor_cannot_give(request, engine, harness)
     """No model is called: the harness reports the typed line through its hook as soon as it is submitted. The line must reach the real TUI,
     be submitted, and name the message by its id and nothing else of it."""
     p = sandbox
