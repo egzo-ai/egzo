@@ -36,4 +36,4 @@ Not a bug of egzo, and not a failure: under gVisor the terminal of an exec is a 
 
 gVisor keeps its own view of the container's root filesystem: a file `docker cp` writes into a running gVisor container is not visible
 inside it. The specs that copied a helper script (`browser`, `proxy` isolation) now write it through the container's own shell
-(`Engine.put_file`). Users of egzo are not affected: egzo copies nothing into a running container.
+(`Engine.put_file`). egzo itself copies only into engine volumes (`workspace put`), which gVisor does see, and those specs pass.
