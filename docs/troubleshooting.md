@@ -84,7 +84,7 @@ engine's default logging: if `egzo logs` prints nothing for a container that sho
 
 - **Rootful Podman, intermittent loss of outbound connectivity.** The proxy's first outbound connection sometimes
   times out; a project that comes up broken stays broken. It reproduces without egzo, appears host-level and is open
-  (`known-issues/rootful-podman-intermittent-egress.md`). Recreate the project, or use Docker or rootless Podman.
+  (`known-issues/rootful-podman-intermittent-egress.md`). Rootful Podman is not supported for now: use Docker or rootless Podman.
 - **Podman cannot run agents under gVisor** (`known-issues/podman-gvisor-unsupported.md`).
 - **`pi` has no integration**, because it has no MCP support (`known-issues/mcp-support-is-required.md`).
 - **Platforms other than the developer's machine have not been run** by the specs

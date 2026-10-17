@@ -14,8 +14,9 @@ any other supported agent).
 
 ## Supported platforms
 
-- Linux with Docker or Podman as the container engine.
-- Docker with gVisor (runsc) and rootless podman are also supported for additional security.
+- Linux with Docker or rootless Podman as the container engine.
+- Docker with gVisor (runsc) is also supported for additional security.
+- Rootful Podman is not supported for now: [`known-issues/rootful-podman-intermittent-egress.md`](known-issues/rootful-podman-intermittent-egress.md).
 - macOS and Windows (through WSL2) are planned but not supported yet: [`roadmap/windows-and-macos.md`](roadmap/windows-and-macos.md).
 
 egzo uses the engine `DOCKER_HOST` points at, like the docker CLI (default `/var/run/docker.sock`). Harness images come

@@ -38,8 +38,12 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [ ] **A CI matrix running the specs** on every reference platform ([`ci-test-matrix.md`](ci-test-matrix.md),
       `known-issues/reference-platform-ci-matrix.md`). `ci.yml` runs only the Go tests, linters and hub tests today. The CI solution is
       undecided; until the matrix runs, "supported on Podman" or "gVisor works" are not claims to make.
-- [ ] Decide whether Podman is supported in the first release, given
-      `known-issues/rootful-podman-intermittent-egress.md` and `known-issues/podman-gvisor-unsupported.md`.
+- [ ] **Re-check the rootful Podman egress bug and decide whether rootful Podman is supported in 1.0.0.** Docker and rootless Podman are
+      supported now; rootful Podman is not. The cause looks like containers/netavark#1497 (a stale per-bridge sysctl file switches
+      forwarding off on a reused bridge name; fix proposed in #1498). Before 1.0.0: see whether the fix is released, run the `podman`
+      cell on a Podman and netavark that have it, and either support rootful Podman with a stated minimum version of both
+      (`known-issues/rootful-podman-intermittent-egress.md`) or keep it unsupported and say so in the README and `docs/install.md`.
+      Podman cannot run agents under gVisor either (`known-issues/podman-gvisor-unsupported.md`).
 - [ ] Retire [`review-leftovers.md`](review-leftovers.md): file its concrete items as GitHub issues (the `errcheck` sweep, a fake
       `client.APIClient` for `Up`/`Apply`/`Down`/`RunPrep` unit tests, audit-log sampling of repeated denials, and a link to
       `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost

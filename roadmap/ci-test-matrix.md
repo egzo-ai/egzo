@@ -31,10 +31,13 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
   merging, so `main` never gets a change a platform rejects. The nightly run catches what no push touched: a new runner image
   (an engine version), a new engine release, an online service the specs reach going away.
 - **Cells that are not proven are `experimental`**: they run and show, and cannot fail the run. `docker` is required from the
-  start. `docker-gvisor`, `podman`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history, by
-  removing the flag in `specs.yml` and adding the check to the branch rules. Rootful Podman has a diagnosed intermittent failure
-  (`known-issues/rootful-podman-intermittent-egress.md`, netavark leaves a stale per-bridge sysctl file that switches forwarding off on a reused bridge name, containers/netavark#1497) and must not
-  block merges until it is fixed upstream or gone from the runs.
+  start. `docker-gvisor`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history, by
+  removing the flag in `specs.yml` and adding the check to the branch rules. Docker and rootless Podman are supported platforms.
+  Rootful Podman (`podman`) is not supported for now: it has a diagnosed intermittent failure
+  (`known-issues/rootful-podman-intermittent-egress.md`, netavark leaves a stale per-bridge sysctl file that switches forwarding off
+  on a reused bridge name, containers/netavark#1497). Its cell stays `experimental` and its specs stay red, as they say what is true.
+  Whether it is supported in 1.0.0, probably with a minimum Podman and netavark version, is decided then
+  ([initial-release.md](initial-release.md)).
 - **Serial.** Each cell runs the specs one at a time. Four `pytest-xdist` workers (`--dist loadfile`) were tried on the first
   runs: locally with Docker and gVisor they took 3 minutes instead of about 12, but 54 specs failed on `all predefined address
   pools have been fully subnetted` (every project and instance is a network and Docker's default pool holds about 30), and with

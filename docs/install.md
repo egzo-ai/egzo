@@ -2,7 +2,7 @@
 
 ## Supported platforms
 
-**Linux** with Docker or Podman is the supported host today. The specs describe reference platforms, and so far they
+**Linux** with Docker or rootless Podman is the supported host today. Rootful Podman is not supported for now (see the table below). The specs describe reference platforms, and so far they
 have run on one developer machine only (`known-issues/reference-platform-ci-matrix.md`), so read "supported" as
 "built and tried on Linux with Docker", not as a tested matrix.
 
@@ -41,8 +41,8 @@ engine setting in `egzo.yaml`.
 |---|---|
 | Docker (rootful) | the engine the specs run against; use this first |
 | Docker with gVisor | supported; register `runsc` and set `runtime: runsc` on agents |
-| Podman (through its Docker-compatible socket) | works, not run in full by the specs; no gVisor |
-| Rootless Podman | works through the user socket, see below |
+| Rootless Podman | supported; works through the user socket, see below; no gVisor |
+| Rootful Podman | not supported for now: a netavark bug can leave a project without outbound connectivity (`known-issues/rootful-podman-intermittent-egress.md`); to be decided for 1.0.0, probably with a minimum Podman and netavark version |
 
 Rootless Podman:
 
