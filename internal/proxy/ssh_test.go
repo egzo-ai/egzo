@@ -463,11 +463,23 @@ func TestSSHRefusesForwarding(t *testing.T) {
 	if ok, _ := session.SendRequest("x11-req", true, nil); ok {
 		t.Fatal("X11 forwarding was accepted")
 	}
-	if err := session.RequestSubsystem("sftp"); err == nil {
-		t.Fatal("a subsystem was relayed")
+	if err := session.RequestSubsystem("netconf"); err == nil {
+		t.Fatal("a subsystem other than sftp was relayed")
 	}
 	if r.fake.saw("auth-agent-req@openssh.com") || r.fake.saw("subsystem") {
 		t.Fatalf("a refused request reached the server: %v", r.fake.requests)
+	}
+}
+
+func TestSSHRelaysTheSftpSubsystemAndAuditsIt(t *testing.T) {
+	r := newSSHRig(t, nil)
+	session, _ := r.connect().NewSession()
+	defer session.Close()
+	if err := session.RequestSubsystem("sftp"); err != nil {
+		t.Fatalf("sftp: %v", err)
+	}
+	if !r.fake.saw("subsystem") || !r.audit.has("ssh-sftp", "") {
+		t.Fatalf("requests %v audit %+v", r.fake.requests, r.audit.events())
 	}
 }
 
