@@ -20,7 +20,7 @@ const (
 )
 
 // LoadOrCreateSSHHostKey returns the key the proxy's ssh listener identifies itself with, made on first use and kept in
-// the private volume. Agents will trust its public half, which the proxy publishes in the shared volume.
+// the private volume. Agents trust its public half, which PublishSSHClientFiles writes into the shared volume.
 func LoadOrCreateSSHHostKey(dir string) (ssh.Signer, error) {
 	path := filepath.Join(dir, sshHostKeyFile)
 	data, err := os.ReadFile(path)

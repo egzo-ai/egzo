@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/agentclient"
 	"github.com/egzo-ai/egzo/internal/browser"
 	"github.com/egzo-ai/egzo/internal/harness"
+	"github.com/egzo-ai/egzo/internal/proxy"
 	sess "github.com/egzo-ai/egzo/internal/session"
 )
 
@@ -60,7 +62,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 	}
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
-		newAttachCommand(opts), run, browserCommand)
+		newAttachCommand(opts), run, browserCommand, newSSHSetupCommand())
 	return group(cmd)
 }
 
@@ -104,6 +106,11 @@ func runAgent(args []string) error {
 	// project CA is a smaller problem than a harness that does not start.
 	if err := browser.TrustProjectCA(home, browser.ProjectCA, exec.LookPath, browser.ExecRunner); err != nil {
 		fmt.Fprintf(os.Stderr, "egzo: could not trust the project CA in the browser's database: %v\n", err)
+	}
+
+	// Best effort, like the browser: an agent that cannot ssh is a smaller problem than a harness that does not start.
+	if err := setupSSH(home, os.Getenv("EGZO_TOKEN"), filepath.Join(proxy.AgentCADir, "ssh_config")); err != nil {
+		fmt.Fprintf(os.Stderr, "egzo: could not set up ssh: %v\n", err)
 	}
 
 	if hasIntegration {
