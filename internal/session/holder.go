@@ -180,8 +180,10 @@ func (h *Holder) wait() {
 		c.finish()
 	}
 	h.clients = map[*client]bool{}
-	h.mu.Unlock()
+	// done closes under the lock: a client registering after this point sees it (handle checks it under the lock too)
+	// and is told the exit itself, instead of waiting in a map nobody will visit again.
 	close(h.done)
+	h.mu.Unlock()
 }
 
 // pump copies the program's output to every client.
@@ -257,6 +259,15 @@ func (h *Holder) handle(conn net.Conn) {
 	// new output may overtake it: the history is queued before the client is registered, under the
 	// lock the pump takes to add output, so every byte is either in the history or sent after it.
 	h.mu.Lock()
+	select {
+	case <-h.done:
+		h.mu.Unlock()
+		body, _ := json.Marshal(exitStatus{Code: h.code})
+		c.enqueue(frameExit, body)
+		c.finish()
+		return
+	default:
+	}
 	if recent := h.recent(); len(recent) > 0 {
 		c.enqueue(frameOutput, recent)
 	}
