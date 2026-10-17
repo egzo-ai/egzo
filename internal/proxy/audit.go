@@ -16,11 +16,15 @@ type Event struct {
 	Time   time.Time `json:"time"`
 	Agent  string    `json:"agent,omitempty"`
 	Host   string    `json:"host,omitempty"`
-	Action string    `json:"action"` // allow, inject, inspect, intercept, challenge, deny, aborted, request, close, error
+	Action string    `json:"action"` // allow, inject, inspect, intercept, challenge, deny, aborted, request, close, error; ssh-open, ssh-exec, ssh-shell, ssh-deny, ssh-close, ssh-error
 	Reason string    `json:"reason,omitempty"`
 	Method string    `json:"method,omitempty"`
 	Path   string    `json:"path,omitempty"`
 	Status int       `json:"status,omitempty"`
+
+	// On an ssh event: the server's name in the profile, and the command an agent asked to run.
+	Server  string `json:"server,omitempty"`
+	Command string `json:"command,omitempty"`
 
 	// On a tunnel's "close": what went from the agent to the host and back, and for how long.
 	BytesUp    int64 `json:"bytes_up,omitempty"`
@@ -57,6 +61,7 @@ func (a *Audit) Log(event Event) {
 	}
 	event.Time = time.Now().UTC()
 	event.Agent, event.Host, event.Reason, event.Path = clip(event.Agent), clip(event.Host), clip(event.Reason), clip(event.Path)
+	event.Server, event.Command = clip(event.Server), clip(event.Command)
 	line, err := json.Marshal(event)
 	if err != nil {
 		return
