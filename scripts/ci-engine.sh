@@ -42,7 +42,9 @@ docker-gvisor)
 	rm -rf "$tmp"
 	# registers the runtime `runsc` in /etc/docker/daemon.json and makes it the engine's default: egzo never chooses a runtime,
 	# so gVisor is what the host is, and every container the engine starts runs under it
-	sudo runsc install
+	# --reproduce-nat: Docker's embedded DNS (127.0.0.11, how a container finds `control` and `proxy` by name) is a NAT rule in the
+	# container's network namespace, which gVisor's own network stack only reproduces when asked to
+	sudo runsc install -- --reproduce-nat
 	sudo jq '. + {"default-runtime": "runsc"}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new
 	sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
 	sudo systemctl restart docker
