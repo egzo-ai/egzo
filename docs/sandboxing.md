@@ -145,6 +145,48 @@ A child can add to what it inherits and cannot remove anything. Cycles and unkno
 service that uses a secret that no vault declares. Two services in one profile cannot share a host with different
 injection.
 
+## ssh to servers
+
+For sysadmin work (diagnostics, logs, restarting a service) an agent can run `ssh` to the servers its profile names. The private key
+stays in the proxy, like any other secret:
+
+```yaml
+vaults:
+  main: { backend: pass, secrets: [servers/prod-ssh-key] }
+
+egress:
+  ops:
+    ssh:
+      prod:                                  # what the agent types: ssh prod
+        host: 10.0.4.12                      # one exact name or address (private ones are fine)
+        port: 22                             # optional
+        user: egzo-ops                       # fixed here: the agent cannot choose another account
+        key: main/servers/prod-ssh-key       # an unencrypted private key; a pass entry is read whole
+        host_key: SHA256:Fp3x...             # required: ssh-keygen -lf, or a public key line (ssh-ed25519 AAAA...)
+agents:
+  admin: { harness: claude-code, egress: ops }
+```
+
+Inside the agent, `ssh prod 'journalctl -u nginx -n 100'` and `ssh -t prod` work, with stdin, stderr, exit status and a terminal.
+What happens: the agent signs in to the proxy with an identity egzo makes for the instance, the proxy opens its own connection to
+`host` with the key and **refuses a server whose host key is not the pinned one**, and relays the session. So:
+
+- **The agent never holds the key**, in its environment, files, the engine's records or the audit log. It does not need a default route either.
+- **Only the servers of its profile.** An agent of another profile gets "Permission denied" and the server is never contacted.
+- **The host key is required.** There is no trust on first use; a mismatch is a failure the audit records with the key the server presented. With a
+  fingerprint, a server with several host key types works; with a public key line the type is fixed.
+- **Sessions only.** Port forwarding (`-L`, `-R`, `-W`), agent forwarding and X11 are refused, and so is every subsystem (so `scp` and `sftp`
+  do not work yet).
+- **It does not limit what the agent runs on the server.** Use a dedicated low-privilege account, or a forced command in `authorized_keys`,
+  on the server. The audit records every session and every command (`ssh-exec`), and not what is typed in a shell.
+- The proxy never connects to loopback or a cloud metadata address, and gives up on a server that does not answer, or goes quiet, after the
+  handshake timeout, keepalive failures or an hour without data. A proxy restart ends live ssh sessions.
+- A key with a passphrase is refused by `egzo project up`; FIDO (`sk-`) keys are not supported.
+
+The harness images carry the ssh client. An image of your own needs `openssh-client`; run `egzo agent ssh-setup` at its start if its
+entrypoint is not `egzo agent run`, and, if the agent's uid has no passwd entry, a wrapper like `harness/base/egzo-ssh`
+(ssh refuses to run without one). See [images](images.md).
+
 ## Full internet
 
 ```yaml
@@ -158,8 +200,8 @@ injected only for the hosts of declared services. Use it for a trusted template,
 
 ## What the sandbox does not allow
 
-- **Raw TCP, UDP, ssh, ping, DNS to other servers.** Only HTTPS through the proxy. A git remote must be HTTPS: the base clone (`egzo project up`) and the fetch before each worktree (`egzo agent spawn`) run in short-lived prep containers on a network the proxy serves, so they need the git host in `allow` and, for a private repository, the `github` service. ssh
-  from an agent is an idea in [`roadmap/ssh-access.md`](../roadmap/ssh-access.md), not built.
+- **Raw TCP, UDP, ping, DNS to other servers; ssh anywhere else.** Only HTTPS through the proxy, and ssh to the servers a profile names
+  ([above](#ssh-to-servers)). A git remote of a workspace must be HTTPS: the base clone (`egzo project up`) and the fetch before each worktree (`egzo agent spawn`) run in short-lived prep containers on a network the proxy serves, so they need the git host in `allow` and, for a private repository, the `github` service.
 - **Pinned-certificate clients.** A host with an injected credential is intercepted with the project CA; a client that
   pins certificates will fail on it.
 - **Agent-to-agent traffic.** Agents never share a network. They talk only through the control sidecar (`egzo message send`,
@@ -183,6 +225,9 @@ Each event has a `host`, an `action` and, where it applies, the `agent` and a `r
 | `inject`, `inspect` | the host's TLS was terminated because a service injects a credential there, swaps a placeholder, or has `inspect: true` |
 | `request` | one request to such a host: method, path (never the query) and status |
 | `intercept`, then `close` | a client that sent Encrypted Client Hello was terminated instead of tunneled ([browsing](browser.md)) |
+| `ssh-open`, `ssh-close` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one); `ssh-close` carries the bytes and the duration |
+| `ssh-exec`, `ssh-shell` | a command (`command`) or a shell the agent started on the server |
+| `ssh-deny`, `ssh-error` | refused (forwarding, a subsystem, an identity or server that is not the agent's, too many connections) or failed (the server did not answer, refused the key, or presented another host key than the pinned one) |
 | `error`, `aborted` | the connection failed (the `reason` says where) or the client left before the handshake |
 
 Changing a profile and running `egzo project up` reloads the proxy with the new policy; running instances keep their
