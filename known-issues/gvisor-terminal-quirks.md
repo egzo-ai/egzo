@@ -1,22 +1,15 @@
-# Terminals under gVisor: OpenCode's TUI, Ctrl-D, and `tty`
+# Terminals under gVisor: Ctrl-D, `tty`, and OpenCode on older releases
 
-Status: **open, gVisor or OpenCode, not egzo** (found 2026-10-17, runsc release-20260921 and 20261012, OpenCode 1.18.35).
+Status: **Ctrl-D open** (gVisor, not egzo; found 2026-10-17, runsc release-20261012). The rest is explained below.
 
-egzo runs a harness's TUI on a pty it creates inside the container (the session holder, `egzo agent run`). Under gVisor
-(`docker-gvisor`, with `--network=host`, see [gvisor-docker-embedded-dns.md](gvisor-docker-embedded-dns.md)) Claude Code starts and
-works, and OpenCode does not: the process runs, writes a burst of terminal palette queries (`OSC 4;n;?`, `OSC 10..19;?`), and draws nothing
-more. The spec `test_the_real_tui_reports_idle…[opencode]` times out waiting for "Ask anything".
+egzo runs a harness's TUI on a pty it creates inside the container (the session holder, `egzo agent run`).
 
-Narrowed down without egzo, in a plain `runsc` container with the OpenCode image:
+## OpenCode's TUI did not start on runsc release-20260921
 
-| how OpenCode is started | result |
-|---|---|
-| `docker exec -it … opencode` (the pty is made by the engine) | draws the prompt in about a second |
-| `docker exec -it … script -qfc opencode /dev/null` (a pty made inside the sandbox) | 205 bytes, no prompt, even when every palette query is answered |
-| the same two under runc | both draw the prompt |
-
-So it is the pty made inside the sandbox, which is what egzo and any terminal multiplexer do. No upstream report turned up in a web search (2026-10-17, the trackers themselves were not searched); worth a report to google/gvisor with the `script` reproduction. The two specs are strict xfail on the
-gVisor platform until it is fixed.
+On release-20260921 OpenCode wrote a burst of terminal palette queries and drew nothing more, on any pty made inside the sandbox (even
+`script -qfc opencode /dev/null`); on a pty made by the engine (`docker exec -it`) it drew. On **release-20261012** it draws on both, and
+the specs pass. So a gVisor older than that cannot run OpenCode under egzo; Claude Code worked on both. Nothing is marked in the specs: the
+CI installs the latest release.
 
 ## Ctrl-D at the start of a line does not end a program's input
 
