@@ -108,7 +108,7 @@ def wait_until(check, what, timeout, context=None):
 
 
 def opencode_needs_a_pty_gvisor_cannot_give(request, engine, harness):
-    """OpenCode's TUI draws nothing on a pty made inside a gVisor sandbox (known-issues/opencode-tui-on-gvisor.md): this platform cannot do it."""
+    """OpenCode's TUI draws nothing on a pty made inside a gVisor sandbox (known-issues/gvisor-terminal-quirks.md): this platform cannot do it."""
     if engine.gvisor and harness == "opencode":
         request.applymarker(pytest.mark.xfail(strict=True, reason="OpenCode's TUI does not start on a pty inside gVisor"))
 

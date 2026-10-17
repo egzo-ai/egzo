@@ -71,8 +71,8 @@ def test_exec_with_a_terminal_is_interactive_follows_resizes_and_passes_control_
     shell = sandbox.pty("exec coder-1 -- sh")
     shell.sendline("echo $((6*7))")
     shell.expect("42")
-    shell.sendline("tty")
-    shell.expect("/dev/pts/")
+    shell.sendline("[ -t 0 ] && [ -t 1 ] && echo $((40+2))terminal")  # not `tty`: gVisor's terminal is a host fd, not a /dev/pts entry
+    shell.expect("42terminal")
     shell.sendline("stty size")
     shell.expect("24 80")
     shell.setwinsize(40, 132)

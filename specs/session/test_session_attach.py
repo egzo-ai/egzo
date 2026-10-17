@@ -131,6 +131,17 @@ def test_the_window_size_reaches_the_program_and_a_reattach_repaints_at_the_new_
     detach(second)
 
 
+def test_end_of_input_typed_at_the_start_of_a_line_reaches_the_program(sandbox, engine, request):
+    if engine.gvisor:  # known-issues/gvisor-terminal-quirks.md
+        request.applymarker(pytest.mark.xfail(strict=True, reason="gVisor does not give a program end of input from Ctrl-D on a pty a Go program made"))
+    p = sandbox
+    eof = p.pty("agent attach", p.spawn("lines"))
+    eof.expect(b"READY")
+    eof.send(b"\x04")  # end of input at the start of a line
+    eof.expect(b"eof-seen")
+    detach(eof)
+
+
 def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_and_the_modes_it_set_are_reset_on_detach(sandbox):
     p = sandbox
     environment = p.pty("agent attach", p.spawn("env"))
@@ -144,13 +155,6 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
     sigint.send(b"\x03")
     sigint.expect(b"got-int")  # twice: the attach client is still there
     detach(sigint)
-
-    lines = p.spawn("lines")
-    eof = p.pty("agent attach", lines)
-    eof.expect(b"READY")
-    eof.send(b"\x04")  # end of input at the start of a line
-    eof.expect(b"eof-seen")
-    detach(eof)
 
     emit = p.pty("agent attach", p.spawn("emit"))
     emit.expect(rb"wide:\xe4\xbd\xa0\xe5\xa5\xbd\xf0\x9f\x98\x80")

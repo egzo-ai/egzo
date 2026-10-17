@@ -217,7 +217,7 @@ def test_spawns_started_together_take_turns(sandbox, engine):
     race = [popen(p, "agent", "spawn", "coder", "race") for _ in range(2)]
     batch = [popen(p, "agent", "spawn", "coder", f"batch-{n}") for n in range(3)]
     outputs = [process.communicate(timeout=300) for process in race + batch]
-    assert sorted(process.returncode for process in race) == [0, 17], ("one name at once makes exactly one instance", [o[1].splitlines()[-2:] for o in outputs[:2]])
+    assert sorted(process.returncode for process in race) == [0, 17], ("one name at once makes exactly one instance", [o[1] for o in outputs[:2]])
     assert [process.returncode for process in batch] == [0, 0, 0], [o[1].splitlines()[-2:] for o in outputs]
     assert {i.labels[f"{LABEL_PREFIX}instance"] for i in engine.instances(p.name)} == {"race", "batch-0", "batch-1", "batch-2"}
     assert engine.instance(p.name, "race").raw["State"]["Running"] is True
