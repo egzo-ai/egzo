@@ -10,23 +10,20 @@ egzo is asked to do:
 | scenario | the host is |
 |---|---|
 | `docker` | a typical rootful Docker host, no gVisor |
-| `docker-gvisor` | the same, with `runsc` registered with Docker |
+| `docker-gvisor` | the same, with `runsc` as the engine's default runtime |
 | `podman` | a rootful Podman host, no gVisor |
 | `podman-rootless` | a rootless Podman host, no gVisor |
 
-`podman-gvisor` does not exist: Podman's API cannot select a runtime (`podman-gvisor-unsupported.md`).
-
-A `-gvisor` scenario does not put any agent under gVisor. It only describes a host that could run one.
-Specs that use the gVisor feature (`runtime: runsc` on an agent) are expected to fail on a platform
-without it, and to pass on one with it.
+egzo never chooses a container runtime, so a `-gvisor` scenario is a host whose engine has `runsc` as its default
+runtime: everything it starts runs under gVisor. There is no `podman-gvisor` scenario yet (it would be Podman with
+`runsc` as the default in `containers.conf`).
 
 ## What is missing
 
 - No spec has run on any host except this developer machine (Docker, gVisor available, rootless and
   rootful Podman installed). `.github/workflows/ci.yml` runs the Go unit tests, the linters and the hub's tests, never the specs. The Podman and gVisor scenarios were never run in full.
-- A spec that needs gVisor can only be checked properly on a pair of reference platforms, one with
-  gVisor and one without: "a project that asks for `runtime: runsc` starts and really runs under gVisor
-  on the first, and cannot start on the second" has to be seen failing and passing on real hosts.
+- gVisor can only be checked properly on a pair of reference platforms, one with gVisor as the default runtime and one
+  without: "an agent runs under gVisor on the first and not on the second" has to be seen on real hosts.
 - The reference platforms are not defined beyond the engine: operating system, distribution, kernel,
   cgroup version and firewall backend all change how rootful Podman and rootless networking behave
   (see `rootful-podman-intermittent-egress.md`).
@@ -35,8 +32,7 @@ without it, and to pass on one with it.
 
 A CI matrix, one machine per reference platform, each running `pytest --engine <scenario>`:
 engine scenarios x the operating systems and distributions we support (to be chosen). Each cell
-provides what its scenario names, and nothing else. The gVisor-dependent specs are marked to fail
-(strict xfail, through the `gvisor_agents` fixture) on the scenarios without gVisor, so a cell that unexpectedly passes or fails is a finding.
+provides what its scenario names, and nothing else. A spec that needs a feature a scenario lacks is a strict xfail there, so a cell that unexpectedly passes or fails is a finding.
 
 ## Until then
 

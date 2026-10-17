@@ -17,7 +17,7 @@ and [messaging](messaging.md).
 - **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits,
   sidecars as a non-root uid with a read-only root. Agents run as your uid and gid, not as root. The engine socket is
   never mounted into an agent.
-- **Optional gVisor** (`runtime: runsc`) as a stronger kernel boundary, on engines that can apply it.
+- **Optional gVisor** as a stronger kernel boundary: egzo runs containers under the engine's default runtime, so make `runsc` the engine's default.
 - **Per-agent identity.** Each instance has its own token, used for the proxy and the control sidecar. A token only
   lets an agent act as itself, and the proxy applies that agent's profile, not another's.
 - **Nothing from your host is mounted.** Workspaces are engine volumes, so no directory of yours is exposed to an agent;
@@ -40,7 +40,6 @@ Be clear about these before running agents on something you care about.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
   that is root-equivalent. Prefer a rootless engine.
 - **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.
-- **Podman cannot apply a runtime**, so there is no gVisor there, and egzo refuses to pretend.
 
 ## How secret injection works
 

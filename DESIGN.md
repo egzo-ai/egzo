@@ -187,7 +187,6 @@ agents:                        # templates: nothing runs until `egzo agent spawn
     model: claude-sonnet-5-5
     prompt: ./prompts/coder.md
     resources: { cpus: 2, memory: 4g, pids: 4096 }   # pids default 4096
-    runtime: runsc             # OCI runtime, as in Compose (e.g. gVisor); engine default if omitted
     permissions: bypass        # bypass (default) | default
     env: { FOO: bar }          # non-secret only; validated, secret-looking values rejected
 
@@ -225,7 +224,7 @@ Commands are grouped by what they act on. There are no aliases for names that mo
     egzo workspace get NAME[/INSTANCE] [SRC] DEST  # copy a path of a workspace (or an instance's worktree) out
     egzo workspace fetch [NAME...]                 # clone or refresh git bases through the proxy
     egzo workspace rm NAME... | --all              # delete workspace volumes (`project down` keeps them)
-    egzo system check                              # engine, rootless, gVisor, network, git: no project file needed
+    egzo system check                              # engine, rootless, default runtime (gVisor?), network, git: no project file needed
     egzo ps                                        # engine state + status from control sidecar
     egzo start|stop|restart <svc>                  # operate on existing containers (no reconcile)
     egzo logs [-f] <svc>
@@ -237,8 +236,9 @@ Commands are grouped by what they act on. There are no aliases for names that mo
 - Language: Go.
 - Engine access: Docker Engine API (Go docker client). The engine is whatever `DOCKER_HOST` points at
   (default `/var/run/docker.sock`), like the docker CLI: no probing, no engine setting in egzo.yaml.
-  Podman works through its Docker-compat socket (`podman.socket`); its API cannot select a container's
-  `runtime:`, so egzo refuses to start an agent that asks for one there (known-issues/podman-gvisor-unsupported.md). Never mount the socket into agent
+  Podman works through its Docker-compat socket (`podman.socket`). egzo never chooses an OCI runtime
+  (no `runtime:` key): containers run under the engine's own default, so gVisor is a host setting (`default-runtime` in
+  Docker's `daemon.json`), and the `docker-gvisor` platform of the specs is that host. Never mount the socket into agent
   containers. Engine matrix in specs.
 - No daemon. Everything runs in containers except the `egzo` CLI.
 - Harness control is TUI-first (Scion-style). The native TUI always runs in the agent container
@@ -729,7 +729,7 @@ Claude Code `SessionStart` arrives before its first-run dialogs are answered.
 
 The suite is the status report: `specs/README.md` explains the done / broken / unsupported model.
 A run tests egzo on one reference platform (docker, docker-gvisor, podman, podman-rootless: what the host is like, not
-what egzo is asked), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
+what egzo is asked; docker-gvisor is Docker with `runsc` as its default runtime), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
 per platform (known-issues/reference-platform-ci-matrix.md). It builds its own sidecar and agent images, and needs the internet for the specs that
 talk to real hosts (they fail when offline) and a registry for the image-name spec (`EGZO_SPEC_REGISTRY`).
 
@@ -796,7 +796,7 @@ Decisions taken while building (reversible; each is covered by specs):
   spawns can be started at once and take turns; the network, the first thing a spawn creates, decides a race
   between two spawns of one name (the loser exits 17). A project made before instances existed has agent
   containers without an instance label: only `down` sees them.
-- **Runtime errors belong to spawn.** A Podman project that asks for an OCI runtime, an unpullable harness image,
+- **Runtime errors belong to spawn.** An unpullable harness image,
   a program that exits at once and a git mode conflict fail the spawn, and `up` succeeds.
 - **Secrets reach the proxy only through `engine exec` stdin** and live in its memory. The policy
   hash covers the secret values, so rotating a secret re-pushes the policy without recreating any
@@ -824,7 +824,7 @@ Decisions taken while building (reversible; each is covered by specs):
   stdout (`egzo proxy log [--agent]`).
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
-  init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. An agent's `runtime:` (as in Compose, e.g. `runsc` for gVisor) is passed to the engine as is; there is no project-wide default (use the engine's `default-runtime`, or a YAML anchor).
+  init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. There is no runtime setting: containers run under the engine's default runtime, which is the host administrator's choice (gVisor included).
 - **Agents run as the invoking user** (`uid:gid` of whoever runs egzo, on Docker; Podman maps users itself), so
   what they write on the host belongs to that user. Volumes are created by the engine owned by root, so a prep
   container hands each volume an agent writes to (workspaces, its home) to that user after the agent's container

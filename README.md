@@ -14,8 +14,9 @@ any other supported agent).
 
 ## Supported platforms
 
-- Linux with Docker or Podman as the container engine.
-- Docker with gVisor (runsc) and rootless podman are also supported for additional security.
+- Linux with Docker or rootless Podman as the container engine.
+- Docker with gVisor (runsc) is also supported for additional security.
+- Rootful Podman is not supported for now: [`known-issues/rootful-podman-intermittent-egress.md`](known-issues/rootful-podman-intermittent-egress.md).
 - macOS and Windows (through WSL2) are planned but not supported yet: [`roadmap/windows-and-macos.md`](roadmap/windows-and-macos.md).
 
 egzo uses the engine `DOCKER_HOST` points at, like the docker CLI (default `/var/run/docker.sock`). Harness images come
@@ -25,9 +26,8 @@ another registry). For rootless Podman:
     systemctl --user enable --now podman.socket
     export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 
-For gVisor, register `runsc` with Docker and set `runtime: runsc` on an agent, as in Compose.
-Podman's Docker-compatible API cannot select a runtime, so egzo refuses to start an agent that asks for one on Podman
-rather than start it without.
+For gVisor, register `runsc` with Docker and make it the engine's default runtime (`"default-runtime": "runsc"` in
+`daemon.json`). egzo does not choose a runtime: everything runs under the engine's default.
 
 ## Documentation
 
@@ -40,7 +40,7 @@ See [`docs/`](docs/README.md).
 - **Templates and instances.** Declare agents once in `egzo.yaml`, then `egzo agent spawn` as many instances as you need,
   each with its own container, network, home and worktree. `agent rm` and `project down` clean up.
 - **Isolation by default.** Restricted internet and file access, all capabilities are dropped, memory and process limits.
-- **gVisor and rootless podman.** Fully tested with hardened container runtimes for additional security.
+- **gVisor and rootless podman.** Tested in the specs matrix, for additional security: gVisor as the engine's default runtime, or a rootless engine.
 - **Egress policy.** Allow internet access using a whitelist, or start simple by allowing all domains. Everything remains audited.
 - **Credential injection.** API keys and tokens can be injected live by the built-in proxy, so your agents never need to see any secrets,
   greatly reducing consequences of prompt injections and risks of secrets leaking.

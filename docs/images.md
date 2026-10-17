@@ -82,6 +82,6 @@ agents:
     image: docker.io/library/alpine:3
 ```
 
-The sandbox still applies in full (own network, proxy only, no secrets, your uid, resources, optional gVisor), but
+The sandbox still applies in full (own network, proxy only, no secrets, your uid, resources, gVisor if the engine's default runtime is), but
 there is no harness integration: no hooks, no MCP tools and no home volume, and activity is judged from output
 quietness instead of hooks. Use it to run a script or a tool egzo has no integration for yet, such as `pi`.

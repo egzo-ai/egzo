@@ -11,7 +11,8 @@ Start with `egzo system check` ([installing](install.md)), then `egzo ps`, then 
 | the name is taken (exit 17) | `egzo agent rm NAME`, or pick another. A leftover network or home volume counts as an instance; `agent rm` clears it. |
 | a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo project down` the other. |
 | image cannot be pulled | the error names the image and the `image:` override. `make images`, or set `EGZO_HARNESS_PREFIX` ([installing](install.md), [images](images.md)). |
-| `runtime` refused on Podman | by design: Podman cannot apply or verify a runtime. Use Docker for gVisor. |
+| `unknown key "runtime"` | egzo does not choose a container runtime. Remove the key; to use gVisor make `runsc` the engine's default runtime ([installing](install.md)). |
+| `all predefined address pools have been fully subnetted` | every project and every agent instance is a network of its own, and Docker's default pools hold about 30 networks for the whole engine, other projects included. Remove networks you do not use (`docker network prune`), or give Docker more room: `"default-address-pools": [{"base": "10.10.0.0/16", "size": 24}]` in `/etc/docker/daemon.json`, then restart Docker. |
 | `agent spawn` says a worktree volume or a branch exists | an earlier instance of that name left it: `egzo agent spawn --reuse` continues with it, or remove the volume with `egzo workspace rm NAME --worktree INSTANCE`; the branch `egzo/NAME` stays in the base clone until you delete it there. |
 | "another egzo command is changing this project" | one command at a time changes a project (a lease in the engine). Wait; if that command was killed, `egzo project unlock` removes it, or it expires after 30 minutes. |
 | my files are not on my machine | workspaces are engine volumes: `egzo workspace get NAME PATH DEST` copies them out, `egzo workspace put NAME SRC` copies files in ([workspaces](workspaces.md)). |
@@ -84,8 +85,7 @@ engine's default logging: if `egzo logs` prints nothing for a container that sho
 
 - **Rootful Podman, intermittent loss of outbound connectivity.** The proxy's first outbound connection sometimes
   times out; a project that comes up broken stays broken. It reproduces without egzo, appears host-level and is open
-  (`known-issues/rootful-podman-intermittent-egress.md`). Recreate the project, or use Docker or rootless Podman.
-- **Podman cannot run agents under gVisor** (`known-issues/podman-gvisor-unsupported.md`).
+  (`known-issues/rootful-podman-intermittent-egress.md`). Rootful Podman is not supported for now: use Docker or rootless Podman.
 - **`pi` has no integration**, because it has no MCP support (`known-issues/mcp-support-is-required.md`).
 - **Platforms other than the developer's machine have not been run** by the specs
   (`known-issues/reference-platform-ci-matrix.md`).
