@@ -75,7 +75,6 @@ type ContainerSpec struct {
 	Network      string
 	WorkingDir   string
 	Harness      string
-	Runtime      string
 	NanoCPUs     int64
 	Memory       int64
 	Healthcheck  []string
@@ -129,18 +128,20 @@ type Inputs struct {
 	Placeholders map[string]map[string]string
 }
 
+// The sidecars' tmpfs mounts carry no uid or gid but an explicit mode 1777, which the sidecar's user can write, because Podman refuses the uid option ("unknown mount option uid=...") on rootless hosts. The sidecar user is the only one in the container.
+//
 // The sidecars run as an unprivileged user and are limited in memory and processes: they parse what
 // agents send them, and a compromise or a runaway must stay small. Agents get a generous process limit,
 // because a fork bomb in one must not take the host.
 const (
 	sidecarUser       = "65532:65532"
-	sidecarTmpfs      = "rw,noexec,nosuid,size=16m,uid=65532,gid=65532"
+	sidecarTmpfs      = "rw,noexec,nosuid,size=16m,mode=1777"
 	controlMemory     = 512 << 20
 	controlPids       = 512
 	proxyMemory       = 1 << 30
 	proxyPids         = 2048
 	defaultAgentPids  = 4096
-	sidecarTmpfsState = "rw,nosuid,size=1m,uid=65532,gid=65532"
+	sidecarTmpfsState = "rw,nosuid,size=1m,mode=1777"
 )
 
 // ReadPrompts reads the prompt file of every agent that has one. The text travels in the published template and
@@ -404,7 +405,6 @@ func agentContainer(
 	}
 	spec.WorkingDir = instanceWorkdir(project, agent, name)
 
-	spec.Runtime = agent.Runtime
 	if agent.Resources.CPUs > 0 {
 		spec.NanoCPUs = int64(agent.Resources.CPUs * 1e9)
 	}

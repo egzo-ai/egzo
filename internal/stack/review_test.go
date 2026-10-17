@@ -138,7 +138,8 @@ func TestSidecarsRunUnprivilegedWithLimits(t *testing.T) {
 		t.Errorf("proxy volumes = %v", proxy.OwnedVolumes)
 	}
 	for target, options := range proxy.Tmpfs {
-		if !strings.Contains(options, "uid="+strings.Split(proxy.User, ":")[0]) {
+		// writable by the sidecar's user: owned by it, or open to everyone in the container (Podman refuses the uid option)
+		if !strings.Contains(options, "uid="+strings.Split(proxy.User, ":")[0]) && !strings.Contains(options, "mode=1777") {
 			t.Errorf("tmpfs %s (%s) is not writable by %s", target, options, proxy.User)
 		}
 	}
@@ -173,7 +174,8 @@ func TestWhoAgentsRunAs(t *testing.T) {
 	}{
 		{"an ordinary user", engine.Client{}, 1000, 1000, "1000:1000"},
 		{"root is never an agent's user", engine.Client{}, 0, 0, "1000:1000"},
-		{"podman maps users itself", engine.Client{Podman: true}, 1000, 1000, ""},
+		{"rootful podman keeps the host ids like docker", engine.Client{Podman: true}, 1000, 1000, "1000:1000"},
+		{"rootless podman maps users itself", engine.Client{Podman: true, Rootless: true}, 1000, 1000, ""},
 		{"rootless docker maps users itself", engine.Client{Rootless: true}, 1000, 1000, ""},
 		{"no uid on this platform", engine.Client{}, -1, -1, ""},
 	}

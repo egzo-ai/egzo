@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -112,7 +111,7 @@ func takeLease(ctx context.Context, c *engine.Client, project, image string) (st
 		if err == nil {
 			return created.ID, nil
 		}
-		if !cerrdefs.IsConflict(err) {
+		if !engine.IsNameConflict(err) {
 			return "", fmt.Errorf("take the project lock: %w", err)
 		}
 		leaseID, holder, until, found, inspectErr := readLease(ctx, c, project)
@@ -127,7 +126,7 @@ func takeLease(ctx context.Context, c *engine.Client, project, image string) (st
 		}
 		// expired: the command that held it is gone. Removed by the id that was read: another command may have
 		// replaced it since, and that lease is live.
-		if err := c.API.ContainerRemove(ctx, leaseID, container.RemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
+		if err := c.API.ContainerRemove(ctx, leaseID, container.RemoveOptions{Force: true}); err != nil && !engine.IsNoSuchContainer(err) {
 			return "", fmt.Errorf("take over the expired project lock: %w", err)
 		}
 	}
@@ -136,7 +135,7 @@ func takeLease(ctx context.Context, c *engine.Client, project, image string) (st
 
 func readLease(ctx context.Context, c *engine.Client, project string) (id, holder string, until time.Time, found bool, err error) {
 	inspected, err := c.API.ContainerInspect(ctx, LockName(project))
-	if cerrdefs.IsNotFound(err) {
+	if engine.IsNoSuchContainer(err) {
 		return "", "", time.Time{}, false, nil
 	}
 	if err != nil {
@@ -152,7 +151,7 @@ func Unlock(ctx context.Context, c *engine.Client, project string) (holder strin
 	if err != nil || !found {
 		return "", false, err
 	}
-	if err := c.API.ContainerRemove(ctx, LockName(project), container.RemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
+	if err := c.API.ContainerRemove(ctx, LockName(project), container.RemoveOptions{Force: true}); err != nil && !engine.IsNoSuchContainer(err) {
 		return holder, true, fmt.Errorf("remove the project lock: %w", err)
 	}
 	return holder, true, nil
