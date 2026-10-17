@@ -698,8 +698,8 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-func TestSSHHostKeyIsKeptAndPublished(t *testing.T) {
-	dir, pub := t.TempDir(), t.TempDir()
+func TestSSHHostKeyIsKept(t *testing.T) {
+	dir := t.TempDir()
 	first, err := LoadOrCreateSSHHostKey(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -708,12 +708,7 @@ func TestSSHHostKeyIsKeptAndPublished(t *testing.T) {
 	if err != nil || !bytes.Equal(first.PublicKey().Marshal(), again.PublicKey().Marshal()) {
 		t.Fatalf("the host key changed: %v", err)
 	}
-	if err := PublishSSHHostKey(first, pub); err != nil {
-		t.Fatal(err)
-	}
-	line := readFile(t, pub+"/ssh_host_key.pub")
-	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
-	if err != nil || !bytes.Equal(key.Marshal(), first.PublicKey().Marshal()) {
-		t.Fatalf("published %q: %v", line, err)
+	if info, _ := os.Stat(dir + "/" + sshHostKeyFile); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode().Perm())
 	}
 }
