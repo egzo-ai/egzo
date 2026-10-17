@@ -346,6 +346,7 @@ class Engine:
             "RUN apt-get update && apt-get install -y --no-install-recommends openssh-client libnss-wrapper ca-certificates curl \\\n"
             " && rm -rf /var/lib/apt/lists/*\n"
             "COPY egzo-ssh /usr/local/bin/ssh\n"
+            "RUN ln -s ssh /usr/local/bin/scp && ln -s ssh /usr/local/bin/sftp\n"
             "COPY fake-tui /usr/local/bin/fake-tui\n"
             "COPY egzo /usr/local/bin/egzo\n"
             'ENTRYPOINT ["/usr/local/bin/egzo", "agent", "run", "--"]\n'

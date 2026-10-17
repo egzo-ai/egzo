@@ -167,13 +167,24 @@ def test_a_server_that_refuses_the_key_or_does_not_answer_is_reported_the_way_ss
     assert any(e["action"] == "ssh-error" and "could not connect" in e["reason"] for e in a.audit())
 
 
-def test_forwarding_and_subsystems_are_refused(ssh_of):
+def test_forwarding_and_every_subsystem_but_sftp_are_refused(ssh_of):
     a = ssh_of()
     assert a.ssh("-o", "ExitOnForwardFailure=yes", "-R", "19000:127.0.0.1:80", "prod", "true").returncode != 0
     assert a.ssh("-W", "10.0.0.1:80", "prod").returncode != 0
-    assert a.ssh("-s", "prod", "sftp").returncode != 0
+    assert a.ssh("-s", "prod", "netconf").returncode != 0  # sftp is the one subsystem that is relayed
     reasons = " ".join(e.get("reason", "") for e in a.audit("ssh-deny"))
     assert "tcpip-forward" in reasons and "direct-tcpip" in reasons
+
+
+def test_files_move_both_ways_with_scp_and_sftp(ssh_of):
+    a = ssh_of()
+    assert a.inside("echo from-the-agent > /tmp/up.txt").returncode == 0
+    assert a.inside("scp -q /tmp/up.txt prod:/tmp/egzo-up.txt").returncode == 0
+    assert a.ssh("prod", "cat /tmp/egzo-up.txt").stdout.strip() == "from-the-agent"
+    assert a.inside("scp -q prod:/tmp/egzo-up.txt /tmp/down.txt && cat /tmp/down.txt").stdout.strip() == "from-the-agent"
+    listed = a.inside("echo 'ls /tmp' | sftp -q -b - prod")
+    assert listed.returncode == 0 and "egzo-up.txt" in listed.stdout
+    assert any(e["action"] == "ssh-sftp" for e in a.audit())
 
 
 def test_an_agent_without_the_proxys_host_key_cannot_be_led_to_another_server(ssh_of):

@@ -52,7 +52,8 @@ ENV HOME=/home/agent
 RUN mkdir -p /home/agent /workspace && chmod 0777 /home/agent /workspace
 
 COPY --from=egzo /egzo /usr/local/bin/egzo
-# ssh for the servers of the egress profile (the proxy holds the keys); the wrapper gives the agent's uid a passwd entry.
+# ssh, scp and sftp for the servers of the egress profile (the proxy holds the keys); the wrapper gives the agent's uid a passwd entry.
 COPY egzo-ssh /usr/local/bin/ssh
+RUN ln -s ssh /usr/local/bin/scp && ln -s ssh /usr/local/bin/sftp
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/egzo", "agent", "run", "--"]

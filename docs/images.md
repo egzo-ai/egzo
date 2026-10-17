@@ -95,4 +95,4 @@ how quiet the output is. Use `custom` to run a script, or a tool egzo has no int
 The egzo harness images carry what `ssh` needs ([ssh to servers](sandboxing.md#ssh-to-servers)). In an image of your own: install `openssh-client`;
 if the entrypoint is not `egzo agent run`, run `egzo agent ssh-setup` when the container starts (it writes the instance's identity and the servers of
 its profile into `~/.ssh`); and if the agent's uid may have no passwd entry (it is the uid of whoever started the project), put `harness/base/egzo-ssh`
-and `libnss-wrapper` in the image, first in `PATH` as `ssh`, because ssh refuses to run for a uid it cannot look up.
+and `libnss-wrapper` in the image, first in `PATH` as `ssh`, `scp` and `sftp`, because they refuse to run for a uid they cannot look up.
