@@ -36,18 +36,11 @@ In short:
 
 ## Requirements
 
-Linux with Docker or Podman (see [Installing](install.md)), reached through `DOCKER_HOST` like the docker CLI does (default
-`/var/run/docker.sock`). For rootless Podman:
+Linux with Docker or Podman, reached through `DOCKER_HOST` like the docker CLI does (default `/var/run/docker.sock`). Docker is
+the engine to start with. Rootless Podman and gVisor are covered in [Installing](install.md), as advanced setups.
 
-```console
-$ systemctl --user enable --now podman.socket
-$ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
-```
-
-gVisor: make `runsc` the default runtime of the engine; egzo does not choose a runtime. Docker is the engine the specs run against today.
-
-Run `egzo system check` to check the engine and its isolation. [Installing](install.md) has the details, and
-[the security model](security.md) says what the isolation does and does not give you.
+Run `egzo system check` to check the engine and its isolation. [the security model](security.md) says what the isolation does and
+does not give you.
 
 ## A first run
 
@@ -67,5 +60,5 @@ something misbehaves, see [troubleshooting](troubleshooting.md).
 
 Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
 credential injection, git workspaces, Claude Code and OpenCode, message delivery, and the operator commands. Not yet:
-the `pi` harness, and the Podman and gVisor spec runs. A separate web UI, [the hub](../hub/docs/README.md), is built and is not part
+the `pi` harness; the Podman and gVisor spec runs are reported in CI but are not required checks. A separate web UI, [the hub](../hub/docs/README.md), is built and is not part
 of the CLI. Binaries and images are published for Linux (amd64 and arm64), still as early 0.x releases ([`roadmap/initial-release.md`](../roadmap/initial-release.md)).

@@ -69,11 +69,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha,scope=hub
           cache-to: type=gha,scope=hub,mode=max
-      # The harness images copy the binary out of the egzo image, which is not pushed here, so they build on the runner's
-      # own engine (amd64 only) against a locally built egzo image.
+      # The harness base copies the binary out of the egzo image and the harness images build on the base; neither is pushed
+      # here, so they build on the runner's own engine (amd64 only), one on the other.
       - name: harness images
         run: |
           docker build -t egzo-ci:local .
+          docker build --build-arg EGZO_IMAGE=egzo-ci:local -t egzo-harness-base-ci:local harness/base
           for h in claude-code opencode; do
-            docker build --build-arg EGZO_IMAGE=egzo-ci:local harness/$h
+            docker build --build-arg BASE_IMAGE=egzo-harness-base-ci:local harness/$h
           done

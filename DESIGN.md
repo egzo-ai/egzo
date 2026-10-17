@@ -757,8 +757,8 @@ compatible socket but is not exercised by the current suite): `project init|up|d
 (`up --dry-run`, `check --resolved`), `agent spawn|ls|rm|start|stop|attach`, `message send|ls|reply`,
 `workspace ls|put|get|fetch|rm`, `ps` (`--json`), `logs`, `exec`, `start|stop|restart`, `events`, `proxy log|rules`,
 `system check`, `version`, plus the in-container roles `egzo control`, `egzo proxy serve`, `egzo agent run|browser`,
-`egzo state`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on
-the egzo image with `make images`); `custom` runs any image.
+`egzo state`, `egzo prep`. Claude Code and OpenCode run as harness images (`harness/<name>/Dockerfile`, built on the
+shared `egzo-harness-base` image (`harness/base`: Node, git, the browser, the egzo entrypoint) with `make images`); `custom` runs any image.
 
 Decisions taken while building (reversible; each is covered by specs):
 - **`up` makes the infrastructure and spawn makes the agents.** Per-agent tokens are an HMAC of the instance name
