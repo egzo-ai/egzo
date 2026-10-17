@@ -34,4 +34,9 @@ upstream certificate check). Hooks that exist only for the specs are exactly wha
   that only needs *a* server, so the suite mostly runs offline and the few that do not are named.
 - **Pre-built images** so a run does not build from `docker.io` and npm.
 
+**First step taken (2026-10):** `ssh_server` (`specs/sshd.py`) is a real sshd the specs start on the engine under test, reachable from containers
+on all four platforms (published on the host's address, or `host.containers.internal` on rootless Podman). The ssh specs need nothing
+from the internet. The ssh proxy accepts private addresses for a server an operator named, which is what let this be tested without a hook. The HTTPS
+fixtures would join it in the same place; they still need the two settings above.
+
 Until then, `specs/README.md` lists what needs the outside world.
