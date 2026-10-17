@@ -449,8 +449,10 @@ func (c *sshConn) session(newChannel ssh.NewChannel) {
 	}()
 	fromServer.Wait()
 	// The server may close the channel right after answering a request: the agent has that answer before the channel closes.
-	forwarding.Lock()
-	forwarding.Unlock() //nolint:staticcheck // waits for the request in flight
+	func() {
+		forwarding.Lock()
+		defer forwarding.Unlock()
+	}()
 	local.Close()
 	remote.Close()
 	fromAgent.Wait()
