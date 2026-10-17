@@ -15,8 +15,12 @@ pytestmark = pytest.mark.skipif(not URL, reason="needs the stack of e2e/stack.sh
 
 
 def test_a_person_signs_in_through_dex_and_works_with_a_real_project(page):
+    failed = []
+    page.on("requestfailed", lambda request: failed.append(f"{request.url}: {request.failure}"))
     page.goto(URL)
     page.get_by_role("link", name="Sign in").click()
+    page.wait_for_load_state()
+    assert not page.url.startswith("chrome-error:"), f"the browser could not load the page the hub sent it to; failed requests: {failed}"
     # Dex: the local account of dex.yaml
     if page.get_by_role("link", name="Log in with Email").count():  # Dex shows a chooser when it has several connectors
         page.get_by_role("link", name="Log in with Email").click()
