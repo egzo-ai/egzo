@@ -36,12 +36,9 @@ jobs:
       - id: cells
         env:
           FULL: ${{ github.event_name != 'pull_request' || inputs.full == true }}
-          # TEMPORARY, while this workflow is tried out: the whole matrix on pull requests too, so every platform runs without
-          # a merge. Delete this line (and the `|| [ "$PR_FULL" = true ]` below) to go back to docker only on pull requests.
-          PR_FULL: 'true'
         run: |
           docker='{"name":"docker","engine":"docker","runner":"ubuntu-26.04","experimental":false}'
-          if [ "$FULL" = true ] || [ "$PR_FULL" = true ]; then
+          if [ "$FULL" = true ]; then
             cells="[$docker,
               {\"name\":\"docker-gvisor\",\"engine\":\"docker-gvisor\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
               {\"name\":\"podman\",\"engine\":\"podman\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
