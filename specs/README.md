@@ -87,6 +87,15 @@ ClientHello through the proxy, with or without Encrypted Client Hello, and says 
 carries `python3` for it) and `mcp_client.mjs` (starts the MCP server a harness is configured with and calls its tools,
 for the browser specs).
 
+### Servers the specs bring along
+
+A spec must not depend on a site it does not control. `ssh_server` (`sshd.py`, image in `fixtures/sshd/`) is a real OpenSSH
+server in a container of the engine under test, up for the whole run, with one unprivileged user (`ops`), key authentication only,
+and keys made when it starts: `host`, `port`, `user`, `private_key`, `public_key`, `host_key`, `fingerprint` (`SHA256:...`), `sh(script)` to
+look inside, and `keygen()` for a key pair it does not know. It is published on the host's address (on a rootless Podman, under
+the name Podman gives the host), which a container of every platform can reach. It is the first piece of a server of the specs' own:
+the HTTPS sites the proxy specs fetch today are meant to move here, so that the suite needs no internet.
+
 ## Output contract assumed by the specs
 
 `egzo project check --resolved` prints the resolved configuration as YAML and exits non-zero with a message on stderr
@@ -118,6 +127,7 @@ it covers and how the project it runs on is shared.
 
 | File | Covers |
 |---|---|
+| `test_spec_fixtures.py` | the servers the specs bring along (the ssh server) do what the specs rely on |
 | `test_meta.py` | the status model itself; every command line a spec writes is one egzo has; every command and flag of egzo is run by a spec |
 | `test_schema.py` | validation of `egzo.yaml` (`egzo project check --resolved`), no users in files, no secrets in output, the `inject` section |
 | `test_egress_ssh.py` | ssh servers in a profile: fields, the pinned host key, the key reference, extend |

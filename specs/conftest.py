@@ -363,6 +363,9 @@ class Engine:
         flags = ["-d"] if detach else []
         return self.run("exec", *flags, container, *command)
 
+    def inspect(self, container):
+        return json.loads(self.run("inspect", container).stdout)[0]
+
     def volume_exists(self, name):
         return self.run("volume", "inspect", name).returncode == 0
 
@@ -571,6 +574,16 @@ def live_project(make_project, engine, egzo):
     yield created
     created.run("project", "down", "--force")
     engine.cleanup(created.name)
+
+
+@pytest.fixture(scope="session")
+def ssh_server(engine):
+    """A real OpenSSH server in a container (see sshd.py), up for the whole run. It accepts one key, for the user `ops`."""
+    import sshd
+
+    server = sshd.start(engine)
+    yield server
+    server.stop()
 
 
 class Registry:
