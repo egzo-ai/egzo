@@ -89,3 +89,10 @@ resource limits, and it runs under whatever runtime the engine defaults to (gVis
 
 What you do not get is the harness integration. There are no hooks, no MCP tools and no home volume, so egzo judges activity from
 how quiet the output is. Use `custom` to run a script, or a tool egzo has no integration for yet, such as `pi`.
+
+## ssh in an image of your own
+
+The egzo harness images carry what `ssh` needs ([ssh to servers](sandboxing.md#ssh-to-servers)). In an image of your own: install `openssh-client`;
+if the entrypoint is not `egzo agent run`, run `egzo agent ssh-setup` when the container starts (it writes the instance's identity and the servers of
+its profile into `~/.ssh`). Nothing else: egzo gives the agent's user (the uid of whoever started the project) a passwd entry whose home is `$HOME`,
+which ssh needs.
