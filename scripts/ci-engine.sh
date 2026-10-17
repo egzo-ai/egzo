@@ -42,10 +42,9 @@ docker-gvisor)
 	rm -rf "$tmp"
 	# registers the runtime `runsc` in /etc/docker/daemon.json and makes it the engine's default: egzo never chooses a runtime,
 	# so gVisor is what the host is, and every container the engine starts runs under it
-	# Docker's embedded DNS (127.0.0.11, how a container finds `control` and `proxy` by name) is a NAT rule in the container's network
-	# namespace, which gVisor's own network stack only reproduces when asked to: --reproduce-nat reads it through the legacy iptables
-	# interface, which a host on nftables (Ubuntu 26.04) does not have ("failed to call IPT_SO_GET_INFO"), --reproduce-nftables reads nftables
-	sudo runsc install -- --reproduce-nftables
+	# --network=host: gVisor's own network stack cannot reach Docker's embedded DNS (127.0.0.11), so no container name resolves in it;
+	# the sandbox then uses the container's kernel network stack, which weakens gVisor's network isolation (known-issues/gvisor-docker-embedded-dns.md)
+	sudo runsc install -- --network=host
 	sudo jq '. + {"default-runtime": "runsc"}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new
 	sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
 	sudo systemctl restart docker
