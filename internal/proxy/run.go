@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/signal"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 // Config says where the proxy keeps its files inside its container.
 type Config struct {
 	Listen       string
+	SSHListen    string // where agents sign in to be relayed to an ssh server of their profile
 	CADir        string // private volume: the CA key lives here and nowhere else
 	PubDir       string // shared volume: what agents may read
 	SystemBundle string
@@ -30,6 +32,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Listen:       ":3128",
+		SSHListen:    ":2222",
 		CADir:        "/ca-private",
 		PubDir:       "/ca-pub",
 		SystemBundle: "/etc/ssl/certs/ca-certificates.crt",
@@ -48,6 +51,14 @@ func Run(cfg Config, audit io.Writer) error {
 		return fmt.Errorf("publish CA: %w", err)
 	}
 	server := NewServer(ca, NewAudit(audit))
+	hostKey, err := LoadOrCreateSSHHostKey(cfg.CADir)
+	if err != nil {
+		return fmt.Errorf("ssh host key: %w", err)
+	}
+	if err := PublishSSHHostKey(hostKey, cfg.PubDir); err != nil {
+		return fmt.Errorf("publish ssh host key: %w", err)
+	}
+	server.SetSSHHostKey(hostKey)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -61,6 +72,16 @@ func Run(cfg Config, audit io.Writer) error {
 		defer cancel()
 		listener.Shutdown(shutdown)
 	}()
+
+	sshListener, err := net.Listen("tcp", cfg.SSHListen)
+	if err != nil {
+		return fmt.Errorf("ssh listener: %w", err)
+	}
+	go func() {
+		<-ctx.Done()
+		sshListener.Close()
+	}()
+	go server.ServeSSH(sshListener)
 
 	operatorDone := make(chan error, 1)
 	go func() { operatorDone <- operator.Serve(cfg.Socket, operatorHandler(server, ca, cfg)) }()

@@ -23,14 +23,30 @@ type Policy struct {
 
 // Profile is one egress profile: what an agent bound to it may reach, and what is injected on the way.
 type Profile struct {
-	Allow    []string  `json:"allow"`
-	Services []Service `json:"services"`
+	Allow    []string    `json:"allow"`
+	Services []Service   `json:"services"`
+	SSH      []SSHServer `json:"ssh,omitempty"`
+}
+
+// SSHServer is a server an agent of the profile may ssh to under Name. Key is the private key itself (it travels
+// with the policy, like a service's secret, and never reaches an agent); HostKey is the pinned key, a SHA256
+// fingerprint or a public key line.
+type SSHServer struct {
+	Name    string `json:"name"`
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	User    string `json:"user"`
+	Key     string `json:"key"`
+	HostKey string `json:"host_key"`
 }
 
 // Binding ties an agent's proxy credentials to the profile it runs under.
 type Binding struct {
 	Token   string `json:"token"`
 	Profile string `json:"profile"`
+	// SSHKey is the agent's ssh identity: an ed25519 public key line. It is an identity, not a secret; the agent's private
+	// half signs in to the proxy's ssh listener. Empty means the agent has no ssh access.
+	SSHKey string `json:"ssh_key,omitempty"`
 }
 
 // Service is a set of hosts and, when the service injects a credential, how.
