@@ -3,14 +3,28 @@
 ARG EGZO_IMAGE=ghcr.io/egzo-ai/egzo:latest
 # The pinned versions of the harness and of the Playwright MCP server (its Chromium comes with it); bump them deliberately.
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+ARG GIT_VERSION=2.53.0
 ARG OPENCODE_VERSION=1.18.35
 FROM ${EGZO_IMAGE} AS egzo
+
+# git >= 2.48: egzo makes worktrees with relative links (`git worktree add --relative-paths`) and sets the
+# relativeWorktrees repository extension, which Debian's git (2.39 on bookworm) refuses with "unknown repository
+# extension". Built from source so the version does not depend on the distribution.
+FROM docker.io/library/node:22-bookworm-slim AS git
+ARG GIT_VERSION
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gcc make libc6-dev libssl-dev libcurl4-openssl-dev zlib1g-dev libexpat1-dev \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.xz | tar -xJ -C /tmp \
+ && make -C /tmp/git-${GIT_VERSION} -j"$(nproc)" prefix=/usr/local NO_GETTEXT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 NO_INSTALL_HARDLINKS=1 install
 
 FROM docker.io/library/node:22-bookworm-slim
 ARG OPENCODE_VERSION
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git procps ripgrep \
+ && apt-get install -y --no-install-recommends ca-certificates curl procps ripgrep libcurl4 zlib1g libexpat1 \
  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=git /usr/local/ /usr/local/
 
 # The browser every egzo harness image carries: Chromium behind the Playwright MCP server, installed here because
 # anything fetched at run time has to pass the egress profile. `playwright-mcp install-browser` is the package's
