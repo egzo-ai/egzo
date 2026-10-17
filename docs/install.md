@@ -53,7 +53,8 @@ $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 
 gVisor on Docker: install `runsc`, register it under `"runtimes"` in `/etc/docker/daemon.json` and set
 `"default-runtime": "runsc"`, then restart Docker. Register it with `--reproduce-nat` (`runsc install -- --reproduce-nat`, or `runtimeArgs`
-in the `daemon.json` entry): without it gVisor does not reproduce Docker's embedded DNS, and containers cannot find each other by name. egzo never chooses a container runtime: everything the engine
+in the `daemon.json` entry), or `--reproduce-nftables` on a host whose firewall is nftables: without one of them gVisor does not
+reproduce Docker's embedded DNS, and containers cannot find each other by name. egzo never chooses a container runtime: everything the engine
 starts, agents and sidecars, runs under its default one, which is the host administrator's choice.
 
 Agents run as your uid and gid, and egzo never mounts the engine socket into an agent. Anything that can reach the

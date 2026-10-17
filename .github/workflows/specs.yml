@@ -88,9 +88,8 @@ jobs:
       # The registry the image specs push to and pull from (test_images.py): localhost:5000, no login. It runs on the runner's
       # Docker, which every runner has, for the Podman platforms too.
       - name: Test registry
-        # the registry is part of the test setup, not of what is tested: it runs under runc even where gVisor is the engine's default
         run: |
-          docker run -d --name spec-registry --runtime runc -p 5000:5000 registry:2 2>registry-${{ matrix.name }}.log || {
+          docker run -d --name spec-registry -p 5000:5000 registry:2 2>registry-${{ matrix.name }}.log || {
             docker logs spec-registry >>registry-${{ matrix.name }}.log 2>&1
             scripts/ci-annotate.sh "${{ matrix.name }} registry" registry-${{ matrix.name }}.log tail
             exit 1
