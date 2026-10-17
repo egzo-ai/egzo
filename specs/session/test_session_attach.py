@@ -175,6 +175,7 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
         assert off in tail, f"{off!r} missing after detach: {tail!r}"
 
     # when the program exits, attach exits and the instance is exited
+    lines = p.spawn("lines")
     client = p.pty("agent attach", lines)
     client.expect(b"READY")
     p.sh(f"exec {lines} -- sh -c", "pkill -9 -f '^/bin/sh /usr/local/bin/fake-tui'")

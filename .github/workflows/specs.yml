@@ -39,8 +39,6 @@ jobs:
           # TEMPORARY, while this workflow is tried out: the whole matrix on pull requests too, so every platform runs without
           # a merge. Delete this line (and the `|| [ "$PR_FULL" = true ]` below) to go back to docker only on pull requests.
           PR_FULL: 'true'
-          # TEMPORARY, to work on one platform at a time: only these cells run (a comma-separated list of names; empty is all)
-          ONLY: docker-gvisor
         run: |
           docker='{"name":"docker","engine":"docker","runner":"ubuntu-26.04","experimental":false}'
           if [ "$FULL" = true ] || [ "$PR_FULL" = true ]; then
@@ -52,7 +50,7 @@ jobs:
           else
             cells="[$docker]"
           fi
-          echo "cells=$(echo "$cells" | jq -c --arg only "$ONLY" 'if $only == "" then . else map(select(.name as $n | ($only | split(",") | index($n)))) end')" >> "$GITHUB_OUTPUT"
+          echo "cells=$(echo "$cells" | jq -c .)" >> "$GITHUB_OUTPUT"
 
   specs:
     needs: plan
@@ -89,9 +87,6 @@ jobs:
           specs/.venv/bin/pip install -r specs/requirements.txt
       # The registry the image specs push to and pull from (test_images.py): localhost:5000, no login. It runs on the runner's
       # Docker, which every runner has, for the Podman platforms too.
-      - name: TEMP gVisor DNS diagnostics
-        if: matrix.engine == 'docker-gvisor'
-        run: scripts/debug-gvisor.sh 2>&1 | tee engine-debug.log; scripts/ci-annotate.sh "gvisor dns" engine-debug.log tail
       - name: Test registry
         run: |
           docker run -d --name spec-registry -p 5000:5000 registry:2 2>registry-${{ matrix.name }}.log || {
@@ -105,7 +100,7 @@ jobs:
           EGZO_BIN: ${{ github.workspace }}/bin/egzo
         run: |
           set -o pipefail
-          ../specs/.venv/bin/pytest -x --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
+          ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
       # The logs of a run need a login; annotations do not, so a failure is also written as annotations.
       - name: Annotate the failure
         if: failure()
