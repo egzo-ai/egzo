@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"golang.org/x/crypto/ssh"
 	"io"
 	"log"
 	"net"
@@ -53,6 +54,17 @@ type Server struct {
 	// HandshakeTimeout is the hard limit for a client's TLS handshake with the proxy, however it trickles.
 	HandshakeTimeout time.Duration
 	limits           limiter
+
+	// DialSSH reaches the ssh servers of profiles. Tests replace it; the default refuses loopback and metadata addresses.
+	DialSSH func(ctx context.Context, network, address string) (net.Conn, error)
+	// SSHKeepAlive is how often a connection of the ssh listener, and the one it opened to a server, is probed; SSHIdleTimeout
+	// closes a connection none of whose sessions moved data for that long.
+	SSHKeepAlive   time.Duration
+	SSHIdleTimeout time.Duration
+	sshHostKey     atomic.Pointer[ssh.Signer]
+	handshakes     atomic.Int64
+	sshMu          sync.Mutex
+	sshConns       map[string]map[*sshConn]struct{}
 }
 
 func NewServer(ca *CA, audit *Audit) *Server {
@@ -111,8 +123,20 @@ func (s *Server) BindAgent(name string, binding Binding) error {
 	if _, ok := policy.Profiles[binding.Profile]; !ok {
 		return fmt.Errorf("the loaded policy has no egress profile %q", binding.Profile)
 	}
+	if binding.SSHKey != "" {
+		if err := checkIdentityKey(binding.SSHKey); err != nil {
+			return err
+		}
+	}
 	s.agentsMu.Lock()
 	defer s.agentsMu.Unlock()
+	var previous string
+	if current := s.agents.Load(); current != nil {
+		previous = (*current)[name].SSHKey
+	}
+	if previous != "" && previous != binding.SSHKey {
+		defer s.closeSSH(name)
+	}
 	next := map[string]Binding{name: binding}
 	if current := s.agents.Load(); current != nil {
 		for key, value := range *current {
@@ -125,11 +149,21 @@ func (s *Server) BindAgent(name string, binding Binding) error {
 	return nil
 }
 
+// checkIdentityKey accepts the one kind of key egzo makes for an instance: an ed25519 public key line.
+func checkIdentityKey(line string) error {
+	key, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(line))
+	if err != nil || len(strings.TrimSpace(string(rest))) > 0 || key.Type() != ssh.KeyAlgoED25519 {
+		return errors.New("the ssh identity of an agent is an ed25519 public key line")
+	}
+	return nil
+}
+
 // UnbindAgent removes an agent's credentials: it cannot reach anything through the proxy again. Unknown
 // names are fine.
 func (s *Server) UnbindAgent(name string) {
 	s.agentsMu.Lock()
 	defer s.agentsMu.Unlock()
+	defer s.closeSSH(name)
 	current := s.agents.Load()
 	if current == nil {
 		return
