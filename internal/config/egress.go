@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 type ResolvedProfile struct {
 	Allow    []string                    `yaml:"allow"`
 	Services map[string]*ResolvedService `yaml:"services"`
+	SSH      map[string]*ResolvedSSH     `yaml:"ssh"`
 }
 
 type ResolvedService struct {
@@ -72,7 +74,7 @@ func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
 	r.visiting[name] = true
 	defer delete(r.visiting, name)
 
-	current := &ResolvedProfile{Services: map[string]*ResolvedService{}}
+	current := &ResolvedProfile{Services: map[string]*ResolvedService{}, SSH: map[string]*ResolvedSSH{}}
 	if definition.Extend != "" {
 		_, parentDefined := r.file.Egress[definition.Extend]
 		if !parentDefined && definition.Extend != defaultProfile {
@@ -83,6 +85,10 @@ func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
 				copied := *resolved
 				copied.Hosts = slices.Clone(resolved.Hosts)
 				current.Services[service] = &copied
+			}
+			for server, resolved := range parent.SSH {
+				copied := *resolved
+				current.SSH[server] = &copied
 			}
 		}
 	}
@@ -107,6 +113,7 @@ func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
 		r.applyService(name, current, service, definition.Services[service])
 	}
 
+	r.applySSH(name, current, definition.SSH)
 	r.checkProfile(name, current)
 	r.done[name] = current
 	return current
@@ -133,7 +140,7 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 			r.problems.addf("egress profile %q: service %q has neither inject nor placeholder, so a secret cannot be bound to it", profile, name)
 			return
 		}
-		if r.checkSecret(profile, name, entry.Ref) {
+		if r.checkSecret(profile, fmt.Sprintf("service %q", name), entry.Ref) {
 			existing.Secret = entry.Ref
 		}
 		return
@@ -190,7 +197,7 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 			valid = false
 		}
 	}
-	if def.Secret != "" && !r.checkSecret(profile, name, def.Secret) {
+	if def.Secret != "" && !r.checkSecret(profile, fmt.Sprintf("service %q", name), def.Secret) {
 		valid = false
 	}
 	if !valid {
@@ -214,19 +221,19 @@ func serviceKeys(profile *ResolvedProfile) []string {
 
 // checkSecret validates a <vault>/<secret> reference against the declared vaults. The reference is
 // split at the first '/': a vault name has none, a secret name can.
-func (r *egressResolver) checkSecret(profile, service, ref string) bool {
+func (r *egressResolver) checkSecret(profile, what, ref string) bool {
 	vaultName, secret, found := strings.Cut(ref, "/")
 	if !found || vaultName == "" || secret == "" {
-		r.problems.addf("egress profile %q: service %q: invalid secret reference %q (want <vault>/<secret>)", profile, service, ref)
+		r.problems.addf("egress profile %q: %s: invalid secret reference %q (want <vault>/<secret>)", profile, what, ref)
 		return false
 	}
 	vault, ok := r.file.Vaults[vaultName]
 	if !ok {
-		r.problems.addf("egress profile %q: service %q: secret reference %q names unknown vault %q", profile, service, ref, vaultName)
+		r.problems.addf("egress profile %q: %s: secret reference %q names unknown vault %q", profile, what, ref, vaultName)
 		return false
 	}
 	if !slices.Contains(vault.Secrets, secret) {
-		r.problems.addf("egress profile %q: service %q: secret reference %q: vault %q does not list %q", profile, service, ref, vaultName, secret)
+		r.problems.addf("egress profile %q: %s: secret reference %q: vault %q does not list %q", profile, what, ref, vaultName, secret)
 		return false
 	}
 	return true
