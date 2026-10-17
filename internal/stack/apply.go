@@ -64,13 +64,13 @@ func Apply(ctx context.Context, c *engine.Client, desired Desired, plan []Action
 	}
 
 	out = &lockedWriter{w: out}
-	return runConcurrently(ctx, plan, dependencies(desired, plan), onePerTimeOnPodman(c, func(ctx context.Context, action Action) error {
+	return runConcurrently(ctx, plan, dependencies(desired, plan), func(ctx context.Context, action Action) error {
 		fmt.Fprintln(out, action)
 		if err := run(ctx, c, desired, action); err != nil {
 			return fmt.Errorf("%s: %w", action, err)
 		}
 		return nil
-	}))
+	})
 }
 
 func run(ctx context.Context, c *engine.Client, desired Desired, action Action) error {
@@ -384,13 +384,13 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 			actions = append(actions, Action{Verb: "remove", Type: kind, Name: r.Name, ID: r.ID})
 		}
 		deps := make([][]int, len(actions))
-		err := runConcurrently(ctx, actions, deps, onePerTimeOnPodman(c, func(ctx context.Context, a Action) error {
+		err := runConcurrently(ctx, actions, deps, func(ctx context.Context, a Action) error {
 			fmt.Fprintf(out, "remove %s %s\n", a.Type, a.Name)
 			if err := run(ctx, c, Desired{}, a); err != nil {
 				return fmt.Errorf("remove %s %s: %w", a.Type, a.Name, err)
 			}
 			return nil
-		}))
+		})
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,11 @@
 # Rootful Podman: intermittent loss of outbound connectivity
 
-Status: **diagnosed 2026-10-16, mitigated in egzo, not gone** (found 2026-10-04). Podman/netavark race, not an egzo bug.
+Status: **diagnosed 2026-10-16, no workaround in egzo** (found 2026-10-04). A netavark bug, not an egzo bug; very likely
+[containers/netavark#1497](https://github.com/containers/netavark/issues/1497) (fix proposed in
+[#1498](https://github.com/containers/netavark/pull/1498)): netavark leaves a `/run/sysctl.d/10-netavark-<bridge>.conf` with
+`forwarding = 0` behind when an internal network is removed, bridge names are reused, and `systemd-sysctl` applies the stale file
+to the next network that gets the name, racing with netavark's own setup. To confirm on a failing runner: list
+`/run/sysctl.d/10-netavark-*.conf` and compare the names with the bridges at `forwarding=0`.
 
 ## Diagnosis (2026-10-16, GitHub runner, Ubuntu 26.04, Podman 5.7.0, netavark 1.16.1)
 
@@ -17,16 +22,13 @@ addresses, `aardvark-dns` answers, netavark's isolation and masquerade rules.
   time left three of the six bridges at `forwarding=0` and three containers without egress. The same sequence
   one at a time (four rounds of an internal network, an external network and a container on both) left every
   external bridge at `1`.
-- The setup and the teardown of containers (conmon's `container cleanup`) also run netavark outside any call
-  of the API, so serializing the calls lowers the odds and does not remove the race: a run with the calls
-  serialized still lost the egress of one project in one of three runs.
+- Serializing egzo's engine calls on Podman was tried and removed: it lowered the failures and did not remove them, and
+  egzo must behave the same on every engine. The races it was aimed at (parallel network setup) were probably not the cause.
 - `docker` on the same host, the host firewall's `FORWARD` policy (DROP, set by Docker) and the order of the
   nameservers were checked and are not the cause: with the bridge forwarding on, Podman containers reach the
   internet through the same rules.
 
-What egzo does: on Podman it runs the engine calls of an `up`, `spawn` and `down` one at a time
-(`onePerTimeOnPodman` in `internal/stack/schedule.go`). What is left is an upstream bug to report to
-containers/netavark with the reproduction above.
+What egzo does: nothing. An `up` after a `down` on rootful Podman can hit this by itself; the fix is upstream.
 
 ## Earlier notes (before the diagnosis)
 

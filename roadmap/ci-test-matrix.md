@@ -33,7 +33,7 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
 - **Cells that are not proven are `experimental`**: they run and show, and cannot fail the run. `docker` is required from the
   start. `docker-gvisor`, `podman`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history, by
   removing the flag in `specs.yml` and adding the check to the branch rules. Rootful Podman has a diagnosed intermittent failure
-  (`known-issues/rootful-podman-intermittent-egress.md`, a netavark race that leaves a bridge without forwarding) and must not
+  (`known-issues/rootful-podman-intermittent-egress.md`, netavark leaves a stale per-bridge sysctl file that switches forwarding off on a reused bridge name, containers/netavark#1497) and must not
   block merges until it is fixed upstream or gone from the runs.
 - **Serial.** Each cell runs the specs one at a time. Four `pytest-xdist` workers (`--dist loadfile`) were tried on the first
   runs: locally with Docker and gVisor they took 3 minutes instead of about 12, but 54 specs failed on `all predefined address
