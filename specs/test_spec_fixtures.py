@@ -39,7 +39,7 @@ def test_the_ssh_server_accepts_its_key_and_runs_commands_as_an_unprivileged_use
 def test_the_ssh_server_host_key_is_the_one_it_reports(ssh_server, ssh_client):
     """Pinning a host key only means something if the fixture says which key the server really has."""
     assert ssh_server.fingerprint.startswith("SHA256:")
-    scanned = ssh_server.sh("ssh-keyscan -t ed25519 127.0.0.1 2>/dev/null > /tmp/scan; ssh-keygen -lf /tmp/scan")
+    scanned = ssh_server.inside("ssh-keyscan -t ed25519 127.0.0.1 2>/dev/null > /tmp/scan; ssh-keygen -lf /tmp/scan")
     assert scanned.stdout.split()[1] == ssh_server.fingerprint
     assert ssh_client("true", extra=["-o", "HostKeyAlgorithms=ssh-ed25519"]).returncode == 0
 
@@ -53,4 +53,4 @@ def test_the_ssh_server_refuses_a_key_it_does_not_know(ssh_server, ssh_client):
 
 def test_the_ssh_server_refuses_root_and_passwords(ssh_server, ssh_client):
     assert "Permission denied" in ssh_client("true", user="root").stderr
-    assert ssh_server.sh("grep -E '^PasswordAuthentication no' /etc/ssh/sshd_config").returncode == 0
+    assert ssh_server.inside("grep -E '^PasswordAuthentication no' /etc/ssh/sshd_config").returncode == 0
