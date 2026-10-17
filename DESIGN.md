@@ -542,6 +542,26 @@ egress:
   these are declared explicitly in `allow`; whether integrations declare them is open.
 - Unverified: that GitHub accepts `Authorization: Bearer` for git over HTTPS (spike).
 
+## ssh through the proxy (decided, built)
+- A second listener of the proxy (`:2222`, agents reach it as `proxy`) terminates ssh and re-originates it (`internal/proxy/ssh*.go`, `golang.org/x/crypto/ssh`).
+  Public key authentication only. The identity of an instance is an ed25519 key **derived from its token** (HKDF), so there is nothing to
+  store: `up`/`spawn` bind the public half (`Binding.ssh_key`), `egzo agent run` writes the private half to `~/.ssh`. The decision is taken on the key
+  that signed, not on the keys offered (CVE-2024-45337). The ssh *user* the agent asks for is the name of a server in its profile; an unknown
+  identity, a server of another profile and an agent without a server get the same refusal.
+- Then the proxy dials the server (dial timeout, private addresses allowed because an operator named the host; loopback and cloud metadata
+  addresses refused) with the key of the profile and checks the pinned host key. A fingerprint pin cannot say which key type the server has, so
+  each type is tried in turn; a public key line fixes it. A failure reaches the agent as ssh itself would show it (stderr, exit status 255) and never
+  quotes the key; the audit records the key the server presented.
+- Relayed: exec, shell, pty, window-change, env, signal, stderr, exit status, end of input. Refused and audited: direct-tcpip, tcpip-forward, agent and
+  X11 forwarding, every subsystem. Bounded: 10 sessions per connection, per-agent and global connection limits, 64 handshakes at once, keepalive both
+  ways, one hour idle. Unbinding an agent or changing its identity closes its connections.
+- The proxy publishes `ssh_config` (one `Host` per server name of the policy, all the proxy's listener, told apart by the user) and `ssh_known_hosts`
+  (its host key under the alias `egzo-proxy`, strict checking) in the shared CA volume whenever a policy is loaded. The agent copies the servers into a
+  managed block at the top of `~/.ssh/config` (copied, not included: ssh refuses an included file owned by neither the user nor root).
+- ssh needs a passwd entry for its uid and takes `~/.ssh` from its home; egzo gives the agent's user one (see "The agent's user has a passwd
+  entry"), so the stock `openssh-client` runs as it is.
+- Config: `egress.<profile>.ssh.<name>: {host, port?, user, key, host_key}` (see Egress policy). Keys are unencrypted (no passphrase, no FIDO).
+
 ## Egress proxy and TLS (decided)
 - MITM for hosts of services with credential injection in the agent's profile. Everything else allowed
   is a CONNECT tunnel with host/SNI match (domain-fronting protection), **except for a client that sends Encrypted
