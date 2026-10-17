@@ -14,6 +14,8 @@ and [messaging](messaging.md).
 - **No secrets in the agent.** Credentials sit in the proxy, loaded by `egzo project up`, and are added to requests to the hosts
   of declared services. They are not in the agent's environment, in labels, in `docker inspect` or in any image.
   The harness gets a placeholder value.
+- **ssh without the key.** An agent can ssh only to the servers its egress profile names, through the proxy, which holds the key and checks a pinned
+  host key; forwarding is refused and every session and command is audited ([ssh to servers](sandboxing.md#ssh-to-servers)).
 - **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits,
   sidecars as a non-root uid with a read-only root. Agents run as your uid and gid, not as root. The engine socket is
   never mounted into an agent.
@@ -30,6 +32,7 @@ Be clear about these before running agents on something you care about.
 - **Whatever the agent can reach, it can use.** An agent cannot read the API key, but it can make requests that
   carry it, to the hosts of that service, for as long as it runs. A key with broad rights is used with broad rights.
   Give agents tokens with the narrowest scope the work needs.
+- **What the agent does on a server it can ssh to.** The key is safe; the account is not. Give it a low-privilege account or a forced command.
 - **Data can leave through allowed hosts.** The agent can push your repository to any host you allow (including
   `github.com` with an injected token, to a repository it chooses). `allow: ["*"]` makes this wide open. Keep
   profiles tight, and keep secrets and private data out of workspaces the agent does not need.
