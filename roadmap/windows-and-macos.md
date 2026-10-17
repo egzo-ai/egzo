@@ -31,7 +31,7 @@ The rules to document and check:
   should say so when it finds no engine socket in a WSL distro.
 - **Docker Engine installed inside the distro** (instead of Desktop) is just the Linux case, and could register
   gVisor. Worth stating as the alternative.
-- gVisor is not available on Docker Desktop; `runtime:` is refused as it is on Podman.
+- gVisor is not available on Docker Desktop.
 
 Work: document it, run the quick start and the specs on a real WSL2 distro with Docker Desktop, add the two `system check`
 hints, and decide how the platform is named in the matrix. Likely small.

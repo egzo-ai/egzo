@@ -124,7 +124,6 @@ agents:
     model: claude-sonnet-5-5
     prompt: ./prompts/coder.md    # the agent's standing instructions
     resources: { cpus: 2, memory: 4g, pids: 4096 }
-    runtime: runsc                # gVisor, if registered with the engine
     permissions: bypass           # bypass (default) | default (the harness asks)
     env: { LOG_LEVEL: debug }     # plain settings; secret-looking values are rejected
 ```
