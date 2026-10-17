@@ -553,7 +553,7 @@ egress:
   each type is tried in turn; a public key line fixes it. A failure reaches the agent as ssh itself would show it (stderr, exit status 255) and never
   quotes the key; the audit records the key the server presented.
 - Relayed: exec, shell, pty, window-change, env, signal, stderr, exit status, end of input. Refused and audited: direct-tcpip, tcpip-forward, agent and
-  X11 forwarding, every subsystem. Bounded: 10 sessions per connection, per-agent and global connection limits, 64 handshakes at once, keepalive both
+  X11 forwarding, every subsystem but `sftp`. Bounded: 10 sessions per connection, per-agent and global connection limits, 64 handshakes at once, keepalive both
   ways, one hour idle. Unbinding an agent or changing its identity closes its connections.
 - The proxy publishes `ssh_config` (one `Host` per server name of the policy, all the proxy's listener, told apart by the user) and `ssh_known_hosts`
   (its host key under the alias `egzo-proxy`, strict checking) in the shared CA volume whenever a policy is loaded. The agent copies the servers into a
