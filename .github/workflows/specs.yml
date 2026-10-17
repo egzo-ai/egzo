@@ -1,0 +1,116 @@
+name: specs
+
+# The specs (specs/) on the reference platforms: one job, so one fresh VM, per platform. What runs where:
+#   pull_request   the docker platform only, for a fast answer on the pull request;
+#   merge_group    every platform, the gate in front of main when the branch uses a merge queue (it must list this event);
+#   schedule       every platform, nightly, to catch what no push touched (runner images, new engine releases, online services);
+#   dispatch       every platform, by hand;
+#   workflow_call  every platform when `full` is true: release.yml runs it before it publishes anything.
+# Only the cells that are not `experimental` can fail the run. A platform becomes required (in the branch rules, by the name
+# `specs (<platform>)`) and loses its `experimental` mark after a clean history; see roadmap/ci-test-matrix.md.
+on:
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      full:
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: specs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-26.04
+    outputs:
+      cells: ${{ steps.cells.outputs.cells }}
+    steps:
+      - id: cells
+        env:
+          FULL: ${{ github.event_name != 'pull_request' || inputs.full == true }}
+        run: |
+          docker='{"name":"docker","engine":"docker","runner":"ubuntu-26.04","experimental":false}'
+          if [ "$FULL" = true ]; then
+            cells="[$docker,
+              {\"name\":\"docker-gvisor\",\"engine\":\"docker-gvisor\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
+              {\"name\":\"podman\",\"engine\":\"podman\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
+              {\"name\":\"podman-rootless\",\"engine\":\"podman-rootless\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
+              {\"name\":\"docker-arm64\",\"engine\":\"docker\",\"runner\":\"ubuntu-26.04-arm\",\"experimental\":true}]"
+          else
+            cells="[$docker]"
+          fi
+          echo "cells=$(echo "$cells" | jq -c .)" >> "$GITHUB_OUTPUT"
+
+  specs:
+    needs: plan
+    name: specs (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.cells) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      # The specs build the sidecar image and both harness images (Chromium among them) on the runner's own engine.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
+      - name: The platform (${{ matrix.engine }})
+        run: |
+          set -o pipefail
+          scripts/ci-engine.sh ${{ matrix.engine }} 2>&1 | tee engine-${{ matrix.name }}.log
+      - name: Build egzo and install the specs' dependencies
+        run: |
+          make build
+          python -m venv specs/.venv
+          specs/.venv/bin/pip install -r specs/requirements.txt
+      # The registry the image specs push to and pull from (test_images.py): localhost:5000, no login. It runs on the runner's
+      # Docker, which every runner has, for the Podman platforms too.
+      - name: Test registry
+        run: |
+          docker run -d --name spec-registry -p 5000:5000 registry:2 2>registry-${{ matrix.name }}.log || {
+            docker logs spec-registry >>registry-${{ matrix.name }}.log 2>&1
+            scripts/ci-annotate.sh "${{ matrix.name }} registry" registry-${{ matrix.name }}.log tail
+            exit 1
+          }
+      - name: Specs on ${{ matrix.engine }}
+        working-directory: specs
+        env:
+          EGZO_BIN: ${{ github.workspace }}/bin/egzo
+        run: |
+          set -o pipefail
+          ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
+      # The logs of a run need a login; annotations do not, so a failure is also written as annotations.
+      - name: Annotate the failure
+        if: failure()
+        run: |
+          scripts/ci-annotate.sh "${{ matrix.name }} platform" engine-${{ matrix.name }}.log tail
+          scripts/ci-annotate.sh "${{ matrix.name }} specs" specs-${{ matrix.name }}.log specs
+      # The summary per area is at the end of the log: it is what shows a regression on one platform as a change of a column.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: specs-${{ matrix.name }}
+          path: |
+            specs-${{ matrix.name }}.log
+            specs-${{ matrix.name }}.xml
+            engine-${{ matrix.name }}.log
+          if-no-files-found: warn
