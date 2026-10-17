@@ -135,7 +135,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		WorkingDir: spec.WorkingDir,
 	}
 	if len(spec.Healthcheck) > 0 {
-		config.Healthcheck = healthConfig(spec.Healthcheck, c.Podman)
+		config.Healthcheck = healthConfig(spec.Healthcheck, c.APIAtLeast("1.44"))
 	}
 	host := &container.HostConfig{
 		NetworkMode:    container.NetworkMode(spec.Network),
@@ -209,14 +209,14 @@ func settle(ctx context.Context, c *engine.Client, id string) error {
 }
 
 // healthConfig probes fast until the first success so startup is not paced by the interval, then
-// slowly: every probe result is written to the engine's disk. Podman's Docker-compatible API
-// predates the start interval (API 1.44), so it keeps a short fixed interval.
-func healthConfig(command []string, podman bool) *container.HealthConfig {
+// slowly: every probe result is written to the engine's disk. An engine whose API predates the start interval
+// (1.44, which Podman's Docker-compatible API did at the time of writing) keeps a short fixed interval.
+func healthConfig(command []string, startInterval bool) *container.HealthConfig {
 	health := &container.HealthConfig{
 		Test:    append([]string{"CMD"}, command...),
 		Timeout: 3 * time.Second,
 	}
-	if podman {
+	if !startInterval {
 		health.Interval = time.Second
 		health.Retries = 60
 		return health

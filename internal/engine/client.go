@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/docker/client"
 )
 
@@ -33,6 +34,12 @@ func Connect(ctx context.Context) (*Client, error) {
 }
 
 func (c *Client) Close() error { return c.API.Close() }
+
+// APIAtLeast reports whether the engine speaks the Docker API at version v or later. The client negotiates its version
+// down to the engine's when it connects, so the version in use is the engine's own when the engine is the older one.
+func (c *Client) APIAtLeast(v string) bool {
+	return c.API != nil && versions.GreaterThanOrEqualTo(c.API.ClientVersion(), v)
+}
 
 // IsNameConflict reports whether creating a container failed because its name is taken. Docker answers
 // 409 Conflict; Podman answers a plain 500 whose message says the name is already in use.
