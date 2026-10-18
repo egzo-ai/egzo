@@ -68,6 +68,21 @@ def test_each_instance_has_a_network_of_its_own_and_cannot_reach_the_internet_or
     assert run_in(engine, p, coder, "nc", "-w", "3", reviewer_ip, "8080").returncode != 0
 
 
+def test_the_user_an_instance_runs_as_has_a_passwd_entry_and_a_group_so_that_programs_find_who_they_are(sandbox, engine):
+    p = sandbox
+    coder = p.spawn("coder")
+    uid = run_in(engine, p, coder, "id", "-u").stdout.strip()
+    gid = run_in(engine, p, coder, "id", "-g").stdout.strip()
+
+    entry = run_in(engine, p, coder, "getent", "passwd", uid)
+    assert entry.returncode == 0, "the image does not know the uid and egzo did not add it"
+    name, _, entry_uid, entry_gid, _, home, shell = entry.stdout.strip().split(":")
+    assert (entry_uid, entry_gid) == (uid, gid) and name and shell
+    assert run_in(engine, p, coder, "id", "-un").stdout.strip() == name, "whoami, ssh and git find the user's name"
+    assert run_in(engine, p, coder, "getent", "group", gid).returncode == 0, "the gid has a group"
+    assert run_in(engine, p, coder, "sh", "-c", f'[ "$(cd ~ && pwd)" = "{home}" ]').returncode == 0, "~ is the home the entry names"
+
+
 def test_an_instance_runs_unprivileged_as_the_invoking_user_with_limits_and_binds_nothing_from_the_host(sandbox, engine):
     p = sandbox
     coder, small, limited, solo = p.spawn("coder"), p.spawn("small"), p.spawn("limited"), p.spawn("solo")

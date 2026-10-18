@@ -164,6 +164,12 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 	if err != nil {
 		return "", err
 	}
+	if spec.Identity.Kind == kindAgent {
+		if err := ensureUserEntry(ctx, c, created.ID, spec.Env); err != nil {
+			c.API.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true})
+			return "", err
+		}
+	}
 	if err := chownVolumes(ctx, c, prepImage, spec.User, spec.OwnedVolumes, spec.Identity); err != nil {
 		c.API.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true})
 		return "", err
