@@ -5,3 +5,4 @@ e2e/server/egzo-hub-e2e
 e2e/.venv/
 e2e/__pycache__/
 .pytest_cache/
+/egzo-hub
