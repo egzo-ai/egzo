@@ -119,7 +119,9 @@ func takeLease(ctx context.Context, c *engine.Client, project, image string) (st
 			return "", inspectErr
 		}
 		if !found {
-			continue // released between the two calls
+			// The name is taken but there is nothing to read: the holder is removing its lease right now, and the engine
+			// keeps the name until that is done. Trying again at once only conflicts again.
+			return "", &LockedError{Project: project, Holder: "a command that is finishing", Expires: time.Now()}
 		}
 		if time.Now().Before(until) {
 			return "", &LockedError{Project: project, Holder: holder, Expires: until}
