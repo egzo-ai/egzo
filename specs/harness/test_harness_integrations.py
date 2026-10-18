@@ -112,6 +112,9 @@ def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_cre
     p = sandbox
     name = p.spawn(harness, f"{harness}-1", timeout=900)
     assert in_instance(engine, p, name, "id -u").stdout.strip() == str(engine.uid)
+    # The home of the user is the home the harness keeps its state in: ssh takes ~/.ssh from the passwd entry, not from $HOME.
+    entry = in_instance(engine, p, name, 'getent passwd "$(id -u)"').stdout.strip().split(":")
+    assert entry[5] == "/home/agent", f"the passwd entry of the user says {entry}"
     version = in_instance(engine, p, name, f"{BINARY[harness]} --version")
     assert version.returncode == 0 and re.search(r"\d+\.\d+", version.stdout), version.stderr
     for tool in ("egzo", "git", "curl", "rg", "node"):

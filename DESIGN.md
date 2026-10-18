@@ -837,6 +837,12 @@ Decisions taken while building (reversible; each is covered by specs):
   container hands each volume an agent writes to (workspaces, its home) to that user after the agent's container
   is created and before it starts: the engine hands a volume to root when it is the container's working
   directory, which would undo an earlier chown.
+- **The agent's user has a passwd entry.** An image does not know the invoking user's uid, and ssh, `whoami` and git need an
+  entry (ssh also takes `~/.ssh` from the entry's home, not from `$HOME`). After the agent's container is created and before it
+  starts, egzo reads its `/etc/passwd` and `/etc/group` through the engine API and writes them back into the container's own
+  layer: a uid the image does not know is added as `agent` with `$HOME` as its home; a uid it knows keeps its entry but takes
+  `$HOME` as its home, since the home egzo mounts is the agent's home. It works for any image and any engine, including one on
+  another machine. The sidecars (read-only root) do not need it.
 - **Harness images** carry the egzo binary (`COPY --from=<egzo image>`), `HOME=/home/agent` (a volume
   `<project>_<agent>-home`, so `/resume` and settings survive recreating the agent) and
   `ENTRYPOINT egzo agent run --`. An integration (`internal/harness`) is pure: from the agent's definition it
