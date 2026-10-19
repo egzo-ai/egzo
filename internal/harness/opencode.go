@@ -65,7 +65,12 @@ export default {
             case "permission.asked":
               await state("blocked", { reason: "permission" })
               break
+            case "form.created":
+              await state("blocked", { reason: "question" })
+              break
             case "permission.replied":
+            case "form.replied":
+            case "form.cancelled":
               await state("working", { reason: event.type })
               break
           }
@@ -78,34 +83,43 @@ export default {
 `
 
 func (o openCode) Plan(opts Options, args []string) (Plan, error) {
-	config := map[string]any{
-		"$schema":    "https://opencode.ai/config.json",
-		"autoupdate": false,
-		"share":      "disabled",
-		"mcp": map[string]any{
-			"egzo": map[string]any{
-				"type":    "remote",
-				"url":     strings.TrimRight(opts.ControlURL, "/") + "/mcp",
-				"headers": map[string]any{"Authorization": opts.Authorization},
-				"enabled": true,
-			},
+	servers := map[string]any{
+		"egzo": map[string]any{
+			"type":    "remote",
+			"url":     strings.TrimRight(opts.ControlURL, "/") + "/mcp",
+			"headers": map[string]any{"Authorization": opts.Authorization},
 		},
+	}
+	config := map[string]any{
+		"$schema":      "https://opencode.ai/config.json",
+		"update":       "disable",
+		"share":        "disabled",
 		"instructions": []any{opts.InstructionsFile},
+		// What OpenCode 1 versions of egzo wrote under their old names: the home outlives the agent, and OpenCode 2 would
+		// read both.
+		"autoupdate": nil,
+		"permission": nil,
 	}
 	// The browser's server is egzo's to refresh or delete only when egzo wrote it (a command starting with `egzo agent browser`).
 	configPath := filepath.Join(opts.Home, ".config", "opencode", "opencode.json")
 	var replace [][]string
-	entry := map[string]any{"type": "local", "command": toAny(browserCommand), "enabled": true}
-	if value, present, wholesale := opts.browserServer(configPath, []string{"mcp"}, entry, ownsOpenCodeBrowser); present {
-		config["mcp"].(map[string]any)["playwright"] = value
+	entry := map[string]any{"type": "local", "command": toAny(browserCommand)}
+	if value, present, wholesale := opts.browserServer(configPath, []string{"mcp", "servers"}, entry, ownsOpenCodeBrowser); present {
+		servers["playwright"] = value
 		if wholesale {
-			replace = [][]string{{"mcp", "playwright"}}
+			replace = [][]string{{"mcp", "servers", "playwright"}}
 		}
 	}
+	// The old place of the servers, before OpenCode 2 (mcp.<name>): egzo's own entries there are deleted.
+	legacy := map[string]any{"servers": servers, "egzo": nil}
+	if old, exists := existingServer(configPath, []string{"mcp"}); exists && ownsOpenCodeBrowser(old) {
+		legacy["playwright"] = nil
+	}
+	config["mcp"] = legacy
 	if opts.Bypass {
-		config["permission"] = map[string]any{"*": "allow"}
+		config["permissions"] = []any{map[string]any{"action": "*", "resource": "*", "effect": "allow"}}
 	} else {
-		config["permission"] = nil // delete: what an earlier run allowed must not outlive the opt-out
+		config["permissions"] = nil // delete: what an earlier run allowed must not outlive the opt-out
 	}
 	if opts.Model != "" {
 		config["model"] = opts.Model

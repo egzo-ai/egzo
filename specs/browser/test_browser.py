@@ -29,7 +29,7 @@ DEV_PAGE = "require('http').createServer((q, r) => r.end('<title>dev</title><h1>
 CONFIG_FILE = {"claude-code": "$HOME/.claude.json", "opencode": "$HOME/.config/opencode/opencode.json"}
 USERS_OWN = {
     "claude-code": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest", "--headless"], "env": {"A": "1"}},
-    "opencode": {"type": "local", "command": ["npx", "@playwright/mcp"], "enabled": False},
+    "opencode": {"type": "local", "command": ["npx", "@playwright/mcp"], "disabled": True},
 }
 MODEL_API = {"allow": ["platform.claude.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}
 
@@ -80,7 +80,7 @@ def servers_of(engine, project, name, harness):
     read = engine.exec(engine.instance(project.name, name).name, "sh", "-c", f"cat {CONFIG_FILE[harness]}")
     assert read.returncode == 0, read.stderr
     config = json.loads(read.stdout)
-    return config["mcpServers"] if harness == "claude-code" else config["mcp"]
+    return config["mcpServers"] if harness == "claude-code" else config["mcp"]["servers"]
 
 
 def launch_command(server):
@@ -117,7 +117,7 @@ def audit(project, host, agent_name):
 
 
 def set_server(engine, project, name, harness, entry):
-    key = "mcpServers" if harness == "claude-code" else "mcp"
+    key = "mcpServers" if harness == "claude-code" else "mcp.servers"
     script = (
         "const fs=require('fs');const p=process.argv[1].replace('$HOME',process.env.HOME);const c=JSON.parse(fs.readFileSync(p));"
         f"c.{key}[process.argv[2]]=JSON.parse(process.argv[3]);fs.writeFileSync(p,JSON.stringify(c))"

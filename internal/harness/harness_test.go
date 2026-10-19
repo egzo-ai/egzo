@@ -190,13 +190,13 @@ func TestOpenCodeAllowsEverythingOrDeletesWhatItAllowedBefore(t *testing.T) {
 	o := options(t)
 	plan, _ := openCode{}.Plan(o, nil)
 	config := decode(t, plan, filepath.Join(o.Home, ".config", "opencode", "opencode.json"))
-	if get(t, config, "permission", "*") != "allow" {
+	if marshal(config["permissions"]) != `[{"action":"*","effect":"allow","resource":"*"}]` {
 		t.Errorf("config = %v", config)
 	}
 	o.Bypass = false
 	plan, _ = openCode{}.Plan(o, nil)
 	config = decode(t, plan, filepath.Join(o.Home, ".config", "opencode", "opencode.json"))
-	if value, present := config["permission"]; !present || value != nil {
+	if value, present := config["permissions"]; !present || value != nil {
 		t.Errorf("an opt-out must send null so the merge deletes the key: %v", config)
 	}
 }
@@ -212,7 +212,7 @@ func TestOpenCodeModelInstructionsAndControlTools(t *testing.T) {
 	if list := config["instructions"].([]any); len(list) != 1 || list[0] != o.InstructionsFile {
 		t.Errorf("instructions = %v", list)
 	}
-	server := get(t, config, "mcp", "egzo")
+	server := get(t, config, "mcp", "servers", "egzo")
 	if get(t, server, "type") != "remote" || get(t, server, "url") != "http://control:7777/mcp" || get(t, server, "headers", "Authorization") != o.Authorization {
 		t.Errorf("server = %v", server)
 	}
@@ -222,7 +222,7 @@ func TestOpenCodePluginReportsEgzosStates(t *testing.T) {
 	o := options(t)
 	plan, _ := openCode{}.Plan(o, nil)
 	plugin := string(plan.Files[filepath.Join(o.Home, ".config", "opencode", "plugins", "egzo.js")].Content)
-	for _, want := range []string{`state("idle"`, `"session.idle"`, `state("working"`, `hook("prompt"`, `state("blocked"`, `"permission.asked"`, "/v1/state"} {
+	for _, want := range []string{`state("idle"`, `"session.idle"`, `state("working"`, `hook("prompt"`, `state("blocked"`, `"permission.asked"`, `"form.created"`, "/v1/state"} {
 		if !strings.Contains(plugin, want) {
 			t.Errorf("the plugin lacks %s", want)
 		}

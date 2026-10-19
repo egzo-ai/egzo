@@ -205,8 +205,8 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     p = sandbox
     default, model, asks = (p.spawn(t, name, timeout=900) for t, name in (("opencode", "oc-a"), ("oc-model", "oc-b"), ("oc-asks", "oc-c")))
     config = read_json(engine, p, default, "$HOME/.config/opencode/opencode.json")
-    assert config["permission"] in ("allow", {"*": "allow"}) or all(v == "allow" for v in config["permission"].values())
-    server = config["mcp"]["egzo"]
+    assert config["permissions"] == [{"action": "*", "resource": "*", "effect": "allow"}]
+    server = config["mcp"]["servers"]["egzo"]
     assert server["type"] == "remote" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
     plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugins/egzo.js").stdout
     assert "session.idle" in plugin
@@ -217,7 +217,7 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     assert "Always answer in rhyme." in read(engine, p, model, "$HOME/.egzo/instructions.md")
 
     asked = read_json(engine, p, asks, "$HOME/.config/opencode/opencode.json")
-    assert asked.get("permission") not in ("allow", {"*": "allow"}), "permissions: default keeps the prompts"
+    assert "permissions" not in asked and "permission" not in asked, "permissions: default keeps the prompts"
 
 
 def test_claude_code_gets_an_oauth_placeholder_when_the_profile_injects_a_bearer_token(sandbox, engine):
