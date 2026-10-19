@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,8 +40,8 @@ func TestAHarnessRegistersTheBrowserNextToTheEgzoServerWhenTheImageHasOne(t *tes
 	}
 
 	plan, _ = openCode{}.Plan(o, nil)
-	servers = get(t, decode(t, plan, filepath.Join(o.Home, ".config", "opencode", "opencode.json")), "mcp")
-	want = `{"command":["egzo","agent","browser"],"enabled":true,"type":"local"}`
+	servers = get(t, decode(t, plan, filepath.Join(o.Home, ".config", "opencode", "opencode.json")), "mcp", "servers")
+	want = `{"command":["egzo","agent","browser"],"type":"local"}`
 	if got := marshal(get(t, servers, "playwright")); got != want {
 		t.Errorf("opencode server = %s, want %s", got, want)
 	}
@@ -59,8 +60,8 @@ func TestAStaleBrowserServerIsRemovedFromAPersistedHomeAndWhatTheUserAddedStays(
 	}{
 		{"claude-code", claudeCode{}, []string{".claude.json"}, "mcpServers",
 			`{"mcpServers":{"playwright":{"type":"stdio","command":"egzo","args":["agent","browser"]},"mine":{"type":"stdio","command":"x"}}}`},
-		{"opencode", openCode{}, []string{".config", "opencode", "opencode.json"}, "mcp",
-			`{"mcp":{"playwright":{"type":"local","command":["egzo","agent","browser"]},"mine":{"type":"local","command":["x"]}}}`},
+		{"opencode", openCode{}, []string{".config", "opencode", "opencode.json"}, "mcp.servers",
+			`{"mcp":{"servers":{"playwright":{"type":"local","command":["egzo","agent","browser"]},"mine":{"type":"local","command":["x"]}}}}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -72,7 +73,7 @@ func TestAStaleBrowserServerIsRemovedFromAPersistedHomeAndWhatTheUserAddedStays(
 				var config map[string]any
 				data, _ := os.ReadFile(path)
 				json.Unmarshal(data, &config)
-				return config[c.key].(map[string]any)
+				return at(config, c.key)
 			}
 
 			plan, _ := c.integration.Plan(withBrowser(o, false), nil)
@@ -107,7 +108,7 @@ type browserCase struct {
 
 var browserCases = []browserCase{
 	{"claude-code", claudeCode{}, []string{".claude.json"}, "mcpServers"},
-	{"opencode", openCode{}, []string{".config", "opencode", "opencode.json"}, "mcp"},
+	{"opencode", openCode{}, []string{".config", "opencode", "opencode.json"}, "mcp.servers"},
 }
 
 // roundTrip writes existing (when not empty) where the harness keeps it, applies the plan and returns the servers.
@@ -131,13 +132,13 @@ func roundTrip(t *testing.T, c browserCase, existing string, browser bool) map[s
 	if err := json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
-	return config[c.key].(map[string]any)
+	return at(config, c.key)
 }
 
 func TestAFreshHomeGetsTheBrowserServer(t *testing.T) {
 	want := map[string]string{
 		"claude-code": `{"args":["agent","browser"],"command":"egzo","env":{},"type":"stdio"}`,
-		"opencode":    `{"command":["egzo","agent","browser"],"enabled":true,"type":"local"}`,
+		"opencode":    `{"command":["egzo","agent","browser"],"type":"local"}`,
 	}
 	for _, c := range browserCases {
 		servers := roundTrip(t, c, "", true)
@@ -153,11 +154,11 @@ func TestAFreshHomeGetsTheBrowserServer(t *testing.T) {
 func TestAnEntryEgzoWroteIsReplacedWholesaleNotMerged(t *testing.T) {
 	existing := map[string]string{
 		"claude-code": `{"mcpServers":{"playwright":{"type":"stdio","command":"egzo","args":["agent","browser","--old"],"env":{"A":"1"}},"mine":{"command":"x"}}}`,
-		"opencode":    `{"mcp":{"playwright":{"type":"local","command":["egzo","agent","browser","--old"],"enabled":false,"environment":{"A":"1"}},"mine":{"command":["x"]}}}`,
+		"opencode":    `{"mcp":{"servers":{"playwright":{"type":"local","command":["egzo","agent","browser","--old"],"disabled":true,"environment":{"A":"1"}},"mine":{"command":["x"]}}}}`,
 	}
 	want := map[string]string{
 		"claude-code": `{"args":["agent","browser"],"command":"egzo","env":{},"type":"stdio"}`,
-		"opencode":    `{"command":["egzo","agent","browser"],"enabled":true,"type":"local"}`,
+		"opencode":    `{"command":["egzo","agent","browser"],"type":"local"}`,
 	}
 	for _, c := range browserCases {
 		servers := roundTrip(t, c, existing[c.name], true)
@@ -173,14 +174,14 @@ func TestAnEntryEgzoWroteIsReplacedWholesaleNotMerged(t *testing.T) {
 func TestAServerTheUserWroteIsLeftAloneWhateverTheImageHas(t *testing.T) {
 	existing := map[string]string{
 		"claude-code": `{"mcpServers":{"playwright":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest","--headless"],"env":{"A":"1"}}}}`,
-		"opencode":    `{"mcp":{"playwright":{"type":"local","command":["npx","@playwright/mcp"],"enabled":false}}}`,
+		"opencode":    `{"mcp":{"servers":{"playwright":{"type":"local","command":["npx","@playwright/mcp"],"disabled":true}}}}`,
 	}
 	for _, c := range browserCases {
 		for _, browser := range []bool{true, false} {
 			servers := roundTrip(t, c, existing[c.name], browser)
 			var want map[string]any
 			json.Unmarshal([]byte(existing[c.name]), &want)
-			if got, wanted := marshal(servers["playwright"]), marshal(want[c.key].(map[string]any)["playwright"]); got != wanted {
+			if got, wanted := marshal(servers["playwright"]), marshal(at(want, c.key)["playwright"]); got != wanted {
 				t.Errorf("%s (browser %v): playwright = %s, want it untouched: %s", c.name, browser, got, wanted)
 			}
 			if servers["egzo"] == nil {
@@ -231,5 +232,44 @@ func TestOnlyAnEntryThatLooksLikeEgzosOwnIsEgzos(t *testing.T) {
 		if got := ownsOpenCodeBrowser(entry); got != c.opencode {
 			t.Errorf("%s: OpenCode owns = %v, want %v", c.name, got, c.opencode)
 		}
+	}
+}
+
+// at is the object at a dotted key of a decoded config ("mcp.servers").
+func at(config map[string]any, key string) map[string]any {
+	object := config
+	for _, part := range strings.Split(key, ".") {
+		object, _ = object[part].(map[string]any)
+	}
+	return object
+}
+
+func TestOpenCodeMovesWhatItsOldVersionWroteToTheNewNames(t *testing.T) {
+	o := withBrowser(options(t), true)
+	path := filepath.Join(o.Home, ".config", "opencode", "opencode.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	old := `{"autoupdate":false,"permission":{"*":"allow"},"mcp":{"egzo":{"type":"remote","url":"http://x/mcp"},"playwright":{"type":"local","command":["egzo","agent","browser"],"enabled":true},"mine":{"type":"local","command":["x"]}}}`
+	os.WriteFile(path, []byte(old), 0o600)
+	plan, _ := openCode{}.Plan(o, nil)
+	if err := plan.Write(); err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	data, _ := os.ReadFile(path)
+	json.Unmarshal(data, &config)
+	for _, key := range []string{"autoupdate", "permission"} {
+		if _, stale := config[key]; stale {
+			t.Errorf("%s of OpenCode 1 is still there: %s", key, data)
+		}
+	}
+	mcp := at(config, "mcp")
+	if mcp["egzo"] != nil || mcp["playwright"] != nil {
+		t.Errorf("egzo's servers are still under the old place: %v", mcp)
+	}
+	if mcp["mine"] == nil {
+		t.Errorf("a server of the user's was deleted: %v", mcp)
+	}
+	if servers := at(config, "mcp.servers"); servers["egzo"] == nil || servers["playwright"] == nil {
+		t.Errorf("servers = %v", servers)
 	}
 }
