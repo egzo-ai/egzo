@@ -414,16 +414,19 @@ class Engine:
         }[kind]
         label = ["--filter", f"label={LABEL_PREFIX}project={project}"]
         names = self.run(*listing, *label).stdout.split()
+        if not names:
+            return []
+        inspect = {"container": ["inspect"], "volume": ["volume", "inspect"], "network": ["network", "inspect"]}[kind]
+        # One call for all of them: each one costs a process and an API round trip, and rootless Podman charges dearly for both.
+        # A resource removed since the listing is missing from the answer; what was found is still printed.
         resources = []
-        for name in names:
-            inspect = {"container": ["inspect"], "volume": ["volume", "inspect"], "network": ["network", "inspect"]}[kind]
-            raw = json.loads(self.run(*inspect, name).stdout)[0]
+        for raw in json.loads(self.run(*inspect, *names).stdout):
             if kind == "container":
                 labels = raw.get("Config", {}).get("Labels")
             else:  # podman reports network labels in lowercase
                 labels = raw.get("Labels") or raw.get("labels")
             labels = labels or {}
-            real_name = (raw.get("Name") or raw.get("name") or name).lstrip("/")  # ps -q and ls -q print ids
+            real_name = (raw.get("Name") or raw.get("name") or raw.get("Id", "")).lstrip("/")  # ps -q and ls -q print ids
             resources.append(Resource(kind, real_name, labels, raw))
         return resources
 
