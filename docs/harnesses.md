@@ -60,6 +60,23 @@ agents:
 OpenCode reports idle through a plugin egzo installs. Its provider host must be reachable through the profile like
 any other.
 
+The image carries OpenCode 2 (`@opencode/cli`). For an OpenCode Go subscription, OpenCode reads the key from
+`OPENCODE_API_KEY`; give it a placeholder so the agent never holds the key:
+
+```yaml
+egress:
+  opencode:
+    allow: [models.opencode.ai]
+    services:
+      opencode-go:
+        hosts: [opencode.ai]               # a service's hosts are reachable too
+        secret: main/opencode-go-key
+        placeholder: OPENCODE_API_KEY
+
+agents:
+  open: { harness: opencode, egress: opencode, model: opencode-go/glm-5.3 }
+```
+
 ## Trying two side by side
 
 ```yaml

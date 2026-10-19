@@ -24,7 +24,8 @@ func (openCode) ContainerEnv(bool, bool) map[string]string {
 	return map[string]string{"ANTHROPIC_API_KEY": claudeKey}
 }
 
-// openCodePlugin reports OpenCode's life cycle to the control sidecar as egzo's states.
+// openCodePlugin reports OpenCode's life cycle to the control sidecar as egzo's states. It is an OpenCode 2 plugin: a default
+// export with a setup function, a hook on the prompt and the server's event stream.
 const openCodePlugin = `// Written by egzo: reports this agent's state to the control sidecar. Do not edit.
 const base = process.env.EGZO_CONTROL_URL
 const agent = process.env.EGZO_AGENT
@@ -45,32 +46,34 @@ async function state(name, report) {
   } catch {}
 }
 
-let started = false
-
-export const EgzoPlugin = async () => {
-  // OpenCode only creates a session when the first prompt is sent, so the plugin loading is the
-  // moment the TUI is up and waiting.
-  if (!started) {
-    started = true
+export default {
+  id: "egzo",
+  async setup(ctx) {
+    // The plugin loading is the moment the TUI is up and waiting: OpenCode only creates a session when the first prompt is sent.
     state("idle", { reason: "started" })
-  }
-  return {
-  event: async ({ event }) => {
-    switch (event.type) {
-      case "session.idle":
-        return state("idle", { reason: event.type })
-      case "permission.asked":
-      case "permission.updated":
-        return state("blocked", { reason: "permission" })
-      case "question.asked":
-        return state("blocked", { reason: "question" })
-    }
+    await ctx.session.hook("prompt", (event) => state("working", { reason: "prompt", prompt: event.prompt?.text ?? "" }))
+    const stop = new AbortController()
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
+          switch (event.type) {
+            case "session.idle":
+            case "session.execution.failed":
+            case "session.execution.interrupted":
+              await state("idle", { reason: event.type })
+              break
+            case "permission.asked":
+              await state("blocked", { reason: "permission" })
+              break
+            case "permission.replied":
+              await state("working", { reason: event.type })
+              break
+          }
+        }
+      } catch {}
+    })()
+    return () => stop.abort()
   },
-  "chat.message": async (_input, output) => {
-    const prompt = (output.parts || []).filter((part) => part.type === "text").map((part) => part.text).join("\n")
-    await state("working", { reason: "prompt", prompt })
-  },
-  }
 }
 `
 
@@ -116,7 +119,7 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 	return Plan{
 		Files: map[string]File{
 			configPath: {Content: encoded, Merge: true, Mode: 0o600, Replace: replace},
-			filepath.Join(opts.Home, ".config", "opencode", "plugin", "egzo.js"): {Content: []byte(openCodePlugin)},
+			filepath.Join(opts.Home, ".config", "opencode", "plugins", "egzo.js"): {Content: []byte(openCodePlugin)},
 			opts.InstructionsFile: {Content: instructions},
 		},
 		Command:      command,
