@@ -19,9 +19,12 @@ func (openCode) IdleSignal() string { return "state" }
 // OpenCode's prompt box says "Ask anything…" until the first message.
 func (openCode) ReadyMarkers() []string { return []string{"Ask anything"} }
 
+// openCodeKey is the placeholder OpenCode is given as its OpenCode Go or Console key. It is not a credential either.
+const openCodeKey = "oc_s_egzo-placeholder-0000000000000000000000000000000000"
+
 func (openCode) ContainerEnv(bool, bool) map[string]string {
-	// The proxy replaces the credential of every request to api.anthropic.com.
-	return map[string]string{"ANTHROPIC_API_KEY": claudeKey}
+	// The proxy replaces the credential of every request to api.anthropic.com and to opencode.ai.
+	return map[string]string{"ANTHROPIC_API_KEY": claudeKey, "OPENCODE_API_KEY": openCodeKey}
 }
 
 // openCodePlugin reports OpenCode's life cycle to the control sidecar as egzo's states. It is an OpenCode 2 plugin: a default

@@ -56,7 +56,7 @@ func TestEgressUnknownService(t *testing.T) {
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      anthropc: main/KEY\n",
 		`unknown service "anthropc" (did you mean "anthropic"?)`)
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      kubernetes: main/KEY\n",
-		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, github)`)
+		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, github, opencode)`)
 }
 
 func TestEgressEmptyServiceEntryIsRejected(t *testing.T) {
@@ -273,7 +273,7 @@ func TestValidHost(t *testing.T) {
 }
 
 func TestBuiltinsAreSortedAndComplete(t *testing.T) {
-	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "github"}; !reflect.DeepEqual(got, want) {
+	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "github", "opencode"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("builtinNames = %v, want %v", got, want)
 	}
 	if got, want := HarnessNames(), []string{"claude-code", "custom", "opencode", "pi"}; !reflect.DeepEqual(got, want) {
@@ -358,4 +358,11 @@ agents:
 			}
 		}
 	})
+}
+
+func TestTheOpenCodeServiceIsBuiltInAndSendsABearerTokenToOpenCodeAi(t *testing.T) {
+	service, ok := builtinService("opencode")
+	if !ok || len(service.Hosts) != 1 || service.Hosts[0] != "opencode.ai" || service.Inject.Header != "Authorization" || service.Inject.Value != "Bearer {secret}" {
+		t.Errorf("service = %+v, ok = %v", service, ok)
+	}
 }

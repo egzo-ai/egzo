@@ -522,7 +522,7 @@ egress:
   object replaces the definition entirely. A child cannot remove anything it inherits. One parent
   only; cycles and unknown parents are errors.
 - **Built-in services** ship with egzo as data. `anthropic-oauth` is for a Claude subscription token (`claude setup-token`, `sk-ant-oat…`), sent as `Authorization: Bearer`; the agent then gets `CLAUDE_CODE_OAUTH_TOKEN` instead of `ANTHROPIC_API_KEY`. A token bound to `anthropic`, or an API key to `anthropic-oauth`, is refused at `up`. Initially `anthropic`: `api.anthropic.com` +
-  `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Basic` with the token as password, which git over HTTPS needs), more later
+  `x-api-key`; `github`: `github.com` and `api.github.com` + `Authorization: Basic` with the token as password, which git over HTTPS needs); `opencode`: `opencode.ai` + `Authorization: Bearer`, for the key (a service account's) of an OpenCode Go or Console workspace, and OpenCode agents always get a placeholder `OPENCODE_API_KEY` to make it send one (the model list on `models.opencode.ai` needs no credential), more later
   (openai, google-ai, package registries). An object with a built-in's name replaces it.
   `egzo project check --resolved` prints each profile fully resolved.
 - **ssh servers** (`ssh:` in a profile, a map by name) are the ssh analogue of `inject`: the agent runs `ssh <name>`, the proxy

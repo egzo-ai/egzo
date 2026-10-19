@@ -60,8 +60,8 @@ agents:
 OpenCode reports idle through a plugin egzo installs. Its provider host must be reachable through the profile like
 any other.
 
-The image carries OpenCode 2 (`@opencode/cli`). It reads its key from `OPENCODE_API_KEY`, so give it a placeholder and the
-agent never holds the key:
+The image carries OpenCode 2 (`@opencode/cli`). Bind the key of an OpenCode Go (or Console) workspace to the built-in
+`opencode` service; the agent only holds a placeholder `OPENCODE_API_KEY`:
 
 ```yaml
 vaults:
@@ -69,12 +69,9 @@ vaults:
 
 egress:
   opencode:
-    allow: [models.opencode.ai]
+    allow: [models.opencode.ai]            # the model list; the model calls go to opencode.ai, which the service covers
     services:
-      opencode-go:
-        hosts: [opencode.ai]               # a service's hosts are reachable too
-        secret: main/opencode/go-key
-        placeholder: OPENCODE_API_KEY
+      opencode: main/opencode/go-key
 
 agents:
   open: { harness: opencode, egress: opencode, model: opencode-go/glm-5.3-flash }
@@ -91,7 +88,7 @@ The Console has no page that shows a key to copy. A key is a *service account* o
    member), create a service account. The one this was tested with had the permissions *models: request* and *providers:
    write*, and no others.
 2. The service account gives you an API key (it starts with `oc_s`). Store it in your password manager:
-   `pass insert opencode/go-key`.
+   `pass insert opencode/go-key`, as in the example above.
 
 You can also get a feel for it first with OpenCode itself, in a test agent: `egzo exec <agent> -- opencode auth login opencode`
 offers *OpenCode Console account* (a browser login) and *API key (service account)*. The browser login stores a session in

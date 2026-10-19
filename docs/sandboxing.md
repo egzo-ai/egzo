@@ -23,7 +23,7 @@ egress:
 ```
 
 - `allow`: host names or `*.domain` globs the agent may reach with **no** credential.
-- `services`: hosts that get a secret applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`)
+- `services`: hosts that get a secret applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`, `opencode`)
   needs only the secret: `vault/SECRET` (for a secret named `company/project/token` in a `pass` vault `main`:
   `main/company/project/token`).
 - The agent's reach is `allow` plus the hosts of its services. Without a `default` profile, an agent that names none
@@ -37,6 +37,7 @@ egress:
 |---|---|---|
 | `anthropic` | `api.anthropic.com` | `x-api-key: <secret>` |
 | `anthropic-oauth` | `api.anthropic.com` | `Authorization: Bearer <token>` (a Claude subscription token from `claude setup-token`) |
+| `opencode` | `opencode.ai` | `Authorization: Bearer <key>` (the API key of an OpenCode Go or Console workspace: a service account's) |
 | `github` | `github.com`, `api.github.com` | `Authorization: Basic base64(x-access-token:<secret>)` (git over HTTPS refuses a bearer token) |
 
 Binding a token to the wrong one of the two Anthropic services is refused at `egzo project up`. Claude Code also needs
