@@ -18,6 +18,12 @@ var builtinServices = map[string]ResolvedService{
 		Hosts:  []string{"api.anthropic.com"},
 		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
 	},
+	// The key of an OpenCode Go or Console workspace (a service account's) is a bearer token for the model calls,
+	// which go to opencode.ai (its model list, on models.opencode.ai, takes none).
+	"opencode": {
+		Hosts:  []string{"opencode.ai"},
+		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
+	},
 	// git over HTTPS refuses a bearer token; GitHub takes the token as the password of a Basic credential,
 	// which its API accepts too. This is only what a custom service can say.
 	"github": {

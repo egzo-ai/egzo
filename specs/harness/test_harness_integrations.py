@@ -216,6 +216,9 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     assert configured["model"] == "anthropic/claude-sonnet-5-5" and any("instructions.md" in path for path in configured["instructions"])
     assert "Always answer in rhyme." in read(engine, p, model, "$HOME/.egzo/instructions.md")
 
+    env = env_of(engine, p, default)
+    assert env["OPENCODE_API_KEY"] and env["OPENCODE_API_KEY"] != API_KEY, "a placeholder: the proxy replaces it on opencode.ai"
+
     asked = read_json(engine, p, asks, "$HOME/.config/opencode/opencode.json")
     assert "permissions" not in asked and "permission" not in asked, "permissions: default keeps the prompts"
 
