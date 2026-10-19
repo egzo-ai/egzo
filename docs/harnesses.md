@@ -60,22 +60,42 @@ agents:
 OpenCode reports idle through a plugin egzo installs. Its provider host must be reachable through the profile like
 any other.
 
-The image carries OpenCode 2 (`@opencode/cli`). For an OpenCode Go subscription, OpenCode reads the key from
-`OPENCODE_API_KEY`; give it a placeholder so the agent never holds the key:
+The image carries OpenCode 2 (`@opencode/cli`). It reads its key from `OPENCODE_API_KEY`, so give it a placeholder and the
+agent never holds the key:
 
 ```yaml
+vaults:
+  main: { backend: pass, secrets: [opencode/go-key] }
+
 egress:
   opencode:
     allow: [models.opencode.ai]
     services:
       opencode-go:
         hosts: [opencode.ai]               # a service's hosts are reachable too
-        secret: main/opencode-go-key
+        secret: main/opencode/go-key
         placeholder: OPENCODE_API_KEY
 
 agents:
-  open: { harness: opencode, egress: opencode, model: opencode-go/glm-5.3 }
+  open: { harness: opencode, egress: opencode, model: opencode-go/glm-5.3-flash }
 ```
+
+OpenCode talks to two hosts: `models.opencode.ai` (the model list) and `opencode.ai` (the model calls, under
+`/inference/go/`, and the Console).
+
+### Getting the key for an OpenCode Go subscription
+
+The Console has no page that shows a key to copy. A key is a *service account* of your workspace:
+
+1. In the [Console](https://opencode.ai/console), in the workspace that holds the Go subscription (a Go workspace has one
+   member), create a service account. The one this was tested with had the permissions *models: request* and *providers:
+   write*, and no others.
+2. The service account gives you an API key (it starts with `oc_s`). Store it in your password manager:
+   `pass insert opencode/go-key`.
+
+You can also get a feel for it first with OpenCode itself, in a test agent: `egzo exec <agent> -- opencode auth login opencode`
+offers *OpenCode Console account* (a browser login) and *API key (service account)*. The browser login stores a session in
+the agent's home, which egzo cannot inject; use the key.
 
 ## Trying two side by side
 
