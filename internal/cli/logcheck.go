@@ -128,7 +128,7 @@ func checkLogs(ctx context.Context, c *engine.Client, report func(level, format 
 	} else {
 		probe = &result
 	}
-	for _, f := range logFindings(c.Podman, staticDriver, probe, notTried) {
+	for _, f := range logFindings(c.IsPodman(), staticDriver, probe, notTried) {
 		report(f.Level, "%s", f.Text)
 	}
 }

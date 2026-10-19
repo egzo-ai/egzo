@@ -115,7 +115,7 @@ func firstLine(text string) string {
 
 func checkEngine(ctx context.Context, c *engine.Client, report func(level, format string, a ...any)) {
 	name := "Docker"
-	if c.Podman {
+	if c.IsPodman() {
 		name = "Podman"
 	}
 	version, err := c.API.ServerVersion(ctx)

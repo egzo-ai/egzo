@@ -40,7 +40,7 @@ func AgentUser(c *engine.Client) string { return agentUser(c, os.Getuid(), os.Ge
 // agents that run unprivileged.
 func agentUser(c *engine.Client, uid, gid int) string {
 	switch {
-	case c.Rootless || uid < 0:
+	case c.IsRootless() || uid < 0:
 		return ""
 	case uid == 0:
 		return "1000:1000"

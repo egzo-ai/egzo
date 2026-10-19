@@ -16,10 +16,10 @@ import (
 type Client struct {
 	API  *client.Client
 	Host string
-	// Podman is true when the engine behind the Docker-compatible API is Podman.
-	Podman bool
-	// Rootless is true when the engine runs without root: it maps users itself, like Podman.
-	Rootless bool
+	// Podman and Rootless are what IsPodman and IsRootless answer once they have asked the engine; a Client built by hand
+	// (a test) sets them and is never asked.
+	Podman, Rootless bool
+	facts            *facts
 }
 
 // Connect opens the engine the environment points at, the way the docker CLI does: DOCKER_HOST,

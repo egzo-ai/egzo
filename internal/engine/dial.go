@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/client"
@@ -77,17 +78,42 @@ func probe(ctx context.Context, api *client.Client, hint string) (*Client, error
 		api.Close()
 		return nil, fmt.Errorf("no container engine reachable at %s: %w%s", host, err, hint)
 	}
-	c := &Client{API: api, Host: host}
-	if info, err := api.Info(check); err == nil {
-		for _, option := range info.SecurityOptions {
-			c.Rootless = c.Rootless || strings.Contains(option, "rootless")
-		}
+	return &Client{API: api, Host: host, facts: &facts{}}, nil
+}
+
+// facts is what egzo learns about an engine when it first needs it. The two questions cost an engine a call each, and rootless
+// Podman answers each in about 350 ms (it asks its runtime and conmon for their versions), so a command that needs neither does not ask.
+type facts struct{ info, version sync.Once }
+
+// IsPodman reports whether the engine behind the Docker-compatible API is Podman.
+func (c *Client) IsPodman() bool {
+	if c.facts != nil {
+		c.facts.version.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if version, err := c.API.ServerVersion(ctx); err == nil {
+				c.Podman = strings.Contains(strings.ToLower(version.Platform.Name), "podman")
+				for _, component := range version.Components {
+					c.Podman = c.Podman || strings.Contains(strings.ToLower(component.Name), "podman")
+				}
+			}
+		})
 	}
-	if version, err := api.ServerVersion(check); err == nil {
-		c.Podman = strings.Contains(strings.ToLower(version.Platform.Name), "podman")
-		for _, component := range version.Components {
-			c.Podman = c.Podman || strings.Contains(strings.ToLower(component.Name), "podman")
-		}
+	return c.Podman
+}
+
+// IsRootless reports whether the engine runs without root: it maps users itself, like Podman.
+func (c *Client) IsRootless() bool {
+	if c.facts != nil {
+		c.facts.info.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if info, err := c.API.Info(ctx); err == nil {
+				for _, option := range info.SecurityOptions {
+					c.Rootless = c.Rootless || strings.Contains(option, "rootless")
+				}
+			}
+		})
 	}
-	return c, nil
+	return c.Rootless
 }
