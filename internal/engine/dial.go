@@ -66,11 +66,11 @@ func Dial(ctx context.Context, target Target) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return probe(ctx, api, "")
+	return probe(ctx, api, "", false)
 }
 
 // probe pings the engine and learns what it is. hint is added to the error when nothing answers.
-func probe(ctx context.Context, api *client.Client, hint string) (*Client, error) {
+func probe(ctx context.Context, api *client.Client, hint string, remembered bool) (*Client, error) {
 	host := api.DaemonHost()
 	check, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -78,17 +78,29 @@ func probe(ctx context.Context, api *client.Client, hint string) (*Client, error
 		api.Close()
 		return nil, fmt.Errorf("no container engine reachable at %s: %w%s", host, err, hint)
 	}
-	return &Client{API: api, Host: host, facts: &facts{}}, nil
+	key := ""
+	if remembered {
+		key = rememberKey(host)
+	}
+	return &Client{API: api, Host: host, facts: &facts{key: key}}, nil
 }
 
 // facts is what egzo learns about an engine when it first needs it. The two questions cost an engine a call each, and rootless
 // Podman answers each in about 350 ms (it asks its runtime and conmon for their versions), so a command that needs neither does not ask.
-type facts struct{ info, version sync.Once }
+type facts struct {
+	info, version sync.Once
+	// key says which engine the answers are kept for (see remembered.go); empty when they are not kept.
+	key string
+}
 
 // IsPodman reports whether the engine behind the Docker-compatible API is Podman.
 func (c *Client) IsPodman() bool {
 	if c.facts != nil {
 		c.facts.version.Do(func() {
+			if value, found := recall(c.facts.key, "podman"); found {
+				c.Podman = value
+				return
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			if version, err := c.API.ServerVersion(ctx); err == nil {
@@ -96,6 +108,7 @@ func (c *Client) IsPodman() bool {
 				for _, component := range version.Components {
 					c.Podman = c.Podman || strings.Contains(strings.ToLower(component.Name), "podman")
 				}
+				remember(c.facts.key, "podman", c.Podman)
 			}
 		})
 	}
@@ -106,12 +119,17 @@ func (c *Client) IsPodman() bool {
 func (c *Client) IsRootless() bool {
 	if c.facts != nil {
 		c.facts.info.Do(func() {
+			if value, found := recall(c.facts.key, "rootless"); found {
+				c.Rootless = value
+				return
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			if info, err := c.API.Info(ctx); err == nil {
 				for _, option := range info.SecurityOptions {
 					c.Rootless = c.Rootless || strings.Contains(option, "rootless")
 				}
+				remember(c.facts.key, "rootless", c.Rootless)
 			}
 		})
 	}

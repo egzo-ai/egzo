@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -188,5 +189,63 @@ func TestDialUsesTheDialerItIsGiven(t *testing.T) {
 	defer c.Close()
 	if dialed != "engine.invalid:2375" {
 		t.Errorf("dialed %q", dialed)
+	}
+}
+
+// Each command is a new process, so what the engine said is kept for as long as its socket is the same file.
+func TestWhatTheEngineIsIsRememberedForAsLongAsItsSocketIsTheSameFile(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	var mu sync.Mutex
+	infos := 0
+	counting := http.NewServeMux()
+	counting.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/info") {
+			mu.Lock()
+			infos++
+			mu.Unlock()
+		}
+		answeringEngine().ServeHTTP(w, r)
+	})
+	socket := filepath.Join(t.TempDir(), "engine.sock")
+	serve := func() *http.Server {
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := &http.Server{Handler: counting}
+		go server.Serve(listener)
+		return server
+	}
+	rootless := func() bool {
+		t.Setenv("DOCKER_HOST", "unix://"+socket)
+		c, err := Connect(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		return c.IsRootless()
+	}
+
+	server := serve()
+	if !rootless() || !rootless() || !rootless() {
+		t.Fatal("rootless was not read")
+	}
+	mu.Lock()
+	if infos != 1 {
+		t.Errorf("the engine was asked %d times by three commands, want once", infos)
+	}
+	mu.Unlock()
+
+	server.Close() // the engine restarts: a new socket file
+	os.Remove(socket)
+	server = serve()
+	defer server.Close()
+	if !rootless() {
+		t.Fatal("rootless was not read after the restart")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if infos != 2 {
+		t.Errorf("after the socket was replaced the engine was asked %d times in all, want 2", infos)
 	}
 }
