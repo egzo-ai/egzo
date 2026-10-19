@@ -85,9 +85,11 @@ OpenCode talks to two hosts: `models.opencode.ai` (the model list) and `opencode
 The Console has no page that shows a key to copy. A key is a *service account* of your workspace:
 
 1. In the [Console](https://opencode.ai/console), in the workspace that holds the Go subscription (a Go workspace has one
-   member), create a service account. The one this was tested with had the permissions *models: request* and *providers:
-   write*, and no others.
-2. The service account gives you an API key (it starts with `oc_s`). Store it in your password manager:
+   member), create a service account. The one this was tested with had *models: request* and *providers: write*; *models: request* alone is the safer
+   choice, and has not been tested.
+2. The service account gives you an API key (it starts with `oc_s`). The proxy sends it with every request to `opencode.ai`, the
+   website as well as the model API, so give the account no more than the permission to request models
+   ([why](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md)). Store it in your password manager:
    `pass insert opencode/go-key`, as in the example above.
 
 You can also get a feel for it first with OpenCode itself, in a test agent: `egzo exec <agent> -- opencode auth login opencode`

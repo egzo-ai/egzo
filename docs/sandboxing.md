@@ -69,7 +69,8 @@ such as git over HTTPS. `basic_user` and `value` cannot be combined. The built-i
 ```
 
 A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.
-Rules are by host: a service cannot be limited to a path or a method.
+Rules are by host: a service cannot be limited to a path or a method, so the secret goes with every request to its hosts, including a
+website on the same name (`github.com`, `opencode.ai`): see [the known issue](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md).
 
 Service `hosts` take the patterns `allow` takes (`host`, `*.domain`, `*`), **but only for a service without a secret**: a
 secret binds to exact hosts, because a wildcard would hand it to every subdomain, including ones somebody else controls.
