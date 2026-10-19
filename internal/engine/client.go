@@ -29,8 +29,7 @@ func Connect(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return probe(ctx, api, "\negzo uses the engine DOCKER_HOST points at, like the docker CLI. For rootless Podman: "+
-		"systemctl --user enable --now podman.socket; export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock", true)
+	return probe(ctx, api, "\negzo uses the engine DOCKER_HOST points at, like the docker CLI: set it to the socket of a running engine", true)
 }
 
 func (c *Client) Close() error { return c.API.Close() }

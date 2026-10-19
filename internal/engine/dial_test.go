@@ -253,3 +253,20 @@ func TestWhatTheEngineIsIsRememberedForAsLongAsItsSocketIsTheSameFile(t *testing
 		t.Errorf("after the socket was replaced the engine was asked %d times in all, want 2", infos)
 	}
 }
+
+// Setting up the engine is the user's job, whatever their init system: egzo says where it looked and how to point it elsewhere.
+func TestAnEngineThatDoesNotAnswerIsNotMetWithAdviceOnHowToStartIt(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "none.sock"))
+	_, err := Connect(context.Background())
+	if err == nil {
+		t.Fatal("an engine that does not exist answered")
+	}
+	for _, word := range []string{"systemctl", "systemd", "enable --now"} {
+		if strings.Contains(err.Error(), word) {
+			t.Errorf("the error tells the user how to start an engine (%q): %v", word, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "DOCKER_HOST") {
+		t.Errorf("the error does not say that DOCKER_HOST chooses the engine: %v", err)
+	}
+}
