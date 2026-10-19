@@ -94,8 +94,10 @@ func TestDialAsksWhatTheEngineIsOnlyWhenSomethingNeedsIt(t *testing.T) {
 		t.Errorf("dialing asked %v: the facts are for whoever needs them", asked)
 	}
 	mu.Unlock()
-	if !c.IsRootless() || !c.IsRootless() {
-		t.Error("rootless was not read")
+	for range 2 {
+		if !c.IsRootless() {
+			t.Error("rootless was not read")
+		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -227,8 +229,10 @@ func TestWhatTheEngineIsIsRememberedForAsLongAsItsSocketIsTheSameFile(t *testing
 	}
 
 	server := serve()
-	if !rootless() || !rootless() || !rootless() {
-		t.Fatal("rootless was not read")
+	for range 3 { // three commands
+		if !rootless() {
+			t.Fatal("rootless was not read")
+		}
 	}
 	mu.Lock()
 	if infos != 1 {
