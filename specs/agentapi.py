@@ -23,6 +23,7 @@ class Agent:
         self.engine = engine
         self.project = project
         self.name = name
+        self._container_name = None
 
     def __repr__(self):
         return self.name
@@ -36,7 +37,11 @@ class Agent:
         return self.engine.instance(self.project.name, self.name)
 
     def exec(self, script):
-        return self.engine.exec(self.container.name, "sh", "-c", script)
+        # The container of an instance keeps its name for as long as the instance lives, so it is looked up once: finding it
+        # lists and inspects every container of the project.
+        if self._container_name is None:
+            self._container_name = self.container.name
+        return self.engine.exec(self._container_name, "sh", "-c", script)
 
     def token(self):
         return dict(i.split("=", 1) for i in self.container.raw["Config"]["Env"])["EGZO_TOKEN"]
