@@ -4,11 +4,13 @@ Egzo is early (0.x releases): see [`roadmap/initial-release.md`](../roadmap/init
 still have to be checked against. These pages are quick pointers, not a reference; `egzo <command> --help` and `egzo project check --resolved` are the
 detail, and the executable specs in `specs/` are the status report.
 
-**Start here**
+## Start here
+
 1. [Introduction](intro.md): what egzo is, how it is built, a first run
 2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, `egzo system check`
 
-**Using egzo**
+## Using egzo
+
 3. [The project file](project-file.md): `egzo.yaml` by example
 4. [Managing projects](managing-projects.md): `project up`, `agent spawn`, `agent attach`, `agent rm`, `project down`
 5. [Workspaces](workspaces.md): directories, git worktrees, and what removing an agent deletes
@@ -17,7 +19,8 @@ detail, and the executable specs in `specs/` are the status report.
 8. [Overriding base images](images.md): adding tools to an agent
 9. [Browsing](browser.md): the browser every agent has, and what it may reach
 
-**Safety and problems**
+## Safety and problems
+
 10. [Sandboxing agents](sandboxing.md): writing egress policies
 11. [The security model](security.md): what is enforced and what is not
 12. [Troubleshooting](troubleshooting.md)
