@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -54,11 +55,51 @@ func TestDialAUnixSocketWithoutTheEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if !c.Podman || !c.Rootless {
-		t.Errorf("Podman=%v Rootless=%v: the engine's answers were not read", c.Podman, c.Rootless)
+	if !c.IsPodman() || !c.IsRootless() {
+		t.Errorf("Podman=%v Rootless=%v: the engine's answers were not read", c.IsPodman(), c.IsRootless())
 	}
 	if !strings.HasSuffix(c.Host, "engine.sock") {
 		t.Errorf("host = %q", c.Host)
+	}
+}
+
+// A command that needs neither fact does not pay for them: Podman takes about 350 ms to answer each (rootless).
+func TestDialAsksWhatTheEngineIsOnlyWhenSomethingNeedsIt(t *testing.T) {
+	var mu sync.Mutex
+	asked := map[string]int{}
+	counting := http.NewServeMux()
+	counting.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]++
+		mu.Unlock()
+		answeringEngine().ServeHTTP(w, r)
+	})
+	socket := filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: counting}
+	go server.Serve(listener)
+	defer server.Close()
+
+	c, err := Dial(context.Background(), Target{Host: "unix://" + socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	mu.Lock()
+	if asked["info"]+asked["version"] != 0 {
+		t.Errorf("dialing asked %v: the facts are for whoever needs them", asked)
+	}
+	mu.Unlock()
+	if !c.IsRootless() || !c.IsRootless() {
+		t.Error("rootless was not read")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if asked["info"] != 1 || asked["version"] != 0 {
+		t.Errorf("after IsRootless twice the engine was asked %v: want /info once and no /version", asked)
 	}
 }
 
