@@ -208,7 +208,7 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     assert config["permission"] in ("allow", {"*": "allow"}) or all(v == "allow" for v in config["permission"].values())
     server = config["mcp"]["egzo"]
     assert server["type"] == "remote" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
-    plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugin/egzo.js $HOME/.config/opencode/plugins/egzo.js 2>/dev/null").stdout
+    plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugins/egzo.js").stdout
     assert "session.idle" in plugin
     assert "/v1/state" in plugin and "blocked" in plugin and "working" in plugin and "idle" in plugin
 

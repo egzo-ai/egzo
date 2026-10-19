@@ -221,8 +221,8 @@ func TestOpenCodeModelInstructionsAndControlTools(t *testing.T) {
 func TestOpenCodePluginReportsEgzosStates(t *testing.T) {
 	o := options(t)
 	plan, _ := openCode{}.Plan(o, nil)
-	plugin := string(plan.Files[filepath.Join(o.Home, ".config", "opencode", "plugin", "egzo.js")].Content)
-	for _, want := range []string{`state("idle"`, `"session.idle"`, `state("working"`, `"chat.message"`, `state("blocked"`, `"permission.asked"`, `"question.asked"`, "/v1/state"} {
+	plugin := string(plan.Files[filepath.Join(o.Home, ".config", "opencode", "plugins", "egzo.js")].Content)
+	for _, want := range []string{`state("idle"`, `"session.idle"`, `state("working"`, `hook("prompt"`, `state("blocked"`, `"permission.asked"`, "/v1/state"} {
 		if !strings.Contains(plugin, want) {
 			t.Errorf("the plugin lacks %s", want)
 		}
