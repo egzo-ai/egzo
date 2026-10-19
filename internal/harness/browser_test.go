@@ -243,33 +243,3 @@ func at(config map[string]any, key string) map[string]any {
 	}
 	return object
 }
-
-func TestOpenCodeMovesWhatItsOldVersionWroteToTheNewNames(t *testing.T) {
-	o := withBrowser(options(t), true)
-	path := filepath.Join(o.Home, ".config", "opencode", "opencode.json")
-	os.MkdirAll(filepath.Dir(path), 0o755)
-	old := `{"autoupdate":false,"permission":{"*":"allow"},"mcp":{"egzo":{"type":"remote","url":"http://x/mcp"},"playwright":{"type":"local","command":["egzo","agent","browser"],"enabled":true},"mine":{"type":"local","command":["x"]}}}`
-	os.WriteFile(path, []byte(old), 0o600)
-	plan, _ := openCode{}.Plan(o, nil)
-	if err := plan.Write(); err != nil {
-		t.Fatal(err)
-	}
-	var config map[string]any
-	data, _ := os.ReadFile(path)
-	json.Unmarshal(data, &config)
-	for _, key := range []string{"autoupdate", "permission"} {
-		if _, stale := config[key]; stale {
-			t.Errorf("%s of OpenCode 1 is still there: %s", key, data)
-		}
-	}
-	mcp := at(config, "mcp")
-	if mcp["egzo"] != nil || mcp["playwright"] != nil {
-		t.Errorf("egzo's servers are still under the old place: %v", mcp)
-	}
-	if mcp["mine"] == nil {
-		t.Errorf("a server of the user's was deleted: %v", mcp)
-	}
-	if servers := at(config, "mcp.servers"); servers["egzo"] == nil || servers["playwright"] == nil {
-		t.Errorf("servers = %v", servers)
-	}
-}

@@ -98,10 +98,6 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		"update":       "disable",
 		"share":        "disabled",
 		"instructions": []any{opts.InstructionsFile},
-		// What OpenCode 1 versions of egzo wrote under their old names: the home outlives the agent, and OpenCode 2 would
-		// read both.
-		"autoupdate": nil,
-		"permission": nil,
 	}
 	// The browser's server is egzo's to refresh or delete only when egzo wrote it (a command starting with `egzo agent browser`).
 	configPath := filepath.Join(opts.Home, ".config", "opencode", "opencode.json")
@@ -113,12 +109,7 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 			replace = [][]string{{"mcp", "servers", "playwright"}}
 		}
 	}
-	// The old place of the servers, before OpenCode 2 (mcp.<name>): egzo's own entries there are deleted.
-	legacy := map[string]any{"servers": servers, "egzo": nil}
-	if old, exists := existingServer(configPath, []string{"mcp"}); exists && ownsOpenCodeBrowser(old) {
-		legacy["playwright"] = nil
-	}
-	config["mcp"] = legacy
+	config["mcp"] = map[string]any{"servers": servers}
 	if opts.Bypass {
 		config["permissions"] = []any{map[string]any{"action": "*", "resource": "*", "effect": "allow"}}
 	} else {
