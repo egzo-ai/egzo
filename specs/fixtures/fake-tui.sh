@@ -47,6 +47,12 @@ modes) # a TUI that turns terminal modes on: mouse tracking, bracketed paste, fo
 	printf '\033[?1000h\033[?1006h\033[?2004h\033[?1004h\033[?25l'
 	while :; do sleep 1; done
 	;;
+modes-old) # a TUI that turned the mouse on when it started and has written more since than a client is given as history
+	printf '\033[?1000h\033[?1006h\033[?2004h'
+	head -c 200000 /dev/zero | tr '\0' x
+	printf '\r\nREADY\r\n'
+	while :; do sleep 1; done
+	;;
 emit) # escape sequences a terminal passes on: OSC 52, OSC 8, truecolor, wide characters
 	printf 'READY\r\n'
 	printf '\033]52;c;aGVsbG8=\007'

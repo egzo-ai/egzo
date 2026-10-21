@@ -20,7 +20,7 @@ import pytest
 from support import agent, custom, spec
 
 CTRL_RIGHT_BRACKET = "\x1d"
-MODES = ["cat", "resize", "env", "sigint", "lines", "emit", "draw", "modes", "exit"]
+MODES = ["cat", "resize", "env", "sigint", "lines", "emit", "draw", "modes", "modes-old", "exit"]
 
 
 @pytest.fixture(scope="module")
@@ -173,6 +173,17 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
     modes.close()
     for off in (b"\x1b[?1000l", b"\x1b[?1006l", b"\x1b[?2004l", b"\x1b[?1004l", b"\x1b[?25h"):
         assert off in tail, f"{off!r} missing after detach: {tail!r}"
+
+    # ... and a client that attaches later, after the program has written more than the history holds, is put in those modes: it
+    # is told what the program turned on when it started, so a browser terminal sends the mouse to the program instead of selecting
+    old = p.spawn("modes-old")
+    early = p.pty("agent attach", old)
+    early.expect(b"READY", timeout=60)
+    detach(early)
+    late = p.pty("agent attach", old)
+    late.expect(b"READY", timeout=60)
+    late.expect(rb"\x1b\[\?1000h\x1b\[\?1006h\x1b\[\?2004h", timeout=10)
+    detach(late)
 
     # when the program exits, attach exits and the instance is exited
     lines = p.spawn("lines")
