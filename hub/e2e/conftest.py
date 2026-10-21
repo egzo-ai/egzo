@@ -64,6 +64,15 @@ def browser_context_args(browser_context_args):
     return {**browser_context_args, "viewport": {"width": 1100, "height": 800}}
 
 
+# The WebGL renderer draws to a canvas; the tests read the terminal's text from the DOM renderer's rows.
+DOM_RENDERER = 'try { localStorage.setItem("egzo.renderer", "dom") } catch (e) {}'
+
+
+@pytest.fixture(autouse=True)
+def dom_terminal_renderer(context):
+    context.add_init_script(DOM_RENDERER)
+
+
 def sign_in(page, server, name):
     """Log in through the test provider as `name`."""
     page.goto(server.url + "/login")
@@ -81,6 +90,7 @@ def new_person(browser, hub):
     def make(name, server=None):
         context = browser.new_context(viewport={"width": 1100, "height": 800})
         contexts.append(context)
+        context.add_init_script(DOM_RENDERER)
         page = context.new_page()
         sign_in(page, server or hub, name)
         return page
