@@ -142,6 +142,16 @@ func TestAClientArrivingLateGetsWhatTheProgramWroteBefore(t *testing.T) {
 	late.waitFor("READYhistory")
 }
 
+func TestAClientArrivingLateGetsTheModesTheProgramSetLongAgo(t *testing.T) {
+	// the program turns mouse tracking on once, then writes more than the history keeps
+	_, path := startHolder(t, "printf '\\033[?1000h\\033[?1006h\\033[?2004h\\033[?1000l'; head -c 200000 /dev/zero | tr '\\0' a; printf END; sleep 30")
+	first := connect(t, path, true, 24, 80)
+	first.waitFor("END")
+	late := connect(t, path, true, 24, 80)
+	late.waitFor("END")
+	late.waitFor("\x1b[?1000l\x1b[?1006h\x1b[?2004h")
+}
+
 func TestAReadOnlyClientSeesEverythingAndTypesNothing(t *testing.T) {
 	_, path := startHolder(t, rawCat)
 	writer := connect(t, path, false, 24, 80)

@@ -39,7 +39,8 @@ type Holder struct {
 	clients    map[*client]bool
 	lastHuman  time.Time // the last time a read-write client typed
 	lastOutput time.Time
-	tail       []byte // the program's most recent output, for acknowledging injected text
+	tail       []byte      // the program's most recent output, for acknowledging injected text
+	modes      modeTracker // the input modes the program has turned on, from all its output and not just the tail
 	wrote      bool
 	rows, cols int
 
@@ -197,6 +198,7 @@ func (h *Holder) pump() {
 			h.mu.Lock()
 			h.lastOutput = time.Now()
 			h.wrote = true
+			h.modes.feed(chunk)
 			h.tail = append(h.tail, chunk...)
 			if len(h.tail) > 2*tailSize {
 				// trimmed in one step per tailSize bytes written, not on every chunk
@@ -270,6 +272,11 @@ func (h *Holder) handle(conn net.Conn) {
 	}
 	if recent := h.recent(); len(recent) > 0 {
 		c.enqueue(frameOutput, recent)
+	}
+	// The modes follow the history: a program sets them when it starts, which the history may no longer reach, and they
+	// must end up as the program left them.
+	if modes := h.modes.replay(); len(modes) > 0 {
+		c.enqueue(frameOutput, modes)
 	}
 	h.clients[c] = true
 	h.mu.Unlock()
