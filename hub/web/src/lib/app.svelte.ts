@@ -13,6 +13,7 @@ export const app = $state({
   offline: false,
   theme: "system" as "system" | "dark" | "light",
   singleKeys: true,
+  renderer: "auto" as "auto" | "dom",
   keyref: false,
   palette: false,
 });
@@ -92,6 +93,16 @@ export function setSingleKeys(on: boolean): void {
   }
 }
 
+/** The terminal renderer: "auto" is WebGL where the browser has it, "dom" never uses it. */
+export function setRenderer(r: "auto" | "dom"): void {
+  app.renderer = r;
+  try {
+    localStorage.setItem("egzo.renderer", r);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Where the login sends the browser back to. */
 export function toLogin(): void {
   if (nav.route.name === "login") return;
@@ -104,6 +115,7 @@ export async function boot(): Promise<void> {
     const t = localStorage.getItem("egzo.theme");
     if (t === "dark" || t === "light") app.theme = t;
     app.singleKeys = localStorage.getItem("egzo.singlekeys") !== "0";
+    if (localStorage.getItem("egzo.renderer") === "dom") app.renderer = "dom";
   } catch {
     /* ignore */
   }
