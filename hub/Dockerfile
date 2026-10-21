@@ -1,6 +1,6 @@
 # The hub image. The build context is the repository root (docker build -f hub/Dockerfile .): the hub module requires core
 # from ../ (see roadmap/hub.md).
-ARG GO_VERSION=1.27.2
+ARG GO_VERSION=1.27.3
 
 FROM docker.io/library/node:22-alpine AS web
 WORKDIR /src/hub/web
