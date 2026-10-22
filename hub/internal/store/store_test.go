@@ -329,9 +329,12 @@ func TestSessionsOfAFormerIssuerAndPasswordSessionsEndInBulk(t *testing.T) {
 	oldSession, _ := s.NewSession(ctx, admin.ID, MethodIdentity, old.ID, time.Hour)
 	currentSession, _ := s.NewSession(ctx, admin.ID, MethodIdentity, current.ID, time.Hour)
 	password, _ := s.NewSession(ctx, admin.ID, MethodPassword, "", time.Hour)
-	issuers, err := s.EndSessionsNotAt(ctx, issuer)
+	issuers, ended, err := s.EndSessionsNotAt(ctx, issuer)
 	if err != nil || len(issuers) != 1 || issuers[0] != "https://old.example.com" {
 		t.Fatalf("issuers = %v %v", issuers, err)
+	}
+	if len(ended) != 1 || ended[0] != HashToken(oldSession) {
+		t.Errorf("sessions of the former issuer ended: %v", ended)
 	}
 	if _, err := s.SessionUser(ctx, oldSession); err == nil {
 		t.Error("a session of the former issuer survived")
