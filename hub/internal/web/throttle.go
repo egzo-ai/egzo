@@ -11,6 +11,7 @@ import (
 type throttle struct {
 	mu       sync.Mutex
 	accounts map[string]*failures
+	pruned   time.Time
 	now      func() time.Time
 }
 
@@ -22,6 +23,10 @@ type failures struct {
 const (
 	freeFailures = 3
 	maxWait      = time.Minute
+	// maxAccounts bounds the memory that guesses at made-up usernames take. When it is reached the account quiet the longest is
+	// forgotten. Pushing out an account under attack would take this many attempts at other names since its last one, which at
+	// the rate the hub checks passwords (two at a time) is several minutes: much longer than the longest wait.
+	maxAccounts = 10_000
 )
 
 func newThrottle() *throttle { return &throttle{accounts: map[string]*failures{}, now: time.Now} }
@@ -47,18 +52,36 @@ func (t *throttle) try(account string) time.Duration {
 			return wait
 		}
 	}
-	for k, f := range t.accounts { // forget accounts quiet for an hour
-		if now.Sub(f.last) > time.Hour {
-			delete(t.accounts, k)
-		}
-	}
 	if f == nil {
+		t.makeRoom(now)
 		f = &failures{}
 		t.accounts[account] = f
 	}
 	f.n++
 	f.last = now
 	return 0
+}
+
+// makeRoom forgets accounts quiet for an hour, once a minute at most, and the one quiet the longest when there are too many.
+func (t *throttle) makeRoom(now time.Time) {
+	if now.Sub(t.pruned) > time.Minute {
+		t.pruned = now
+		for k, f := range t.accounts {
+			if now.Sub(f.last) > time.Hour {
+				delete(t.accounts, k)
+			}
+		}
+	}
+	if len(t.accounts) < maxAccounts {
+		return
+	}
+	oldest := ""
+	for k, f := range t.accounts {
+		if oldest == "" || f.last.Before(t.accounts[oldest].last) {
+			oldest = k
+		}
+	}
+	delete(t.accounts, oldest)
 }
 
 func (t *throttle) reset(account string) {
