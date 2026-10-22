@@ -472,7 +472,8 @@ func TestTheLoginNextAddressStaysOnTheHub(t *testing.T) {
 	r := newRig(t)
 	b := r.browser()
 	b.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	for _, next := range []string{"https://evil.example/", "//evil.example/", "/\\evil.example"} {
+	// browsers drop tabs and newlines from a URL, so "/<tab>/evil.example" is "//evil.example" to them
+	for _, next := range []string{"https://evil.example/", "//evil.example/", "/\\evil.example", "/\t/evil.example", "/\n/evil.example", "/\r/evil.example", "/\x00/evil.example"} {
 		resp, err := b.client.Get(b.base + "/login/start?next=" + url.QueryEscape(next))
 		if err != nil {
 			t.Fatal(err)

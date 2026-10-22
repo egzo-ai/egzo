@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/egzo-ai/egzo/hub/internal/auth"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
@@ -166,9 +167,12 @@ func (s *Server) cookie(r *http.Request, name, value string, ttl time.Duration) 
 	return &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.urls.Secure(r), MaxAge: int(ttl.Seconds())}
 }
 
-// safeNext only lets a path of this hub through: a login link must not become an open redirect.
+// safeNext only lets a path of this hub through: a login link must not become an open redirect. Control characters are refused
+// as well as backslashes: browsers drop tabs and newlines from a URL, so "/<tab>/evil.example" would be "//evil.example" to them.
 func safeNext(next string) string {
-	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "\\") {
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") ||
+		strings.Contains(next, "\\") || strings.IndexFunc(next, unicode.IsControl) >= 0 {
 		return "/"
 	}
 	return next
