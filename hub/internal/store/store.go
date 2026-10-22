@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -479,18 +478,9 @@ func insertIdentity(ctx context.Context, tx *sql.Tx, userID, issuer, subject str
 
 // LoginIdentity signs in with an identity. Found and enabled: its snapshot and the times are refreshed. Found and disabled:
 // ErrDisabled, and nothing is written. Not found: a new user is made, with no access, and the identity is theirs (created is set).
-// identityID is the identity signed in with, for the session.
-func (s *Store) LoginIdentity(ctx context.Context, issuer, subject string, p Profile) (user User, identityID string, created bool, err error) {
-	for attempt := 0; ; attempt++ {
-		user, identityID, created, err = s.loginIdentity(ctx, issuer, subject, p)
-		// two first logins at once: the unique index refused one; the retry finds what the other made
-		if err == nil || attempt == 2 || !isConstraint(err) {
-			return user, identityID, created, err
-		}
-	}
-}
-
-func (s *Store) loginIdentity(ctx context.Context, issuer, subject string, p Profile) (User, string, bool, error) {
+// identityID is the identity signed in with, for the session. Two first logins at once cannot both make a user: the store has one
+// connection, which the transaction holds from the lookup to the insert.
+func (s *Store) LoginIdentity(ctx context.Context, issuer, subject string, p Profile) (User, string, bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return User{}, "", false, err
@@ -530,10 +520,6 @@ func (s *Store) loginIdentity(ctx context.Context, issuer, subject string, p Pro
 	}
 	user, err := s.User(ctx, userID)
 	return user, identityID, created, err
-}
-
-func isConstraint(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // IdentityTakenError is returned when an identity to link belongs to somebody else.
