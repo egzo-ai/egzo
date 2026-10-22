@@ -228,7 +228,7 @@ func (s *Server) passwordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := strings.ToLower(strings.TrimSpace(body.Username))
-	if wait := s.limit.wait(key); wait > 0 {
+	if wait := s.limit.try(key); wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+1)))
 		s.apiFail(w, http.StatusTooManyRequests, "too_many", fmt.Sprintf("Too many failed sign-ins. Try again in %d seconds.", int(wait.Seconds()+1)))
 		return
@@ -236,7 +236,6 @@ func (s *Server) passwordLogin(w http.ResponseWriter, r *http.Request) {
 	user, err := s.hub.PasswordLogin(r.Context(), strings.TrimSpace(body.Username), body.Password)
 	if err != nil {
 		if errors.Is(err, hub.ErrBadLogin) {
-			s.limit.fail(key)
 			s.apiFail(w, http.StatusUnauthorized, "bad_login", "Wrong username or password.")
 			return
 		}
