@@ -34,33 +34,31 @@ func (t *throttle) delay(n int) time.Duration {
 	return min(d, maxWait)
 }
 
-// wait is how long the account must still wait before its next try.
-func (t *throttle) wait(account string) time.Duration {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	f := t.accounts[account]
-	if f == nil {
-		return 0
-	}
-	return max(f.last.Add(t.delay(f.n)).Sub(t.now()), 0)
-}
-
-func (t *throttle) fail(account string) {
+// try counts an attempt at the account before its password is checked, and is how long the account must still wait when it is
+// refused (0 when the attempt may go ahead). Counting first is what makes the delay hold against attempts sent all at once: each
+// one sees the ones before it, though none has finished. A success resets the count.
+func (t *throttle) try(account string) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
+	f := t.accounts[account]
+	if f != nil {
+		if wait := f.last.Add(t.delay(f.n)).Sub(now); wait > 0 {
+			return wait
+		}
+	}
 	for k, f := range t.accounts { // forget accounts quiet for an hour
 		if now.Sub(f.last) > time.Hour {
 			delete(t.accounts, k)
 		}
 	}
-	f := t.accounts[account]
 	if f == nil {
 		f = &failures{}
 		t.accounts[account] = f
 	}
 	f.n++
 	f.last = now
+	return 0
 }
 
 func (t *throttle) reset(account string) {
