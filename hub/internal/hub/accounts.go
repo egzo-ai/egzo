@@ -125,8 +125,9 @@ func (h *Hub) savePassword(ctx context.Context, userID, password string) error {
 	return err
 }
 
-// PasswordLogin signs in with a username and a password. Every failure is ErrBadLogin and costs the same time, and is written to
-// the audit log.
+// PasswordLogin signs in with a username and a password. Every failure is ErrBadLogin and costs the same time. A failure for a
+// user is written to the audit log; one for a username nobody has only to the hub's log, as anyone can send as many of those as
+// they like.
 func (h *Hub) PasswordLogin(ctx context.Context, username, password string) (store.User, error) {
 	if !h.signIn.LocalLogin {
 		return store.User{}, ErrNoLocalLogin
@@ -143,11 +144,14 @@ func (h *Hub) PasswordLogin(ctx context.Context, username, password string) (sto
 		auth.CheckNoPassword(password)
 	}
 	if !ok || user.Disabled() {
-		actor := "hub"
-		if user.ID != "" {
-			actor = rbac.Actor(user.ID)
+		if user.ID == "" {
+			if len(username) > 64 {
+				username = username[:64] + "..."
+			}
+			h.log.Info("password sign-in refused: no such user", "username", username)
+		} else {
+			_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: fmt.Sprintf("refused: password for %q", user.Username)})
 		}
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: actor, Action: "user.signin", Detail: fmt.Sprintf("refused: password for %q", username)})
 		return store.User{}, ErrBadLogin
 	}
 	if err := h.store.MarkLogin(ctx, user.ID); err != nil {

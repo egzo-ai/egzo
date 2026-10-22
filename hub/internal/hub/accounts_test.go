@@ -84,7 +84,7 @@ func TestTheStarterAccountIsRepairedAtStart(t *testing.T) {
 	}
 }
 
-func TestEveryFailedPasswordSignInAnswersTheSameAndIsAudited(t *testing.T) {
+func TestEveryFailedPasswordSignInAnswersTheSameAndOnesForAUserAreAudited(t *testing.T) {
 	r := newRig(t)
 	r.login("alice")
 	for _, c := range []struct{ user, password string }{{"admin", "wrong"}, {"nobody", "admin-password"}, {"alice", "anything"}} {
@@ -99,7 +99,7 @@ func TestEveryFailedPasswordSignInAnswersTheSameAndIsAudited(t *testing.T) {
 			refused++
 		}
 	}
-	if refused != 3 {
+	if refused != 2 { // admin and alice; not nobody, who does not exist
 		t.Errorf("refusals audited: %d", refused)
 	}
 }
