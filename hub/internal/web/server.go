@@ -170,12 +170,13 @@ func (s *Server) cookie(r *http.Request, name, value string, ttl time.Duration) 
 // safeNext only lets a path of this hub through: a login link must not become an open redirect. Control characters are refused
 // as well as backslashes: browsers drop tabs and newlines from a URL, so "/<tab>/evil.example" would be "//evil.example" to them.
 func safeNext(next string) string {
-	u, err := url.Parse(next)
-	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") ||
-		strings.Contains(next, "\\") || strings.IndexFunc(next, unicode.IsControl) >= 0 {
-		return "/"
+	if len(next) > 1 && next[0] == '/' && next[1] != '/' && next[1] != '\\' &&
+		!strings.Contains(next, "\\") && strings.IndexFunc(next, unicode.IsControl) < 0 {
+		if u, err := url.Parse(next); err == nil && u.Scheme == "" && u.Host == "" {
+			return next
+		}
 	}
-	return next
+	return "/"
 }
 
 func (s *Server) loginStart(w http.ResponseWriter, r *http.Request) {
