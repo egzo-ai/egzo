@@ -111,12 +111,12 @@ func printPassword(password string) {
 ==================================================================
   egzo hub: the starter account was given a password.
 
-    username: admin
+    username: %s
     password: %s
 
   It is shown this once. To choose it instead, or to reset it,
   set EGZO_ADMIN_PASSWORD and restart.
 ==================================================================
 
-`, password)
+`, store.StarterUsername, password)
 }
