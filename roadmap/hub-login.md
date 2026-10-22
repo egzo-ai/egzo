@@ -108,7 +108,8 @@ The starter account's username is `admin`, set directly and not generated.
   every case.
 - **Brute force.** Basic: a per-account delay that grows after failures, kept in memory. No per-address limit and no lockout. It
   can be used to slow the operator's own sign-in, which is accepted: the hub is not meant to be reachable from the internet.
-  Failures go to the audit log.
+  Failures for a user go to the audit log; failures for a username nobody has go only to the hub's log, so anyone who can
+  reach the login cannot fill the audit log.
 - **Cookies and CSRF** as the OIDC path already does: `SameSite=Lax`, `Secure` when the public URL is https.
 
 ## Signing in with SSO
