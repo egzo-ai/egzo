@@ -2,7 +2,7 @@
   import { api } from "../lib/api";
   import { errorText, toast } from "../lib/app.svelte";
   import { ask } from "../lib/confirm.svelte";
-  import { initials } from "../lib/format";
+  import PersonCell from "./PersonCell.svelte";
   import type { Members, Role } from "../lib/types";
 
   let { engine, project, data, reload }: { engine: string; project: string; data: Members; reload: () => Promise<void> } = $props();
@@ -48,20 +48,20 @@
       {#each data.members as m (m.user.id)}
         {@const me = m.user.id === data.me}
         <tr data-user={m.user.id} data-dim={m.operator ? "" : undefined} data-operator={m.operator ? "" : undefined}>
-          <td><span class="presence"><span class="avatar" data-me={me ? "" : undefined}>{initials(m.user.name)}</span>{m.user.name}</span> <span class="muted">{m.user.email}</span></td>
+          <td><PersonCell user={m.user} {me} /></td>
           {#if m.operator}
             <td><span class="badge" title="An operator holds every project. This is not a role: change it under Settings, Users.">operator</span></td>
             <td class="actions"><span class="muted">{me ? "you · " : ""}holds every project</span></td>
           {:else}
           <td>
             <span class="btn-group">
-              <select class="select" style="width:auto" aria-label="Role of {m.user.name}" disabled={me} value={chosen[m.user.id] ?? m.role} onchange={(e) => (chosen[m.user.id] = e.currentTarget.value as Role)}>
+              <select class="select" style="width:auto" aria-label="Role of {m.user.username}" disabled={me} value={chosen[m.user.id] ?? m.role} onchange={(e) => (chosen[m.user.id] = e.currentTarget.value as Role)}>
                 {#each data.roles as r}<option value={r}>{r}</option>{/each}
               </select>
-              {#if !me}<button class="btn" data-size="sm" disabled={(chosen[m.user.id] ?? m.role) === m.role} onclick={() => change(m.user.id, m.user.name, m.role)}>Change</button>{/if}
+              {#if !me}<button class="btn" data-size="sm" disabled={(chosen[m.user.id] ?? m.role) === m.role} onclick={() => change(m.user.id, m.user.username, m.role)}>Change</button>{/if}
             </span>
           </td>
-          <td class="actions">{#if !me}<button class="btn" data-variant="danger" data-size="sm" aria-label="Remove {m.user.name}" onclick={() => remove(m.user.id, m.user.name)}>Remove</button>{:else}<span class="muted">you</span>{/if}</td>
+          <td class="actions">{#if !me}<button class="btn" data-variant="danger" data-size="sm" aria-label="Remove {m.user.username}" onclick={() => remove(m.user.id, m.user.username)}>Remove</button>{:else}<span class="muted">you</span>{/if}</td>
           {/if}
         </tr>
       {/each}
@@ -77,7 +77,7 @@
         <div class="field"><label for="m-person">Person</label>
           <select id="m-person" class="select" bind:value={addUser} required>
             <option value="" disabled>Choose…</option>
-            {#each data.candidates as c}<option value={c.id}>{c.name} ({c.email})</option>{/each}
+            {#each data.candidates as c}<option value={c.id}>{c.username}{c.name && c.name !== c.username ? ` · ${c.name}` : ""}{c.email ? ` (${c.email})` : ""}</option>{/each}
           </select></div>
         <div class="field"><label for="m-role">Role</label>
           <select id="m-role" class="select" bind:value={addRole}>{#each data.roles as r}<option value={r}>{r}</option>{/each}</select></div>

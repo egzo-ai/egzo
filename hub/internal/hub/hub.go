@@ -41,6 +41,7 @@ type Hub struct {
 	feeds    *feedManager           // the status followers and event watchers; nil until StartFeeds
 	pubMu    sync.Mutex
 	pub      map[projectKey]*publishedEntry
+	signIn   SignInOptions // set by SetupSignIn
 }
 
 type engineScan struct {
@@ -156,18 +157,6 @@ func (h *Hub) reconcileFeeds(engineNames []string) {
 	}
 	h.mu.RUnlock()
 	m.reconcile(scanned, engineNames)
-}
-
-// Login records a successful login. The first user becomes an operator.
-func (h *Hub) Login(ctx context.Context, identity, email, name string) (store.User, error) {
-	user, created, err := h.store.LoginUser(ctx, identity, email, name)
-	if err != nil {
-		return store.User{}, err
-	}
-	if created && user.IsOperator {
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.operator", Detail: "the first login is an operator", Allowed: true})
-	}
-	return user, nil
 }
 
 // EngineView is one engine and what the last scan found on it.

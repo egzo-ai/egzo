@@ -19,6 +19,7 @@
       out.push({ group: "Go to", label: "Engines", run: () => { showPage(); navigate(href.engines()); } });
       out.push({ group: "Go to", label: "Users", run: () => { showPage(); navigate(href.users()); } });
     }
+    out.push({ group: "Go to", label: "Your account", run: () => { showPage(); navigate(href.account()); } });
     for (const p of app.projects) {
       out.push({ group: "Projects", label: p.name, hint: multi ? p.engine : "", run: () => { showPage(); navigate(href.project(p.engine, p.name)); } });
       for (const a of p.agents) {

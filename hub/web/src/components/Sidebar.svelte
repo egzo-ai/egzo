@@ -2,7 +2,7 @@
   import { app, multiEngine, signOut, toggleTheme } from "../lib/app.svelte";
   import { href, nav } from "../lib/router.svelte";
   import { closeTerm, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
-  import { initials } from "../lib/format";
+  import Avatar from "./Avatar.svelte";
   import EngineBadge from "./EngineBadge.svelte";
   import Icon from "./Icon.svelte";
   import Logo from "./Logo.svelte";
@@ -191,9 +191,9 @@
       </div>
     {/if}
     <div class="row">
-      <span class="me" data-testid="signed-in-as" title={app.user?.email}>
-        <span class="avatar" data-me>{initials(app.user?.name ?? "")}</span><span class="t">{app.user?.name}{#if app.user?.isOperator}&nbsp;· operator{/if}</span>
-      </span>
+      <a class="me" data-testid="signed-in-as" href={href.account()} title="Your account" onclick={showPage}>
+        {#if app.user}<Avatar user={app.user} me />{/if}<span class="t">{app.user?.username}{#if app.user?.isOperator}&nbsp;· operator{/if}</span>
+      </a>
       <span class="grow"></span>
       <button class="btn hide-rail" data-variant="quiet" data-size="sm" data-icon-only aria-label="Switch theme" onclick={toggleTheme}><Icon name="sun" /></button>
       <button class="btn hide-rail" data-variant="quiet" data-size="sm" data-icon-only aria-label="Sign out" title="Sign out" onclick={onsignout}><Icon name="signout" /></button>

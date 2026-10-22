@@ -78,8 +78,12 @@ func run(scenario string) error {
 	provider := oidctest.New(issuer, "hub", "secret")
 	go http.Serve(providerListener, provider.Handler())
 
+	// the starter account signs in with this password; everyone else through the test provider
+	if _, err := h.SetupSignIn(ctx, hub.SignInOptions{LocalLogin: true, AdminPassword: "e2e-admin-password", Issuer: issuer}); err != nil {
+		return err
+	}
 	urls, _ := publicurl.New("", nil)
-	app, err := web.New(h, auth.New(auth.Config{Issuer: issuer, ClientID: "hub", ClientSecret: "secret"}), urls, nil)
+	app, err := web.New(h, auth.New(auth.Config{Issuer: issuer, ClientID: "hub", ClientSecret: "secret"}), web.Options{SSOName: "Test login"}, urls, nil)
 	if err != nil {
 		return err
 	}
@@ -162,7 +166,7 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			users, _ := db.Users(ctx)
 			granted := false
 			for _, u := range users {
-				if u.Name == c.User {
+				if u.Username == c.User {
 					db.SetRole(ctx, c.Engine, c.Project, u.ID, rbac.Role(c.Role))
 					granted = true
 				}

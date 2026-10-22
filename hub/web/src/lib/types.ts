@@ -2,11 +2,35 @@
 
 export type Role = "user" | "administrator" | "owner";
 
+/** A person: the username the hub chose, then what their login provider says (display only, from their latest sign-in). */
 export interface User {
   id: string;
+  username: string;
   name: string;
   email: string;
+  emailVerified: boolean;
+  /** An https address the browser fetches, or "". */
+  picture: string;
   isOperator: boolean;
+  disabled: boolean;
+}
+
+/** One account at a login provider. `current` is false for an account of a former provider: it cannot sign in. */
+export interface Identity {
+  id: string;
+  issuer: string;
+  email: string;
+  name: string;
+  current: boolean;
+  lastLoginAt: string;
+}
+
+/** The ways in the sign-in page offers. */
+export interface SignInOptions {
+  local: boolean;
+  /** What the single sign-on button says; "" without single sign-on. */
+  sso: string;
+  redirect?: string;
 }
 
 export interface EngineState {
@@ -19,6 +43,12 @@ export interface EngineState {
 export interface Session {
   user: User;
   engines: EngineState[];
+  identities: Identity[];
+  /** Signs in with a password (the starter account, while local login is on). */
+  hasPassword: boolean;
+  /** What single sign-on is called; "" without it. */
+  sso: string;
+  issuer: string;
 }
 
 /** One agent, as the project list and the sidebar know it (from the last scan). */
@@ -113,6 +143,9 @@ export interface Member {
 /** A person who has signed in, as the Users page lists them. */
 export interface UserRow extends User {
   createdAt: string;
+  lastLoginAt: string | null;
+  hasPassword: boolean;
+  identities: Identity[];
 }
 
 export interface Members {

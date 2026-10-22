@@ -2,7 +2,7 @@ import re
 
 from playwright.sync_api import expect
 
-from conftest import sign_in
+from conftest import ADMIN_PASSWORD, sign_in
 
 
 def projects_table(page):
@@ -26,8 +26,8 @@ def terminal_state(page, agent="coder-1"):
     return page.locator(f".tpane[aria-label='Terminal of {agent}']").get_by_test_id("terminal-state")
 
 
-def test_the_first_person_to_sign_in_is_the_operator_and_sees_every_project(hub, page):
-    sign_in(page, hub, "root")
+def test_the_starter_account_is_the_operator_and_sees_every_project(hub, page):
+    sign_in(page, hub, "admin")
     expect(page.get_by_test_id("signed-in-as")).to_contain_text("operator")
     expect(page.get_by_role("heading", name="Projects")).to_be_visible()
     expect(projects_table(page).locator("tbody tr")).to_have_count(4)  # web and data on local, web and ml on lab
@@ -39,14 +39,14 @@ def test_the_first_person_to_sign_in_is_the_operator_and_sees_every_project(hub,
 
 
 def test_with_one_engine_there_is_no_engine_badge_and_no_filter(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     expect(projects_table(page).locator("tbody tr")).to_have_count(2)
     expect(page.locator(".engine")).to_have_count(0)
     expect(page.locator(".chips")).to_have_count(0)
 
 
 def test_the_engine_chips_filter_the_list(hub, page):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     page.locator(".chips .chip", has_text="lab").click()
     expect(projects_table(page).locator("tbody tr")).to_have_count(2)
     expect(projects_table(page).get_by_role("link", name="ml")).to_be_visible()
@@ -57,7 +57,7 @@ def test_the_engine_chips_filter_the_list(hub, page):
 
 
 def test_an_engine_that_is_down_is_reported_without_losing_the_others(hub, page):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     hub.world("down", engine="lab")
     expect(page.get_by_role("alert")).to_contain_text("lab is unreachable", timeout=8000)  # the hub rescans every second, the page asks every three
     expect(projects_table(page).get_by_role("link", name="data")).to_be_visible()
@@ -67,7 +67,7 @@ def test_an_engine_that_is_down_is_reported_without_losing_the_others(hub, page)
 
 
 def test_a_newcomer_sees_nothing_until_an_owner_adds_them(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     alice = new_person("alice")
     expect(alice.get_by_text("have a role on any project")).to_be_visible()
     alice.goto(hub.url + "/e/local/p/web")
@@ -89,7 +89,7 @@ def test_a_newcomer_sees_nothing_until_an_owner_adds_them(hub, page, new_person)
 
 
 def test_an_owner_cannot_remove_themselves_and_an_operator_is_a_locked_row(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     alice = new_person("alice")
     hub.world("grant", engine="local", project="web", user="alice", role="owner")
     alice.goto(hub.url + "/e/local/p/web/members")
@@ -99,14 +99,14 @@ def test_an_owner_cannot_remove_themselves_and_an_operator_is_a_locked_row(hub, 
     # the operator holds the project without a role: listed, shaded, and nothing to change
     locked = alice.locator("tr[data-operator]")
     expect(locked).to_have_count(1)
-    expect(locked).to_contain_text("root")
+    expect(locked).to_contain_text("admin")
     expect(locked).to_contain_text("operator")
     expect(locked.get_by_role("button")).to_have_count(0)
     expect(locked.get_by_role("combobox")).to_have_count(0)
 
 
 def test_removing_a_member_asks_first(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     new_person("alice")
     hub.world("grant", engine="local", project="web", user="alice", role="user")
     page.goto(hub.url + "/e/local/p/web/members")
@@ -120,7 +120,7 @@ def test_removing_a_member_asks_first(hub, page, new_person):
 
 
 def test_spawn_stop_start_and_remove_an_agent(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     projects_table(page).get_by_role("link", name="web").click()
     spawn(page, "fix-bug", "reviewer")
     expect(page.get_by_role("status")).to_contain_text("Spawned fix-bug")
@@ -145,7 +145,7 @@ def test_spawn_stop_start_and_remove_an_agent(single_hub, page):
 
 
 def test_the_page_follows_the_agent_without_reloading(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     projects_table(page).get_by_role("link", name="web").click()
     row = page.locator("tr[data-agent=coder-1]")
     expect(row).to_contain_text("refactoring the parser on local")
@@ -163,7 +163,7 @@ def test_the_page_follows_the_agent_without_reloading(single_hub, page):
 
 
 def test_there_is_no_messaging_in_the_web_ui(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + "/e/local/p/web/a/coder-1")
     expect(page.get_by_role("heading", name="coder-1")).to_be_visible()
     expect(page.locator("textarea")).to_have_count(0)
@@ -172,7 +172,7 @@ def test_there_is_no_messaging_in_the_web_ui(single_hub, page):
 
 
 def test_the_terminal_types_into_the_agent_and_a_second_person_can_take_it_over(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     page.goto(hub.url + "/e/local/p/web/a/coder-1")
     page.get_by_role("button", name="Attach", exact=True).click()
     expect(terminal_state(page)).to_have_text("connected")
@@ -192,7 +192,7 @@ def test_the_terminal_types_into_the_agent_and_a_second_person_can_take_it_over(
     alice.goto(hub.url + "/e/local/p/web/a/coder-1")
     alice.get_by_role("button", name="Attach", exact=True).click()
     expect(terminal_state(alice)).to_have_text("in use by someone else")
-    expect(alice.get_by_role("status")).to_contain_text("root is at this terminal")
+    expect(alice.get_by_role("status")).to_contain_text("admin is at this terminal")
     expect(terminal_text(alice)).not_to_contain_text("attached to")
     alice.get_by_role("button", name="Take over").click()
     expect(terminal_text(alice)).to_contain_text("attached to web/coder-1")
@@ -210,7 +210,7 @@ def test_the_terminal_types_into_the_agent_and_a_second_person_can_take_it_over(
 
 
 def test_several_terminals_stay_open_while_you_browse_and_the_leader_key_switches_them(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     single_hub.world("set-agent", engine="local", project="web", agent="coder-2", state="idle", text="second")
     page.goto(single_hub.url + "/e/local/p/web")
     page.locator("tr[data-agent=coder-1]").get_by_role("button", name="Attach coder-1").click()
@@ -248,7 +248,7 @@ def test_several_terminals_stay_open_while_you_browse_and_the_leader_key_switche
 
 
 def test_a_user_who_may_not_operate_the_agent_has_no_terminal(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     bob = new_person("bob")
     hub.world("grant", engine="local", project="web", user="bob", role="user")
     bob.goto(hub.url + "/e/local/p/web/a/coder-1")
@@ -258,7 +258,7 @@ def test_a_user_who_may_not_operate_the_agent_has_no_terminal(hub, page, new_per
 
 
 def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     alice = new_person("alice")
     hub.world("grant", engine="local", project="web", user="alice", role="user")
     alice.goto(hub.url + "/e/local/p/web")
@@ -275,13 +275,13 @@ def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person
 
 
 def test_an_operator_holds_a_project_as_soon_as_the_scan_finds_it(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     single_hub.world("add-project", engine="local", project="fresh")
     expect(projects_table(page).get_by_role("link", name="fresh")).to_be_visible(timeout=10000)  # found by the next scan
 
 
 def test_a_project_whose_sidecar_logs_no_status_says_so_and_shows_its_agents_as_running(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     single_hub.world("add-project", engine="local", project="mute", state="silent")
     single_hub.world("set-agent", engine="local", project="mute", agent="coder-1", state="working")
     page.goto(single_hub.url + "/e/local/p/mute")
@@ -296,14 +296,14 @@ def test_a_project_whose_sidecar_logs_no_status_says_so_and_shows_its_agents_as_
 
 
 def test_a_project_with_a_status_log_shows_what_its_agents_do_and_no_banner(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + "/e/local/p/web")
     expect(page.locator("tr[data-agent=coder-1]")).to_contain_text("working")
     expect(page.get_by_test_id("feed-banner")).to_have_count(0)
 
 
 def test_the_operator_adds_an_ssh_engine_and_confirms_its_host_key(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.get_by_role("link", name=re.compile("^Settings")).click()
     expect(page.get_by_role("heading", name="Settings")).to_be_visible()
     expect(page.get_by_role("tab", name="Engines")).to_have_attribute("aria-selected", "true")
@@ -328,7 +328,7 @@ def test_the_operator_adds_an_ssh_engine_and_confirms_its_host_key(single_hub, p
 
 
 def test_only_an_operator_sees_the_settings(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     alice = new_person("alice")
     expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_have_count(0)
     for path in ("/settings/engines", "/settings/users", "/engines"):
@@ -341,7 +341,7 @@ def test_only_an_operator_sees_the_settings(hub, page, new_person):
 
 
 def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     alice = new_person("alice")
     expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_have_count(0)
 
@@ -349,10 +349,10 @@ def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub
     page.get_by_role("tab", name="Users").click()
     users = page.get_by_test_id("users")
     expect(users.locator("tr[data-user]")).to_have_count(2)
-    root_row = users.locator("tr[data-user]").filter(has_text="root@example.com")
+    root_row = users.locator("tr[data-user]").filter(has=page.locator("b", has_text=re.compile("^admin$")))
     alice_row = users.locator("tr[data-user]").filter(has_text="alice@example.com")
     # the only operator cannot be removed
-    expect(root_row.get_by_role("button", name="Remove operator from root")).to_be_disabled()
+    expect(root_row.get_by_role("button", name="Remove operator from admin")).to_be_disabled()
     expect(alice_row.get_by_test_id("operator-badge")).to_have_count(0)
 
     alice_row.get_by_role("button", name="Make alice an operator").click()
@@ -369,9 +369,9 @@ def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub
     expect(projects_table(alice).locator("tbody tr")).to_have_count(4)  # every project of both engines, none of them granted
     expect(projects_table(alice).locator("tbody tr").first).to_contain_text("operator")
 
-    # with two operators, root may step down, and is then no operator
-    expect(root_row.get_by_role("button", name="Remove operator from root")).to_be_enabled()
-    root_row.get_by_role("button", name="Remove operator from root").click()
+    # with two operators, admin may step down, and is then no operator
+    expect(root_row.get_by_role("button", name="Remove operator from admin")).to_be_enabled()
+    root_row.get_by_role("button", name="Remove operator from admin").click()
     page.get_by_role("dialog").get_by_role("button", name="Remove operator").click()
     expect(page.get_by_role("heading", name="Forbidden")).to_be_visible()
     expect(page.get_by_role("link", name=re.compile("^Settings"))).to_have_count(0)
@@ -383,7 +383,7 @@ def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub
 
 
 def test_the_audit_log_shows_who_did_what_and_what_was_refused(hub, page, new_person):
-    sign_in(page, hub, "root")
+    sign_in(page, hub, "admin")
     alice = new_person("alice")
     hub.world("grant", engine="local", project="web", user="alice", role="user")
     alice.goto(hub.url + "/e/local/p/web")
@@ -398,7 +398,7 @@ def test_the_audit_log_shows_who_did_what_and_what_was_refused(hub, page, new_pe
 
 
 def test_the_spec_and_the_logs_are_read_only_text(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + "/e/local/p/web")
     page.get_by_role("tab", name="Spec").click()
     expect(page.get_by_test_id("text")).to_contain_text("name: web")
@@ -408,13 +408,13 @@ def test_the_spec_and_the_logs_are_read_only_text(single_hub, page):
 
 
 def test_the_timeline_of_a_project(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + "/e/local/p/web/timeline")
     expect(page.get_by_test_id("timeline")).to_contain_text("refactoring the parser on local")
 
 
 def test_the_command_menu_opens_an_agent_terminal(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.keyboard.press("Control+k")
     page.get_by_role("combobox", name="Command").fill("coder-1")
     page.keyboard.press("Enter")
@@ -422,7 +422,7 @@ def test_the_command_menu_opens_an_agent_terminal(single_hub, page):
 
 
 def test_signing_out_ends_the_session(single_hub, page):
-    sign_in(page, single_hub, "root")
+    sign_in(page, single_hub, "admin")
     page.get_by_role("button", name="Sign out").click()
     expect(page.get_by_role("link", name="Sign in")).to_be_visible()
     page.goto(single_hub.url + "/")
@@ -443,7 +443,60 @@ def test_the_pages_fit_a_phone(single_hub, browser):
 
 def sign_in_phone(page, server):
     page.goto(server.url + "/login")
-    page.get_by_role("link", name="Sign in").click()
-    page.get_by_label("Who are you?").fill("root")
-    page.get_by_role("button", name="Sign in").click()
+    page.get_by_label("Username").fill("admin")
+    page.get_by_label("Password").fill(ADMIN_PASSWORD)
+    page.get_by_role("button", name="Sign in", exact=True).click()
     expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+
+
+def test_a_wrong_password_is_refused_and_the_right_one_signs_in(hub, page):
+    page.goto(hub.url + "/login")
+    page.get_by_label("Password").fill("not the password")
+    page.get_by_role("button", name="Sign in", exact=True).click()
+    expect(page.get_by_role("alert")).to_contain_text("Wrong username or password")
+    page.get_by_label("Password").fill(ADMIN_PASSWORD)
+    page.get_by_role("button", name="Sign in", exact=True).click()
+    expect(page.get_by_test_id("signed-in-as")).to_contain_text("admin")
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+
+
+def test_the_starter_account_links_single_sign_on_and_then_signs_in_with_it(hub, page, browser):
+    sign_in(page, hub, "admin")
+    page.get_by_test_id("signed-in-as").click()
+    account = page.get_by_test_id("account")
+    account.get_by_role("button", name="Link Test login").click()
+    page.get_by_label("Who are you?").fill("boss")
+    page.get_by_role("button", name="Sign in").click()
+    expect(page.get_by_test_id("linked-as")).to_contain_text("boss@example.com")
+    # unlinking is allowed: the password is still a way in
+    expect(page.get_by_test_id("linked-as").get_by_role("button", name="Unlink")).to_be_enabled()
+
+    context = browser.new_context()
+    other = context.new_page()
+    other.goto(hub.url + "/login")
+    other.get_by_role("link", name="Sign in with Test login").click()
+    other.get_by_label("Who are you?").fill("boss")
+    other.get_by_role("button", name="Sign in").click()
+    expect(other.get_by_test_id("signed-in-as")).to_contain_text("admin · operator")
+    context.close()
+
+
+def test_a_disabled_person_is_signed_out_and_cannot_sign_in_again(hub, page, new_person):
+    sign_in(page, hub, "admin")
+    alice = new_person("alice")
+    page.goto(hub.url + "/settings/users")
+    row = page.get_by_test_id("users").locator("tr[data-user]").filter(has_text="alice@example.com")
+    row.get_by_role("button", name="Disable alice").click()
+    page.get_by_role("dialog").get_by_role("button", name="Disable").click()
+    expect(page.get_by_role("status")).to_contain_text("alice is disabled")
+    # disabled users are hidden behind a filter
+    expect(row).to_have_count(0)
+    page.get_by_label(re.compile("Show disabled users")).check()
+    expect(row.get_by_test_id("disabled-badge")).to_be_visible()
+
+    alice.reload()
+    expect(alice.get_by_role("link", name="Sign in with Test login")).to_be_visible()
+    alice.get_by_role("link", name="Sign in with Test login").click()
+    alice.get_by_label("Who are you?").fill("alice")
+    alice.get_by_role("button", name="Sign in").click()
+    expect(alice.get_by_role("alert")).to_contain_text("Sign-in refused")

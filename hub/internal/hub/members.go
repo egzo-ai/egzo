@@ -50,7 +50,8 @@ func (h *Hub) Members(ctx context.Context, user store.User, engine, project stri
 	return members, nil
 }
 
-// Candidates lists the users who hold no role on the project yet: the people an owner can still invite. Operators hold every project, so they are not among them. Users exist once they have logged in.
+// Candidates lists the users who hold no role on the project yet: the people an owner can still invite. Operators hold every
+// project, so they are not among them, and disabled users are left out. Users exist once they have signed in.
 func (h *Hub) Candidates(ctx context.Context, user store.User, engine, project string) ([]store.User, error) {
 	members, err := h.Members(ctx, user, engine, project)
 	if err != nil {
@@ -66,7 +67,7 @@ func (h *Hub) Candidates(ctx context.Context, user store.User, engine, project s
 	}
 	var out []store.User
 	for _, u := range all {
-		if !has[u.ID] {
+		if !has[u.ID] && !u.Disabled() {
 			out = append(out, u)
 		}
 	}
@@ -99,6 +100,9 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, engine, project, ta
 	if target.IsOperator {
 		return refuse(ErrOperatorAccess, "an operator holds every project: ")
 	}
+	if target.Disabled() && role != rbac.None {
+		return refuse(ErrDisabled, "a disabled user: ")
+	}
 	if !rbac.CanAssign(actorRole, actor.ID, targetID, role) {
 		return refuse(ErrForbidden, "")
 	}
@@ -109,7 +113,7 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, engine, project, ta
 	return h.store.Audit(ctx, audit)
 }
 
-// Users lists everyone who has signed in. Only an operator may.
+// Users lists everyone who has signed in, disabled users included. Only an operator may.
 func (h *Hub) Users(ctx context.Context, user store.User) ([]store.User, error) {
 	if err := h.requireOperator(ctx, user, "users.list", ""); err != nil {
 		return nil, err
@@ -139,6 +143,9 @@ func (h *Hub) SetOperator(ctx context.Context, actor store.User, targetID string
 		entry.Detail = "refused: the last operator: " + entry.Detail
 		_ = h.store.Audit(ctx, entry)
 		return ErrLastOperator
+	}
+	if errors.Is(err, store.ErrDisabled) {
+		return ErrDisabled
 	}
 	if err != nil {
 		return err

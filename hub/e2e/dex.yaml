@@ -1,0 +1,30 @@
+# Dex, a real OpenID Connect provider for `make hub-stack` (stack.compose.yaml): a test fixture, not part of the deployment the docs
+# describe. The browser of the test reaches it as "dex" (--add-host), as the hub does inside the compose network.
+issuer: http://dex:15556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:15556
+
+oauth2:
+  skipApprovalScreen: true   # the hub is the only client: no "Grant access" page
+
+staticClients:
+  - id: egzo-hub
+    name: egzo hub
+    secretEnv: EGZO_OIDC_CLIENT_SECRET   # set in .env, shared with the hub
+    redirectURIs:
+      - http://localhost:18080/auth/callback
+
+# The account the stack test links to the starter account and then signs in with.
+enablePasswordDB: true
+staticPasswords:
+  - email: admin@example.com
+    # bcrypt of "password"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: admin
+    userID: 08a8684b-db88-4b73-90a9-3cd1661f5466

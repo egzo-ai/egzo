@@ -96,7 +96,7 @@
         {/if}
       </div>
       {#if a.holder}
-        <span class="presence" data-live data-testid="presence"><span class="avatar" data-me={a.holder === app.user?.name ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.name ? "you" : a.holder}</span>
+        <span class="presence" data-live data-testid="presence"><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>
       {/if}
     </section>
 

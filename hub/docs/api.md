@@ -3,10 +3,18 @@
 The web app is a client of this API and nothing else: everything under `/api/v1`, JSON in and out. The shapes are in
 `hub/internal/web/api.go` and, as the front end sees them, `hub/web/src/lib/types.ts`. Times are RFC 3339.
 
-**Authentication.** The browser logs in with OIDC (`/login/start`, then `/auth/callback`, which set the session cookie and redirect
-back; a failed login redirects to `/login?error=...`). Every API call without a valid session answers 401. A call that changes
-anything must send `Content-Type: application/json` and the `Origin` of the hub's own address (a browser does); anything else
-is refused (415, 403).
+**Authentication.** Two ways in, both ending in the same session cookie (12 hours):
+
+- **The starter account's password**: `POST /auth/login` `{username, password}` (outside `/api/v1`) answers `{ok}` and sets the
+  cookie. Every failure is 401 `bad_login` "Wrong username or password." After three failures in a row an account waits, longer
+  after each further one (429 `too_many`, with `Retry-After`). 404 while local login is off.
+- **Single sign-on**: `/login/start?next=`, then `/auth/callback`, which sets the cookie and redirects to `next`; a failed sign-in
+  redirects to `/login?error=...`.
+
+`GET /signin` needs no session and says which ways exist: `{local, sso, redirect}` (`sso` is the button's name, "" without single
+sign-on; `redirect` is the callback address to register at the provider). Every other API call without a valid session answers
+401. A call that changes anything must send `Content-Type: application/json` and the `Origin` of the hub's own address (a browser
+does); anything else is refused (415, 403).
 
 **Errors** are `{"code": "...", "message": "..."}` with a real status: `unauthorized` (401), `forbidden` (403), `not_found` (404; also
 for a project the person has no role on, so its existence is not leaked; an operator gets it for a project that is not on a scan), `bad_request`, `invalid` (422), `expired` (410),
@@ -14,8 +22,10 @@ for a project the person has no role on, so its existence is not leaked; an oper
 
 | Call | Answer |
 |---|---|
-| `GET /session` | `{user: {id, name, email, isOperator}, engines: [{name, up, err}]}` |
-| `POST /logout` | `{ok}` |
+| `GET /session` | `{user, engines: [{name, up, err}], identities: [identity], hasPassword, sso, issuer}`. A `user` is `{id, username, name, email, emailVerified, picture, isOperator, disabled}`: the username is the hub's; name, email and picture (https only, fetched by the browser) come from the provider, for display. An `identity` is `{id, issuer, email, name, current, lastLoginAt}`; `current` is false for an account of a former provider |
+| `POST /logout` | `{ok}`; the session's terminals close |
+| `POST /me/link` | `{url}`: send the browser there to sign in at the provider; the callback links that account to the signed-in user and returns to `/settings/account?linked=1` (or `?error=`). Refused when the account belongs to somebody else, or when the user already has one at that provider |
+| `DELETE /me/identities/{id}` | `{ok}`; the sessions made with it end. 409 `conflict` when it is the last way to sign in |
 | `GET /projects` | `{projects: [{engine, name, role, operator, feed, up, agents: [{name, template, running, activity, status, waiting}]}], unreachable: [{name, err}]}` from what the hub holds (the engines' last listing, kept current by their events, and the agents' status from the control sidecars' logs); it feeds the home page and the sidebar and calls no engine |
 | `GET /e/{engine}/p/{project}` | the project, from what the hub holds (the templates from the control sidecar, kept for five minutes): `{engine, name, role, operator, feed, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder}], canSpawn, canManage, canAudit}` |
 | `GET .../events?agent=&limit=` | `{events: [{time, type, agent, actor, text}]}`, newest first |
@@ -32,8 +42,9 @@ for a project the person has no role on, so its existence is not leaked; an oper
 | `POST /engines` `{name, host, sshUser, ca, cert, key, sshKey}` (operator) | `{saved}`, or `{pending: {name, host, fingerprint, token}}` when an ssh host key must be confirmed first. Credentials are never returned |
 | `POST /engines/confirm` `{token}` (operator) | `{saved}`; the token lives ten minutes and works once |
 | `DELETE /engines/{name}` (operator) | `{removed}` |
-| `GET /users` (operator) | `{users: [{id, name, email, isOperator, createdAt}], me}` |
-| `PUT /users/{id}` `{isOperator}` (operator) | `{ok}`. 409 `conflict` when it would remove the last operator; setting the value a person already has changes nothing |
+| `GET /users` (operator) | `{users: [user + {createdAt, lastLoginAt, hasPassword, identities}], me}`, disabled users included |
+| `PUT /users/{id}` `{isOperator}` or `{disabled}` (operator) | `{ok}`. 409 `conflict` when it would remove the last operator, disable an operator, or make a disabled user an operator; setting the value a person already has changes nothing. Disabling ends the person's sessions and closes their terminals |
+| `DELETE /users/{id}/identities/{identity}` (operator) | `{ok}`: frees an account at a provider from a **disabled** user, so it can be linked to another (409 otherwise) |
 
 `.../` is `/e/{engine}/p/{project}`.
 

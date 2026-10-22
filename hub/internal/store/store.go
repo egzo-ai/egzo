@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -19,14 +20,37 @@ import (
 // Store is the hub database.
 type Store struct{ db *sql.DB }
 
+// schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
+const schemaVersion = 1
+
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
 	id TEXT PRIMARY KEY,
-	identity TEXT NOT NULL UNIQUE,   -- issuer + "\n" + subject
-	email TEXT NOT NULL,
-	name TEXT NOT NULL,
+	username TEXT NOT NULL UNIQUE COLLATE NOCASE, -- disabled users keep theirs: a name is never freed
 	is_operator INTEGER NOT NULL DEFAULT 0,
-	created_at INTEGER NOT NULL
+	disabled_at INTEGER,                          -- null: enabled
+	created_at INTEGER NOT NULL,
+	last_login_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS user_passwords (
+	user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+	hash TEXT NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_identities (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	issuer TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	email TEXT NOT NULL DEFAULT '',
+	email_verified INTEGER NOT NULL DEFAULT 0,
+	name TEXT NOT NULL DEFAULT '',
+	preferred_username TEXT NOT NULL DEFAULT '',
+	picture_url TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	last_login_at INTEGER NOT NULL,
+	UNIQUE (issuer, subject),
+	UNIQUE (user_id, issuer)
 );
 CREATE TABLE IF NOT EXISTS grants (
 	engine TEXT NOT NULL,
@@ -46,6 +70,8 @@ CREATE TABLE IF NOT EXISTS engines (
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	method TEXT NOT NULL CHECK (method IN ('password', 'identity')),
+	identity_id TEXT REFERENCES user_identities(id) ON DELETE CASCADE, -- set for an identity
 	expires_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit (
@@ -62,6 +88,9 @@ CREATE TABLE IF NOT EXISTS audit (
 CREATE INDEX IF NOT EXISTS audit_project ON audit (engine, project, id);
 `
 
+// ErrOldSchema is returned by Open for a database made by another version of the hub.
+var ErrOldSchema = errors.New("the database was made by another version of the hub")
+
 // Open opens (and creates) the database at path; ":memory:" gives a private one for tests.
 func Open(path string) (*Store, error) {
 	dsn := path
@@ -76,11 +105,33 @@ func Open(path string) (*Store, error) {
 	}
 	// One connection: SQLite serialises writers anyway, and an in-memory database exists per connection.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := prepare(db); err != nil {
 		db.Close()
+		if errors.Is(err, ErrOldSchema) {
+			return nil, fmt.Errorf("%w: remove %s and start again (before 1.0 the hub has no migrations)", err, path)
+		}
 		return nil, fmt.Errorf("prepare the database: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+// prepare makes the tables of a new database, and refuses one of another version.
+func prepare(db *sql.DB) error {
+	var version, tables int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
+		return err
+	}
+	if tables > 0 && version != schemaVersion {
+		return ErrOldSchema
+	}
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	_, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -93,66 +144,36 @@ func newID(prefix string, n int) string {
 	return prefix + hex.EncodeToString(b)
 }
 
-// User is a person who has logged in.
+// StarterUsername is the username of the starter account, the one that signs in with a password.
+const StarterUsername = "admin"
+
+// User is a person as the hub knows them. Name, Email, EmailVerified and Picture come from the identity they signed in with most
+// recently, for display only; HasPassword and Issuers say how they can sign in.
 type User struct {
-	ID         string
-	Identity   string
-	Email      string
-	Name       string
-	IsOperator bool
-	CreatedAt  time.Time
+	ID          string
+	Username    string
+	IsOperator  bool
+	DisabledAt  time.Time // zero: enabled
+	CreatedAt   time.Time
+	LastLoginAt time.Time // zero: never
+
+	Name, Email   string
+	EmailVerified bool
+	Picture       string
+	HasPassword   bool
 }
+
+// Disabled reports whether the user may not sign in.
+func (u User) Disabled() bool { return !u.DisabledAt.IsZero() }
 
 // Subject is the user as the permission rules see them.
 func (u User) Subject() rbac.Subject { return rbac.Subject{ID: u.ID, IsOperator: u.IsOperator} }
 
-// DisplayName is what the UI calls the user.
-func (u User) DisplayName() string {
-	switch {
-	case u.Name != "":
-		return u.Name
-	case u.Email != "":
-		return u.Email
-	}
-	return u.ID
-}
+// DisplayName is what the UI calls the user: their username, which the hub chose and which no provider changes.
+func (u User) DisplayName() string { return u.Username }
 
 // ErrNotFound is returned when a row does not exist.
 var ErrNotFound = errors.New("not found")
-
-// LoginUser returns the user of an identity, creating them on the first login. The very first user is the operator.
-// created tells whether this call made the user.
-func (s *Store) LoginUser(ctx context.Context, identity, email, name string) (user User, created bool, err error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return User{}, false, err
-	}
-	defer tx.Rollback()
-	row := tx.QueryRowContext(ctx, `SELECT id, identity, email, name, is_operator, created_at FROM users WHERE identity = ?`, identity)
-	user, err = scanUser(row)
-	switch {
-	case err == nil:
-		if user.Email != email || user.Name != name {
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET email = ?, name = ? WHERE id = ?`, email, name, user.ID); err != nil {
-				return User{}, false, err
-			}
-			user.Email, user.Name = email, name
-		}
-		return user, false, tx.Commit()
-	case !errors.Is(err, ErrNotFound):
-		return User{}, false, err
-	}
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		return User{}, false, err
-	}
-	user = User{ID: newID("u", 6), Identity: identity, Email: email, Name: name, IsOperator: count == 0, CreatedAt: time.Now()}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, identity, email, name, is_operator, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		user.ID, identity, email, name, boolInt(user.IsOperator), user.CreatedAt.Unix()); err != nil {
-		return User{}, false, err
-	}
-	return user, true, tx.Commit()
-}
 
 func boolInt(b bool) int {
 	if b {
@@ -163,28 +184,46 @@ func boolInt(b bool) int {
 
 type scanner interface{ Scan(...any) error }
 
+// userSelect reads a user with the display fields of their latest identity; append a WHERE on u.
+const userSelect = `SELECT u.id, u.username, u.is_operator, u.disabled_at, u.created_at, u.last_login_at,
+	COALESCE(i.name, ''), COALESCE(i.email, ''), COALESCE(i.email_verified, 0), COALESCE(i.picture_url, ''),
+	EXISTS (SELECT 1 FROM user_passwords p WHERE p.user_id = u.id)
+	FROM users u LEFT JOIN user_identities i ON i.id =
+		(SELECT id FROM user_identities WHERE user_id = u.id ORDER BY last_login_at DESC, created_at DESC LIMIT 1) `
+
 func scanUser(row scanner) (User, error) {
 	var u User
-	var operator int
+	var operator, verified, password int
 	var created int64
-	if err := row.Scan(&u.ID, &u.Identity, &u.Email, &u.Name, &operator, &created); err != nil {
+	var disabled, login sql.NullInt64
+	if err := row.Scan(&u.ID, &u.Username, &operator, &disabled, &created, &login, &u.Name, &u.Email, &verified, &u.Picture, &password); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
-	u.IsOperator, u.CreatedAt = operator == 1, time.Unix(created, 0)
+	u.IsOperator, u.CreatedAt, u.EmailVerified, u.HasPassword = operator == 1, time.Unix(created, 0), verified == 1, password == 1
+	if disabled.Valid {
+		u.DisabledAt = time.Unix(disabled.Int64, 0)
+	}
+	if login.Valid {
+		u.LastLoginAt = time.Unix(login.Int64, 0)
+	}
 	return u, nil
 }
 
-const userColumns = `id, identity, email, name, is_operator, created_at`
-
 func (s *Store) User(ctx context.Context, id string) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE id = ?`, id))
+	return scanUser(s.db.QueryRowContext(ctx, userSelect+`WHERE u.id = ?`, id))
 }
 
+// UserByName finds a user by username, whatever the case.
+func (s *Store) UserByName(ctx context.Context, username string) (User, error) {
+	return scanUser(s.db.QueryRowContext(ctx, userSelect+`WHERE u.username = ?`, username))
+}
+
+// Users lists everyone, disabled users included, in the order they were made.
 func (s *Store) Users(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at, rowid`)
+	rows, err := s.db.QueryContext(ctx, userSelect+`ORDER BY u.created_at, u.rowid`)
 	if err != nil {
 		return nil, err
 	}
@@ -200,11 +239,47 @@ func (s *Store) Users(ctx context.Context) ([]User, error) {
 	return users, rows.Err()
 }
 
+// insertUser makes a user with a free username built from base: base itself, else base-2, base-3, ... The unique index settles
+// two logins at once.
+func insertUser(ctx context.Context, tx *sql.Tx, base string, operator bool) (User, error) {
+	now := time.Now()
+	for n := 1; ; n++ {
+		name := withSuffix(base, n)
+		if n == 1 && reserved[name] {
+			continue
+		}
+		var taken int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE username = ?`, name).Scan(&taken); err != nil {
+			return User{}, err
+		}
+		if taken > 0 {
+			continue
+		}
+		u := User{ID: newID("u", 6), Username: name, IsOperator: operator, CreatedAt: now, LastLoginAt: now}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, is_operator, created_at, last_login_at) VALUES (?, ?, ?, ?, ?)`,
+			u.ID, u.Username, boolInt(operator), now.Unix(), now.Unix()); err != nil {
+			return User{}, err
+		}
+		return u, nil
+	}
+}
+
+// EnsureStarter makes sure the starter account exists, is enabled and is an operator, making or repairing it as needed.
+func (s *Store) EnsureStarter(ctx context.Context) (User, error) {
+	now := time.Now().Unix()
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, is_operator, created_at) VALUES (?, ?, 1, ?)
+		ON CONFLICT (username) DO UPDATE SET is_operator = 1, disabled_at = NULL`, newID("u", 6), StarterUsername, now); err != nil {
+		return User{}, err
+	}
+	return s.UserByName(ctx, StarterUsername)
+}
+
 // ErrLastOperator is returned when a change would leave the hub with no operator.
 var ErrLastOperator = errors.New("the last operator cannot be removed")
 
 // SetOperator makes a user an operator or takes it away. The last operator cannot be demoted, by themselves or by anyone: one
 // transaction counts and writes. It reports whether anything changed, and returns ErrNotFound for a user that does not exist.
+// A disabled user cannot be made an operator (ErrDisabled).
 func (s *Store) SetOperator(ctx context.Context, id string, on bool) (changed bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -212,7 +287,8 @@ func (s *Store) SetOperator(ctx context.Context, id string, on bool) (changed bo
 	}
 	defer tx.Rollback()
 	var current int
-	if err := tx.QueryRowContext(ctx, `SELECT is_operator FROM users WHERE id = ?`, id).Scan(&current); err != nil {
+	var disabled sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT is_operator, disabled_at FROM users WHERE id = ?`, id).Scan(&current, &disabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, ErrNotFound
 		}
@@ -220,6 +296,9 @@ func (s *Store) SetOperator(ctx context.Context, id string, on bool) (changed bo
 	}
 	if (current == 1) == on {
 		return false, nil
+	}
+	if on && disabled.Valid {
+		return false, ErrDisabled
 	}
 	if !on {
 		var operators int
@@ -236,16 +315,355 @@ func (s *Store) SetOperator(ctx context.Context, id string, on bool) (changed bo
 	return true, tx.Commit()
 }
 
-// DeleteUser removes a user and, by cascade, their grants and sessions. An operator cannot be deleted: demote them first.
-func (s *Store) DeleteUser(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ? AND is_operator = 0`, id)
+// CountOperators counts the operators. Operators cannot be disabled, so every one of them is enabled.
+func (s *Store) CountOperators(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE is_operator = 1 AND disabled_at IS NULL`).Scan(&n)
+	return n, err
+}
+
+// OperatorsWithIdentityAt counts the enabled operators who can sign in at issuer.
+func (s *Store) OperatorsWithIdentityAt(ctx context.Context, issuer string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT u.id) FROM users u JOIN user_identities i ON i.user_id = u.id
+		WHERE u.is_operator = 1 AND u.disabled_at IS NULL AND i.issuer = ?`, issuer).Scan(&n)
+	return n, err
+}
+
+// ErrDisabled is returned for a user who is disabled, where that refuses the change.
+var ErrDisabled = errors.New("the user is disabled")
+
+// ErrOperator is returned when an operator would be disabled: demote them first.
+var ErrOperator = errors.New("an operator cannot be disabled")
+
+// SetDisabled disables or enables a user. Disabling ends every session of theirs, and returns the ended sessions' hashes so their
+// terminals can be closed. An operator cannot be disabled. It reports whether anything changed.
+func (s *Store) SetDisabled(ctx context.Context, id string, on bool) (changed bool, ended []string, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, nil, err
 	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return ErrNotFound
+	defer tx.Rollback()
+	var operator int
+	var disabled sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT is_operator, disabled_at FROM users WHERE id = ?`, id).Scan(&operator, &disabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil, ErrNotFound
+		}
+		return false, nil, err
 	}
-	return nil
+	if disabled.Valid == on {
+		return false, nil, nil
+	}
+	if on {
+		if operator == 1 {
+			return false, nil, ErrOperator
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET disabled_at = ? WHERE id = ?`, time.Now().Unix(), id); err != nil {
+			return false, nil, err
+		}
+		if ended, err = endSessions(ctx, tx, `user_id = ?`, id); err != nil {
+			return false, nil, err
+		}
+	} else if _, err := tx.ExecContext(ctx, `UPDATE users SET disabled_at = NULL WHERE id = ?`, id); err != nil {
+		return false, nil, err
+	}
+	return true, ended, tx.Commit()
+}
+
+// --- passwords ---------------------------------------------------------------------------------------------------------------
+
+// PasswordHash returns a user's password hash, ErrNotFound when they have none.
+func (s *Store) PasswordHash(ctx context.Context, userID string) (string, error) {
+	var hash string
+	err := s.db.QueryRowContext(ctx, `SELECT hash FROM user_passwords WHERE user_id = ?`, userID).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return hash, err
+}
+
+// SetPassword saves a user's password hash and ends every password session of theirs: whoever signed in with the old one is out.
+func (s *Store) SetPassword(ctx context.Context, userID, hash string) (ended []string, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_passwords (user_id, hash, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT (user_id) DO UPDATE SET hash = excluded.hash, updated_at = excluded.updated_at`, userID, hash, time.Now().Unix()); err != nil {
+		return nil, err
+	}
+	if ended, err = endSessions(ctx, tx, `user_id = ? AND method = 'password'`, userID); err != nil {
+		return nil, err
+	}
+	return ended, tx.Commit()
+}
+
+// MarkLogin records that a user signed in now.
+func (s *Store) MarkLogin(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE id = ?`, time.Now().Unix(), userID)
+	return err
+}
+
+// --- identities --------------------------------------------------------------------------------------------------------------
+
+// Profile is what a provider says about an account: a snapshot, refreshed at every sign-in, for display only.
+type Profile struct {
+	Email             string
+	EmailVerified     bool
+	Name              string
+	PreferredUsername string
+	Picture           string
+}
+
+// Identity is one account at one provider, found by (Issuer, Subject).
+type Identity struct {
+	ID, UserID      string
+	Issuer, Subject string
+	Profile
+	CreatedAt, LastLoginAt time.Time
+}
+
+const identityColumns = `id, user_id, issuer, subject, email, email_verified, name, preferred_username, picture_url, created_at, last_login_at`
+
+func scanIdentity(row scanner) (Identity, error) {
+	var i Identity
+	var verified int
+	var created, login int64
+	if err := row.Scan(&i.ID, &i.UserID, &i.Issuer, &i.Subject, &i.Email, &verified, &i.Name, &i.PreferredUsername, &i.Picture, &created, &login); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Identity{}, ErrNotFound
+		}
+		return Identity{}, err
+	}
+	i.EmailVerified, i.CreatedAt, i.LastLoginAt = verified == 1, time.Unix(created, 0), time.Unix(login, 0)
+	return i, nil
+}
+
+// Identities lists the identities of a user, or of everyone when userID is empty.
+func (s *Store) Identities(ctx context.Context, userID string) ([]Identity, error) {
+	query, args := `SELECT `+identityColumns+` FROM user_identities ORDER BY created_at, rowid`, []any{}
+	if userID != "" {
+		query, args = `SELECT `+identityColumns+` FROM user_identities WHERE user_id = ? ORDER BY created_at, rowid`, []any{userID}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Identity
+	for rows.Next() {
+		i, err := scanIdentity(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
+func refreshIdentity(ctx context.Context, tx *sql.Tx, id string, p Profile, now int64) error {
+	_, err := tx.ExecContext(ctx, `UPDATE user_identities SET email = ?, email_verified = ?, name = ?, preferred_username = ?, picture_url = ?,
+		last_login_at = ? WHERE id = ?`, p.Email, boolInt(p.EmailVerified), p.Name, p.PreferredUsername, p.Picture, now, id)
+	return err
+}
+
+func insertIdentity(ctx context.Context, tx *sql.Tx, userID, issuer, subject string, p Profile, now int64) (string, error) {
+	id := newID("i", 6)
+	_, err := tx.ExecContext(ctx, `INSERT INTO user_identities (id, user_id, issuer, subject, email, email_verified, name, preferred_username,
+		picture_url, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, userID, issuer, subject, p.Email, boolInt(p.EmailVerified), p.Name, p.PreferredUsername, p.Picture, now, now)
+	return id, err
+}
+
+// LoginIdentity signs in with an identity. Found and enabled: its snapshot and the times are refreshed. Found and disabled:
+// ErrDisabled, and nothing is written. Not found: a new user is made, with no access, and the identity is theirs (created is set).
+// identityID is the identity signed in with, for the session.
+func (s *Store) LoginIdentity(ctx context.Context, issuer, subject string, p Profile) (user User, identityID string, created bool, err error) {
+	for attempt := 0; ; attempt++ {
+		user, identityID, created, err = s.loginIdentity(ctx, issuer, subject, p)
+		// two first logins at once: the unique index refused one; the retry finds what the other made
+		if err == nil || attempt == 2 || !isConstraint(err) {
+			return user, identityID, created, err
+		}
+	}
+}
+
+func (s *Store) loginIdentity(ctx context.Context, issuer, subject string, p Profile) (User, string, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, "", false, err
+	}
+	defer tx.Rollback()
+	now := time.Now().Unix()
+	var identityID, userID string
+	var disabled sql.NullInt64
+	created := false
+	err = tx.QueryRowContext(ctx, `SELECT i.id, u.id, u.disabled_at FROM user_identities i JOIN users u ON u.id = i.user_id
+		WHERE i.issuer = ? AND i.subject = ?`, issuer, subject).Scan(&identityID, &userID, &disabled)
+	switch {
+	case err == nil:
+		if disabled.Valid {
+			return User{}, "", false, ErrDisabled
+		}
+		if err := refreshIdentity(ctx, tx, identityID, p, now); err != nil {
+			return User{}, "", false, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE id = ?`, now, userID); err != nil {
+			return User{}, "", false, err
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		u, err := insertUser(ctx, tx, UsernameFrom(p.PreferredUsername, localPart(p.Email), p.Name), false)
+		if err != nil {
+			return User{}, "", false, err
+		}
+		userID, created = u.ID, true
+		if identityID, err = insertIdentity(ctx, tx, userID, issuer, subject, p, now); err != nil {
+			return User{}, "", false, err
+		}
+	default:
+		return User{}, "", false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return User{}, "", false, err
+	}
+	user, err := s.User(ctx, userID)
+	return user, identityID, created, err
+}
+
+func isConstraint(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+// IdentityTakenError is returned when an identity to link belongs to somebody else.
+type IdentityTakenError struct{ Username string }
+
+func (e *IdentityTakenError) Error() string {
+	return fmt.Sprintf("that account already belongs to %s", e.Username)
+}
+
+// ErrIssuerLinked is returned when a user already has an identity at the issuer of the one to link: one per issuer.
+var ErrIssuerLinked = errors.New("an account at this provider is already linked: unlink it first")
+
+// LinkIdentity adds an identity to a user who proved control of it. It refuses an identity of another user (identities never
+// move), and a second identity at the same issuer. Linking the identity the user already has changes nothing.
+func (s *Store) LinkIdentity(ctx context.Context, userID, issuer, subject string, p Profile) (Identity, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Identity{}, err
+	}
+	defer tx.Rollback()
+	now := time.Now().Unix()
+	existing, err := scanIdentity(tx.QueryRowContext(ctx, `SELECT `+identityColumns+` FROM user_identities WHERE issuer = ? AND subject = ?`, issuer, subject))
+	switch {
+	case err == nil && existing.UserID == userID:
+		if err := refreshIdentity(ctx, tx, existing.ID, p, now); err != nil {
+			return Identity{}, err
+		}
+		return existing, tx.Commit()
+	case err == nil:
+		var owner string
+		if err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, existing.UserID).Scan(&owner); err != nil {
+			return Identity{}, err
+		}
+		return Identity{}, &IdentityTakenError{Username: owner}
+	case !errors.Is(err, ErrNotFound):
+		return Identity{}, err
+	}
+	var linked int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_identities WHERE user_id = ? AND issuer = ?`, userID, issuer).Scan(&linked); err != nil {
+		return Identity{}, err
+	}
+	if linked > 0 {
+		return Identity{}, ErrIssuerLinked
+	}
+	id, err := insertIdentity(ctx, tx, userID, issuer, subject, p, now)
+	if err != nil {
+		return Identity{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Identity{}, err
+	}
+	return Identity{ID: id, UserID: userID, Issuer: issuer, Subject: subject, Profile: p, CreatedAt: time.Unix(now, 0), LastLoginAt: time.Unix(now, 0)}, nil
+}
+
+// ErrLastWayIn is returned when unlinking would leave a user no way to sign in.
+var ErrLastWayIn = errors.New("this is your last way to sign in")
+
+// UnlinkIdentity removes an identity of a user, and the sessions made with it. A way to sign in is a password (while
+// passwordCounts, that is while local login is on) or an identity at currentIssuer: removing the last one is refused. Removing an
+// identity of another issuer never is.
+func (s *Store) UnlinkIdentity(ctx context.Context, userID, identityID, currentIssuer string, passwordCounts bool) (Identity, []string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Identity{}, nil, err
+	}
+	defer tx.Rollback()
+	identity, err := scanIdentity(tx.QueryRowContext(ctx, `SELECT `+identityColumns+` FROM user_identities WHERE id = ? AND user_id = ?`, identityID, userID))
+	if err != nil {
+		return Identity{}, nil, err
+	}
+	if currentIssuer != "" && identity.Issuer == currentIssuer {
+		var others, password int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_identities WHERE user_id = ? AND issuer = ? AND id != ?`,
+			userID, currentIssuer, identityID).Scan(&others); err != nil {
+			return Identity{}, nil, err
+		}
+		if passwordCounts {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_passwords WHERE user_id = ?`, userID).Scan(&password); err != nil {
+				return Identity{}, nil, err
+			}
+		}
+		if others+password == 0 {
+			return Identity{}, nil, ErrLastWayIn
+		}
+	}
+	ended, err := removeIdentity(ctx, tx, identityID)
+	if err != nil {
+		return Identity{}, nil, err
+	}
+	return identity, ended, tx.Commit()
+}
+
+// RemoveIdentity takes an identity from a disabled user, so it can be linked to somebody else: the way out of an accidental
+// second user. An enabled user's identity is theirs to unlink: that is refused with ErrNotDisabled.
+func (s *Store) RemoveIdentity(ctx context.Context, userID, identityID string) (Identity, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Identity{}, err
+	}
+	defer tx.Rollback()
+	var disabled sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT disabled_at FROM users WHERE id = ?`, userID).Scan(&disabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Identity{}, ErrNotFound
+		}
+		return Identity{}, err
+	}
+	if !disabled.Valid {
+		return Identity{}, ErrNotDisabled
+	}
+	identity, err := scanIdentity(tx.QueryRowContext(ctx, `SELECT `+identityColumns+` FROM user_identities WHERE id = ? AND user_id = ?`, identityID, userID))
+	if err != nil {
+		return Identity{}, err
+	}
+	if _, err := removeIdentity(ctx, tx, identityID); err != nil {
+		return Identity{}, err
+	}
+	return identity, tx.Commit()
+}
+
+// ErrNotDisabled is returned when an operator removes an identity from a user who is not disabled.
+var ErrNotDisabled = errors.New("only a disabled user's identity can be removed")
+
+func removeIdentity(ctx context.Context, tx *sql.Tx, identityID string) ([]string, error) {
+	ended, err := endSessions(ctx, tx, `identity_id = ?`, identityID)
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM user_identities WHERE id = ?`, identityID)
+	return ended, err
 }
 
 // --- grants ------------------------------------------------------------------------------------------------------------------
@@ -311,35 +729,101 @@ func (s *Store) grants(ctx context.Context, query string, args ...any) ([]Grant,
 
 // --- sessions ----------------------------------------------------------------------------------------------------------------
 
-func hashToken(token string) string {
+// HashToken is how a session token is kept: only its hash is stored, and it names the session elsewhere (its terminals).
+func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
-// NewSession makes a login session and returns its token; only the token's hash is stored.
-func (s *Store) NewSession(ctx context.Context, userID string, ttl time.Duration) (string, error) {
+// Session methods: how a session was made.
+const (
+	MethodPassword = "password"
+	MethodIdentity = "identity"
+)
+
+// NewSession makes a login session and returns its token; only the token's hash is stored. identityID is the identity signed in
+// with, for MethodIdentity, and empty for MethodPassword.
+func (s *Store) NewSession(ctx context.Context, userID, method, identityID string, ttl time.Duration) (string, error) {
 	token := newID("", 32)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)`,
-		hashToken(token), userID, time.Now().Add(ttl).Unix())
+	var identity any
+	if identityID != "" {
+		identity = identityID
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (token_hash, user_id, method, identity_id, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		HashToken(token), userID, method, identity, time.Now().Add(ttl).Unix())
 	return token, err
 }
 
-// SessionUser returns the user a live session token belongs to.
+// SessionUser returns the user a live session token belongs to. A disabled user has no live session.
 func (s *Store) SessionUser(ctx context.Context, token string) (User, error) {
 	if token == "" {
 		return User{}, ErrNotFound
 	}
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userColumnsOf("u")+` FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token_hash = ? AND s.expires_at > ?`, hashToken(token), time.Now().Unix()))
-}
-
-func userColumnsOf(alias string) string {
-	return alias + ".id, " + alias + ".identity, " + alias + ".email, " + alias + ".name, " + alias + ".is_operator, " + alias + ".created_at"
+	return scanUser(s.db.QueryRowContext(ctx, userSelect+`JOIN sessions s ON s.user_id = u.id
+		WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled_at IS NULL`, HashToken(token), time.Now().Unix()))
 }
 
 func (s *Store) EndSession(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, HashToken(token))
 	return err
+}
+
+// EndPasswordSessions ends every session made with a password, when local login is turned off.
+func (s *Store) EndPasswordSessions(ctx context.Context) ([]string, error) {
+	return s.endSessionsTx(ctx, `method = 'password'`)
+}
+
+// EndSessionsNotAt ends every session made with an identity of another issuer than the configured one, and lists those issuers.
+func (s *Store) EndSessionsNotAt(ctx context.Context, issuer string) (issuers []string, err error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT i.issuer FROM sessions s JOIN user_identities i ON i.id = s.identity_id WHERE i.issuer != ?`, issuer)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var i string
+		if err := rows.Scan(&i); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		issuers = append(issuers, i)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_, err = s.endSessionsTx(ctx, `identity_id IN (SELECT id FROM user_identities WHERE issuer != ?)`, issuer)
+	return issuers, err
+}
+
+func (s *Store) endSessionsTx(ctx context.Context, where string, args ...any) ([]string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	ended, err := endSessions(ctx, tx, where, args...)
+	if err != nil {
+		return nil, err
+	}
+	return ended, tx.Commit()
+}
+
+// endSessions deletes the sessions that match where and returns their hashes.
+func endSessions(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `DELETE FROM sessions WHERE `+where+` RETURNING token_hash`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ended []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		ended = append(ended, h)
+	}
+	return ended, rows.Err()
 }
 
 // PurgeSessions drops the expired ones.

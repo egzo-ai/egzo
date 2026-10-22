@@ -64,7 +64,7 @@ func TestTheStatusOfAnAgentReachesTheProjectListThroughTheFeedAndFollowsChanges(
 	a := running("coder-1", "working")
 	a.Status, a.Waiting = "refactoring", true
 	r.fakes["local"].SetAgent("web", a)
-	op := r.login("root")
+	op := r.operator()
 	r.startFeeds(quick)
 	r.scan()
 	eventually(t, "the feed to be live and carry the agent's state", func() bool {
@@ -84,7 +84,7 @@ func TestAnAgentWhoseStateTheFeedCannotSayIsUnknownAndNeverStarting(t *testing.T
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", running("coder-1", "working"))
 	r.fakes["local"].SetFeedSilent("web", true) // a sidecar that logs no status: an old one, or a log that cannot be read
-	op := r.login("root")
+	op := r.operator()
 	r.startFeeds(quick)
 	r.scan()
 	got, feed := r.agentOf(op, "local", "web", "coder-1")
@@ -107,7 +107,7 @@ func TestAStoppedAgentIsStoppedWhatEverTheFeedSays(t *testing.T) {
 	a.State = "exited"
 	a.Waiting = true
 	r.fakes["local"].SetAgent("web", a)
-	op := r.login("root")
+	op := r.operator()
 	r.startFeeds(quick)
 	r.scan()
 	eventually(t, "the feed", func() bool { _, feed := r.agentOf(op, "local", "web", "coder-1"); return feed.State == FeedLive })
@@ -121,7 +121,7 @@ func TestABrokenStreamIsRetriedWithADelayAndMendsItself(t *testing.T) {
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", running("coder-1", "idle"))
 	r.fakes["local"].SetFeedError("web", errors.New("configured logging driver does not support reading"))
-	op := r.login("root")
+	op := r.operator()
 	r.startFeeds(quick)
 	r.scan()
 	eventually(t, "the failure to be reported with its reason", func() bool {
@@ -210,7 +210,7 @@ func TestAQuietSidecarIsStaleAfterThreeHeartbeats(t *testing.T) {
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", running("coder-1", "idle"))
 	r.fakes["local"].SetFeedInterval(time.Hour) // one line, then nothing for a long time
-	op := r.login("root")
+	op := r.operator()
 	r.startFeeds(quick)
 	r.scan()
 	eventually(t, "the first line", func() bool { _, feed := r.agentOf(op, "local", "web", "coder-1"); return feed.State == FeedLive })
@@ -252,7 +252,7 @@ func TestAPageThatPollsAsksTheEngineForNothingAndTheTemplatesAreKept(t *testing.
 	b := running("reviewer-1", "idle")
 	b.Template, b.TemplateHash = "reviewer", "hash-reviewer"
 	r.fakes["local"].SetAgent("web", b)
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	for i := 0; i < 20; i++ {
 		view, err := r.hub.Project(ctx, op, "local", "web")
@@ -281,7 +281,7 @@ func TestTheTemplatesAreAskedAgainWhenTheSidecarIsAnotherContainer(t *testing.T)
 	p := project("web", "coder")
 	p.Services = []engines.Service{{Name: "control", State: "running", ID: "one"}, {Name: "proxy", State: "running"}}
 	r.fakes["local"].AddProject(p)
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	r.hub.Project(ctx, op, "local", "web")
 	p.Services = []engines.Service{{Name: "control", State: "running", ID: "two"}, {Name: "proxy", State: "running"}}
@@ -297,7 +297,7 @@ func TestAFailureToReadTheTemplatesIsKeptSoThePageDoesNotAskOnEveryPoll(t *testi
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetPublished("web", engines.Published{})
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	r.fakes["local"].SetDown(errors.New("control sidecar: 404 page not found"))
 	for i := 0; i < 10; i++ {
@@ -316,7 +316,7 @@ func TestAFailureToReadTheTemplatesIsKeptSoThePageDoesNotAskOnEveryPoll(t *testi
 func TestEventsMakeTheHubListAnEngineAgainWithNoTimerInvolved(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
-	op := r.login("root")
+	op := r.operator()
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { r.hub.Run(runCtx, quick); close(done) }() // the fallback is an hour: only events can explain what follows
@@ -335,7 +335,7 @@ func TestWithoutEventsAnEngineIsListedOnTheShortTimerAndTheWatchIsRetried(t *tes
 	r := newRig(t, "local")
 	r.fakes["local"].SetWatchError(errors.New("events are not supported"))
 	r.fakes["local"].AddProject(project("web", "coder"))
-	op := r.login("root")
+	op := r.operator()
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { r.hub.Run(runCtx, quick); close(done) }()
@@ -355,7 +355,7 @@ func TestAnOperatorSeesTheFeedOfEveryProjectAndAUserOnlyTheirs(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", running("coder-1", "working"))
-	r.login("root")
+	r.operator()
 	alice := r.login("alice")
 	r.startFeeds(quick)
 	r.scan()
@@ -369,7 +369,7 @@ func TestAnOperatorSeesTheFeedOfEveryProjectAndAUserOnlyTheirs(t *testing.T) {
 func TestRemovingAnEngineStopsItsStreamsAtOnce(t *testing.T) {
 	r := newRig(t, "local", "lab")
 	r.fakes["lab"].AddProject(project("data", "coder"))
-	op := r.login("root")
+	op := r.operator()
 	r.startFeeds(quick)
 	r.scan()
 	eventually(t, "the engine to be followed and watched", func() bool { return r.fakes["lab"].Feeds("data") == 1 && r.fakes["lab"].WatchStarts() >= 1 })

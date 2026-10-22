@@ -1,5 +1,6 @@
 import type {
-  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Project, ProjectList, SaveEngineAnswer, Session, TimelineEvent, UserRow,
+  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, TimelineEvent,
+  UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -15,7 +16,7 @@ export function setUnauthorizedHandler(f: () => void): void {
   onUnauthorized = f;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, prefix = "/api/v1"): Promise<T> {
   const init: RequestInit = { method, credentials: "same-origin", headers: { Accept: "application/json" } };
   if (method !== "GET") {
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
@@ -23,11 +24,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   let response: Response;
   try {
-    response = await fetch("/api/v1" + path, init);
+    response = await fetch(prefix + path, init);
   } catch {
     throw new ApiError(0, "network", "The hub cannot be reached. Check your connection.");
   }
-  if (response.status === 401) onUnauthorized();
+  if (response.status === 401 && prefix === "/api/v1") onUnauthorized();
   const text = await response.text();
   let data: unknown = null;
   try {
@@ -49,6 +50,11 @@ const agent = (engine: string, p: string, a: string) => `${project(engine, p)}/a
 export const api = {
   session: () => request<Session>("GET", "/session"),
   logout: () => request<{ ok: true }>("POST", "/logout"),
+  signInOptions: () => request<SignInOptions>("GET", "/signin"),
+  passwordLogin: (username: string, password: string) => request<{ ok: true }>("POST", "/login", { username, password }, "/auth"),
+  /** Starts linking an account at the login provider; the answer is where to send the browser. */
+  link: () => request<{ url: string }>("POST", "/me/link"),
+  unlink: (identity: string) => request<{ ok: true }>("DELETE", `/me/identities/${enc(identity)}`),
   projects: () => request<ProjectList>("GET", "/projects"),
 
   engines: () => request<{ engines: EngineState[] }>("GET", "/engines").then((r) => r.engines),
@@ -58,6 +64,8 @@ export const api = {
 
   users: () => request<{ users: UserRow[]; me: string }>("GET", "/users"),
   setOperator: (id: string, isOperator: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { isOperator }),
+  setDisabled: (id: string, disabled: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { disabled }),
+  removeIdentity: (user: string, identity: string) => request<{ ok: true }>("DELETE", `/users/${enc(user)}/identities/${enc(identity)}`),
 
   project: (engine: string, name: string) => request<Project>("GET", project(engine, name)),
   events: (engine: string, name: string, agentName = "", limit = 40) =>

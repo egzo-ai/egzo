@@ -1,11 +1,13 @@
 // What the whole app shares: who is signed in, the projects the sidebar and the home page list, the toasts, and the preferences.
 import { ApiError, api, setUnauthorizedHandler } from "./api";
 import { navigate, nav } from "./router.svelte";
-import type { EngineState, ProjectBrief, ProjectList, User } from "./types";
+import type { EngineState, Identity, ProjectBrief, ProjectList, User } from "./types";
 
 export const app = $state({
   ready: false,
   user: null as User | null,
+  /** How the signed-in user signs in: their accounts at login providers, a password, and what single sign-on is called. */
+  account: { identities: [] as Identity[], hasPassword: false, sso: "", issuer: "" },
   engines: [] as EngineState[],
   projects: [] as ProjectBrief[],
   unreachable: [] as EngineState[],
@@ -60,6 +62,7 @@ export async function refreshProjects(): Promise<void> {
 export async function refreshSession(): Promise<void> {
   const s = await api.session();
   app.user = s.user;
+  app.account = { identities: s.identities, hasPassword: s.hasPassword, sso: s.sso, issuer: s.issuer };
   app.engines = s.engines;
 }
 

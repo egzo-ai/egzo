@@ -1,7 +1,8 @@
 # The egzo hub: a web UI over the egzo projects of one or more container engines.
 #
-#   cp .env.example .env     # set the secrets
+#   cp .env.example .env     # set EGZO_SECRET_KEY
 #   docker compose up -d
+#   docker compose logs hub  # the admin password, printed once
 #   open http://localhost:8080
 #
 # Read hub/docs/README.md first: mounting the engine socket is root-equivalent on the host.
@@ -12,12 +13,17 @@ services:
     image: ghcr.io/egzo-ai/egzo-hub:${EGZO_HUB_VERSION:-latest}
     restart: unless-stopped
     ports:
-      - "8080:8080"           # put a TLS reverse proxy in front of this port
+      - "8080:8080"           # meant for a private network (LAN, Tailscale, a tunnel), not the open internet
     environment:
       EGZO_SECRET_KEY: ${EGZO_SECRET_KEY:?set EGZO_SECRET_KEY in .env}
-      EGZO_OIDC_ISSUER: ${EGZO_OIDC_ISSUER:-http://dex:5556/dex}
-      EGZO_OIDC_CLIENT_ID: egzo-hub
-      EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:?set EGZO_OIDC_CLIENT_SECRET in .env}
+      # The starter account, admin: a password from here (saved at every start), else one printed once in the log.
+      EGZO_ADMIN_PASSWORD: ${EGZO_ADMIN_PASSWORD:-}
+      EGZO_LOCAL_LOGIN: ${EGZO_LOCAL_LOGIN:-true}
+      # Single sign-on, optional: your OpenID Connect provider. See hub/docs/README.md.
+      EGZO_OIDC_ISSUER: ${EGZO_OIDC_ISSUER:-}
+      EGZO_OIDC_CLIENT_ID: ${EGZO_OIDC_CLIENT_ID:-}
+      EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:-}
+      EGZO_OIDC_NAME: ${EGZO_OIDC_NAME:-}
       EGZO_PUBLIC_URL: ${EGZO_PUBLIC_URL:-}
       EGZO_TRUSTED_PROXIES: ${EGZO_TRUSTED_PROXIES:-}
       # The engine of the quick start. "none" starts with no engine; add engines in the UI.
@@ -27,21 +33,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock   # root-equivalent: see hub/docs/README.md for safer ways
     group_add:
       - "${DOCKER_GID:-0}"      # the group that owns the socket: stat -c %g /var/run/docker.sock
-    depends_on:
-      - dex
-
-  dex:
-    image: ghcr.io/dexidp/dex:v2.41.1
-    restart: unless-stopped
-    command: ["dex", "serve", "/etc/dex/config.yaml"]
-    environment:
-      EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:?set EGZO_OIDC_CLIENT_SECRET in .env}
-    ports:
-      - "5556:5556"
-    volumes:
-      - ./dex.yaml:/etc/dex/config.yaml:ro
-      - dex-data:/var/dex
 
 volumes:
   hub-data:
-  dex-data:

@@ -48,6 +48,10 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 	conn.SetReadLimit(1 << 20)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+	// the terminal belongs to the session that opened it: signing out, being disabled or unlinking ends it
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		defer s.trackTerminal(store.HashToken(c.Value), cancel)()
+	}
 
 	sendControl := func(c control) {
 		data, _ := json.Marshal(c)
