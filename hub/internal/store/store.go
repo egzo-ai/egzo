@@ -773,26 +773,34 @@ func (s *Store) EndPasswordSessions(ctx context.Context) ([]string, error) {
 	return s.endSessionsTx(ctx, `method = 'password'`)
 }
 
-// EndSessionsNotAt ends every session made with an identity of another issuer than the configured one, and lists those issuers.
-func (s *Store) EndSessionsNotAt(ctx context.Context, issuer string) (issuers []string, err error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT i.issuer FROM sessions s JOIN user_identities i ON i.id = s.identity_id WHERE i.issuer != ?`, issuer)
+// EndSessionsNotAt ends every session made with an identity of another issuer than the configured one. It returns those issuers
+// and the ended sessions' hashes, read in the same transaction as the sessions are ended.
+func (s *Store) EndSessionsNotAt(ctx context.Context, issuer string) (issuers, ended []string, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT i.issuer FROM sessions s JOIN user_identities i ON i.id = s.identity_id WHERE i.issuer != ?`, issuer)
+	if err != nil {
+		return nil, nil, err
 	}
 	for rows.Next() {
 		var i string
 		if err := rows.Scan(&i); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		issuers = append(issuers, i)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	_, err = s.endSessionsTx(ctx, `identity_id IN (SELECT id FROM user_identities WHERE issuer != ?)`, issuer)
-	return issuers, err
+	if ended, err = endSessions(ctx, tx, `identity_id IN (SELECT id FROM user_identities WHERE issuer != ?)`, issuer); err != nil {
+		return nil, nil, err
+	}
+	return issuers, ended, tx.Commit()
 }
 
 func (s *Store) endSessionsTx(ctx context.Context, where string, args ...any) ([]string, error) {

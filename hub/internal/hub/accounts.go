@@ -89,12 +89,12 @@ func (h *Hub) SetupSignIn(ctx context.Context, o SignInOptions) (generated strin
 			h.log.Info("local login is off: password sessions ended", "sessions", len(ended))
 		}
 	}
-	issuers, err := h.store.EndSessionsNotAt(ctx, o.Issuer)
+	issuers, ended, err := h.store.EndSessionsNotAt(ctx, o.Issuer)
 	if err != nil {
 		return "", err
 	}
 	if len(issuers) > 0 {
-		h.log.Warn("sessions made with another login provider ended: its accounts cannot sign in any more", "previous", strings.Join(issuers, ", "), "configured", o.Issuer)
+		h.log.Warn("sessions made with another login provider ended: its accounts cannot sign in any more", "previous", strings.Join(issuers, ", "), "configured", o.Issuer, "sessions", len(ended))
 	}
 	if !o.LocalLogin {
 		operators, err := h.store.CountOperators(ctx)
