@@ -47,7 +47,7 @@
   $effect(() => {
     const r = nav.route;
     document.title =
-      (r.name === "project" ? r.project + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? (r.tab === "users" ? "Users" : "Engines") + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
+      (r.name === "project" ? r.project + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", engines: "Engines", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
   });
 
   const routeKey = $derived.by(() => {

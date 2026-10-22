@@ -7,6 +7,7 @@ describe("the router", () => {
     expect(parse("/login")).toEqual({ name: "login" });
     expect(parse("/settings/engines")).toEqual({ name: "settings", tab: "engines" });
     expect(parse("/settings/users")).toEqual({ name: "settings", tab: "users" });
+    expect(parse("/settings/account")).toEqual({ name: "settings", tab: "account" });
     expect(parse("/e/lab/p/web")).toEqual({ name: "project", engine: "lab", project: "web", tab: "agents" });
     expect(parse("/e/lab/p/web/members")).toEqual({ name: "project", engine: "lab", project: "web", tab: "members" });
     expect(parse("/e/lab/p/web/a/coder-1")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "overview" });

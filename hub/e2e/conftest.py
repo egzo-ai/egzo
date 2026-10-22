@@ -73,12 +73,20 @@ def dom_terminal_renderer(context):
     context.add_init_script(DOM_RENDERER)
 
 
+ADMIN_PASSWORD = "e2e-admin-password"  # what the test server sets for the starter account
+
+
 def sign_in(page, server, name):
-    """Log in through the test provider as `name`."""
+    """Sign in as `name`: "admin" with the starter account's password, anybody else through the test provider."""
     page.goto(server.url + "/login")
-    page.get_by_role("link", name="Sign in").click()
-    page.get_by_label("Who are you?").fill(name)
-    page.get_by_role("button", name="Sign in").click()
+    if name == "admin":
+        page.get_by_label("Username").fill("admin")
+        page.get_by_label("Password").fill(ADMIN_PASSWORD)
+        page.get_by_role("button", name="Sign in", exact=True).click()
+    else:
+        page.get_by_role("link", name="Sign in with Test login").click()
+        page.get_by_label("Who are you?").fill(name)
+        page.get_by_role("button", name="Sign in").click()
     expect(page.get_by_test_id("signed-in-as")).to_contain_text(name)
 
 

@@ -3,8 +3,8 @@
 export type ProjectTab = "agents" | "services" | "timeline" | "spec" | "audit" | "members";
 export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "spec", "audit", "members"];
 
-export type SettingsTab = "engines" | "users";
-export const settingsTabs: SettingsTab[] = ["engines", "users"];
+export type SettingsTab = "engines" | "users" | "account";
+export const settingsTabs: SettingsTab[] = ["engines", "users", "account"];
 
 export type Route =
   | { name: "home" }
@@ -50,6 +50,7 @@ export const href = {
   settings: (tab: SettingsTab = "engines") => `/settings/${tab}`,
   engines: () => "/settings/engines",
   users: () => "/settings/users",
+  account: () => "/settings/account",
   project: (engine: string, project: string, tab: ProjectTab = "agents") =>
     `/e/${enc(engine)}/p/${enc(project)}${tab === "agents" ? "" : "/" + tab}`,
   agent: (engine: string, project: string, agent: string, tab: "overview" | "logs" = "overview") =>

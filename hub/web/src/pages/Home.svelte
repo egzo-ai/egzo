@@ -62,7 +62,7 @@
 │  0 projects  │
 └──────────────┘</pre>
       <h2>Nothing here yet</h2>
-      <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Send them the address you signed in with: <code>{app.user?.email}</code>.</p>
+      <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Tell them your username: <code>{app.user?.username}</code>.</p>
       <p class="muted">Projects are created from the command line with <code>egzo project up</code>, not from the hub.</p>
     </div>
   {:else if rows.length === 0 && app.projects.length}

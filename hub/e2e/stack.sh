@@ -1,6 +1,7 @@
 #!/bin/sh
-# The whole stack for real: the hub image and Dex from compose.yaml, the local Docker engine, a project made by the egzo CLI, and a
-# browser in Playwright's image logging in through Dex. Run it with `make hub-stack`.
+# The whole stack for real: the hub image from compose.yaml with Dex added as its single sign-on (stack.compose.yaml), the local Docker
+# engine, a project made by the egzo CLI, and a browser in Playwright's image that signs in as admin, links Dex and signs in with it.
+# Run it with `make hub-stack`.
 set -eu
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
@@ -10,9 +11,10 @@ NAME=hubstack$$
 export COMPOSE_PROJECT_NAME=egzo-hub-stack-$$
 export EGZO_SECRET_KEY=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 export EGZO_OIDC_CLIENT_SECRET=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+export EGZO_ADMIN_PASSWORD=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')
 export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
 export EGZO_HUB_VERSION=dev
-COMPOSE="docker compose -f hub/compose.yaml"
+COMPOSE="docker compose -f hub/compose.yaml -f hub/e2e/stack.compose.yaml"
 
 cleanup() {
 	status=$?
@@ -51,10 +53,10 @@ wait_for() {
 	echo "hub-stack: $1 did not answer in 60s" >&2
 	exit 1
 }
-wait_for http://localhost:5556/dex/.well-known/openid-configuration
-wait_for http://localhost:8080/healthz
+wait_for http://localhost:15556/dex/.well-known/openid-configuration
+wait_for http://localhost:18080/healthz
 
 docker build -q -t egzo-hub-e2e hub/e2e >/dev/null
 docker run --rm --network host --ipc=host --add-host dex:127.0.0.1 -v "$ROOT/hub:/hub" \
-	-e HUB_STACK_URL=http://localhost:8080 -e HUB_STACK_PROJECT="$NAME" \
+	-e HUB_STACK_URL=http://localhost:18080 -e HUB_STACK_PROJECT="$NAME" -e HUB_STACK_ADMIN_PASSWORD="$EGZO_ADMIN_PASSWORD" \
 	egzo-hub-e2e pytest -q -p no:cacheprovider test_stack.py

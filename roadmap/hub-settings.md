@@ -1,6 +1,6 @@
 # Roadmap: hub settings, with engines and users
 
-**Status.** The first slice is built (see "What was built"); "Later" is open; removing a user is replaced by disabling one
+**Status.** The first slice is built (see "What was built"); "Later" is open; removing a user was replaced by disabling one
 in [hub-login.md](hub-login.md). Before it, the hub had one operator, set at the
 first login, and no way to change that; engines were the operator's page and there was no list of users.
 

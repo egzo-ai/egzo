@@ -34,11 +34,21 @@ type rig struct {
 	hub      *hub.Hub
 	store    *store.Store
 	fakes    map[string]*fake.Engine
+	oidc     *oidctest.Provider
+	signIn   hub.SignInOptions
 }
 
 var ctx = context.Background()
 
+const adminPassword = "admin-password"
+
 func newRig(t *testing.T, engineNames ...string) *rig {
+	t.Helper()
+	return newRigWith(t, nil, engineNames...)
+}
+
+// newRigWith builds a rig whose sign-in settings options change first.
+func newRigWith(t *testing.T, options []func(*rig), engineNames ...string) *rig {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
 	if err != nil {
@@ -64,9 +74,21 @@ func newRig(t *testing.T, engineNames ...string) *rig {
 	provider := oidctest.New("", "hub", "secret")
 	r.provider = httptest.NewServer(provider.Handler())
 	provider.Issuer = r.provider.URL
+	r.oidc = provider
 	t.Cleanup(r.provider.Close)
+	r.signIn = hub.SignInOptions{LocalLogin: true, AdminPassword: adminPassword, Issuer: r.provider.URL}
+	for _, o := range options {
+		o(r)
+	}
+	if _, err := r.hub.SetupSignIn(ctx, r.signIn); err != nil {
+		t.Fatal(err)
+	}
 	urls, _ := publicurl.New("", nil)
-	app, err := web.New(r.hub, auth.New(auth.Config{Issuer: r.provider.URL, ClientID: "hub", ClientSecret: "secret"}), urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	var sso web.Authenticator
+	if r.signIn.Issuer != "" {
+		sso = auth.New(auth.Config{Issuer: r.provider.URL, ClientID: "hub", ClientSecret: "secret"})
+	}
+	app, err := web.New(r.hub, sso, web.Options{SSOName: "Corp"}, urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,44 +182,82 @@ func list(m json_, key string) []map[string]any {
 	return out
 }
 
-// signIn walks the login: the hub redirects to the provider, the person types a name, the provider redirects back.
+// signIn signs in as user: "admin" with the starter account's password, anybody else through single sign-on.
 func (b *browser) signIn(user string) {
 	b.t.Helper()
-	noFollow := *b.client
-	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := noFollow.Get(b.base + "/login/start")
+	if user == "admin" {
+		if code, out := b.password("admin", adminPassword); code != 200 {
+			b.t.Fatalf("password sign-in = %d %v", code, out)
+		}
+		return
+	}
+	if final := b.sso(b.base+"/login/start", user); final.Path != "/" {
+		b.t.Fatalf("the sign-in ended on %s", final)
+	}
+}
+
+// password posts the sign-in form, as the sign-in page does.
+func (b *browser) password(user, password string) (int, json_) {
+	b.t.Helper()
+	data, _ := json.Marshal(json_{"username": user, "password": password})
+	req, _ := http.NewRequest("POST", b.base+"/auth/login", strings.NewReader(string(data)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", b.base)
+	resp, err := b.client.Do(req)
 	if err != nil {
 		b.t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		b.t.Fatalf("login start = %d", resp.StatusCode)
+	defer resp.Body.Close()
+	var out json_
+	json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+// sso follows a redirect to the provider from start (an address of the hub, or the provider's own), signs in there as user,
+// and follows the redirect back. It returns where the hub sent the browser in the end.
+func (b *browser) sso(start, user string) *url.URL {
+	b.t.Helper()
+	noFollow := *b.client
+	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	authURL, _ := url.Parse(start)
+	if strings.HasPrefix(start, b.base) {
+		resp, err := noFollow.Get(start)
+		if err != nil {
+			b.t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusFound {
+			b.t.Fatalf("login start = %d", resp.StatusCode)
+		}
+		authURL, _ = url.Parse(resp.Header.Get("Location"))
 	}
-	authURL, _ := url.Parse(resp.Header.Get("Location"))
 	q := authURL.Query()
-	resp, err = noFollow.PostForm(authURL.Scheme+"://"+authURL.Host+"/authorize", url.Values{
+	resp, err := noFollow.PostForm(authURL.Scheme+"://"+authURL.Host+"/authorize", url.Values{
 		"user": {user}, "client_id": q["client_id"], "redirect_uri": q["redirect_uri"], "state": q["state"], "nonce": q["nonce"],
+		"code_challenge": q["code_challenge"], "code_challenge_method": q["code_challenge_method"],
 	})
 	if err != nil {
 		b.t.Fatal(err)
 	}
 	resp.Body.Close()
 	back, _ := url.Parse(resp.Header.Get("Location"))
-	resp, err = b.client.Get(b.base + back.RequestURI())
+	resp, err = noFollow.Get(b.base + back.RequestURI())
 	if err != nil {
 		b.t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b.t.Fatalf("callback ended on %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusSeeOther {
+		b.t.Fatalf("callback answered %d", resp.StatusCode)
 	}
+	final, _ := url.Parse(resp.Header.Get("Location"))
+	return final
 }
 
 func (r *rig) userID(name string) string {
 	r.t.Helper()
 	users, _ := r.store.Users(ctx)
 	for _, u := range users {
-		if u.Name == name {
+		if u.Username == name {
 			return u.ID
 		}
 	}

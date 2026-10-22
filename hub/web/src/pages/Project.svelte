@@ -147,7 +147,7 @@
                   <td><a class="name" href={href.agent(engine, name, a.name)}>{a.name}</a> <span class="muted">{a.template}</span>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}</td>
                   <td><Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} /></td>
                   <td class="wrap" style="white-space:normal;min-width:18ch"><span class="status" style:color={a.waiting ? "var(--status-waiting)" : undefined}>{a.status}</span></td>
-                  <td>{#if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.name ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.name ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
+                  <td>{#if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
                   <td>{a.creator}</td>
                   <td class="actions">
                     {#if a.canOperate}

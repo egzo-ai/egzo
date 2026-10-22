@@ -35,6 +35,18 @@ describe("the API client", () => {
     await expect(api.projects()).rejects.toBeInstanceOf(ApiError);
   });
 
+  it("signs in with a password outside the API, and a wrong password does not count as a session that ended", async () => {
+    const ended = vi.fn();
+    setUnauthorizedHandler(ended);
+    const fetch = answer(401, { code: "bad_login", message: "Wrong username or password." });
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.passwordLogin("admin", "nope")).rejects.toMatchObject({ status: 401, message: "Wrong username or password." });
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe("/auth/login");
+    expect(JSON.parse(init.body)).toEqual({ username: "admin", password: "nope" });
+    expect(ended).not.toHaveBeenCalled();
+  });
+
   it("tells the app when the session has ended", async () => {
     const ended = vi.fn();
     setUnauthorizedHandler(ended);

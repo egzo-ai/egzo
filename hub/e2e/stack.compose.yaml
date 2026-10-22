@@ -1,0 +1,23 @@
+# Added to compose.yaml by stack.sh: Dex as the hub's single sign-on, to test the OIDC path and linking for real. Its own ports, so
+# it runs next to a real hub on 8080.
+services:
+  hub:
+    ports: !override
+      - "18080:8080"
+    environment:
+      EGZO_OIDC_ISSUER: http://dex:15556/dex
+      EGZO_OIDC_CLIENT_ID: egzo-hub
+      EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:?}
+      EGZO_OIDC_NAME: Dex
+    depends_on:
+      - dex
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    environment:
+      EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:?}
+    ports:
+      - "15556:15556"
+    volumes:
+      - ./e2e/dex.yaml:/etc/dex/config.yaml:ro   # relative to compose.yaml, the first file

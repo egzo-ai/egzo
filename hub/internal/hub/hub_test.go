@@ -48,6 +48,9 @@ func newRig(t *testing.T, engineNames ...string) *rig {
 	})
 	registry.SetProbe(func(context.Context, engines.Config) (string, error) { return "SHA256:probed", nil })
 	r.hub = New(s, registry, nil)
+	if _, err := r.hub.SetupSignIn(ctx, SignInOptions{LocalLogin: true, AdminPassword: "admin-password", Issuer: testIssuer}); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range engineNames {
 		r.fakes[name] = fake.New()
 		if err := s.PutEngine(ctx, store.EngineRow{Name: name, Host: "unix:///" + name}); err != nil {
@@ -57,9 +60,22 @@ func newRig(t *testing.T, engineNames ...string) *rig {
 	return r
 }
 
+const testIssuer = "https://idp.example.com"
+
+// login signs in through single sign-on as sub, whose username is sub too.
 func (r *rig) login(sub string) store.User {
 	r.t.Helper()
-	u, err := r.hub.Login(ctx, "issuer\n"+sub, sub+"@example.com", sub)
+	u, _, err := r.hub.IdentityLogin(ctx, testIssuer, sub, store.Profile{Email: sub + "@example.com", Name: sub, PreferredUsername: sub})
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return u
+}
+
+// operator is the starter account, an operator.
+func (r *rig) operator() store.User {
+	r.t.Helper()
+	u, err := r.hub.PasswordLogin(ctx, "admin", "admin-password")
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -97,15 +113,18 @@ func names(refs []ProjectRef) string {
 	return strings.Join(out, ",")
 }
 
-func TestTheFirstLoginIsAnOperatorAndHoldsEveryProjectWithoutAGrant(t *testing.T) {
+func TestTheStarterAccountIsAnOperatorAndHoldsEveryProjectWithoutAGrant(t *testing.T) {
 	r := newRig(t, "local", "lab")
 	r.fakes["local"].AddProject(project("web"))
 	r.fakes["lab"].AddProject(project("web"))
 	r.fakes["lab"].AddProject(project("data"))
 	r.scan() // nobody has logged in yet
-	op := r.login("root")
+	op := r.operator()
 	if !op.IsOperator {
-		t.Fatal("the first login is not an operator")
+		t.Fatal("the starter account is not an operator")
+	}
+	if alice := r.login("alice"); alice.IsOperator {
+		t.Fatal("a new user is an operator")
 	}
 	if grants, _ := r.store.GrantsOf(ctx, op.ID); len(grants) != 0 {
 		t.Errorf("an operator was given grants: %+v", grants)
@@ -128,7 +147,7 @@ func TestTheFirstLoginIsAnOperatorAndHoldsEveryProjectWithoutAGrant(t *testing.T
 func TestAnOperatorReachesOnlyWhatExists(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web"))
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	if _, err := r.hub.Project(ctx, op, "local", "ghost"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a project that is not there: %v", err)
@@ -162,7 +181,7 @@ func TestAnOperatorReachesOnlyWhatExists(t *testing.T) {
 func TestAnOperatorOnAnEngineThatIsDownIsToldSoNotThatThereIsNothing(t *testing.T) {
 	r := newRig(t, "local", "lab")
 	r.fakes["lab"].AddProject(project("data"))
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	r.fakes["lab"].SetDown(fake.ErrUnreachable)
 	r.scan()
@@ -179,7 +198,7 @@ func TestAUserSeesOnlyTheProjectsTheyHaveARoleOn(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web"))
 	r.fakes["local"].AddProject(project("secret"))
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
@@ -205,7 +224,7 @@ func TestOneEngineDownKeepsTheOthersListedAndIsReported(t *testing.T) {
 	r := newRig(t, "local", "lab")
 	r.fakes["local"].AddProject(project("web"))
 	r.fakes["lab"].AddProject(project("data"))
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	r.fakes["lab"].SetDown(fake.ErrUnreachable)
 	r.scan()
@@ -232,7 +251,7 @@ func TestOneEngineDownKeepsTheOthersListedAndIsReported(t *testing.T) {
 func TestUsersOperateTheirOwnAgentsAndAdministratorsAllOfThem(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
-	op := r.login("root")
+	op := r.operator()
 	alice, bob, carol := r.login("alice"), r.login("bob"), r.login("carol")
 	r.scan()
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
@@ -287,7 +306,7 @@ func TestAgentsSpawnedFromTheCLIBelongToTheOperator(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
@@ -306,7 +325,7 @@ func TestAgentsSpawnedFromTheCLIBelongToTheOperator(t *testing.T) {
 func TestSpawnNeedsARoleAndATemplate(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
-	r.login("root")
+	r.operator()
 	alice := r.login("alice")
 	r.scan()
 	if _, err := r.hub.Spawn(ctx, alice, "local", "web", "coder", ""); !errors.Is(err, ErrNotFound) {
@@ -322,7 +341,7 @@ func TestOneHolderPerAgentAndAnyoneMayTakeOver(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
-	op := r.login("root")
+	op := r.operator()
 	alice, bob := r.login("alice"), r.login("bob")
 	r.scan()
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.Administrator)
@@ -334,7 +353,7 @@ func TestOneHolderPerAgentAndAnyoneMayTakeOver(t *testing.T) {
 		t.Fatalf("first attach: %v", err)
 	}
 	var inUse *InUseError
-	if _, err := r.hub.Attach(ctx, alice, "local", "web", "coder-1", false); !errors.As(err, &inUse) || inUse.Holder != "root" {
+	if _, err := r.hub.Attach(ctx, alice, "local", "web", "coder-1", false); !errors.As(err, &inUse) || inUse.Holder != "admin" {
 		t.Errorf("second attach: %v", err)
 	}
 	if _, err := r.hub.Attach(ctx, bob, "local", "web", "coder-1", false); !errors.Is(err, ErrForbidden) {
@@ -343,7 +362,7 @@ func TestOneHolderPerAgentAndAnyoneMayTakeOver(t *testing.T) {
 	if _, err := r.hub.Attach(ctx, stranger, "local", "web", "coder-1", false); !errors.Is(err, ErrNotFound) {
 		t.Errorf("attach without a role: %v", err)
 	}
-	if got, _ := r.hub.Holder(ctx, bob, "local", "web", "coder-1"); got != "root" {
+	if got, _ := r.hub.Holder(ctx, bob, "local", "web", "coder-1"); got != "admin" {
 		t.Errorf("holder = %q", got)
 	}
 
@@ -378,7 +397,7 @@ func TestATakenOverAttachmentEndsWithoutAnError(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
-	op := r.login("root")
+	op := r.operator()
 	r.scan()
 	a, _ := r.hub.Attach(ctx, op, "local", "web", "coder-1", false)
 	done := make(chan error, 1)
@@ -402,7 +421,7 @@ func TestATakenOverAttachmentEndsWithoutAnError(t *testing.T) {
 func TestRolesAreManagedByOwnersOnly(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web"))
-	op := r.login("root")
+	op := r.operator()
 	alice, bob := r.login("alice"), r.login("bob")
 	r.scan()
 	if err := r.hub.SetRole(ctx, op, "local", "web", alice.ID, rbac.Administrator); err != nil {
@@ -444,7 +463,7 @@ func TestRolesAreManagedByOwnersOnly(t *testing.T) {
 func TestAnOperatorsAccessIsNotARoleAndCannotBeChangedOnAProject(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web"))
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	r.hub.SetRole(ctx, op, "local", "web", alice.ID, rbac.Owner)
@@ -468,7 +487,7 @@ func TestAnOperatorsAccessIsNotARoleAndCannotBeChangedOnAProject(t *testing.T) {
 func TestAGrantLeftOverOnAnOperatorIsIgnoredWhileTheyAreOne(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web"))
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
@@ -506,7 +525,7 @@ func TestAGrantLeftOverOnAnOperatorIsIgnoredWhileTheyAreOne(t *testing.T) {
 
 func TestOperatorsAreMadeAndUnmadeByOperatorsAndTheLastOneStays(t *testing.T) {
 	r := newRig(t, "local")
-	op := r.login("root")
+	op := r.operator()
 	alice, bob := r.login("alice"), r.login("bob")
 	if err := r.hub.SetOperator(ctx, alice, bob.ID, true); !errors.Is(err, ErrForbidden) {
 		t.Errorf("a user making an operator: %v", err)
@@ -558,7 +577,7 @@ func TestOperatorsAreMadeAndUnmadeByOperatorsAndTheLastOneStays(t *testing.T) {
 
 func TestOperatorChangesAreAuditedWithNoProjectAndAnUnchangedOneIsNot(t *testing.T) {
 	r := newRig(t, "local")
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.hub.SetOperator(ctx, op, alice.ID, true)
 	r.hub.SetOperator(ctx, op, alice.ID, true) // nothing to change
@@ -573,7 +592,7 @@ func TestOperatorChangesAreAuditedWithNoProjectAndAnUnchangedOneIsNot(t *testing
 		e := entries[i]
 		got = append(got, e.Action+":"+map[bool]string{true: "allowed", false: "refused"}[e.Allowed])
 	}
-	want := "user.operator:allowed,operator.grant:allowed,operator.revoke:allowed,operator.revoke:refused"
+	want := "user.signin:allowed,user.create:allowed,operator.grant:allowed,operator.revoke:allowed,operator.revoke:refused"
 	if strings.Join(got, ",") != want {
 		t.Errorf("audit = %s, want %s", strings.Join(got, ","), want)
 	}
@@ -582,7 +601,7 @@ func TestOperatorChangesAreAuditedWithNoProjectAndAnUnchangedOneIsNot(t *testing
 func TestAdministratorsReadTheAuditLogAndUsersDoNot(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web"))
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	r.hub.SetRole(ctx, op, "local", "web", alice.ID, rbac.User)
@@ -597,7 +616,7 @@ func TestAdministratorsReadTheAuditLogAndUsersDoNot(t *testing.T) {
 
 func TestOnlyTheOperatorManagesEngines(t *testing.T) {
 	r := newRig(t)
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	in := EngineInput{Name: "lab", Host: "unix:///lab.sock"}
 	if err := r.hub.SaveEngine(ctx, alice, in); !errors.Is(err, ErrForbidden) {
@@ -624,7 +643,7 @@ func TestOnlyTheOperatorManagesEngines(t *testing.T) {
 
 func TestAnEngineThatCannotBeReachedIsNotSaved(t *testing.T) {
 	r := newRig(t)
-	op := r.login("root")
+	op := r.operator()
 	r.bad["lab"] = errors.New("dial tcp: connection refused")
 	err := r.hub.SaveEngine(ctx, op, EngineInput{Name: "lab", Host: "tcp://lab:2376"})
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {
@@ -637,7 +656,7 @@ func TestAnEngineThatCannotBeReachedIsNotSaved(t *testing.T) {
 
 func TestAnSSHEngineNeedsItsHostKeyConfirmedAndCredentialsAreWriteOnly(t *testing.T) {
 	r := newRig(t)
-	op := r.login("root")
+	op := r.operator()
 	in := EngineInput{Name: "lab", Host: "ssh://me@lab", SSHKey: "PRIVATE-SSH-KEY"}
 	err := r.hub.SaveEngine(ctx, op, in)
 	var pending *HostKeyPending
@@ -698,7 +717,7 @@ func TestTheLocalEngineIsSeededOnlyWhenNoneExists(t *testing.T) {
 func TestRemovingAnEngineRemovesItsGrantsAndItsProjectsFromTheList(t *testing.T) {
 	r := newRig(t, "local", "lab")
 	r.fakes["lab"].AddProject(project("data"))
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	r.store.SetRole(ctx, "lab", "data", alice.ID, rbac.User)
@@ -722,7 +741,7 @@ func TestEventsLogsAndSpecNeedARole(t *testing.T) {
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	r.fakes["local"].AddEvent("web", engines.Event{Seq: 1, Type: "status", Agent: "coder-1", Text: "parsing"})
-	op := r.login("root")
+	op := r.operator()
 	alice := r.login("alice")
 	r.scan()
 	if _, err := r.hub.Events(ctx, alice, "local", "web", "", 10); !errors.Is(err, ErrNotFound) {

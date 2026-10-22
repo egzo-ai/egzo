@@ -1,6 +1,9 @@
 # Roadmap: hub login, without Dex and with a starter account
 
-**Status.** Proposal. Nothing is built.
+**Status.** Built (`hub/`; operator docs in [hub/docs/README.md](../hub/docs/README.md), "Signing in"). Where the build settled
+a detail the proposal left open, this page now says what was built: the generated password is 26 characters (`crypto/rand.Text`),
+a hub with local login off and no operator refuses to start, and Link and Unlink are on the user's Account page (Settings,
+Account, reached from their name in the sidebar).
 
 Today the hub can only log people in through OpenID Connect, and the compose file bundles Dex to make that possible. The cost
 is a second public port and hostname (the browser has to reach Dex itself), an `/etc/hosts` trick for a first try, an `issuer`
@@ -82,7 +85,7 @@ The starter account's username is `admin`, set directly and not generated.
   operator (it creates or repairs it as needed), then settles its password:
   - `EGZO_ADMIN_PASSWORD` **set**: it is saved as the password, on every start. The environment is the source of truth. When
     it differs from the saved one, every password session ends: rotating a leaked password locks the holder out.
-  - `EGZO_ADMIN_PASSWORD` **unset**, and `admin` has **no** password: the hub generates one (24 random characters) and prints it
+  - `EGZO_ADMIN_PASSWORD` **unset**, and `admin` has **no** password: the hub generates one (26 random characters) and prints it
     **once** on standard output, in a clearly marked block.
   - `EGZO_ADMIN_PASSWORD` **unset**, and `admin` **has** a password: left as it is. Nothing is printed.
 - **It is for starting out and demos.** The hub has no page to change a password, to make local users or to reset one. The
@@ -91,7 +94,7 @@ The starter account's username is `admin`, set directly and not generated.
   keeps its row and its identities, and signs in through them. Password sessions end at start. It needs OIDC configured: with `false` and no issuer the hub
   refuses to start. `EGZO_ADMIN_PASSWORD` set together with `false` is ignored, with a warning in the log.
 - **No operator, no way in.** A fresh database with `EGZO_LOCAL_LOGIN=false` has no operator. The hub logs an error that says to
-  start with `EGZO_LOCAL_LOGIN=true`, link SSO and turn it off again, and refuses to serve the login. This **replaces "the first
+  start with `EGZO_LOCAL_LOGIN=true`, link SSO and turn it off again, and refuses to start. This **replaces "the first
   person to sign in is an operator"**, which with an open OIDC provider means "whoever reaches the hub first".
 - **A lockout warning.** With `EGZO_LOCAL_LOGIN=false`, if no enabled operator has an identity at the configured issuer, nobody
   can sign in as an operator. The hub starts and says so in the log, naming the issuer and the fix (the break-glass below).
@@ -132,8 +135,8 @@ The starter account's username is `admin`, set directly and not generated.
 
 ## Linking an identity provider
 
-The way from the starter account to SSO, and from one provider to another, for anyone who can sign in: **Link `<SSO name>`** in the
-user's own menu.
+The way from the starter account to SSO, and from one provider to another, for anyone who can sign in: **Link `<SSO name>`** on the
+user's Account page (Settings, Account; everyone has that tab).
 
 1. The signed-in user starts the link (a `POST`, so a page cannot start it for them). The hub records in the OIDC state which user
    it is for.

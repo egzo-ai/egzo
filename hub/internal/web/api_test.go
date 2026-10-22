@@ -43,14 +43,14 @@ func TestTheAppIsServedForItsOwnAddressesAndTheAPIAnswersJSONWhenSignedOut(t *te
 	}
 }
 
-func TestSigningInMakesTheFirstUserAnOperatorWhoHoldsEveryProject(t *testing.T) {
+func TestTheStarterAccountIsAnOperatorWhoHoldsEveryProject(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	code, session := b.get("/session")
-	if code != 200 || at(session, "user", "name") != "root" || at(session, "user", "isOperator") != true {
+	if code != 200 || at(session, "user", "username") != "admin" || at(session, "user", "isOperator") != true {
 		t.Fatalf("session = %d %v", code, session)
 	}
 	if got := list(session, "engines"); len(got) != 1 || got[0]["name"] != "local" || got[0]["host"] != nil {
@@ -61,7 +61,7 @@ func TestSigningInMakesTheFirstUserAnOperatorWhoHoldsEveryProject(t *testing.T) 
 	if len(got) != 1 || got[0]["name"] != "web" || got[0]["engine"] != "local" || got[0]["role"] != "owner" || got[0]["operator"] != true {
 		t.Errorf("projects = %v", projects)
 	}
-	if grants, _ := r.store.GrantsOf(ctx, r.userID("root")); len(grants) != 0 {
+	if grants, _ := r.store.GrantsOf(ctx, r.userID("admin")); len(grants) != 0 {
 		t.Errorf("an operator was given grants: %+v", grants)
 	}
 }
@@ -70,7 +70,7 @@ func TestANewcomerSeesNothing(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.hub.Scan(ctx)
-	r.browser().signIn("root")
+	r.browser().signIn("admin")
 	b := r.browser()
 	b.signIn("alice")
 	_, projects := b.get("/projects")
@@ -92,7 +92,7 @@ func TestProjectsComeFromEveryEngineAndAnEngineDownIsReportedWithoutLosingTheOth
 	r.fakes["lab"].AddProject(project("data"))
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	_, projects := b.get("/projects")
 	var keys []string
 	for _, p := range list(projects, "projects") {
@@ -119,7 +119,7 @@ func TestAProjectOffersOnlyWhatTheRoleAllows(t *testing.T) {
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	r.hub.Scan(ctx)
 	root := r.browser()
-	root.signIn("root")
+	root.signIn("admin")
 	alice := r.browser()
 	alice.signIn("alice")
 	r.store.SetRole(ctx, "local", "web", r.userID("alice"), rbac.User)
@@ -163,7 +163,7 @@ func TestTheAgentsActivityComesFromTheStatusFeedAndTheFeedIsReported(t *testing.
 	r.hub.StartFeeds(feeds, hub.FeedOptions{Silent: 150 * time.Millisecond, BackoffMin: 5 * time.Millisecond, BackoffMax: 20 * time.Millisecond})
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 
 	var web, mute map[string]any
 	deadline := time.Now().Add(3 * time.Second)
@@ -205,8 +205,8 @@ func TestSpawnStopStartAndRemove(t *testing.T) {
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
-	uid := r.userID("root")
+	b.signIn("admin")
+	uid := r.userID("admin")
 
 	code, out := b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "fix-bug"})
 	if code != 200 || out["agent"] != "fix-bug" {
@@ -249,7 +249,7 @@ func TestAnAgentWaitingOnAQuestionAndTheTimelineWithoutMessageTexts(t *testing.T
 	r.fakes["local"].AddEvent("web", engines.Event{Seq: 1, Time: time.Now(), Type: "status", Agent: "coder-1", Actor: "agent:coder-1", Text: "parsing the grammar"})
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	_, v := b.get("/e/local/p/web/a/coder-1")
 	got := v["agent"].(map[string]any)
 	if got["waiting"] != true || got["status"] != "reading the code" || got["activity"] != "idle" {
@@ -271,7 +271,7 @@ func TestStateChangingRequestsNeedTheOriginAndJSON(t *testing.T) {
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	try := func(origin, contentType string) int {
 		req, _ := http.NewRequest("POST", b.base+"/api/v1/e/local/p/web/spawn", strings.NewReader(`{"template":"coder"}`))
 		if contentType != "" {
@@ -306,17 +306,17 @@ func TestMembersCanBeAddedChangedAndRemovedByAnOwner(t *testing.T) {
 	r.fakes["local"].AddProject(project("web"))
 	r.hub.Scan(ctx)
 	root := r.browser()
-	root.signIn("root")
+	root.signIn("admin")
 	alice := r.browser()
 	alice.signIn("alice")
 	uid := r.userID("alice")
 
 	_, m := root.get("/e/local/p/web/members")
-	if cands := list(m, "candidates"); len(cands) != 1 || cands[0]["email"] != "alice@example.com" || m["me"] != r.userID("root") {
+	if cands := list(m, "candidates"); len(cands) != 1 || cands[0]["email"] != "alice@example.com" || m["me"] != r.userID("admin") {
 		t.Fatalf("members = %v", m)
 	}
 	// the operator is listed, as owner, marked: their access is not a role
-	if rows := list(m, "members"); len(rows) != 1 || at(rows[0], "user", "name") != "root" || rows[0]["role"] != "owner" || rows[0]["operator"] != true {
+	if rows := list(m, "members"); len(rows) != 1 || at(rows[0], "user", "username") != "admin" || rows[0]["role"] != "owner" || rows[0]["operator"] != true {
 		t.Errorf("members = %v", rows)
 	}
 	if code, _ := root.post("/e/local/p/web/members", json_{"user": uid, "role": "administrator"}); code != 200 {
@@ -338,7 +338,7 @@ func TestMembersCanBeAddedChangedAndRemovedByAnOwner(t *testing.T) {
 	// an operator's access is not a role, whoever asks and whatever the role
 	for _, who := range []*browser{root, alice} {
 		for _, role := range []string{"none", "user", "owner"} {
-			if code, out := who.post("/e/local/p/web/members", json_{"user": r.userID("root"), "role": role}); code != 403 || !strings.Contains(out["message"].(string), "operator holds every project") {
+			if code, out := who.post("/e/local/p/web/members", json_{"user": r.userID("admin"), "role": role}); code != 403 || !strings.Contains(out["message"].(string), "operator holds every project") {
 				t.Errorf("setting the operator to %s = %d %v", role, code, out)
 			}
 		}
@@ -354,7 +354,7 @@ func TestOnlyAnOperatorListsUsersAndMakesOperators(t *testing.T) {
 	r.fakes["local"].AddProject(project("web"))
 	r.hub.Scan(ctx)
 	root := r.browser()
-	root.signIn("root")
+	root.signIn("admin")
 	alice := r.browser()
 	alice.signIn("alice")
 	uid := r.userID("alice")
@@ -367,7 +367,7 @@ func TestOnlyAnOperatorListsUsersAndMakesOperators(t *testing.T) {
 	}
 	code, out := root.get("/users")
 	rows := list(out, "users")
-	if code != 200 || len(rows) != 2 || out["me"] != r.userID("root") || rows[0]["isOperator"] != true || rows[1]["isOperator"] != false || rows[1]["createdAt"] == nil {
+	if code != 200 || len(rows) != 2 || out["me"] != r.userID("admin") || rows[0]["isOperator"] != true || rows[1]["isOperator"] != false || rows[1]["createdAt"] == nil {
 		t.Fatalf("users = %d %v", code, out)
 	}
 	if rows[1]["identity"] != nil {
@@ -388,7 +388,7 @@ func TestOnlyAnOperatorListsUsersAndMakesOperators(t *testing.T) {
 	if _, projects := alice.get("/projects"); len(list(projects, "projects")) != 1 {
 		t.Errorf("a new operator holds every project: %v", projects)
 	}
-	if code, _ := root.put("/users/"+r.userID("root"), json_{"isOperator": false}); code != 200 {
+	if code, _ := root.put("/users/"+r.userID("admin"), json_{"isOperator": false}); code != 200 {
 		t.Errorf("an operator stepping down while another is one = %d", code)
 	}
 	if code, _ := root.get("/engines"); code != 403 {
@@ -405,7 +405,7 @@ func TestOnlyAnOperatorListsUsersAndMakesOperators(t *testing.T) {
 func TestTheOperatorAddsAnEngineAndAnSSHHostKeyMustBeConfirmed(t *testing.T) {
 	r := newRig(t, "local")
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	if code, out := b.post("/engines", json_{"name": "lab", "host": "unix:///lab.sock"}); code != 200 || out["saved"] != "lab" {
 		t.Fatalf("add engine = %d %v", code, out)
 	}
@@ -446,7 +446,7 @@ func TestTheOperatorAddsAnEngineAndAnSSHHostKeyMustBeConfirmed(t *testing.T) {
 func TestLogoutEndsTheSession(t *testing.T) {
 	r := newRig(t, "local")
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	if code, _ := b.get("/session"); code != 200 {
 		t.Fatal(code)
 	}
@@ -536,7 +536,7 @@ func TestTheTerminalBridgesTheBrowserToTheAgent(t *testing.T) {
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	r.hub.Scan(ctx)
 	root := r.browser()
-	root.signIn("root")
+	root.signIn("admin")
 	path := "/e/local/p/web/a/coder-1/terminal"
 
 	writer, err := root.dial(path)
@@ -552,7 +552,7 @@ func TestTheTerminalBridgesTheBrowserToTheAgent(t *testing.T) {
 	readUntil(t, writer, "resized to 120x40")
 
 	// the agent says who is at the terminal
-	if _, v := root.get("/e/local/p/web/a/coder-1"); at(v, "agent", "holder") != "root" {
+	if _, v := root.get("/e/local/p/web/a/coder-1"); at(v, "agent", "holder") != "admin" {
 		t.Errorf("presence missing: %v", v)
 	}
 
@@ -565,7 +565,7 @@ func TestTheTerminalBridgesTheBrowserToTheAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer busy.CloseNow()
-	if m := readControl(t, busy); m["type"] != "busy" || m["holder"] != "root" {
+	if m := readControl(t, busy); m["type"] != "busy" || m["holder"] != "admin" {
 		t.Errorf("the second terminal should be refused: %v", m)
 	}
 	taker, err := alice.dial(path + "?takeover=1")
@@ -587,7 +587,7 @@ func TestTheTerminalRefusesWhatTheAPIRefuses(t *testing.T) {
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	r.hub.Scan(ctx)
-	r.browser().signIn("root")
+	r.browser().signIn("admin")
 	eve := r.browser()
 	eve.signIn("eve")
 	if _, err := eve.dial("/e/local/p/web/a/coder-1/terminal"); err == nil {
@@ -599,7 +599,7 @@ func TestTheTerminalRefusesWhatTheAPIRefuses(t *testing.T) {
 	}
 	// another origin is refused even with a valid cookie
 	root := r.browser()
-	root.signIn("root")
+	root.signIn("admin")
 	u, _ := url.Parse(root.base)
 	var cookies []string
 	for _, c := range root.client.Jar.Cookies(u) {
@@ -619,7 +619,7 @@ func TestSpecAndLogsAreReadOnlyText(t *testing.T) {
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	r.hub.Scan(ctx)
 	b := r.browser()
-	b.signIn("root")
+	b.signIn("admin")
 	if _, v := b.get("/e/local/p/web/spec"); !strings.Contains(v["text"].(string), "name: web") {
 		t.Errorf("spec: %v", v)
 	}
@@ -634,7 +634,7 @@ func TestAuditListsRefusals(t *testing.T) {
 	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
 	r.hub.Scan(ctx)
 	root := r.browser()
-	root.signIn("root")
+	root.signIn("admin")
 	alice := r.browser()
 	alice.signIn("alice")
 	r.store.SetRole(ctx, "local", "web", r.userID("alice"), rbac.User)

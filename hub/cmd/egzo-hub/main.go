@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -65,7 +66,23 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	app, err := web.New(h, auth.New(auth.Config{Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCSecret}), urls, log)
+	generated, err := h.SetupSignIn(context.Background(), hub.SignInOptions{LocalLogin: cfg.LocalLogin, AdminPassword: cfg.AdminPassword, Issuer: cfg.OIDCIssuer})
+	if err != nil {
+		return err
+	}
+	if generated != "" {
+		printPassword(generated)
+	}
+	var sso web.Authenticator
+	if cfg.OIDCIssuer != "" {
+		sso = auth.New(auth.Config{Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCSecret, Scopes: cfg.OIDCScopes})
+		redirect := "<the address people reach the hub at>/auth/callback"
+		if cfg.PublicURL != "" {
+			redirect = strings.TrimSuffix(cfg.PublicURL, "/") + "/auth/callback"
+		}
+		log.Info("single sign-on", "issuer", cfg.OIDCIssuer, "redirect", redirect)
+	}
+	app, err := web.New(h, sso, web.Options{SSOName: cfg.OIDCName}, urls, log)
 	if err != nil {
 		return err
 	}
@@ -86,4 +103,20 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	return nil
+}
+
+// printPassword shows the starter account's new password, once, on standard output: it is not kept anywhere else in clear.
+func printPassword(password string) {
+	fmt.Printf(`
+==================================================================
+  egzo hub: the starter account was given a password.
+
+    username: admin
+    password: %s
+
+  It is shown this once. To choose it instead, or to reset it,
+  set EGZO_ADMIN_PASSWORD and restart.
+==================================================================
+
+`, password)
 }

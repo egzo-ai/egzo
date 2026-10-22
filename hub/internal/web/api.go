@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,14 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusForbidden, "forbidden", "An operator holds every project. Change that under Settings, Users, not as a role.")
 	case errors.Is(err, hub.ErrLastOperator):
 		s.apiFail(w, http.StatusConflict, "conflict", "The last operator cannot be removed. Make somebody else an operator first.")
+	case errors.Is(err, hub.ErrCannotDisable):
+		s.apiFail(w, http.StatusConflict, "conflict", "An operator cannot be disabled. Remove operator first.")
+	case errors.Is(err, hub.ErrDisabled):
+		s.apiFail(w, http.StatusConflict, "conflict", "That user is disabled. Enable them first.")
+	case errors.Is(err, hub.ErrLastWayIn):
+		s.apiFail(w, http.StatusConflict, "conflict", "That is your last way to sign in: link another account first.")
+	case errors.Is(err, hub.ErrNotDisabled):
+		s.apiFail(w, http.StatusConflict, "conflict", "Only a disabled user's account can be removed. Disable the user first.")
 	default:
 		s.log.Error("request", "path", r.URL.Path, "err", err)
 		s.apiFail(w, http.StatusBadGateway, "engine_error", err.Error())
@@ -88,15 +97,51 @@ func changesState(method string) bool {
 
 // --- shapes ------------------------------------------------------------------------------------------------------------------
 
+// userJSON is a person: the username the hub chose, then what their provider says (from the identity they signed in with most
+// recently, display only).
 type userJSON struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Email      string `json:"email"`
-	IsOperator bool   `json:"isOperator"`
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"emailVerified"`
+	Picture       string `json:"picture"`
+	IsOperator    bool   `json:"isOperator"`
+	Disabled      bool   `json:"disabled"`
 }
 
 func userOf(u store.User) userJSON {
-	return userJSON{ID: u.ID, Name: u.DisplayName(), Email: u.Email, IsOperator: u.IsOperator}
+	return userJSON{ID: u.ID, Username: u.Username, Name: u.Name, Email: u.Email, EmailVerified: u.EmailVerified, Picture: safePicture(u.Picture),
+		IsOperator: u.IsOperator, Disabled: u.Disabled()}
+}
+
+// safePicture keeps an avatar address only when it is https: the browser fetches it, never the hub (which could be made to
+// reach what only it can reach).
+func safePicture(p string) string {
+	if u, err := url.Parse(p); err == nil && u.Scheme == "https" && u.Host != "" {
+		return p
+	}
+	return ""
+}
+
+// identityJSON is one account at a provider. Current is false for an identity of another issuer than the configured one: it
+// cannot sign in.
+type identityJSON struct {
+	ID          string    `json:"id"`
+	Issuer      string    `json:"issuer"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	Current     bool      `json:"current"`
+	LastLoginAt time.Time `json:"lastLoginAt"`
+}
+
+func (s *Server) identitiesOf(list []store.Identity) []identityJSON {
+	issuer := s.hub.SignIn().Issuer
+	out := []identityJSON{}
+	for _, i := range list {
+		out = append(out, identityJSON{ID: i.ID, Issuer: i.Issuer, Email: i.Email, Name: i.Name, Current: issuer != "" && i.Issuer == issuer, LastLoginAt: i.LastLoginAt})
+	}
+	return out
 }
 
 type engineJSON struct {
@@ -178,14 +223,37 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 	for _, v := range views {
 		list = append(list, engineJSON{Name: v.Name, Up: v.Up, Err: v.Err})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "engines": list})
+	identities, err := s.hub.Store().Identities(r.Context(), user.ID)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	signIn := s.hub.SignIn()
+	sso := ""
+	if s.auth != nil {
+		sso = s.opts.SSOName
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "engines": list, "identities": s.identitiesOf(identities),
+		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		_ = s.hub.Store().EndSession(r.Context(), c.Value)
+		s.endTerminals([]string{store.HashToken(c.Value)})
 	}
 	http.SetCookie(w, s.cookie(r, sessionCookie, "", -time.Hour))
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// unlink removes one of the signed-in user's own identities.
+func (s *Server) unlink(w http.ResponseWriter, r *http.Request, user store.User) {
+	ended, err := s.hub.UnlinkIdentity(r.Context(), user, r.PathValue("id"))
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	s.endTerminals(ended)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -422,7 +490,7 @@ func (s *Server) namer(ctx context.Context) namer {
 	n := namer{}
 	users, _ := s.hub.Store().Users(ctx)
 	for _, u := range users {
-		n[u.ID] = u.DisplayName()
+		n[u.ID] = u.Username
 	}
 	return n
 }
@@ -438,7 +506,7 @@ func (n namer) actor(actor string) string {
 		if name, ok := n[id]; ok {
 			return name
 		}
-		return "a removed user"
+		return "an unknown user"
 	}
 	return actor
 }
@@ -447,7 +515,10 @@ func (n namer) actor(actor string) string {
 
 type userRowJSON struct {
 	userJSON
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	LastLoginAt *time.Time     `json:"lastLoginAt"`
+	HasPassword bool           `json:"hasPassword"`
+	Identities  []identityJSON `json:"identities"`
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.User) {
@@ -456,25 +527,58 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.Us
 		s.problem(w, r, err)
 		return
 	}
+	identities, err := s.hub.Store().Identities(r.Context(), "")
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	byUser := map[string][]store.Identity{}
+	for _, i := range identities {
+		byUser[i.UserID] = append(byUser[i.UserID], i)
+	}
+	local := s.hub.SignIn().LocalLogin
 	rows := make([]userRowJSON, 0, len(users))
 	for _, u := range users {
-		rows = append(rows, userRowJSON{userJSON: userOf(u), CreatedAt: u.CreatedAt})
+		row := userRowJSON{userJSON: userOf(u), CreatedAt: u.CreatedAt, HasPassword: u.HasPassword && local, Identities: s.identitiesOf(byUser[u.ID])}
+		if !u.LastLoginAt.IsZero() {
+			row.LastLoginAt = &u.LastLoginAt
+		}
+		rows = append(rows, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": rows, "me": user.ID})
 }
 
-func (s *Server) setOperator(w http.ResponseWriter, r *http.Request, user store.User) {
+// updateUser makes a user an operator or takes it away ({"isOperator"}), or disables or enables them ({"disabled"}).
+func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, user store.User) {
 	var body struct {
 		IsOperator *bool `json:"isOperator"`
+		Disabled   *bool `json:"disabled"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.IsOperator == nil {
-		s.apiFail(w, http.StatusBadRequest, "bad_request", "Say isOperator: true or false.")
+	if (body.IsOperator == nil) == (body.Disabled == nil) {
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "Say isOperator or disabled: true or false.")
 		return
 	}
-	if err := s.hub.SetOperator(r.Context(), user, r.PathValue("id"), *body.IsOperator); err != nil {
+	var err error
+	if body.IsOperator != nil {
+		err = s.hub.SetOperator(r.Context(), user, r.PathValue("id"), *body.IsOperator)
+	} else {
+		var ended []string
+		ended, err = s.hub.SetDisabled(r.Context(), user, r.PathValue("id"), *body.Disabled)
+		s.endTerminals(ended)
+	}
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// removeIdentity takes an account at a provider from a disabled user, so it can be linked to somebody else.
+func (s *Server) removeIdentity(w http.ResponseWriter, r *http.Request, user store.User) {
+	if err := s.hub.RemoveIdentity(r.Context(), user, r.PathValue("id"), r.PathValue("identity")); err != nil {
 		s.problem(w, r, err)
 		return
 	}
