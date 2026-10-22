@@ -1,7 +1,8 @@
 # Roadmap: egzo-hub and web UI
 
 **Status.** The hub and its web UI are built (`hub/`, see [hub/docs/README.md](../hub/docs/README.md) and "Built" at the end of
-this page). The messaging adapters (NATS, `egzo-discord`) are a separate item: [messaging-adapters.md](messaging-adapters.md).
+this page). The messaging adapters (NATS, `egzo-discord`) are a separate item: [messaging-adapters.md](messaging-adapters.md). Login through Dex
+and "the first user is an operator" are to be replaced by [hub-login.md](hub-login.md).
 
 Core implements none of this; what core guarantees for it is summarised in DESIGN.md, "Not in core".
 

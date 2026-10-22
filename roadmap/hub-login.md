@@ -31,10 +31,10 @@ A person has an egzo-side identity and any number of ways to prove it. The provi
 ```
 users            id, username (unique, case-insensitive), is_operator, disabled_at (null = enabled), created_at, last_login_at
 user_passwords   user_id (primary key), hash, updated_at
-user_identities  id, user_id, issuer, subject, unique (issuer, subject),
+user_identities  id, user_id, issuer, subject, unique (issuer, subject), unique (user_id, issuer),
                  email, email_verified, name, preferred_username, picture_url,
                  created_at, last_login_at
-sessions         token_hash, user_id, identity_id (null for a password sign-in), expires_at
+sessions         token_hash, user_id, method (password | identity), identity_id (set for identity), expires_at
 ```
 
 - **`users` is the person as egzo knows them.** The username is chosen by egzo (see "Usernames"), is the login name of a password
@@ -42,9 +42,13 @@ sessions         token_hash, user_id, identity_id (null for a password sign-in),
 - **A password is a row of its own** in `user_passwords`, so a user query cannot leak a hash. More local accounts later are more
   rows and a way to make them; the schema does not change.
 - **An identity is one account at one provider**, found by (issuer, subject): the only stable identifier OpenID Connect gives.
+  A user has at most one identity per issuer.
   The provider's claims (email, name, username, avatar) are a snapshot kept on the identity, refreshed at every login and
   display-only. A user with two identities could have two emails and both are right.
-- **A session knows how it was made.** Removing an identity removes the sessions made with it.
+- **A session knows how it was made** (`method`, so a later way to sign in, such as API tokens, is a new value and not another
+  nullable column). Removing an identity removes the sessions made with it.
+- **Ending a session closes its terminals**, wherever it ends: sign-out, unlink, disabling the user, or the start-up clean-ups
+  below.
 - **Nothing is matched by email.** Not to find a user, not to link, not to promote. Other tools learned why: Grafana turned email
   lookup off after [CVE-2023-3128](https://git.almalinux.org/rpms/grafana/commit/f70a7074348ebce8503cd63eca3b9fcc635611b7) (an
   Entra ID takeover) and now documents it as insecure; GitLab and Open WebUI ship email merging off with a warning; Gitea warns
@@ -76,14 +80,15 @@ The starter account's username is `admin`, set directly and not generated.
   and Portainer; the username is always `admin`.
 - **At start**, if `EGZO_LOCAL_LOGIN` is true (the default), the hub makes sure the user `admin` exists, is enabled and is an
   operator (it creates or repairs it as needed), then settles its password:
-  - `EGZO_ADMIN_PASSWORD` **set**: it is saved as the password, on every start. The environment is the source of truth.
+  - `EGZO_ADMIN_PASSWORD` **set**: it is saved as the password, on every start. The environment is the source of truth. When
+    it differs from the saved one, every password session ends: rotating a leaked password locks the holder out.
   - `EGZO_ADMIN_PASSWORD` **unset**, and `admin` has **no** password: the hub generates one (24 random characters) and prints it
     **once** on standard output, in a clearly marked block.
   - `EGZO_ADMIN_PASSWORD` **unset**, and `admin` **has** a password: left as it is. Nothing is printed.
 - **It is for starting out and demos.** The hub has no page to change a password, to make local users or to reset one. The
   password is whatever the environment says, or the generated one.
 - **`EGZO_LOCAL_LOGIN=false`** removes the password form and `POST /auth/login`, and makes nothing: an `admin` that already exists
-  keeps its row and its identities, and signs in through them. It needs OIDC configured: with `false` and no issuer the hub
+  keeps its row and its identities, and signs in through them. Password sessions end at start. It needs OIDC configured: with `false` and no issuer the hub
   refuses to start. `EGZO_ADMIN_PASSWORD` set together with `false` is ignored, with a warning in the log.
 - **No operator, no way in.** A fresh database with `EGZO_LOCAL_LOGIN=false` has no operator. The hub logs an error that says to
   start with `EGZO_LOCAL_LOGIN=true`, link SSO and turn it off again, and refuses to serve the login. This **replaces "the first
@@ -98,8 +103,9 @@ The starter account's username is `admin`, set directly and not generated.
   configured (`EGZO_OIDC_NAME`, default "SSO"). Same session cookie as the OIDC path, same lifetime. A failure says "wrong
   username or password" whether the username exists, the password is wrong or the user is disabled, and costs the same time in
   every case.
-- **Brute force.** A per-account and per-address delay that grows after failures (no permanent lockout, which would let anyone
-  lock the operator out). Failures go to the audit log.
+- **Brute force.** Basic: a per-account delay that grows after failures, kept in memory. No per-address limit and no lockout. It
+  can be used to slow the operator's own sign-in, which is accepted: the hub is not meant to be reachable from the internet.
+  Failures go to the audit log.
 - **Cookies and CSRF** as the OIDC path already does: `SameSite=Lax`, `Secure` when the public URL is https.
 
 ## Signing in with SSO
@@ -133,14 +139,14 @@ user's own menu.
    it is for.
 2. They sign in at the provider. The callback checks that the signed-in user is still that user, **adds the identity to them**, and
    creates no new session.
-3. If the (issuer, subject) already belongs to **another user**, and that user is **enabled**, the hub refuses and names them
-   (moving the identity would take their access away). If that user is **disabled** (an operator disables an accidental row for
-   this, made by signing in with SSO before linking), the identity moves to the user linking: they have just proved control of it
-   at the provider. The old row stays disabled, its grants dormant. If it already belongs to this user, nothing changes.
+3. If the (issuer, subject) already belongs to **another user**, the hub refuses and names them; identities never move. If the
+   user linking already has an identity at this issuer, the hub refuses too (unlink it first). If it already belongs to this
+   user, nothing changes. The usual accident (signing in with SSO before linking, which makes a second user) is fixed by an
+   operator: disable that user, **Remove identity** on it under Settings, Users, then link again.
 4. The menu then shows "Linked as `<email>` at `<issuer>`" and an **Unlink**. A way to sign in is a password (while
    `EGZO_LOCAL_LOGIN` is true) or an identity at the configured issuer. Unlinking is refused when it would remove the last one;
    unlinking an identity of a former issuer never does. The sessions made with the identity end.
-5. Link, move and unlink are written to the audit log.
+5. Link, unlink and an operator's Remove identity are written to the audit log.
 
 So the move to SSO is: sign in as `admin`, click Link, sign in at the provider, sign out and in again with SSO to check, set
 `EGZO_LOCAL_LOGIN=false`. The operator and everything they own is the same user throughout.
@@ -178,8 +184,8 @@ person, for the reason in "The model". Settings, Users gets **Disable** and **En
   of any other failure, with no hint that the account exists or is disabled.
 - **The identities stay attached**, so the same person signing in again meets the disabled account and does not become a second,
   new user. Their grants stay too and are dormant; enabling the user brings them back. The Members tab shows a disabled member
-  as such, and the people picker leaves them out. The one thing that takes an identity from a disabled user is a link by someone
-  who proves control of it (see "Linking").
+  as such, and the people picker leaves them out. An operator can **Remove identity** from a disabled user (only a disabled
+  one), which frees it to be linked elsewhere; this is the way out of an accidental second user (see "Linking").
 - **An operator cannot be disabled**, so not yourself and never the last one: demote first, as the store enforces for deletion
   today. The "no operator" start-up check counts enabled operators only.
 - **Their agents keep running.** Disabling is about signing in; an owner or administrator stops or removes agents as usual.
@@ -199,7 +205,8 @@ the provider's keys, identity is issuer plus `sub`. To be generic enough without
   reject scopes they do not know).
 - **Claims.** As in "Signing in with SSO". The userinfo fallback covers providers that leave claims out of the id_token (Entra ID
   and Okta can).
-- **Issuer matching** is exact, as the spec says. The error for a mismatch names both strings, so a trailing slash or `http` against
+- **Issuer matching** is exact, as the spec says, and the issuer is stored exactly as configured. Today `config.go` trims a trailing
+  `/` from `EGZO_OIDC_ISSUER`, which breaks Auth0 (its issuer ends with `/`); that trim goes. The error for a mismatch names both strings, so a trailing slash or `http` against
   `https` is visible at once.
 - **Redirect address** is `<public URL>/auth/callback`. The login page and the logs show the exact value, so it can be pasted into
   the provider's client registration.
@@ -213,8 +220,8 @@ the provider's keys, identity is issuer plus `sub`. To be generic enough without
 `hub/docs/README.md` is rewritten around this:
 
 - **Quick start**: `docker compose up`, set `EGZO_SECRET_KEY`, read the `admin` password in `docker compose logs hub`.
-- **Putting it on the internet**: one port, a TLS reverse proxy in front (a Caddy and an nginx snippet), `EGZO_PUBLIC_URL` and
-  `EGZO_TRUSTED_PROXIES`.
+- **Reaching it**: one port, meant for a private network (a LAN, Tailscale, a tunnel), not the open internet. `EGZO_PUBLIC_URL`
+  and `EGZO_TRUSTED_PROXIES` when a proxy is in front. A few lines; how to self-host is not the hub's docs' job.
 - **Single sign-on**: the client to register (confidential or public with PKCE, authorization code, the redirect address, the
   scopes), the variables, linking from the starter account, and a table of the failures (redirect mismatch, issuer mismatch,
   unreachable issuer, unknown CA) with the fix for each. One worked example each for Keycloak, Authentik and Google; others
@@ -229,19 +236,21 @@ the provider's keys, identity is issuer plus `sub`. To be generic enough without
 Each is a commit with Go unit tests (the hub is not specs-first), and each leaves the hub working.
 
 1. **The schema and the store**: `users`, `user_passwords`, `user_identities`, `sessions` (with the cascade from an identity to
-   its sessions), setting and clearing `disabled_at`; username generation and its tests; the first-sign-in-is-operator rule (and
-   its audit entry) removed. The hub records a schema version and, on an older database, refuses to start and says to remove
-   `hub.db` (pre-1.0 has no migrations).
+   its sessions), setting and clearing `disabled_at`; username generation and its tests. The hub records a schema version and,
+   on an older database, refuses to start and says to remove `hub.db` (pre-1.0 has no migrations).
 2. **The starter account and the login page**: `EGZO_ADMIN_PASSWORD`, `EGZO_LOCAL_LOGIN`, argon2id, `/auth/login`, throttling,
-   the SPA page, the start-up checks and the lockout warning. Store and web tests; a Playwright test of the form.
+   the SPA page, the start-up checks, password sessions ended at start, and the lockout warning. The first-sign-in-is-operator
+   rule (and its audit entry) is removed here, not in step 1, so no commit leaves a fresh hub without a way to an operator.
+   Store and web tests; a Playwright test of the form.
 3. **SSO sign-in on the new model**: identity lookup, new users, the imported fields and the userinfo fallback. Tests include: an
    identity of another issuer never matches; **a disabled user who signs in with SSO is refused and no new user row is made**
    (count the rows before and after), with nothing refreshed and no session; the same for a password sign-in.
-4. **Link and unlink**: the OIDC state, the refusals, the move from a disabled user, the audit entries, sessions ended on unlink,
-   and ended at start for identities of another issuer.
+4. **Link and unlink**: the OIDC state, the refusals (identity of another user, a second identity at the same issuer), an
+   operator's Remove identity on a disabled user, the audit entries, sessions (and their terminals) ended on unlink, and ended at
+   start for identities of another issuer.
 5. **Disable and enable a user**: `PUT /users/{id}` `{disabled}`, the buttons and their confirmation, the filter, the audit entry,
    sessions and terminals ended. `Store.DeleteUser` is removed.
-6. **OIDC generic**: PKCE, client authentication, optional secret, scopes, clear errors. Tests against `oidctest` with providers
+6. **OIDC generic**: PKCE, client authentication, optional secret, scopes, exact issuer (no trimmed `/`), clear errors. Tests against `oidctest` with providers
    that behave differently (claims missing from the id_token, no `email_verified`, public client).
 7. **People in the UI**: username, avatar, sign-in method and last sign-in in the picker, the Members tab and Settings, Users;
    the CSP change. Vitest and a Playwright test.
