@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -70,12 +71,16 @@ func CheckPassword(encoded, password string) (bool, error) {
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
-// dummyHash is checked against when there is no user or no password, so a failed sign-in costs the same time in every case.
-var dummyHash, _ = HashPassword("not a password anyone has")
+// dummyHash is checked against when there is no user or no password, so a failed sign-in costs the same time in every case. It
+// is made the first time it is needed, not when the program starts.
+var dummyHash = sync.OnceValue(func() string {
+	hash, _ := HashPassword("not a password anyone has")
+	return hash
+})
 
 // CheckNoPassword spends the time of a password check and fails.
 func CheckNoPassword(password string) {
-	_, _ = CheckPassword(dummyHash, password)
+	_, _ = CheckPassword(dummyHash(), password)
 }
 
 // NewPassword makes a random password: 26 characters of base32, 130 bits.
