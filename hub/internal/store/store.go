@@ -504,7 +504,7 @@ func (s *Store) LoginIdentity(ctx context.Context, issuer, subject string, p Pro
 			return User{}, "", false, err
 		}
 	case errors.Is(err, sql.ErrNoRows):
-		u, err := insertUser(ctx, tx, UsernameFrom(p.PreferredUsername, localPart(p.Email), p.Name), false)
+		u, err := insertUser(ctx, tx, UsernameFrom(p.PreferredUsername, p.Email, p.Name), false)
 		if err != nil {
 			return User{}, "", false, err
 		}

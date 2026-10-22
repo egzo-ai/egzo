@@ -68,8 +68,3 @@ func withSuffix(base string, n int) string {
 	}
 	return base + suffix
 }
-
-func localPart(email string) string {
-	local, _, _ := strings.Cut(email, "@")
-	return local
-}
