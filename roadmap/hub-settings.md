@@ -35,7 +35,7 @@ The need: a hub-level **Settings** area, outside any project, with two views:
   down in the operator docs in step 3 so that the way out exists on paper.
 - **A hub-level audit view.** Step 3 writes the entries; showing them (a log under Settings, or the project table with an empty
   project) is separate.
-- **Remove a user.** `Store.DeleteUser` exists (grants and sessions go with it, and it refuses the operator) and nothing calls it.
+- **Remove a user.** Replaced by disabling a user, in [hub-login.md](hub-login.md) ("Disabling users"): the audit log, messages and agent labels name people by username, so the row is never deleted.
   Open: whether to expose it, and what happens to the agents they created (the actor label stays, as a name that no longer resolves).
 - **A richer users list.** First and last sign-in, the projects each person holds a role on (it answers "what can this person see?"),
   search for a long list.
