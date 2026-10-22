@@ -23,13 +23,23 @@ const (
 
 var b64 = base64.RawStdEncoding
 
+// hashing bounds the hashes computed at once, each of which takes argonMemory: password sign-ins need no session, so without a
+// bound a burst of them would take as much memory as it likes. The others wait their turn.
+var hashing = make(chan struct{}, 2)
+
+func idKey(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
+	hashing <- struct{}{}
+	defer func() { <-hashing }()
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
+}
+
 // HashPassword returns the encoded argon2id hash of a password.
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := idKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argonMemory, argonTime, argonThreads, b64.EncodeToString(salt), b64.EncodeToString(key)), nil
 }
 
@@ -56,7 +66,7 @@ func CheckPassword(encoded, password string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	got := idKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
