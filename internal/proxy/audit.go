@@ -7,10 +7,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
+	"regexp"
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // Event is one line of the audit log: a step of one connection, and what the proxy decided about it. Bodies and query
@@ -136,19 +140,72 @@ const (
 
 func because(code Code, text string) *Reason { return &Reason{Code: code, Text: text} }
 
-// maxField bounds every string an agent can influence: it is logged for each denied attempt, and an
-// unbounded value would let one agent fill the log.
-const maxField = 256
+// MaxField bounds every string an agent can influence: it is logged for each denied attempt, and an
+// unbounded value would let one agent fill the log. A clipped field ends in an ellipsis.
+const MaxField = 256
+
+const ellipsis = "…"
 
 func clip(text string) string {
-	if len(text) <= maxField {
+	if len(text) <= MaxField {
 		return text
 	}
-	cut := maxField
+	cut := MaxField
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
-	return text[:cut] + "…"
+	return text[:cut] + ellipsis
+}
+
+// clipped reports whether text is what clip leaves: text of at most MaxField bytes and an ellipsis.
+func clipped(text string) bool { return len(text) <= MaxField+len(ellipsis) && utf8.ValidString(text) }
+
+// connID is the form of a connection's id (newConnID).
+var connID = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// ErrEvent is an event the proxy never writes: a field it never fills that way.
+type ErrEvent struct{ Field, Value string }
+
+func (e ErrEvent) Error() string {
+	return fmt.Sprintf("audit event field %s is %.60q, which the proxy never writes", e.Field, e.Value)
+}
+
+// Check reports whether e is an event as the proxy writes it (Log): every name by the rules of internal/names, every text clipped,
+// no count below zero. A reader of a log it does not control (the hub) keeps only what passes.
+func (e Event) Check() error {
+	optional := func(value string, valid func(string) bool) bool { return value == "" || valid(value) }
+	code := ""
+	reason := true
+	if e.Reason != nil {
+		code = string(e.Reason.Code)
+		reason = names.Identifier(code) && clipped(e.Reason.Text)
+	}
+	for _, check := range []struct {
+		field, value string
+		ok           bool
+	}{
+		{"conn", e.Conn, connID.MatchString(e.Conn)},
+		{"time", e.Time.String(), !e.Time.IsZero()},
+		{"protocol", string(e.Protocol), names.Identifier(string(e.Protocol))},
+		{"event", string(e.Kind), names.Identifier(string(e.Kind))},
+		{"decision", string(e.Decision), optional(string(e.Decision), names.Identifier)},
+		{"mode", string(e.Mode), optional(string(e.Mode), names.Identifier)},
+		{"agent", e.Agent, optional(e.Agent, names.Instance)},
+		{"instance", e.Instance, optional(e.Instance, names.InstanceID)},
+		{"profile", e.Profile, clipped(e.Profile)},
+		{"host", e.Host, optional(e.Host, names.Host)},
+		{"server", e.Server, optional(e.Server, names.SSHServer)},
+		{"method", e.Method, clipped(e.Method)},
+		{"path", e.Path, clipped(e.Path)},
+		{"command", e.Command, clipped(e.Command)},
+		{"reason", code, reason},
+		{"counts", fmt.Sprint(e.Status, e.BytesUp, e.BytesDown, e.DurationMs), e.Status >= 0 && e.BytesUp >= 0 && e.BytesDown >= 0 && e.DurationMs >= 0},
+	} {
+		if !check.ok {
+			return ErrEvent{Field: check.field, Value: check.value}
+		}
+	}
+	return nil
 }
 
 // Audit writes events as JSON lines.

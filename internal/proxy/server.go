@@ -266,8 +266,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// How a browser starts: it sends credentials only once challenged. Not a denial.
 			c.decide(KindConnect, OutcomeChallenge, because(CodeNoCredentials, "proxy credentials required"))
 		} else {
-			// The name is what the client claimed; nothing proves it, so nothing more is said of it.
-			c.agent = agent
+			// The name is what the client claimed; nothing proves it, so nothing more is said of it, and only a name an
+			// instance can have is said at all.
+			if names.Instance(agent) {
+				c.agent = agent
+			}
 			c.decide(KindConnect, OutcomeDeny, because(CodeCredentials, "invalid proxy credentials"))
 		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="egzo"`)
