@@ -67,7 +67,7 @@ func (d *Docker) Projects(ctx context.Context) ([]Project, error) {
 		switch kind {
 		case kindAgent:
 			p.Agents = append(p.Agents, Agent{
-				Name: item.Labels[engine.LabelInstance], Template: item.Labels[engine.LabelService], State: item.State,
+				Name: item.Labels[engine.LabelInstance], ID: item.Labels[engine.LabelInstanceID], Template: item.Labels[engine.LabelService], State: item.State,
 				Actor: item.Labels[engine.LabelActor], Created: time.Unix(item.Created, 0), Activity: activityOf(item.State),
 				TemplateHash: item.Labels[engine.LabelTemplateHash],
 			})
@@ -136,7 +136,7 @@ func (d *Docker) Project(ctx context.Context, name string) (Project, error) {
 		switch row.Kind {
 		case kindAgent:
 			project.Agents = append(project.Agents, Agent{
-				Name: row.Name, Template: row.Service, State: row.State, Health: row.Health, Activity: activityOf(row.State),
+				Name: row.Name, ID: row.ID, Template: row.Service, State: row.State, Health: row.Health, Activity: activityOf(row.State),
 				Actor: row.Actor, Created: row.Created,
 			})
 		case kindControl, kindProxy:

@@ -72,6 +72,26 @@ The hub only knows the terminals it opened. `egzo agent attach` goes straight to
 end it. Attaching with the CLI to an agent that is open in the hub is risky: the session has one screen size, so each side's window
 resize changes it for the other, and what both type reaches the program. Avoid it. Nothing in the hub prevents it.
 
+## Network
+
+When an agent cannot reach something, the **Network** tab of its page (and of the project page, for every agent) says what the
+proxy refused, why, and how to fix it. An agent that was refused a host in the last hour shows **N denied** in the agents list.
+
+- **Denied** groups what the proxy refused or failed at by agent, host and reason, with how many times and when it was last
+  seen. **How to fix** says what the reason means and what to change: for a host that is not in the profile, the YAML to add to
+  that profile in `egzo.yaml`, then `egzo project up`. The hub never changes the project file. When several hosts under one
+  domain were refused, it says which wildcard covers them. A group is marked **fixed** once the same agent gets through to the
+  host, and opens again at the next refusal.
+- **Connections** are the latest the hub heard, one row per connection: the host, how it was handled (tunnel, inject, inspect,
+  intercept), its requests, the decision and the traffic. A row opens on its steps. Filters keep the refused ones, a host or an agent.
+
+A user sees the network of the agents they may operate; administrators see every agent's, and the refusals the proxy could not
+tie to an agent (wrong credentials). An agent whose name comes back is another instance and starts with an empty history.
+
+The denials are kept in the hub's database for 30 days after they were last seen, at most 500 per project. The connections are
+the hub's latest 1000 events of the project, in memory; further back, `egzo proxy log` reads the proxy's own log, as far as the
+engine keeps it. The schema of the audit trail is in [sandboxing agents](sandboxing.md#see-what-happened).
+
 ## Engines
 
 Engines are added in the UI by an operator (**Settings, Engines**), not in the compose file. The connection is tested before it is saved.
@@ -87,12 +107,14 @@ stored. Losing the key means entering the credentials again. One unreachable eng
 
 ## How the hub keeps up
 
-The hub does not poll the engines. It reads two streams that the engines push, and lists the containers only when they say something changed:
+The hub does not poll the engines. It reads streams that the engines push, and lists the containers only when they say something changed:
 
 - **The status feed.** The control sidecar of every project writes the agents' status to its log, as JSON lines on standard output (a line
   when something changes, and one every 30 seconds). The hub follows that log through the engine's log API, one stream per project,
   and what the sidebar, Home and the project pages show an agent doing (working, idle, blocked, waiting on a question, its status
   line) is the newest line. It runs no command in the sidecar for it.
+- **The audit trail.** The proxy of every project writes its audit trail to its log the same way, and the hub follows it the
+  same way, for the **Network** tab. After a restart it reads again from the time of the last event it handled.
 - **The engine's events.** The hub watches the engine's event stream for the containers of egzo projects. When one is made,
   started, stopped or removed, it lists that engine again (a project, an agent, a sidecar appears or goes), within a fraction of a second.
 - **Both are retried** with a delay that grows from one second to a minute when they break, and start over when they have run for

@@ -267,6 +267,8 @@ type AgentView struct {
 	CanOperate bool
 	// Holder is who holds the terminal, "" when nobody.
 	Holder string
+	// Denied is how many hosts the proxy refused the agent in the last hour, and that it has not reached since.
+	Denied int
 }
 
 // ProjectView is the project page.
@@ -370,9 +372,13 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 	project, feed := h.overlay(engine, project)
 	view := ProjectView{Engine: engine, Project: project, Role: role, Operator: user.IsOperator, Feed: feed,
 		CanSpawn: rbac.Can(user.Subject(), role, rbac.Spawn, ""), CanManage: rbac.Can(user.Subject(), role, rbac.ManageRoles, "")}
+	denied := h.deniedCounts(engine, name)
 	for _, a := range project.Agents {
 		av := AgentView{Agent: a, CanOperate: rbac.Can(user.Subject(), role, rbac.Operate, a.Actor)}
 		av.Holder = h.holder(engine, name, a.Name)
+		if a.ID != "" && (role.AtLeast(rbac.Administrator) || av.CanOperate) {
+			av.Denied = denied[a.ID]
+		}
 		view.Agents = append(view.Agents, av)
 	}
 	return view, nil

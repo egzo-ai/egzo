@@ -114,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 	api("GET "+project+"/members", s.members)
 	api("POST "+project+"/members", s.setRole)
 	api("GET "+project+"/audit", s.audit)
+	api("GET "+project+"/network", s.network)
 	api("GET "+project+"/a/{agent}", s.agent)
 	api("POST "+project+"/a/{agent}/{verb}", s.operate)
 	api("GET "+project+"/a/{agent}/logs", s.logs)

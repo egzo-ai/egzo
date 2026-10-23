@@ -1,7 +1,9 @@
 // A small router over the History API. The hub serves index.html for every address, so these paths survive a reload.
 
-export type ProjectTab = "agents" | "services" | "timeline" | "spec" | "audit" | "members";
-export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "spec", "audit", "members"];
+export type ProjectTab = "agents" | "services" | "timeline" | "network" | "spec" | "audit" | "members";
+export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "network", "spec", "audit", "members"];
+
+export type AgentTab = "overview" | "network" | "logs";
 
 export type SettingsTab = "engines" | "users" | "account";
 export const settingsTabs: SettingsTab[] = ["engines", "users", "account"];
@@ -11,7 +13,7 @@ export type Route =
   | { name: "login" }
   | { name: "settings"; tab: SettingsTab }
   | { name: "project"; engine: string; project: string; tab: ProjectTab }
-  | { name: "agent"; engine: string; project: string; agent: string; tab: "overview" | "logs" }
+  | { name: "agent"; engine: string; project: string; agent: string; tab: AgentTab }
   | { name: "notfound" };
 
 const dec = (s: string) => {
@@ -38,7 +40,7 @@ export function parse(pathname: string): Route {
     }
     if (rest[0] === "a" && rest[1]) {
       if (rest.length === 2) return { name: "agent", engine, project, agent: rest[1], tab: "overview" };
-      if (rest.length === 3 && rest[2] === "logs") return { name: "agent", engine, project, agent: rest[1], tab: "logs" };
+      if (rest.length === 3 && (rest[2] === "logs" || rest[2] === "network")) return { name: "agent", engine, project, agent: rest[1], tab: rest[2] };
     }
   }
   return { name: "notfound" };
@@ -53,8 +55,8 @@ export const href = {
   account: () => "/settings/account",
   project: (engine: string, project: string, tab: ProjectTab = "agents") =>
     `/e/${enc(engine)}/p/${enc(project)}${tab === "agents" ? "" : "/" + tab}`,
-  agent: (engine: string, project: string, agent: string, tab: "overview" | "logs" = "overview") =>
-    `/e/${enc(engine)}/p/${enc(project)}/a/${enc(agent)}${tab === "logs" ? "/logs" : ""}`,
+  agent: (engine: string, project: string, agent: string, tab: AgentTab = "overview") =>
+    `/e/${enc(engine)}/p/${enc(project)}/a/${enc(agent)}${tab === "overview" ? "" : "/" + tab}`,
 };
 
 export const nav = $state({ path: "/", route: { name: "home" } as Route, previous: "/" });
