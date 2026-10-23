@@ -45,6 +45,9 @@ type Resource struct {
 // Observed is everything that exists on the engine for a project.
 type Observed struct {
 	Resources []Resource
+	// Ignored is what carries the project's label but labels egzo never writes (engine.IdentityOf): it is not the project's, and
+	// nothing is done to it. Each says what and why.
+	Ignored []string
 }
 
 func (o Observed) find(kind, name string) *Resource {
@@ -60,22 +63,36 @@ func projectFilter(project string) filters.Args {
 	return filters.NewArgs(filters.Arg("label", engine.LabelProject+"="+project))
 }
 
-func resourceFrom(kind, id, name string, labels map[string]string) Resource {
+// resourceFrom reads a resource from its labels; an error when they are not labels egzo writes.
+func resourceFrom(kind, id, name string, labels map[string]string) (Resource, error) {
+	identity, err := engine.IdentityOf(labels)
+	if err != nil {
+		return Resource{}, fmt.Errorf("%s %s: %w", kind, name, err)
+	}
 	return Resource{
 		Type:       kind,
 		ID:         id,
 		Name:       name,
-		Service:    labels[engine.LabelService],
-		Kind:       labels[engine.LabelKind],
-		ConfigHash: labels[engine.LabelConfigHash],
-		ProjectDir: labels[engine.LabelProjectDir],
+		Service:    identity.Service,
+		Kind:       identity.Kind,
+		ConfigHash: identity.ConfigHash,
+		ProjectDir: identity.ProjectDir,
 
-		Workspace:    labels[engine.LabelWorkspace],
-		Instance:     labels[engine.LabelInstance],
-		Actor:        labels[engine.LabelActor],
-		TemplateHash: labels[engine.LabelTemplateHash],
-		InstanceID:   labels[engine.LabelInstanceID],
+		Workspace:    identity.Workspace,
+		Instance:     identity.Instance,
+		Actor:        identity.Actor,
+		TemplateHash: identity.TemplateHash,
+		InstanceID:   identity.InstanceID,
+	}, nil
+}
+
+// take adds a resource read from its labels, or what is wrong with them to Ignored.
+func (o *Observed) take(r Resource, err error) {
+	if err != nil {
+		o.Ignored = append(o.Ignored, err.Error())
+		return
 	}
+	o.Resources = append(o.Resources, r)
 }
 
 // Observe lists every container, network and volume labelled as belonging to project.
@@ -91,6 +108,7 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 	containers = slices.DeleteFunc(containers, func(item container.Summary) bool { return item.Labels[engine.LabelKind] == kindLock })
 	// One inspect per container, a few at a time: each is a round trip to the engine.
 	found := make([]Resource, len(containers))
+	ignored := make([]error, len(containers))
 	slots := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 	for i, item := range containers {
@@ -103,7 +121,11 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 			if len(item.Names) > 0 {
 				name = strings.TrimPrefix(item.Names[0], "/")
 			}
-			resource := resourceFrom("container", item.ID, name, item.Labels)
+			resource, err := resourceFrom("container", item.ID, name, item.Labels)
+			if err != nil {
+				ignored[i] = err
+				return
+			}
 			resource.State = item.State
 			resource.Created = time.Unix(item.Created, 0)
 			if inspected, err := c.API.ContainerInspect(ctx, item.ID); err == nil {
@@ -121,14 +143,16 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 		}()
 	}
 	wg.Wait()
-	observed.Resources = append(observed.Resources, found...)
+	for i := range found {
+		observed.take(found[i], ignored[i])
+	}
 
 	networks, err := c.API.NetworkList(ctx, network.ListOptions{Filters: f})
 	if err != nil {
 		return observed, fmt.Errorf("list networks: %w", err)
 	}
 	for _, item := range networks {
-		observed.Resources = append(observed.Resources, resourceFrom("network", item.ID, item.Name, item.Labels))
+		observed.take(resourceFrom("network", item.ID, item.Name, item.Labels))
 	}
 
 	volumes, err := c.API.VolumeList(ctx, volume.ListOptions{Filters: f})
@@ -136,7 +160,7 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 		return observed, fmt.Errorf("list volumes: %w", err)
 	}
 	for _, item := range volumes.Volumes {
-		observed.Resources = append(observed.Resources, resourceFrom("volume", item.Name, item.Name, item.Labels))
+		observed.take(resourceFrom("volume", item.Name, item.Name, item.Labels))
 	}
 
 	sort.Slice(observed.Resources, func(i, j int) bool {
