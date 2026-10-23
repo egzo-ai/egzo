@@ -70,7 +70,6 @@ var scaffoldHosts = map[string]string{
 
 func scaffold(harness, repoURL string) string {
 	var b strings.Builder
-	b.WriteString("# egzo.yaml: see DESIGN.md for the full schema\n")
 	if hosts, known := scaffoldHosts[harness]; known {
 		fmt.Fprintf(&b, `vaults:
   main:
