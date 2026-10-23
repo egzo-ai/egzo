@@ -54,6 +54,14 @@ func TestAChainOfProxiesUsesTheFirstValueAndABadHostIsIgnored(t *testing.T) {
 	if got != "http://hub" {
 		t.Errorf("a malformed forwarded host was used: %q", got)
 	}
+	for _, bad := range []string{"evil@hub.example.com", "a..example.com", "[::1]x", "hub.example.com:443:1"} {
+		if got := resolver.Base(request("127.0.0.1:1", "hub", map[string]string{"X-Forwarded-Host": bad})); got != "http://hub" {
+			t.Errorf("X-Forwarded-Host %q was used: %q", bad, got)
+		}
+	}
+	if got := resolver.Base(request("127.0.0.1:1", "hub", map[string]string{"X-Forwarded-Host": "[2001:db8::1]:8443"})); got != "http://[2001:db8::1]:8443" {
+		t.Errorf("an IPv6 literal with a port: %q", got)
+	}
 }
 
 func TestAFixedPublicURLWinsAndMustBeABaseAddress(t *testing.T) {
