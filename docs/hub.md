@@ -13,15 +13,23 @@ API](hub-api.md) is what the web app talks to. The design and its reasons are in
 
 ## Quick start
 
-From `hub/` in a clone of the repository (it needs `compose.yaml` and `.env.example` from there):
+On the machine that runs your agents, with Docker and its compose plugin:
 
 ```sh
-cd hub
-cp .env.example .env            # set EGZO_SECRET_KEY: openssl rand -hex 32
-export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+mkdir egzo-hub && cd egzo-hub
+curl -fsSLO https://raw.githubusercontent.com/egzo-ai/egzo/main/hub/compose.yaml
+cat > .env <<EOF
+EGZO_SECRET_KEY=$(openssl rand -hex 32)
+DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+EOF
+cat .env                        # review the settings before starting
 docker compose up -d
 docker compose logs hub         # the password of the starter account, admin, printed once
 ```
+
+`.env` holds the hub's settings ([Settings](#settings)); the other ones are listed, commented, in
+[`hub/.env.example`](../hub/.env.example). Keep `EGZO_SECRET_KEY`: it encrypts the engine credentials the hub stores, and a new key
+means entering them again. Set `EGZO_HUB_VERSION` in `.env` to a release (`0.9.0`) to pin the image; the default is `latest`.
 
 Open <http://localhost:8080> and sign in as `admin` with that password ([the starter account](hub-access.md#the-starter-account)).
 `admin` is an operator, who holds every project the hub finds. Create a project with the CLI as usual (`egzo project up`) and it
@@ -101,7 +109,8 @@ control sidecar (made by an egzo before the status log) writes no status; run `e
 
 ## Settings
 
-All settings are environment variables, set in the compose file.
+All settings are environment variables. The compose file passes the common ones from `.env`; add any other to its
+`environment:`.
 
 | Variable | Default | |
 |---|---|---|

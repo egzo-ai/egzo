@@ -1,5 +1,10 @@
 # egzo: simple agent sandboxing and orchestration
 
+[![specs](https://github.com/egzo-ai/egzo/actions/workflows/specs.yml/badge.svg?branch=main)](https://github.com/egzo-ai/egzo/actions/workflows/specs.yml)
+[![ci](https://github.com/egzo-ai/egzo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/egzo-ai/egzo/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/egzo-ai/egzo?sort=semver)](https://github.com/egzo-ai/egzo/releases)
+[![license](https://img.shields.io/github/license/egzo-ai/egzo)](LICENSE)
+
 > [!NOTE]
 > **Project status:** egzo is in active development. Expect some breaking changes as we work toward a 1.0 release.
 > The core CLI tool and web UI are stable enough for testing and non-production work.
@@ -34,26 +39,31 @@ does the rest.
 - **[Your own tools](docs/images.md).** Add software to a harness image, or run any image with the `custom` harness.
 - **[The hub](docs/hub.md).** A web UI: every project and agent, terminals in the browser, single sign-on and per-project roles.
 
-## Supported platforms
+## Quick start
 
-Egzo needs a working Docker or Podman engine.
+Install the binary (Linux, amd64; `egzo-linux-arm64` for arm64):
 
-The following platforms are tested for each new release and using nightly GitHub Actions:
+```console
+$ curl -fsSLO https://github.com/egzo-ai/egzo/releases/latest/download/egzo-linux-amd64
+$ install -m 0755 egzo-linux-amd64 ~/.local/bin/egzo
+```
 
-- Docker engine on Linux (amd64 and arm64)
-- Rootless Podman on Linux
-- Docker with [gVisor](docs/install.md#using-gvisor)
+In a clone of your repository:
 
-Work in progress:
+```console
+$ egzo project init                   # writes egzo.yaml: one Claude Code agent, your repo as its workspace
+$ export ANTHROPIC_API_KEY=...
+$ egzo project up
+$ egzo agent spawn claude --attach    # Claude Code in a sandbox; Ctrl-] detaches
+```
 
-- Rootful Podman has a minor issue: [`known-issues/rootful-podman-intermittent-egress.md`](known-issues/rootful-podman-intermittent-egress.md).
-- macOS and Windows (through WSL2) are untested: [`roadmap/windows-and-macos.md`](roadmap/windows-and-macos.md).
+With a Claude subscription, run `claude setup-token` and use the `anthropic-oauth` service
+([sandboxing](docs/sandboxing.md#built-in-services)). To clone a private repo or push, give the agent a GitHub token: the
+`github` service ([workspaces](docs/workspaces.md)).
 
-See [Installation](docs/install.md) for more details.
+## Web UI
 
-## Documentation
-
-See [`docs/`](docs/README.md): the CLI and the project file, then [the hub](docs/hub.md), the web UI.
+The hub runs as one container next to your engine. See [the hub](docs/hub.md) to set it up.
 
 ## Example: architect with Claude, code with OpenCode
 
@@ -107,6 +117,27 @@ $ egzo agent attach architect-1  # the real Claude Code TUI; detach with Ctrl-]
 $ egzo agent spawn coder review-123 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
 $ egzo agent rm review-123
 ```
+
+## Supported platforms
+
+Egzo needs a working Docker or Podman engine.
+
+The following platforms are tested for each new release and using nightly GitHub Actions:
+
+- Docker engine on Linux (amd64 and arm64)
+- Rootless Podman on Linux
+- Docker with [gVisor](docs/install.md#using-gvisor)
+
+Work in progress:
+
+- Rootful Podman has a minor issue: [`known-issues/rootful-podman-intermittent-egress.md`](known-issues/rootful-podman-intermittent-egress.md).
+- macOS and Windows (through WSL2) are untested: [`roadmap/windows-and-macos.md`](roadmap/windows-and-macos.md).
+
+See [Installation](docs/install.md) for more details.
+
+## Documentation
+
+See [`docs/`](docs/README.md): the CLI and the project file, then [the hub](docs/hub.md), the web UI.
 
 ## License
 
