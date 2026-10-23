@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
@@ -38,5 +39,15 @@ func TestHostsNoNameCanBeAreNotKeptAndTheNetworkViewStaysSmall(t *testing.T) {
 	data, _ := json.Marshal(view)
 	if len(data) > 2<<20 {
 		t.Errorf("the Network view of one project is %d MiB, all of it chosen by an agent", len(data)>>20)
+	}
+}
+
+func TestAFieldIsCutOnACharacterBoundary(t *testing.T) {
+	got := cut(strings.Repeat("é", 200), maxName)
+	if len(got) > maxName || !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
+		t.Errorf("cut = %d bytes %q", len(got), got)
+	}
+	if cut("registry.npmjs.org", maxName) != "registry.npmjs.org" {
+		t.Error("a short field is cut")
 	}
 }
