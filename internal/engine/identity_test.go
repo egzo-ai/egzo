@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/egzo-ai/egzo/internal/version"
 )
 
 func instanceIdentity() Identity {
@@ -18,6 +20,7 @@ func instanceIdentity() Identity {
 func TestWhatEgzoLabelsIsReadBack(t *testing.T) {
 	for _, id := range []Identity{instanceIdentity(), {Project: "web", Service: "control", Kind: "control", ProjectDir: "/w", ConfigHash: strings.Repeat("c", 64)}, {Project: "web", Service: "lock", Kind: "lock"}} {
 		got, err := IdentityOf(id.Labels())
+		id.CreatedBy = "egzo/" + version.Version
 		if err != nil || !reflect.DeepEqual(got, id) {
 			t.Errorf("IdentityOf(%+v) = %+v, %v", id, got, err)
 		}
@@ -27,7 +30,7 @@ func TestWhatEgzoLabelsIsReadBack(t *testing.T) {
 func TestALabelEgzoNeverWritesMakesTheResourceNotEgzos(t *testing.T) {
 	for key, value := range map[string]string{
 		LabelProject: "../../etc", LabelKind: "", LabelService: "<img src=x>", LabelProjectDir: "/a\nb", LabelConfigHash: "zz",
-		LabelInstance: "Not Egzo's", LabelActor: "root", LabelTemplateHash: strings.Repeat("a", 65), LabelInstanceID: "nope", LabelWorkspace: "a/b",
+		LabelInstance: "Not Egzo's", LabelActor: "root", LabelTemplateHash: strings.Repeat("a", 65), LabelInstanceID: "nope", LabelWorkspace: "a/b", LabelCreatedBy: "someone else",
 	} {
 		labels := instanceIdentity().Labels()
 		labels[key] = value

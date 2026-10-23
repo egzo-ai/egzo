@@ -66,6 +66,9 @@ type Project struct {
 	Agents    []Agent
 	Templates []string
 	CreatedBy string
+	// Ignored is what carries the project's label with labels egzo never writes (engine.IdentityOf): not the project's, and not
+	// shown as part of it. Each says what and why.
+	Ignored []string `json:",omitempty"`
 }
 
 // Published is what a project's control sidecar holds of its templates: the names, and a hash of each, which an instance

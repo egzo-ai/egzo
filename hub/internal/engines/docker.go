@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
 
@@ -52,36 +53,58 @@ func (d *Docker) Projects(ctx context.Context) ([]Project, error) {
 		return nil, err
 	}
 	byName := map[string]*Project{}
+	project := func(name string) *Project {
+		if byName[name] == nil {
+			byName[name] = &Project{Name: name}
+		}
+		return byName[name]
+	}
 	for _, item := range list {
-		name := item.Labels[engine.LabelProject]
-		kind := item.Labels[engine.LabelKind]
-		if name == "" || kind == "lock" {
+		id, err := engine.IdentityOf(item.Labels)
+		if err != nil {
+			// a project egzo could make is told; a container that names none is nobody's
+			if name := item.Labels[engine.LabelProject]; names.Project(name) {
+				p := project(name)
+				p.Ignored = append(p.Ignored, fmt.Sprintf("container %s: %v", containerName(item), err))
+			}
 			continue
 		}
-		p := byName[name]
-		if p == nil {
-			p = &Project{Name: name, Dir: item.Labels[engine.LabelProjectDir], CreatedBy: item.Labels[engine.LabelCreatedBy]}
-			byName[name] = p
+		if id.Kind == "lock" {
+			continue
 		}
-		switch kind {
+		p := project(id.Project)
+		if p.Dir == "" {
+			p.Dir, p.CreatedBy = id.ProjectDir, id.CreatedBy
+		}
+		switch id.Kind {
 		case kindAgent:
 			p.Agents = append(p.Agents, Agent{
-				Name: item.Labels[engine.LabelInstance], ID: item.Labels[engine.LabelInstanceID], Template: item.Labels[engine.LabelService], State: item.State,
-				Actor: item.Labels[engine.LabelActor], Created: time.Unix(item.Created, 0), Activity: activityOf(item.State),
-				TemplateHash: item.Labels[engine.LabelTemplateHash],
+				Name: id.Instance, ID: id.InstanceID, Template: id.Service, State: item.State,
+				Actor: id.Actor, Created: time.Unix(item.Created, 0), Activity: activityOf(item.State),
+				TemplateHash: id.TemplateHash,
 			})
 		case kindControl, kindProxy:
-			p.Services = append(p.Services, Service{Name: kind, State: item.State, Health: healthOf(item.Status), ID: item.ID})
+			p.Services = append(p.Services, Service{Name: id.Kind, State: item.State, Health: healthOf(item.Status), ID: item.ID})
 		}
 	}
 	projects := make([]Project, 0, len(byName))
 	for _, p := range byName {
+		if len(p.Agents) == 0 && len(p.Services) == 0 {
+			continue // only containers that are not egzo's claim it
+		}
 		p.Up = sidecarsRunning(p.Services)
 		sort.Slice(p.Agents, func(i, j int) bool { return p.Agents[i].Name < p.Agents[j].Name })
 		projects = append(projects, *p)
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].Name < projects[j].Name })
 	return projects, nil
+}
+
+func containerName(item container.Summary) string {
+	if len(item.Names) > 0 {
+		return strings.TrimPrefix(item.Names[0], "/")
+	}
+	return item.ID
 }
 
 func sidecarsRunning(services []Service) bool {
@@ -121,7 +144,7 @@ func (d *Docker) Project(ctx context.Context, name string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	project := Project{Name: name}
+	project := Project{Name: name, Ignored: observed.Ignored}
 	rows := stack.Rows(observed, nil, nil)
 	for _, r := range observed.Resources {
 		if r.Type == "container" && project.Dir == "" {

@@ -194,6 +194,8 @@ type projectJSON struct {
 	CanSpawn  bool          `json:"canSpawn"`
 	CanManage bool          `json:"canManage"`
 	CanAudit  bool          `json:"canAudit"`
+	// Ignored is what claims the project with labels egzo never writes, for whoever may audit it.
+	Ignored []string `json:"ignored,omitempty"`
 }
 
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
@@ -213,6 +215,9 @@ func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 	}
 	for _, a := range v.Agents {
 		p.Agents = append(p.Agents, s.agentOf(a, n))
+	}
+	if p.CanAudit {
+		p.Ignored = v.Project.Ignored
 	}
 	return p
 }

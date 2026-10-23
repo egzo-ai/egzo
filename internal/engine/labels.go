@@ -59,6 +59,8 @@ type Identity struct {
 	InstanceID string
 	// Workspace names the workspace a volume belongs to.
 	Workspace string
+	// CreatedBy is the egzo that made the resource ("egzo/<version>"), as IdentityOf reads it; Labels always writes this one.
+	CreatedBy string
 	// Extra holds additional ai.egzo.* labels, such as the agent's harness.
 	Extra map[string]string
 }

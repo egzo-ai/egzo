@@ -5,12 +5,16 @@ package engine
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/egzo-ai/egzo/internal/names"
 )
+
+// createdBy is the form of the created-by label: egzo and its version.
+var createdBy = regexp.MustCompile(`^egzo/[A-Za-z0-9._+-]{1,64}$`)
 
 // maxProjectDir is the longest project directory a label holds: PATH_MAX.
 const maxProjectDir = 4096
@@ -30,7 +34,7 @@ func IdentityOf(labels map[string]string) (Identity, error) {
 	id := Identity{
 		Project: labels[LabelProject], Service: labels[LabelService], Kind: labels[LabelKind], ProjectDir: labels[LabelProjectDir],
 		ConfigHash: labels[LabelConfigHash], Instance: labels[LabelInstance], Actor: labels[LabelActor], TemplateHash: labels[LabelTemplateHash],
-		InstanceID: labels[LabelInstanceID], Workspace: labels[LabelWorkspace],
+		InstanceID: labels[LabelInstanceID], Workspace: labels[LabelWorkspace], CreatedBy: labels[LabelCreatedBy],
 	}
 	optional := func(value string, valid func(string) bool) bool { return value == "" || valid(value) }
 	for _, check := range []struct {
@@ -47,6 +51,7 @@ func IdentityOf(labels map[string]string) (Identity, error) {
 		{LabelTemplateHash, optional(id.TemplateHash, names.Hash)},
 		{LabelInstanceID, optional(id.InstanceID, names.InstanceID)},
 		{LabelWorkspace, optional(id.Workspace, names.Identifier)},
+		{LabelCreatedBy, optional(id.CreatedBy, createdBy.MatchString)},
 	} {
 		if !check.ok {
 			return Identity{}, ErrLabel{Key: check.key, Value: labels[check.key]}
