@@ -62,11 +62,30 @@ func Dial(ctx context.Context, target Target) (*Client, error) {
 	} else if strings.HasPrefix(host, "tcp://") && target.DialContext == nil {
 		options = append(options, client.WithScheme("http"))
 	}
-	api, err := client.NewClientWithOpts(options...)
+	attach, err := client.NewClientWithOpts(options...)
 	if err != nil {
 		return nil, err
 	}
-	return probe(ctx, api, "", false)
+	// Every other request goes through a client whose transport bounds what the engine answers (limits.go). It has the
+	// transport of the first, wrapped, which the engine client cannot hijack a connection with: attaching uses the first.
+	scheme := "http"
+	if strings.HasPrefix(host, "tcp://") && (len(target.CA) > 0 || len(target.Cert) > 0) {
+		scheme = "https"
+	}
+	plain := attach.HTTPClient()
+	api, err := client.NewClientWithOpts(client.WithHost(host), client.WithAPIVersionNegotiation(), client.WithScheme(scheme),
+		client.WithHTTPClient(&http.Client{Transport: boundedTransport{next: plain.Transport}}))
+	if err != nil {
+		attach.Close()
+		return nil, err
+	}
+	c, err := probe(ctx, api, "", false)
+	if err != nil {
+		attach.Close()
+		return nil, err
+	}
+	c.attach = attach
+	return c, nil
 }
 
 // probe pings the engine and learns what it is. hint is added to the error when nothing answers.

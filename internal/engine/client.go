@@ -16,6 +16,9 @@ import (
 type Client struct {
 	API  *client.Client
 	Host string
+	// attach, when set, is the client Exec attaches with: the engine client hijacks the connection with its own transport, which
+	// a client whose transport is wrapped (Dial's bounded one) does not have. API otherwise.
+	attach *client.Client
 	// Podman and Rootless are what IsPodman and IsRootless answer once they have asked the engine; a Client built by hand
 	// (a test) sets them and is never asked.
 	Podman, Rootless bool
@@ -33,7 +36,20 @@ func Connect(ctx context.Context) (*Client, error) {
 		"systemctl --user enable --now podman.socket; export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock", true)
 }
 
-func (c *Client) Close() error { return c.API.Close() }
+func (c *Client) Close() error {
+	if c.attach != nil {
+		c.attach.Close()
+	}
+	return c.API.Close()
+}
+
+// attachAPI is the client that attaches to a command.
+func (c *Client) attachAPI() *client.Client {
+	if c.attach != nil {
+		return c.attach
+	}
+	return c.API
+}
 
 // APIAtLeast reports whether the engine speaks the Docker API at version v or later. The client negotiates its version
 // down to the engine's when it connects, so the version in use is the engine's own when the engine is the older one.
