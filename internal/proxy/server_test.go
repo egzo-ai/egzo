@@ -96,7 +96,7 @@ func newRig(t *testing.T, upstreamHandler http.HandlerFunc) *rig {
 // setPolicy loads a profile of the agent's own name and binds the agent to it.
 func (r *rig) setPolicy(agent, token string, allow []string, services ...Service) {
 	r.proxy.SetPolicy(&Policy{Hash: "h", Profiles: map[string]Profile{agent: {Allow: allow, Services: services}}})
-	if err := r.proxy.BindAgent(agent, Binding{Token: token, Profile: agent}); err != nil {
+	if err := r.proxy.BindAgent(agent, Binding{Instance: testInstance, Token: token, Profile: agent}); err != nil {
 		panic(err)
 	}
 }
@@ -264,6 +264,20 @@ func TestDeniesHostsOutsideTheProfile(t *testing.T) {
 	}
 	if r.requests() != 0 {
 		t.Error("the upstream was contacted")
+	}
+}
+
+func TestEveryEventOfAnAgentCarriesTheIdOfItsInstanceAndABindingNeedsOne(t *testing.T) {
+	r := newRig(t, nil)
+	r.setPolicy("coder", "tok", []string{"example.com"})
+	r.client("coder", "tok", r.ca.Cert).Get("https://evil.example/")
+	if !strings.Contains(r.audit.String(), `"agent":"coder","instance":"`+testInstance+`"`) {
+		t.Errorf("audit:\n%s", r.audit.String())
+	}
+	for _, id := range []string{"", "issue-1", "01jbx7q0000000000000000000", "01JBX7Q000000000000000000I"} {
+		if err := r.proxy.BindAgent("reviewer", Binding{Instance: id, Token: "t2", Profile: "coder"}); err == nil {
+			t.Errorf("a binding with the instance id %q was accepted", id)
+		}
 	}
 }
 
@@ -499,3 +513,9 @@ func TestParseServerNameHandlesOddHellos(t *testing.T) {
 		}
 	}
 }
+
+// testInstance is the id of every instance a test binds.
+const testInstance = "01JBX7Q0000000000000000000"
+
+// first is the first of two results.
+func first[T, U any](value T, _ U) T { return value }

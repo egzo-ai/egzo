@@ -135,8 +135,8 @@ func TestTheLimitOfOneAgentDoesNotStopAnother(t *testing.T) {
 	r := newRig(t, nil)
 	r.proxy.MaxPerAgent = 1
 	r.proxy.SetPolicy(&Policy{Hash: "h", Profiles: map[string]Profile{"p": {Allow: []string{"example.com"}}}})
-	r.proxy.BindAgent("coder", Binding{Token: "tok", Profile: "p"})
-	r.proxy.BindAgent("reviewer", Binding{Token: "tok2", Profile: "p"})
+	r.proxy.BindAgent("coder", Binding{Instance: testInstance, Token: "tok", Profile: "p"})
+	r.proxy.BindAgent("reviewer", Binding{Instance: testInstance, Token: "tok2", Profile: "p"})
 	connectRequest(t, r, "example.com", "443")
 	conn, err := net.Dial("tcp", strings.TrimPrefix(r.front.URL, "http://"))
 	if err != nil {
@@ -497,7 +497,7 @@ func terminated(t *testing.T, r *rig, host string) (client net.Conn, done chan s
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
-		r.proxy.terminate(server, "coder", host, Decision{}, true)
+		r.proxy.terminate(server, peer{agent: "coder", instance: testInstance}, host, Decision{}, true)
 	}()
 	t.Cleanup(func() { client.Close() })
 	return client, done
@@ -889,7 +889,7 @@ func TestThePolicyEndpointRejectsBadAndOversizedBodies(t *testing.T) {
 
 func TestTheOperatorBindsAndUnbindsAgentsByName(t *testing.T) {
 	handler, server, _ := operatorFor(t, Config{CADir: t.TempDir(), PubDir: t.TempDir(), SystemBundle: "/nonexistent"})
-	bind := `{"token":"t","profile":"p"}`
+	bind := `{"instance":"01JBX7Q0000000000000000000","token":"t","profile":"p"}`
 	if response := call(handler, "PUT", "/agents/coder", bind); response.Code != http.StatusConflict {
 		t.Errorf("binding before a policy was loaded: status = %d", response.Code)
 	}
@@ -901,8 +901,8 @@ func TestTheOperatorBindsAndUnbindsAgentsByName(t *testing.T) {
 		"an upper case name":  {"/agents/Coder", bind},
 		"no token":            {"/agents/coder", `{"profile":"p"}`},
 		"not json":            {"/agents/coder", `{`},
-		"an unknown profile":  {"/agents/coder", `{"token":"t","profile":"nope"}`},
-		"an oversized body":   {"/agents/coder", `{"token":"` + strings.Repeat("a", 70<<10) + `","profile":"p"}`},
+		"an unknown profile":  {"/agents/coder", `{"instance":"01JBX7Q0000000000000000000","token":"t","profile":"nope"}`},
+		"an oversized body":   {"/agents/coder", `{"instance":"01JBX7Q0000000000000000000","token":"` + strings.Repeat("a", 70<<10) + `","profile":"p"}`},
 	} {
 		if response := call(handler, "PUT", c.path, c.body); response.Code < 400 {
 			t.Errorf("%s: status = %d", name, response.Code)

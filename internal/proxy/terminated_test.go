@@ -304,11 +304,11 @@ func TestAnUnknownAgentAndAWrongTokenAreRefusedTheSameWay(t *testing.T) {
 	for _, c := range []struct{ agent, token string }{
 		{"coder", "wrong"}, {"coder", ""}, {"coder", "tokk"}, {"ghost", "tok"}, {"ghost", ""}, {"", ""},
 	} {
-		if r.proxy.authenticate(policy, c.agent, c.token) != nil {
+		if first(r.proxy.authenticate(policy, c.agent, c.token)) != nil {
 			t.Errorf("%q with %q was let in", c.agent, c.token)
 		}
 	}
-	if r.proxy.authenticate(policy, "coder", "tok") == nil {
+	if first(r.proxy.authenticate(policy, "coder", "tok")) == nil {
 		t.Error("the right credentials were refused")
 	}
 }

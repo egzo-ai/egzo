@@ -218,7 +218,7 @@ func BindInstances(ctx context.Context, c *engine.Client, project string, instan
 	}
 	var failures []error
 	for _, instance := range bindable {
-		if err := bindProxy(ctx, c, project, instance.Name, tokens[instance.Name], p.Templates[instance.Template].Agent.Egress); err != nil {
+		if err := bindProxy(ctx, c, project, instance.Name, instance.ID, tokens[instance.Name], p.Templates[instance.Template].Agent.Egress); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -259,10 +259,10 @@ func fetchTokens(ctx context.Context, c *engine.Client, controlName string, name
 	return tokens, nil
 }
 
-// bindProxy lets an instance through the proxy under a profile: its token and the profile's name, never
+// bindProxy lets an instance through the proxy under a profile: its id, its token and the profile's name, never
 // a secret.
-func bindProxy(ctx context.Context, c *engine.Client, project, name, token, profile string) error {
-	body, _ := json.Marshal(BindingFor(token, profile))
+func bindProxy(ctx context.Context, c *engine.Client, project, name, id, token, profile string) error {
+	body, _ := json.Marshal(BindingFor(id, token, profile))
 	result, err := c.Exec(ctx, project+"-proxy-1", []string{"/egzo", "proxy", "request", "PUT", "/agents/" + name}, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("bind %s in the proxy: %w", name, err)

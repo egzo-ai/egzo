@@ -66,12 +66,12 @@ func usedProfiles(project *config.Resolved) []string {
 	return sortedKeys(seen)
 }
 
-// BindingFor is what the proxy needs to let an instance through: its credentials, the profile of its template and
+// BindingFor is what the proxy needs to let an instance through: its id, its credentials, the profile of its template and
 // the public half of its ssh identity. It holds no secret.
-func BindingFor(token, profile string) proxy.Binding {
+func BindingFor(id, token, profile string) proxy.Binding {
 	// The ssh identity is derived from the token, so it needs nothing more; an instance without a token has none.
 	identity, _ := proxy.IdentityPublicKey(token)
-	return proxy.Binding{Token: token, Profile: profile, SSHKey: identity}
+	return proxy.Binding{Instance: id, Token: token, Profile: profile, SSHKey: identity}
 }
 
 // ResolveSecrets reads the value of every secret an agent's profile injects. A secret that cannot

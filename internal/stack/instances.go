@@ -14,6 +14,7 @@ import (
 // left of an instance that has no container any more.
 type Instance struct {
 	Name         string
+	ID           string // see NewInstanceID
 	Template     string // the key of the template, from the service label
 	Actor        string
 	Container    string
@@ -29,7 +30,7 @@ func (o Observed) Instances() []Instance {
 	for _, r := range o.Resources {
 		if r.Type == "container" && r.Kind == kindAgent && r.Instance != "" {
 			instances = append(instances, Instance{
-				Name: r.Instance, Template: r.Service, Actor: r.Actor, Container: r.Name,
+				Name: r.Instance, ID: r.InstanceID, Template: r.Service, Actor: r.Actor, Container: r.Name,
 				State: r.State, Created: r.Created, TemplateHash: r.TemplateHash,
 			})
 		}
@@ -44,7 +45,7 @@ func (o Observed) Instances() []Instance {
 	for _, r := range o.Resources {
 		if r.Kind == kindAgent && r.Instance != "" && r.Type == "network" && !seen[r.Instance] {
 			seen[r.Instance] = true
-			instances = append(instances, Instance{Name: r.Instance, Template: r.Service, Actor: r.Actor, State: "missing", TemplateHash: r.TemplateHash})
+			instances = append(instances, Instance{Name: r.Instance, ID: r.InstanceID, Template: r.Service, Actor: r.Actor, State: "missing", TemplateHash: r.TemplateHash})
 		}
 	}
 	sort.Slice(instances, func(i, j int) bool { return instances[i].Name < instances[j].Name })

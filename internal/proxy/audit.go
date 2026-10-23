@@ -13,14 +13,16 @@ import (
 
 // Event is one line of the audit log. Bodies and query strings are never recorded.
 type Event struct {
-	Time   time.Time `json:"time"`
-	Agent  string    `json:"agent,omitempty"`
-	Host   string    `json:"host,omitempty"`
-	Action string    `json:"action"` // allow, inject, inspect, intercept, challenge, deny, aborted, request, close, error; ssh-open, ssh-exec, ssh-shell, ssh-sftp, ssh-deny, ssh-close, ssh-error
-	Reason string    `json:"reason,omitempty"`
-	Method string    `json:"method,omitempty"`
-	Path   string    `json:"path,omitempty"`
-	Status int       `json:"status,omitempty"`
+	Time  time.Time `json:"time"`
+	Agent string    `json:"agent,omitempty"`
+	// Instance is the id of the agent's instance: the name can come back, the id never does.
+	Instance string `json:"instance,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Action   string `json:"action"` // allow, inject, inspect, intercept, challenge, deny, aborted, request, close, error; ssh-open, ssh-exec, ssh-shell, ssh-sftp, ssh-deny, ssh-close, ssh-error
+	Reason   string `json:"reason,omitempty"`
+	Method   string `json:"method,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Status   int    `json:"status,omitempty"`
 
 	// On an ssh event: the server's name in the profile, and the command an agent asked to run.
 	Server  string `json:"server,omitempty"`

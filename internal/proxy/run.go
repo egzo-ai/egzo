@@ -102,6 +102,9 @@ func Run(cfg Config, audit io.Writer) error {
 // agentName is what an instance may be called (the identifier rule of the project file).
 var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
+// instanceID is the form of an instance's id: a ULID.
+var instanceID = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+
 // operatorHandler is the proxy's operator API: load a policy, report which one is loaded, bind agents
 // to its profiles.
 func operatorHandler(server *Server, ca *CA, cfg Config, hostKey ssh.Signer) http.Handler {

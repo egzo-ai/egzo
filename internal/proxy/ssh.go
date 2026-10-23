@@ -66,10 +66,10 @@ func (s *Server) sshIdleTimeout() time.Duration {
 
 // sshIdentity finds the agent whose identity key is key. It looks at every binding, so the time it takes does not tell
 // how many agents there are or which one matched.
-func (s *Server) sshIdentity(key ssh.PublicKey) (agent string, ok bool) {
+func (s *Server) sshIdentity(key ssh.PublicKey) (who peer, ok bool) {
 	current := s.agents.Load()
 	if current == nil {
-		return "", false
+		return peer{}, false
 	}
 	wire := key.Marshal()
 	for name, binding := range *current {
@@ -81,10 +81,10 @@ func (s *Server) sshIdentity(key ssh.PublicKey) (agent string, ok bool) {
 			continue
 		}
 		if subtle.ConstantTimeCompare(known.Marshal(), wire) == 1 {
-			agent, ok = name, true
+			who, ok = peer{agent: name, instance: binding.Instance}, true
 		}
 	}
-	return agent, ok
+	return who, ok
 }
 
 // sshServerOf finds the server an agent's profile names.
@@ -117,14 +117,14 @@ func (s *Server) sshServerConfig() (*ssh.ServerConfig, error) {
 		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			// What is decided here is returned in the permissions of this very key: x/crypto calls the callback for every key
 			// a client offers, and only the one that signs is the identity (CVE-2024-45337).
-			agent, ok := s.sshIdentity(key)
+			who, ok := s.sshIdentity(key)
 			if !ok {
 				return nil, errors.New("unknown identity")
 			}
-			if _, ok := s.sshServerOf(agent, meta.User()); !ok {
+			if _, ok := s.sshServerOf(who.agent, meta.User()); !ok {
 				return nil, errors.New("no such server")
 			}
-			return &ssh.Permissions{Extensions: map[string]string{"agent": agent, "server": meta.User()}}, nil
+			return &ssh.Permissions{Extensions: map[string]string{"agent": who.agent, "instance": who.instance, "server": meta.User()}}, nil
 		},
 	}
 	config.AddHostKey(*hostKey)
@@ -153,6 +153,7 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 	}
 	raw.SetDeadline(time.Time{})
 	agent, name := sc.Permissions.Extensions["agent"], sc.Permissions.Extensions["server"]
+	who := peer{agent: agent, instance: sc.Permissions.Extensions["instance"]}
 	server, ok := s.sshServerOf(agent, name)
 	if !ok {
 		sc.Close()
@@ -160,13 +161,13 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 	}
 	release, reason := s.limits.acquire(agent, s.MaxPerAgent, s.MaxTotal)
 	if release == nil {
-		s.audit.Log(Event{Agent: agent, Host: server.Host, Server: name, Action: "ssh-deny", Reason: reason})
+		s.audit.Log(who.event(Event{Host: server.Host, Server: name, Action: "ssh-deny", Reason: reason}))
 		sc.Close()
 		return
 	}
 	defer release()
 
-	conn := &sshConn{s: s, agent: agent, name: name, client: sc, started: time.Now()}
+	conn := &sshConn{s: s, agent: agent, who: who, name: name, client: sc, started: time.Now()}
 	conn.server.Store(&server)
 	conn.touch()
 	if !s.trackSSH(agent, conn) {
@@ -174,7 +175,7 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 		return
 	}
 	defer s.untrackSSH(agent, conn)
-	s.audit.Log(Event{Agent: agent, Host: server.Host, Server: name, Action: "ssh-open"})
+	s.audit.Log(who.event(Event{Host: server.Host, Server: name, Action: "ssh-open"}))
 	conn.run(channels, requests)
 }
 
@@ -225,6 +226,7 @@ func (s *Server) closeSSH(agent string) {
 type sshConn struct {
 	s       *Server
 	agent   string
+	who     peer
 	server  atomic.Pointer[SSHServer] // the entry in use: the one at sign-in, then the one dialed
 	name    string
 	client  *ssh.ServerConn
@@ -243,8 +245,8 @@ type sshConn struct {
 func (c *sshConn) touch() { c.last.Store(time.Now().UnixNano()) }
 
 func (c *sshConn) audit(event Event) {
-	event.Agent, event.Host, event.Server = c.agent, c.server.Load().Host, c.name
-	c.s.audit.Log(event)
+	event.Host, event.Server = c.server.Load().Host, c.name
+	c.s.audit.Log(c.who.event(event))
 }
 
 // connect dials the server once for all the sessions of this connection.

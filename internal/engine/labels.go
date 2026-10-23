@@ -23,6 +23,9 @@ const (
 	LabelInstance     = LabelPrefix + "instance"
 	LabelActor        = LabelPrefix + "actor"
 	LabelTemplateHash = LabelPrefix + "template-hash"
+	// LabelInstanceID is the id spawn made for the instance, never reused: a name can come back, an id does not. It is on the
+	// instance's container and network only; a volume can outlive the instance and be taken up by the next of the name.
+	LabelInstanceID = LabelPrefix + "instance-id"
 
 	// Labels of a workspace volume (LabelKind is "workspace"): the workspace's name, on the volumes of its base clone
 	// and its worktrees too. A worktree volume also carries the instance labels above.
@@ -52,6 +55,8 @@ type Identity struct {
 	Instance     string
 	Actor        string
 	TemplateHash string
+	// InstanceID is set on the container and the network of an instance.
+	InstanceID string
 	// Workspace names the workspace a volume belongs to.
 	Workspace string
 	// Extra holds additional ai.egzo.* labels, such as the agent's harness.
@@ -73,6 +78,9 @@ func (i Identity) Labels() map[string]string {
 		labels[LabelInstance] = i.Instance
 		labels[LabelActor] = i.Actor
 		labels[LabelTemplateHash] = i.TemplateHash
+	}
+	if i.InstanceID != "" {
+		labels[LabelInstanceID] = i.InstanceID
 	}
 	if i.Workspace != "" {
 		labels[LabelWorkspace] = i.Workspace

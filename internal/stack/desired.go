@@ -270,6 +270,8 @@ func InstanceNetwork(project, instance string) string { return project + "_" + i
 
 // InstanceIdentity says where an instance came from.
 type InstanceIdentity struct {
+	// ID is the instance's own id (see NewInstanceID).
+	ID           string
 	Template     string
 	Actor        string
 	TemplateHash string
@@ -285,13 +287,19 @@ func DesireInstance(view *config.Resolved, dir string, in Inputs, name string, f
 			Instance: name, Actor: from.Actor, TemplateHash: from.TemplateHash,
 		}
 	}
+	// The container and the network are this instance's alone; the home volume can be taken up by the next instance of the name.
+	own := func(kind string) engine.Identity {
+		id := identity(kind)
+		id.InstanceID = from.ID
+		return id
+	}
 	agent, ok := view.Agents[name]
 	if !ok {
 		return Desired{}, fmt.Errorf("no instance %q in the project view", name)
 	}
 	desired := Desired{PrepImage: in.Image, Control: view.Name + "-control-1"}
-	network := NetworkSpec{Name: InstanceNetwork(view.Name, name), Internal: true, Identity: identity(kindAgent)}
-	spec, err := agentContainer(view, dir, name, agent, network.Name, in, identity(kindAgent))
+	network := NetworkSpec{Name: InstanceNetwork(view.Name, name), Internal: true, Identity: own(kindAgent)}
+	spec, err := agentContainer(view, dir, name, agent, network.Name, in, own(kindAgent))
 	if err != nil {
 		return desired, err
 	}

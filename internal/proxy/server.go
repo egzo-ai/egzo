@@ -116,6 +116,9 @@ func (s *Server) BindAgent(name string, binding Binding) error {
 	if binding.Token == "" {
 		return errors.New("a binding needs a token")
 	}
+	if !instanceID.MatchString(binding.Instance) {
+		return errors.New("a binding needs the instance's id (an instance spawned before ids existed: `egzo agent rm` it and spawn again)")
+	}
 	policy := s.policy.Load()
 	if policy == nil {
 		return errors.New("no egress policy is loaded: run `egzo project up` first")
@@ -189,15 +192,24 @@ func (s *Server) BoundAgents() []string {
 	return names
 }
 
-// authenticate finds the profile an agent's proxy credentials give it.
-func (s *Server) authenticate(policy *Policy, agent, token string) *Profile {
+// peer is who a connection is from: the agent's name, for people, and its instance's id, for history.
+type peer struct{ agent, instance string }
+
+// event is e from the peer.
+func (p peer) event(e Event) Event {
+	e.Agent, e.Instance = p.agent, p.instance
+	return e
+}
+
+// authenticate finds the profile an agent's proxy credentials give it, and the id of its instance.
+func (s *Server) authenticate(policy *Policy, agent, token string) (*Profile, string) {
 	current := s.agents.Load()
 	if current == nil {
-		return nil
+		return nil, ""
 	}
 	// No real token is this long: refuse before hashing, so a huge value costs nothing.
 	if len(token) > maxToken {
-		return nil
+		return nil, ""
 	}
 	// An unknown agent takes the same path as a wrong token: the comparison always runs, on digests, so
 	// neither the answer's timing nor the token's length tells which agents exist.
@@ -206,13 +218,13 @@ func (s *Server) authenticate(policy *Policy, agent, token string) *Profile {
 	given := sha256.Sum256([]byte(token))
 	match := subtle.ConstantTimeCompare(expected[:], given[:]) == 1
 	if !ok || binding.Token == "" || !match {
-		return nil
+		return nil, ""
 	}
 	profile, ok := policy.Profiles[binding.Profile]
 	if !ok {
-		return nil
+		return nil, ""
 	}
-	return &profile
+	return &profile, binding.Instance
 }
 
 // PolicyHash is the hash of the loaded policy, or empty when none is loaded.
@@ -246,15 +258,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	agent, token, hasCredentials := proxyCredentials(r)
 	var agentPolicy *Profile
+	var instance string
 	if hasCredentials {
-		agentPolicy = s.authenticate(policy, agent, token)
+		agentPolicy, instance = s.authenticate(policy, agent, token)
 	}
+	who := peer{agent: agent, instance: instance}
 	if agentPolicy == nil {
 		if _, sent := r.Header["Proxy-Authorization"]; !sent {
 			// How a browser starts: it sends credentials only once challenged. Not a denial.
 			s.audit.Log(Event{Host: host, Action: "challenge", Reason: "proxy credentials required"})
 		} else {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "invalid proxy credentials"})
+			s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: "invalid proxy credentials"}))
 		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="egzo"`)
 		http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
@@ -262,24 +276,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if port != allowedPort {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "only port 443 is allowed"})
+		s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: "only port 443 is allowed"}))
 		http.Error(w, "only port 443 is allowed", http.StatusForbidden)
 		return
 	}
 	decision := agentPolicy.Decide(host)
 	if !decision.Allowed {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: decision.Reason})
+		s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: decision.Reason}))
 		http.Error(w, "egzo: "+host+" is not allowed by this agent's egress profile", http.StatusForbidden)
 		return
 	}
 	if ip := net.ParseIP(host); ip != nil && !isPublic(ip) {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "not a public address"})
+		s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: "not a public address"}))
 		http.Error(w, "egzo: "+host+" is not a public address", http.StatusForbidden)
 		return
 	}
 	release, reason := s.limits.acquire(agent, s.MaxPerAgent, s.MaxTotal)
 	if release == nil {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: reason})
+		s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: reason}))
 		http.Error(w, "egzo: "+reason, http.StatusServiceUnavailable)
 		return
 	}
@@ -306,10 +320,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if decision.Inject != nil || decision.Inspect || len(decision.Substitutions) > 0 {
-		s.intercept(conn, agent, host, decision)
+		s.intercept(conn, who, host, decision)
 		return
 	}
-	s.tunnel(conn, agent, host)
+	s.tunnel(conn, who, host)
 }
 
 // normalizeHost is the form a host is compared and logged in: lower case, without the one trailing dot
@@ -334,7 +348,7 @@ func proxyCredentials(r *http.Request) (agent, token string, ok bool) {
 }
 
 // tunnel connects the agent straight to the host: the proxy sees the host name, never the traffic.
-func (s *Server) tunnel(client net.Conn, agent, host string) {
+func (s *Server) tunnel(client net.Conn, who peer, host string) {
 	defer client.Close()
 
 	// The tunnel was approved for host: the TLS server name must say the same, or an allowed name
@@ -343,13 +357,13 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 	hello, serverName, ech, err := readClientHello(client)
 	switch {
 	case err != nil && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)):
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "aborted", Reason: "client closed before sending a ClientHello"})
+		s.audit.Log(who.event(Event{Host: host, Action: "aborted", Reason: "client closed before sending a ClientHello"}))
 		return
 	case err != nil:
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: err.Error()})
+		s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: err.Error()}))
 		return
 	case !strings.EqualFold(serverName, host):
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "TLS server name " + quoteName(serverName) + " differs from the approved host"})
+		s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: "TLS server name " + quoteName(serverName) + " differs from the approved host"}))
 		return
 	}
 
@@ -357,7 +371,7 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 		// The hello may hide the server it really asks for, and the proxy cannot tell a harmless one from
 		// one that does: never tunnel it, terminate TLS here and check the real certificate ourselves.
 		// The upstream is not contacted until a request inside names the approved host.
-		s.terminate(&prefixedConn{Conn: client, pending: hello}, agent, host, Decision{}, true)
+		s.terminate(&prefixedConn{Conn: client, pending: hello}, who, host, Decision{}, true)
 		return
 	}
 
@@ -365,15 +379,15 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 	defer cancel()
 	upstream, err := s.Dial(ctx, "tcp", net.JoinHostPort(host, allowedPort))
 	if err != nil {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "error", Reason: "dial: " + err.Error()})
+		s.audit.Log(who.event(Event{Host: host, Action: "error", Reason: "dial: " + err.Error()}))
 		return
 	}
 	defer upstream.Close()
 	if _, err := upstream.Write(hello); err != nil {
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "error", Reason: "write: " + err.Error()})
+		s.audit.Log(who.event(Event{Host: host, Action: "error", Reason: "write: " + err.Error()}))
 		return
 	}
-	s.audit.Log(Event{Agent: agent, Host: host, Action: "allow"})
+	s.audit.Log(who.event(Event{Host: host, Action: "allow"}))
 
 	var wg sync.WaitGroup
 	var up, down int64
@@ -390,7 +404,7 @@ func (s *Server) tunnel(client net.Conn, agent, host string) {
 	go pump(upstream, client, &sent)
 	go pump(client, upstream, &down)
 	wg.Wait()
-	s.audit.Log(Event{Agent: agent, Host: host, Action: "close", BytesUp: up + sent, BytesDown: down, DurationMs: time.Since(started).Milliseconds()})
+	s.audit.Log(who.event(Event{Host: host, Action: "close", BytesUp: up + sent, BytesDown: down, DurationMs: time.Since(started).Milliseconds()}))
 }
 
 // prefixedConn reads bytes that were already taken off the connection before the rest.
@@ -436,23 +450,23 @@ func (c *countingConn) Write(p []byte) (int, error) {
 // intercept terminates the agent's TLS with a certificate from the project CA so the proxy can add
 // the credential, then forwards each request to the real host. Toward the agent it always speaks
 // HTTP/1.1, whatever the upstream speaks.
-func (s *Server) intercept(client net.Conn, agent, host string, decision Decision) {
-	s.terminate(client, agent, host, decision, false)
+func (s *Server) intercept(client net.Conn, who peer, host string, decision Decision) {
+	s.terminate(client, who, host, decision, false)
 }
 
 // terminate is intercept for a connection that may have been read from already. With ech the client
 // sent an Encrypted Client Hello at a plain tunnel: the connection is logged like a tunnel (intercept,
 // then close with the bytes that went through) and its requests are not. A host that is inspected never
 // gets here with ech: it is intercepted from the start, and its requests are logged.
-func (s *Server) terminate(client net.Conn, agent, host string, decision Decision, ech bool) {
+func (s *Server) terminate(client net.Conn, who peer, host string, decision Decision, ech bool) {
 	var counted *countingConn
 	if ech {
 		started := time.Now()
 		counted = &countingConn{Conn: client}
 		client = counted
-		s.audit.Log(Event{Agent: agent, Host: host, Action: "intercept", Reason: "the client sent Encrypted Client Hello, which can hide the server it asks for, so TLS is terminated here instead of tunneled"})
+		s.audit.Log(who.event(Event{Host: host, Action: "intercept", Reason: "the client sent Encrypted Client Hello, which can hide the server it asks for, so TLS is terminated here instead of tunneled"}))
 		defer func() {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "close", BytesUp: counted.read.Load(), BytesDown: counted.written.Load(), DurationMs: time.Since(started).Milliseconds()})
+			s.audit.Log(who.event(Event{Host: host, Action: "close", BytesUp: counted.read.Load(), BytesDown: counted.written.Load(), DurationMs: time.Since(started).Milliseconds()}))
 		}()
 	}
 	// The idle timeout applies from the first byte, but the handshake has a hard limit of its own that a
@@ -479,7 +493,7 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 		if ech {
 			reason = "the client sent Encrypted Client Hello, so egzo had to terminate TLS, and it probably does not trust the project CA (" + reason + "): the client must trust the project CA (the harness images do it with certutil, see docs/browser.md)"
 		}
-		s.audit.Log(Event{Agent: agent, Host: host, Action: action, Reason: reason})
+		s.audit.Log(who.event(Event{Host: host, Action: action, Reason: reason}))
 		client.Close()
 		return
 	}
@@ -490,12 +504,12 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 		if decision.Inject != nil || len(decision.Substitutions) > 0 {
 			action = "inject"
 		}
-		s.audit.Log(Event{Agent: agent, Host: host, Action: action})
+		s.audit.Log(who.event(Event{Host: host, Action: action}))
 	}
 
 	listener := newConnListener(tlsConn)
 	server := &http.Server{
-		Handler:           s.interceptHandler(agent, host, decision.Inject, newSwapper(decision.Substitutions), ech),
+		Handler:           s.interceptHandler(who, host, decision.Inject, newSwapper(decision.Substitutions), ech),
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       s.idleTimeout(),
 		ErrorLog:          log.New(io.Discard, "", 0),
@@ -503,7 +517,7 @@ func (s *Server) terminate(client net.Conn, agent, host string, decision Decisio
 	server.Serve(listener)
 }
 
-func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *swapper, quiet bool) http.Handler {
+func (s *Server) interceptHandler(who peer, host string, inject *Injection, swap *swapper, quiet bool) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme = "https"
@@ -518,12 +532,12 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 		FlushInterval: -1, // stream responses, such as model output, as they arrive
 		ModifyResponse: func(response *http.Response) error {
 			if !quiet {
-				s.audit.Log(Event{Agent: agent, Host: host, Action: "request", Method: response.Request.Method, Path: loggedPath(response.Request), Status: response.StatusCode})
+				s.audit.Log(who.event(Event{Host: host, Action: "request", Method: response.Request.Method, Path: loggedPath(response.Request), Status: response.StatusCode}))
 			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "error", Method: r.Method, Path: loggedPath(r), Reason: err.Error()})
+			s.audit.Log(who.event(Event{Host: host, Action: "error", Method: r.Method, Path: loggedPath(r), Reason: err.Error()}))
 			http.Error(w, "egzo: upstream error", http.StatusBadGateway)
 		},
 	}
@@ -531,12 +545,12 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 		// Requests inside the tunnel may only go to the host the tunnel was approved for.
 		requested, ok := requestHost(r.Host)
 		if !ok {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "malformed Host header " + quoteName(clip(r.Host))})
+			s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: "malformed Host header " + quoteName(clip(r.Host))}))
 			http.Error(w, "bad Host header", http.StatusBadRequest)
 			return
 		}
 		if requested != host {
-			s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Reason: "request host " + quoteName(requested) + " differs from the approved tunnel host"})
+			s.audit.Log(who.event(Event{Host: host, Action: "deny", Reason: "request host " + quoteName(requested) + " differs from the approved tunnel host"}))
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
@@ -545,7 +559,7 @@ func (s *Server) interceptHandler(agent, host string, inject *Injection, swap *s
 			path := r.URL.Path
 			r = r.WithContext(context.WithValue(r.Context(), agentPathKey{}, path))
 			if status, reason := swap.apply(r); status != 0 {
-				s.audit.Log(Event{Agent: agent, Host: host, Action: "deny", Method: r.Method, Path: path, Reason: reason})
+				s.audit.Log(who.event(Event{Host: host, Action: "deny", Method: r.Method, Path: path, Reason: reason}))
 				http.Error(w, "egzo: "+reason, status)
 				return
 			}

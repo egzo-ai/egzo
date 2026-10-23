@@ -142,20 +142,20 @@ func TestAuthenticateNeedsTheRightTokenForTheRightAgent(t *testing.T) {
 	policy := &Policy{Hash: "h", Profiles: map[string]Profile{"p": {Allow: []string{"example.com"}}}}
 	server.SetPolicy(policy)
 	for name, token := range map[string]string{"coder": "tc", "reviewer": "tr"} {
-		if err := server.BindAgent(name, Binding{Token: token, Profile: "p"}); err != nil {
+		if err := server.BindAgent(name, Binding{Instance: testInstance, Token: token, Profile: "p"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if server.authenticate(policy, "coder", "tc") == nil {
+	if first(server.authenticate(policy, "coder", "tc")) == nil {
 		t.Error("valid credentials refused")
 	}
-	if server.authenticate(policy, "coder", "tr") != nil {
+	if first(server.authenticate(policy, "coder", "tr")) != nil {
 		t.Error("another agent's token accepted")
 	}
-	if server.authenticate(policy, "ghost", "tc") != nil {
+	if first(server.authenticate(policy, "ghost", "tc")) != nil {
 		t.Error("unknown agent accepted")
 	}
-	if server.authenticate(policy, "coder", "") != nil {
+	if first(server.authenticate(policy, "coder", "")) != nil {
 		t.Error("an empty token accepted")
 	}
 	if err := server.BindAgent("nobody", Binding{Profile: "p"}); err == nil {
@@ -165,28 +165,28 @@ func TestAuthenticateNeedsTheRightTokenForTheRightAgent(t *testing.T) {
 
 func TestBindingsNeedALoadedProfileAndFollowItsChanges(t *testing.T) {
 	server := NewServer(nil, NewAudit(io.Discard))
-	if err := server.BindAgent("coder", Binding{Token: "t", Profile: "p"}); err == nil {
+	if err := server.BindAgent("coder", Binding{Instance: testInstance, Token: "t", Profile: "p"}); err == nil {
 		t.Error("an agent was bound before any policy was loaded")
 	}
-	first := &Policy{Hash: "1", Profiles: map[string]Profile{"p": {Allow: []string{"a.example"}}}}
-	server.SetPolicy(first)
-	if err := server.BindAgent("coder", Binding{Token: "t", Profile: "missing"}); err == nil {
+	initial := &Policy{Hash: "1", Profiles: map[string]Profile{"p": {Allow: []string{"a.example"}}}}
+	server.SetPolicy(initial)
+	if err := server.BindAgent("coder", Binding{Instance: testInstance, Token: "t", Profile: "missing"}); err == nil {
 		t.Error("an agent was bound to a profile that does not exist")
 	}
-	if err := server.BindAgent("coder", Binding{Token: "t", Profile: "p"}); err != nil {
+	if err := server.BindAgent("coder", Binding{Instance: testInstance, Token: "t", Profile: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	// Loading a new policy keeps the binding and gives the agent the new profile at once.
 	second := &Policy{Hash: "2", Profiles: map[string]Profile{"p": {Allow: []string{"b.example"}}}}
 	server.SetPolicy(second)
-	profile := server.authenticate(second, "coder", "t")
+	profile := first(server.authenticate(second, "coder", "t"))
 	if profile == nil || !profile.Decide("b.example").Allowed || profile.Decide("a.example").Allowed {
 		t.Errorf("profile after the change = %+v", profile)
 	}
 	// A policy without the profile leaves the agent bound but denied.
 	third := &Policy{Hash: "3", Profiles: map[string]Profile{}}
 	server.SetPolicy(third)
-	if server.authenticate(third, "coder", "t") != nil {
+	if first(server.authenticate(third, "coder", "t")) != nil {
 		t.Error("an agent kept a profile that was removed")
 	}
 	server.UnbindAgent("coder")

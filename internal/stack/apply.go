@@ -434,6 +434,7 @@ type Report struct {
 // Row is one container of a project as `egzo ps` shows it.
 type Row struct {
 	Name     string    `json:"name"`
+	ID       string    `json:"id,omitempty"` // an instance's id; a sidecar has none
 	Service  string    `json:"service"`
 	Kind     string    `json:"kind"`
 	State    string    `json:"state"`
@@ -458,6 +459,7 @@ func Rows(observed Observed, reported map[string]Report, published *Published) [
 		row := Row{Name: r.Name, Service: r.Service, Kind: r.Kind, State: r.State, Health: r.Health, Actor: r.Actor, Created: r.Created}
 		if r.Kind == kindAgent {
 			row.Name = r.Instance // what every command takes
+			row.ID = r.InstanceID
 			report := reported[r.Instance]
 			row.Open, row.Waiting, row.Status = report.Open, report.Waiting, termsafe.Truncate(termsafe.Line(report.Status), 200)
 			row.Activity = report.Activity

@@ -99,11 +99,13 @@ def test_a_removed_name_is_spawned_again_with_nothing_of_the_old_instance(sandbo
     sandbox.spawn("coder", "again")
     assert in_instance(engine, sandbox, "again", "echo old > /tmp/marker").returncode == 0
     first = dict(i.split("=", 1) for i in engine.instance(sandbox.name, "again").raw["Config"]["Env"])["EGZO_TOKEN"]
+    first_id = engine.instance(sandbox.name, "again").labels[f"{LABEL_PREFIX}instance-id"]
     sandbox.ok("agent rm --force again")
     sandbox.spawn("coder", "again")
     assert in_instance(engine, sandbox, "again", "test ! -e /tmp/marker").returncode == 0
     second = dict(i.split("=", 1) for i in engine.instance(sandbox.name, "again").raw["Config"]["Env"])["EGZO_TOKEN"]
     assert second != first, "what leaked from the first instance opens the second"
+    assert engine.instance(sandbox.name, "again").labels[f"{LABEL_PREFIX}instance-id"] != first_id, "the same name, another instance"
 
 
 def test_rm_with_a_filter_asks_says_why_and_removes_only_what_matches(sandbox, engine):

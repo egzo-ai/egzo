@@ -42,8 +42,10 @@ type SSHServer struct {
 
 // Binding ties an agent's proxy credentials to the profile it runs under.
 type Binding struct {
-	Token   string `json:"token"`
-	Profile string `json:"profile"`
+	// Instance is the instance's id: the name of an agent can come back, the id never does. Every audit event of the agent has it.
+	Instance string `json:"instance"`
+	Token    string `json:"token"`
+	Profile  string `json:"profile"`
 	// SSHKey is the agent's ssh identity: an ed25519 public key line. It is an identity, not a secret; the agent's private
 	// half signs in to the proxy's ssh listener. Empty means the agent has no ssh access.
 	SSHKey string `json:"ssh_key,omitempty"`

@@ -460,7 +460,8 @@ func withPrepIdentity(ctx context.Context, c *engine.Client, project *config.Res
 	if err != nil {
 		return err
 	}
-	if err := bindProxy(ctx, c, project.Name, prepIdentity, tokens[prepIdentity], profile); err != nil {
+	// Each job is an identity of its own in the audit trail, as an instance is.
+	if err := bindProxy(ctx, c, project.Name, prepIdentity, NewInstanceID(), tokens[prepIdentity], profile); err != nil {
 		return err
 	}
 	return fn(net, tokens[prepIdentity])
