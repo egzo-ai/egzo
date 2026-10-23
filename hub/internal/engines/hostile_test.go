@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -153,11 +154,13 @@ func TestAListingWithoutEndIsCutOffInBoundedMemory(t *testing.T) {
 	defer cancel()
 	var err error
 	n := allocated(func() { _, err = d.Projects(ctx) })
-	if err == nil {
-		t.Fatal("a listing without end is an error")
+	var tooLarge engine.ErrAnswerTooLarge
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("a listing without end is refused for its size, before the deadline: %v", err)
 	}
-	if n > 4*allocationBound {
-		t.Errorf("a listing without end allocated %d MiB before it was cut off by the deadline (%v): a listing larger than any real engine sends must be refused as it is read", n>>20, err)
+	// decoding JSON keeps a few times what it reads: its buffer, and what it decoded
+	if n > 8*engine.MaxAnswer {
+		t.Errorf("a listing without end allocated %d MiB before it was refused: a listing larger than any real engine sends must be refused as it is read", n>>20)
 	}
 }
 

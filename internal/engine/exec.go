@@ -4,10 +4,10 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -37,7 +37,7 @@ func (c *Client) Exec(ctx context.Context, containerID string, command []string,
 	if err != nil {
 		return result, err
 	}
-	attached, err := c.API.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
+	attached, err := c.attachAPI().ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
 	if err != nil {
 		return result, err
 	}
@@ -49,7 +49,8 @@ func (c *Client) Exec(ctx context.Context, containerID string, command []string,
 			_ = attached.CloseWrite()
 		}()
 	}
-	var stdout, stderr bytes.Buffer
+	what := "the output of `" + strings.Join(command, " ") + "`"
+	stdout, stderr := boundedBuffer{what: what}, boundedBuffer{what: what}
 	if _, err := Demux(&stdout, &stderr, attached.Reader); err != nil && err != io.EOF {
 		return result, err
 	}

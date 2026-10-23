@@ -41,7 +41,7 @@ func (c *Client) ExecStream(ctx context.Context, containerID string, command []s
 	if err != nil {
 		return 1, err
 	}
-	attached, err := c.API.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: s.TTY})
+	attached, err := c.attachAPI().ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{Tty: s.TTY})
 	if err != nil {
 		return 1, err
 	}
