@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, TimelineEvent,
+  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Network, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, TimelineEvent,
   UserRow,
 } from "./types";
 
@@ -77,6 +77,8 @@ export const api = {
   setRole: (engine: string, name: string, user: string, role: string) =>
     request<{ ok: true }>("POST", `${project(engine, name)}/members`, { user, role }),
   audit: (engine: string, name: string) => request<{ entries: AuditEntry[] }>("GET", `${project(engine, name)}/audit`).then((r) => r.entries),
+  network: (engine: string, name: string, agentName = "") =>
+    request<Network>("GET", `${project(engine, name)}/network${agentName ? "?agent=" + enc(agentName) : ""}`),
 
   agent: (engine: string, p: string, a: string) => request<AgentAnswer>("GET", agent(engine, p, a)),
   operate: (engine: string, p: string, a: string, verb: "start" | "stop" | "rm") => request<{ agent: string }>("POST", `${agent(engine, p, a)}/${verb}`),

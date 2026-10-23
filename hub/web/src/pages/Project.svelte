@@ -12,6 +12,7 @@
   import Icon from "../components/Icon.svelte";
   import MembersTable from "../components/MembersTable.svelte";
   import Modal from "../components/Modal.svelte";
+  import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import SpecView from "../components/SpecView.svelte";
   import Timeline from "../components/Timeline.svelte";
@@ -66,7 +67,7 @@
   const running = $derived(agents.filter((a) => a.running).length);
   const waiting = $derived(agents.filter((a) => a.waiting).length);
   const tabs = $derived.by(() => {
-    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null], ["timeline", "Timeline", null], ["spec", "Spec", null]];
+    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null], ["timeline", "Timeline", null], ["network", "Network", null], ["spec", "Spec", null]];
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canManage) list.push(["members", "Members", null]);
     return list;
@@ -144,7 +145,7 @@
               {#each agents as a (a.name)}
                 {@const open = workspace.terms.some((t) => t.engine === engine && t.project === name && t.agent === a.name)}
                 <tr data-row tabindex="-1" data-agent={a.name} aria-selected={open}>
-                  <td><a class="name" href={href.agent(engine, name, a.name)}>{a.name}</a> <span class="muted">{a.template}</span>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}</td>
+                  <td><a class="name" href={href.agent(engine, name, a.name)}>{a.name}</a> <span class="muted">{a.template}</span>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}{#if a.denied} <a class="pill" data-s="error" data-testid="denied" href={href.agent(engine, name, a.name, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}</td>
                   <td><Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} /></td>
                   <td class="wrap" style="white-space:normal;min-width:18ch"><span class="status" style:color={a.waiting ? "var(--status-waiting)" : undefined}>{a.status}</span></td>
                   <td>{#if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
@@ -181,6 +182,8 @@
       </div>
     {:else if tab === "timeline"}
       <Timeline {events} />
+    {:else if tab === "network"}
+      <NetworkView {engine} project={name} />
     {:else if tab === "spec"}
       {#if spec === null}<p class="muted">Loading…</p>{:else}<SpecView text={spec} />{/if}
     {:else if tab === "audit"}

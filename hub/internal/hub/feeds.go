@@ -14,6 +14,7 @@ import (
 //
 //   - a status follower per project reads the control sidecar's standard output through the engine's log API (core writes a status
 //     line on every change and a heartbeat every interval). It keeps the latest line, and is what Projects and Project show.
+//   - an audit follower per project reads the proxy's audit trail the same way (network.go).
 //   - an event watcher per engine reads the engine's event stream, and a change of containers makes the hub list that engine again.
 //     The timed rescan that remains is a fallback for an event that was missed.
 //
@@ -35,6 +36,8 @@ type FeedOptions struct {
 	Healthy time.Duration
 	// Grace is what is added to three heartbeats before a quiet sidecar is called stale (10 seconds); negative for none.
 	Grace time.Duration
+	// Flush is how often what an audit follower heard is written to the database (1 second).
+	Flush time.Duration
 }
 
 func (o FeedOptions) withDefaults() FeedOptions {
@@ -50,6 +53,7 @@ func (o FeedOptions) withDefaults() FeedOptions {
 	def(&o.Silent, 90*time.Second)
 	def(&o.Debounce, 250*time.Millisecond)
 	def(&o.Healthy, 30*time.Second)
+	def(&o.Flush, time.Second)
 	if o.Grace == 0 {
 		o.Grace = 10 * time.Second
 	} else if o.Grace < 0 {
@@ -111,6 +115,7 @@ type feedManager struct {
 
 	mu        sync.Mutex
 	followers map[projectKey]*follower
+	audits    map[projectKey]*auditFollower
 	watches   map[string]*engineWatch
 	dirty     map[string]bool
 	wake      chan struct{}
@@ -118,8 +123,9 @@ type feedManager struct {
 }
 
 func newFeedManager(h *Hub, ctx context.Context, opt FeedOptions) *feedManager {
-	return &feedManager{hub: h, ctx: ctx, opt: opt.withDefaults(), followers: map[projectKey]*follower{}, watches: map[string]*engineWatch{},
-		dirty: map[string]bool{}, wake: make(chan struct{}, 1), scannedAt: map[string]time.Time{}}
+	return &feedManager{hub: h, ctx: ctx, opt: opt.withDefaults(), followers: map[projectKey]*follower{}, audits: map[projectKey]*auditFollower{},
+		watches: map[string]*engineWatch{},
+		dirty:   map[string]bool{}, wake: make(chan struct{}, 1), scannedAt: map[string]time.Time{}}
 }
 
 // StartFeeds turns on the streams: from now on every scan starts and stops the followers and watchers it needs. Run does this;
@@ -194,7 +200,8 @@ func (m *feedManager) reconcile(scanned map[string]*engineScan, engineNames []st
 		}
 	}
 
-	wanted := map[projectKey]string{} // the projects whose control sidecar runs, and its container
+	wanted := map[projectKey]string{}  // the projects whose control sidecar runs, and its container
+	proxies := map[projectKey]string{} // the projects whose proxy runs, and its container
 	for name, scan := range scanned {
 		if scan == nil || scan.err != nil {
 			continue // an engine that does not answer is not a place to open streams
@@ -204,6 +211,9 @@ func (m *feedManager) reconcile(scanned map[string]*engineScan, engineNames []st
 			for _, s := range p.Services {
 				if s.Name == "control" && s.State == "running" {
 					wanted[projectKey{name, p.Name}] = s.ID
+				}
+				if s.Name == "proxy" && s.State == "running" {
+					proxies[projectKey{name, p.Name}] = s.ID
 				}
 			}
 		}
@@ -217,6 +227,17 @@ func (m *feedManager) reconcile(scanned map[string]*engineScan, engineNames []st
 	for key, id := range wanted {
 		if m.followers[key] == nil {
 			m.startFollower(key, id)
+		}
+	}
+	for key, f := range m.audits {
+		if id, ok := proxies[key]; !ok || id != f.proxyID {
+			f.cancel()
+			delete(m.audits, key)
+		}
+	}
+	for key, id := range proxies {
+		if m.audits[key] == nil {
+			m.startAudit(key, id)
 		}
 	}
 }
@@ -453,6 +474,7 @@ func (h *Hub) Run(ctx context.Context, opt FeedOptions) {
 			h.log.Warn("scan failed", "err", err)
 		}
 		_ = h.store.PurgeSessions(listing)
+		_ = h.store.PurgeDenials(listing, time.Now().Add(-denialRetention))
 	}
 	scan(nil)
 	tick := time.NewTicker(m.opt.Fast)

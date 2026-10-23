@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -431,5 +432,82 @@ func TestTheAuditLogIsKeptPerProjectNewestFirst(t *testing.T) {
 	}
 	if entries[0].Action != "agent.rm" || entries[0].Allowed || entries[1].Action != "agent.stop" || !entries[1].Allowed {
 		t.Errorf("entries = %+v", entries)
+	}
+}
+
+func TestDenialsGroupAndAreBoundedAndAFixHoldsUntilTheNextOne(t *testing.T) {
+	s := open(t)
+	at := time.Now().Truncate(time.Millisecond)
+	group := Denial{Engine: "local", Project: "web", Instance: "01JBX7Q0000000000000000000", Protocol: "https", Host: "evil.example",
+		Code: "not-in-profile", Event: "connect", Decision: "deny", Agent: "coder-1", Actor: "user:alice", Profile: "default", Count: 2, First: at, Last: at}
+	if err := s.RecordDenials(ctx, []Denial{group}); err != nil {
+		t.Fatal(err)
+	}
+	later := group
+	later.Count, later.First, later.Last, later.Actor, later.Text = 1, at.Add(time.Second), at.Add(time.Second), "", "again"
+	if err := s.RecordDenials(ctx, []Denial{later}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Denials(ctx, "local", "web")
+	if len(got) != 1 || got[0].Count != 3 || !got[0].First.Equal(at) || !got[0].Last.Equal(at.Add(time.Second)) || got[0].Actor != "user:alice" || got[0].Text != "again" {
+		t.Fatalf("group = %+v", got)
+	}
+
+	// a fix before the last denial does not count; one after it does, until the next denial
+	s.FixDenials(ctx, "local", "web", group.Instance, "https", "evil.example", []string{"connect"}, at.Add(500*time.Millisecond))
+	if got, _ := s.Denials(ctx, "local", "web"); !got[0].Fixed.IsZero() {
+		t.Error("fixed by an allow older than the last denial")
+	}
+	s.FixDenials(ctx, "local", "web", group.Instance, "https", "evil.example", []string{"connect"}, at.Add(2*time.Second))
+	if got, _ := s.Denials(ctx, "local", "web"); !got[0].Fixed.Equal(at.Add(2 * time.Second)) {
+		t.Errorf("not fixed: %+v", got[0])
+	}
+	s.RecordDenials(ctx, []Denial{later})
+	if got, _ := s.Denials(ctx, "local", "web"); !got[0].Fixed.IsZero() {
+		t.Error("a denial after the fix leaves it fixed")
+	}
+
+	// a project keeps MaxDenials groups, the most recent
+	var many []Denial
+	for i := range MaxDenials + 10 {
+		d := group
+		d.Host = fmt.Sprintf("h%03d.example", i)
+		d.Last = at.Add(time.Duration(i) * time.Minute)
+		many = append(many, d)
+	}
+	s.RecordDenials(ctx, many)
+	got, _ = s.Denials(ctx, "local", "web")
+	if len(got) != MaxDenials || got[0].Host != fmt.Sprintf("h%03d.example", MaxDenials+9) {
+		t.Errorf("%d groups, newest %s", len(got), got[0].Host)
+	}
+	if err := s.PurgeDenials(ctx, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Denials(ctx, "local", "web"); len(got) != MaxDenials-60+10 {
+		t.Errorf("after the purge: %d", len(got))
+	}
+}
+
+func TestTheAuditCursorOnlyMovesForwardAndGoesWithItsEngine(t *testing.T) {
+	s := open(t)
+	if at, err := s.AuditCursor(ctx, "local", "web"); err != nil || !at.IsZero() {
+		t.Fatalf("a project never read: %v %v", at, err)
+	}
+	at := time.Date(2026, 10, 23, 12, 0, 0, 123456789, time.UTC)
+	s.SetAuditCursor(ctx, "local", "web", at)
+	s.SetAuditCursor(ctx, "local", "web", at.Add(-time.Hour))
+	if got, _ := s.AuditCursor(ctx, "local", "web"); !got.Equal(at) {
+		t.Errorf("cursor = %v", got)
+	}
+	s.PutEngine(ctx, EngineRow{Name: "local", Host: "unix:///x"})
+	s.RecordDenials(ctx, []Denial{{Engine: "local", Project: "web", Host: "h", Count: 1, First: at, Last: at}})
+	if err := s.DeleteEngine(ctx, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.AuditCursor(ctx, "local", "web"); !got.IsZero() {
+		t.Error("the cursor outlived its engine")
+	}
+	if got, _ := s.Denials(ctx, "local", "web"); len(got) != 0 {
+		t.Error("the denials outlived their engine")
 	}
 }

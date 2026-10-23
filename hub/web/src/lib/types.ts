@@ -96,6 +96,8 @@ export interface Agent {
   createdAt: string;
   canOperate: boolean;
   holder: string;
+  /** Hosts the proxy refused the agent in the last hour, and that it has not reached since. */
+  denied: number;
 }
 
 export interface Service {
@@ -162,6 +164,63 @@ export interface AuditEntry {
   agent: string;
   detail: string;
   allowed: boolean;
+}
+
+/** Why the proxy decided what it did: a code from a fixed list (roadmap/proxy-audit.md), and a text for people. */
+export interface NetworkReason {
+  code: string;
+  text: string;
+}
+
+/** One event of a proxy's audit trail: a step of one connection. */
+export interface NetworkEvent {
+  time: string;
+  conn: string;
+  protocol: "https" | "ssh";
+  event: string;
+  decision?: "allow" | "deny" | "error" | "challenge";
+  mode?: "tunnel" | "inject" | "inspect" | "intercept";
+  agent?: string;
+  instance?: string;
+  profile?: string;
+  host?: string;
+  server?: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  command?: string;
+  reason?: NetworkReason;
+  bytesUp?: number;
+  bytesDown?: number;
+  durationMs?: number;
+}
+
+/** What the proxy refused, or failed at, for one instance, one host and one reason, however many times. */
+export interface Denial {
+  instance: string;
+  agent: string;
+  creator: string;
+  protocol: "https" | "ssh";
+  host: string;
+  server?: string;
+  code: string;
+  event: string;
+  decision: "deny" | "error";
+  profile: string;
+  text: string;
+  count: number;
+  first: string;
+  last: string;
+  /** When the same instance reached the host afterwards; null while it has not. */
+  fixed: string | null;
+}
+
+export interface Network {
+  feed: Feed;
+  /** The most recently seen first. */
+  denials: Denial[];
+  /** The latest events the hub heard, newest first. */
+  events: NetworkEvent[];
 }
 
 export interface EngineInput {

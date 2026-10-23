@@ -1,4 +1,5 @@
-// Package store is the hub's database: users, grants, engines, sessions and the audit log. SQLite, one file, no cgo.
+// Package store is the hub's database: users, grants, engines, sessions, the audit log and what the proxies denied. SQLite,
+// one file, no cgo.
 package store
 
 import (
@@ -20,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 1
+const schemaVersion = 2
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -85,6 +86,35 @@ CREATE TABLE IF NOT EXISTS audit (
 	allowed INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_project ON audit (engine, project, id);
+-- What the proxies denied, grouped: one row per instance, protocol, host and reason code (roadmap/proxy-audit.md).
+CREATE TABLE IF NOT EXISTS denials (
+	engine TEXT NOT NULL,
+	project TEXT NOT NULL,
+	instance TEXT NOT NULL,              -- the instance's id; '' when the proxy could not tell who it was
+	protocol TEXT NOT NULL,
+	host TEXT NOT NULL,
+	code TEXT NOT NULL,
+	event TEXT NOT NULL,                 -- the step that was refused or failed
+	decision TEXT NOT NULL,              -- deny or error
+	agent TEXT NOT NULL DEFAULT '',      -- the instance's name when it was last seen
+	actor TEXT NOT NULL DEFAULT '',      -- who spawned the instance, when the hub knew it
+	profile TEXT NOT NULL DEFAULT '',
+	server TEXT NOT NULL DEFAULT '',
+	text TEXT NOT NULL DEFAULT '',       -- the latest reason, for people
+	count INTEGER NOT NULL,
+	first_at INTEGER NOT NULL,           -- Unix milliseconds
+	last_at INTEGER NOT NULL,
+	fixed_at INTEGER,                    -- the same instance got through since the last one
+	PRIMARY KEY (engine, project, instance, protocol, host, code)
+);
+CREATE INDEX IF NOT EXISTS denials_recent ON denials (engine, project, last_at);
+-- How far the hub read each project's audit trail: the time of the last event it handled.
+CREATE TABLE IF NOT EXISTS audit_cursors (
+	engine TEXT NOT NULL,
+	project TEXT NOT NULL,
+	at INTEGER NOT NULL,                 -- Unix nanoseconds
+	PRIMARY KEY (engine, project)
+);
 `
 
 // ErrOldSchema is returned by Open for a database made by another version of the hub.
@@ -873,7 +903,7 @@ func (s *Store) Engines(ctx context.Context) ([]EngineRow, error) {
 	return engines, rows.Err()
 }
 
-// DeleteEngine removes an engine and the grants that were on its projects.
+// DeleteEngine removes an engine, and the grants and the denials of its projects.
 func (s *Store) DeleteEngine(ctx context.Context, name string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -887,8 +917,10 @@ func (s *Store) DeleteEngine(ctx context.Context, name string) error {
 	if n, _ := result.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM grants WHERE engine = ?`, name); err != nil {
-		return err
+	for _, table := range []string{"grants", "denials", "audit_cursors"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE engine = ?`, name); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

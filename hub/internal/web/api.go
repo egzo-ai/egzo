@@ -164,6 +164,7 @@ type agentJSON struct {
 	CreatedAt  time.Time `json:"createdAt"`
 	CanOperate bool      `json:"canOperate"`
 	Holder     string    `json:"holder"`
+	Denied     int       `json:"denied"` // hosts the proxy refused it in the last hour, not reached since
 }
 
 // feedJSON says how far the agents' activity can be trusted: live, connecting, stale or unavailable, and why.
@@ -197,7 +198,8 @@ type projectJSON struct {
 
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 	return agentJSON{Name: a.Name, Template: a.Template, State: a.State, Running: a.Running(), Activity: a.Activity, Status: a.Status,
-		Waiting: a.Waiting, Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder}
+		Waiting: a.Waiting, Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder,
+		Denied: a.Denied}
 }
 
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
@@ -387,6 +389,87 @@ func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"agent": agent, "verb": verb})
+}
+
+// --- network ---------------------------------------------------------------------------------------------------------------------
+
+type reasonJSON struct {
+	Code string `json:"code"`
+	Text string `json:"text"`
+}
+
+// networkEventJSON is one event of a proxy's audit trail (roadmap/proxy-audit.md), in the web's spelling.
+type networkEventJSON struct {
+	Time       time.Time   `json:"time"`
+	Conn       string      `json:"conn"`
+	Protocol   string      `json:"protocol"`
+	Event      string      `json:"event"`
+	Decision   string      `json:"decision,omitempty"`
+	Mode       string      `json:"mode,omitempty"`
+	Agent      string      `json:"agent,omitempty"`
+	Instance   string      `json:"instance,omitempty"`
+	Profile    string      `json:"profile,omitempty"`
+	Host       string      `json:"host,omitempty"`
+	Server     string      `json:"server,omitempty"`
+	Method     string      `json:"method,omitempty"`
+	Path       string      `json:"path,omitempty"`
+	Status     int         `json:"status,omitempty"`
+	Command    string      `json:"command,omitempty"`
+	Reason     *reasonJSON `json:"reason,omitempty"`
+	BytesUp    int64       `json:"bytesUp,omitempty"`
+	BytesDown  int64       `json:"bytesDown,omitempty"`
+	DurationMs int64       `json:"durationMs,omitempty"`
+}
+
+type denialJSON struct {
+	Instance string     `json:"instance"`
+	Agent    string     `json:"agent"`
+	Creator  string     `json:"creator"`
+	Protocol string     `json:"protocol"`
+	Host     string     `json:"host"`
+	Server   string     `json:"server,omitempty"`
+	Code     string     `json:"code"`
+	Event    string     `json:"event"`
+	Decision string     `json:"decision"`
+	Profile  string     `json:"profile"`
+	Text     string     `json:"text"`
+	Count    int        `json:"count"`
+	First    time.Time  `json:"first"`
+	Last     time.Time  `json:"last"`
+	Fixed    *time.Time `json:"fixed"`
+}
+
+// network answers what the project's proxy recorded, or what it recorded for one agent with ?agent=: the groups of denials, the
+// most recently seen first, and the latest events, newest first.
+func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User) {
+	view, err := s.hub.Network(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.URL.Query().Get("agent"))
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	n := s.namer(r.Context())
+	denials := make([]denialJSON, 0, len(view.Denials))
+	for _, d := range view.Denials {
+		row := denialJSON{Instance: d.Instance, Agent: d.Agent, Creator: n.actor(d.Actor), Protocol: d.Protocol, Host: d.Host, Server: d.Server,
+			Code: d.Code, Event: d.Event, Decision: d.Decision, Profile: d.Profile, Text: d.Text, Count: d.Count, First: d.First, Last: d.Last}
+		if !d.Fixed.IsZero() {
+			fixed := d.Fixed
+			row.Fixed = &fixed
+		}
+		denials = append(denials, row)
+	}
+	events := make([]networkEventJSON, 0, len(view.Events))
+	for i := len(view.Events) - 1; i >= 0; i-- { // newest first
+		e := view.Events[i]
+		row := networkEventJSON{Time: e.Time, Conn: e.Conn, Protocol: string(e.Protocol), Event: string(e.Kind), Decision: string(e.Decision),
+			Mode: string(e.Mode), Agent: e.Agent, Instance: e.Instance, Profile: e.Profile, Host: e.Host, Server: e.Server, Method: e.Method,
+			Path: e.Path, Status: e.Status, Command: e.Command, BytesUp: e.BytesUp, BytesDown: e.BytesDown, DurationMs: e.DurationMs}
+		if e.Reason != nil {
+			row.Reason = &reasonJSON{Code: string(e.Reason.Code), Text: e.Reason.Text}
+		}
+		events = append(events, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"feed": feedOf(view.Feed), "denials": denials, "events": events})
 }
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request, user store.User) {

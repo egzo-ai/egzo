@@ -79,7 +79,44 @@ func (d *Docker) FollowStatus(ctx context.Context, project string, on func(Statu
 	if len(list) == 0 {
 		return ErrNoProject{Name: project}
 	}
-	reader, err := d.client.API.ContainerLogs(ctx, list[0].ID, container.LogsOptions{ShowStdout: true, Follow: true, Tail: statusTail})
+	return followLines(ctx, d, list[0].ID, container.LogsOptions{ShowStdout: true, Follow: true, Tail: statusTail}, func(raw []byte) error {
+		line, ok, err := parseStatusLine(raw)
+		if err != nil {
+			return err
+		}
+		if ok {
+			on(line)
+		}
+		return nil
+	})
+}
+
+// FollowAudit follows the standard output of the project's proxy, where it writes its audit trail, one JSON event per line.
+func (d *Docker) FollowAudit(ctx context.Context, project string, since time.Time, on func(AuditEvent)) error {
+	list, err := d.client.API.ContainerList(ctx, container.ListOptions{Filters: filters.NewArgs(
+		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindProxy), filters.Arg("status", "running"))})
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		return ErrNoProject{Name: project}
+	}
+	options := container.LogsOptions{ShowStdout: true, Follow: true, Tail: fmt.Sprint(AuditBacklog)}
+	if !since.IsZero() {
+		options.Tail, options.Since = "", since.Format(time.RFC3339Nano)
+	}
+	return followLines(ctx, d, list[0].ID, options, func(line []byte) error {
+		var event AuditEvent
+		if json.Unmarshal(line, &event) == nil && event.Conn != "" && !event.Time.IsZero() {
+			on(event)
+		}
+		return nil
+	})
+}
+
+// followLines follows the standard output of a container through the engine's log API and calls on for each line.
+func followLines(ctx context.Context, d *Docker, id string, options container.LogsOptions, on func([]byte) error) error {
+	reader, err := d.client.API.ContainerLogs(ctx, id, options)
 	if err != nil {
 		return err
 	}
@@ -103,12 +140,8 @@ func (d *Docker) FollowStatus(ctx context.Context, project string, on func(Statu
 	scanner := bufio.NewScanner(lines)
 	scanner.Buffer(make([]byte, 64<<10), maxLogLine)
 	for scanner.Scan() {
-		line, ok, err := parseStatusLine(scanner.Bytes())
-		if err != nil {
+		if err := on(scanner.Bytes()); err != nil {
 			return err
-		}
-		if ok {
-			on(line)
 		}
 	}
 	if ctx.Err() != nil {
