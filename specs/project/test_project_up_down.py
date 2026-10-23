@@ -39,3 +39,18 @@ def test_up_makes_the_sidecars_and_no_agent_and_down_removes_everything_but_refu
     p.ok("project down --force")
     assert engine.resources(p.name) == [], "down --force removes the instances with their networks, the home volumes, the control state and the CA"
     assert p.sh("project down").returncode == 0 and engine.resources(p.name) == [], "down of a project that is not up changes nothing"
+
+
+def test_a_container_that_claims_the_project_with_labels_egzo_never_writes_is_not_the_projects(live_project, engine, agent_image):
+    p = live_project
+    p.write(spec(agents={"coder": custom(agent_image)}))
+    p.up()
+    foreign = f"{p.name}-foreign"
+    engine.run("run", "-d", "--name", foreign, "--entrypoint", "sleep", "--label", f"{LABEL_PREFIX}project={p.name}",
+               "--label", f"{LABEL_PREFIX}kind=agent", "--label", f"{LABEL_PREFIX}instance=Not Egzo's", agent_image, "600")
+    try:
+        assert "Not Egzo" not in p.ok("ps").stdout, "no instance egzo makes has this name"
+        p.ok("project down")
+        assert engine.run("inspect", foreign).returncode == 0, "down removes what egzo made, and only that"
+    finally:
+        engine.run("rm", "-f", foreign)

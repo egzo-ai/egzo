@@ -5,6 +5,7 @@ package stack
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -198,12 +199,16 @@ func TestObservedFind(t *testing.T) {
 }
 
 func TestResourceFromReadsTheLabels(t *testing.T) {
-	r := resourceFrom("container", "id1", "p-a-1", map[string]string{
-		engine.LabelService: "a", engine.LabelConfigHash: "h", engine.LabelProjectDir: "/d",
+	hash := strings.Repeat("a", 64)
+	r, err := resourceFrom("container", "id1", "p-a-1", map[string]string{
+		engine.LabelProject: "p", engine.LabelKind: "agent", engine.LabelService: "a", engine.LabelConfigHash: hash, engine.LabelProjectDir: "/d",
 	})
-	want := Resource{Type: "container", ID: "id1", Name: "p-a-1", Service: "a", ConfigHash: "h", ProjectDir: "/d"}
-	if !reflect.DeepEqual(r, want) {
-		t.Errorf("resourceFrom = %+v, want %+v", r, want)
+	want := Resource{Type: "container", ID: "id1", Name: "p-a-1", Service: "a", Kind: "agent", ConfigHash: hash, ProjectDir: "/d"}
+	if err != nil || !reflect.DeepEqual(r, want) {
+		t.Errorf("resourceFrom = %+v, %v, want %+v", r, err, want)
+	}
+	if _, err := resourceFrom("container", "id2", "x", map[string]string{engine.LabelProject: "p", engine.LabelKind: "agent", engine.LabelInstance: "Not Egzo's"}); err == nil {
+		t.Error("labels egzo never writes are read")
 	}
 }
 
