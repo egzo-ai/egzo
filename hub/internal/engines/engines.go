@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
 // Engine is one connected container engine, as the hub uses it.
@@ -23,6 +25,10 @@ type Engine interface {
 	// latest one already in the log, and returns when ctx ends or the stream breaks; a stream that cannot be opened or read
 	// is an error that says why. The caller retries.
 	FollowStatus(ctx context.Context, project string, on func(StatusLine)) error
+	// FollowAudit follows the audit trail the project's proxy writes to its log (core's proxy events), through the engine's log
+	// API, like FollowStatus. It begins with the events written after since, or with the last AuditBacklog lines of the log when
+	// since is zero, and returns when ctx ends or the stream breaks.
+	FollowAudit(ctx context.Context, project string, since time.Time, on func(AuditEvent)) error
 	// Watch calls changed when the egzo containers of the engine change (made, started, stopped, removed), and returns when
 	// ctx ends or the event stream breaks. It is how the hub knows to look again without asking on a timer.
 	Watch(ctx context.Context, changed func()) error
@@ -88,6 +94,7 @@ type Service struct {
 // Agent is one instance.
 type Agent struct {
 	Name     string // the instance, what every command takes
+	ID       string // the instance's id: a name can come back, an id does not
 	Template string
 	State    string // running, exited, created...
 	Health   string
@@ -106,6 +113,13 @@ type Agent struct {
 
 // Running reports whether the agent's container is running.
 func (a Agent) Running() bool { return a.State == "running" }
+
+// AuditEvent is one event of a proxy's audit trail: a step of one connection and what the proxy decided (see
+// roadmap/proxy-audit.md).
+type AuditEvent = proxy.Event
+
+// AuditBacklog is how many lines of a proxy's log FollowAudit reads first when it has no time to start from.
+const AuditBacklog = 2000
 
 // StatusLine is one status line of the control sidecar's log: what every agent of the project was doing at Time.
 type StatusLine struct {

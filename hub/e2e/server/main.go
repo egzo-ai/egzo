@@ -27,6 +27,8 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/secretbox"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
+	"github.com/egzo-ai/egzo/internal/proxy"
+	"github.com/egzo-ai/egzo/internal/stack"
 )
 
 func main() {
@@ -121,7 +123,8 @@ func (w *world) seed(name string) {
 	e := w.get(name)
 	now := time.Now()
 	e.AddProject(engines.Project{Name: "web", Templates: []string{"coder", "reviewer"}})
-	e.SetAgent("web", engines.Agent{Name: "coder-1", Template: "coder", State: "running", Activity: "working", Actor: "operator", Status: "refactoring the parser on " + name, Created: now})
+	e.SetAgent("web", engines.Agent{Name: "coder-1", ID: stack.NewInstanceID(), Template: "coder", State: "running", Activity: "working", Actor: "operator",
+		Status: "refactoring the parser on " + name, Created: now})
 	e.SetAgent("web", engines.Agent{Name: "reviewer-1", Template: "reviewer", State: "exited", Activity: "stopped", Actor: "operator", Created: now})
 	e.AddEvent("web", engines.Event{Seq: 1, Time: now, Type: "status", Agent: "coder-1", Actor: "agent:coder-1", Text: "refactoring the parser on " + name})
 	if name == "local" {
@@ -142,6 +145,11 @@ type command struct {
 	Text    string `json:"text"`
 	Waiting bool   `json:"waiting"`
 	Actor   string `json:"actor"`
+	// an event of the proxy's audit trail (op audit): the agent's, to host, with a decision and a reason code
+	Host     string `json:"host"`
+	Decision string `json:"decision"`
+	Code     string `json:"code"`
+	Mode     string `json:"mode"`
 }
 
 func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
@@ -184,8 +192,24 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			if c.State == "stopped" {
 				container = "exited"
 			}
-			e.SetAgent(c.Project, engines.Agent{Name: c.Agent, Template: "coder", State: container, Activity: orDefault(c.State, "idle"),
+			id := stack.NewInstanceID() // the same agent keeps its id; a new one gets its own
+			if a, ok := agentOf(ctx, e, c.Project, c.Agent); ok {
+				id = a.ID
+			}
+			e.SetAgent(c.Project, engines.Agent{Name: c.Agent, ID: id, Template: "coder", State: container, Activity: orDefault(c.State, "idle"),
 				Status: c.Text, Waiting: c.Waiting, Actor: actor, Created: time.Now()})
+		case "audit":
+			a, ok := agentOf(ctx, e, c.Project, c.Agent)
+			if !ok {
+				http.Error(rw, "no agent "+c.Agent, http.StatusNotFound)
+				return
+			}
+			event := engines.AuditEvent{Conn: stack.NewInstanceID(), Protocol: proxy.HTTPS, Kind: proxy.KindConnect, Decision: proxy.Outcome(c.Decision),
+				Mode: proxy.Mode(c.Mode), Agent: a.Name, Instance: a.ID, Profile: "default", Host: c.Host}
+			if c.Code != "" {
+				event.Reason = &proxy.Reason{Code: proxy.Code(c.Code), Text: orDefault(c.Text, c.Code)}
+			}
+			e.AddAudit(c.Project, event)
 		case "add-project":
 			// state "silent": its control sidecar logs no status, as an old one does
 			e.SetFeedSilent(c.Project, c.State == "silent")
@@ -202,6 +226,19 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 		rw.WriteHeader(http.StatusNoContent)
 	})
 	return mux
+}
+
+func agentOf(ctx context.Context, e *fake.Engine, project, name string) (engines.Agent, bool) {
+	p, err := e.Project(ctx, project)
+	if err != nil {
+		return engines.Agent{}, false
+	}
+	for _, a := range p.Agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return engines.Agent{}, false
 }
 
 func orDefault(v, d string) string {

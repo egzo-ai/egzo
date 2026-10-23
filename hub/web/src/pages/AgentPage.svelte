@@ -4,16 +4,17 @@
   import { operate } from "../lib/agentops";
   import { activityKind, activityLabel, ago, initials, stamp } from "../lib/format";
   import { poll } from "../lib/live";
-  import { href, navigate } from "../lib/router.svelte";
+  import { href, navigate, type AgentTab } from "../lib/router.svelte";
   import type { AgentAnswer, TimelineEvent } from "../lib/types";
   import { openTerm, termId, workspace } from "../lib/workspace.svelte";
   import EngineBadge from "../components/EngineBadge.svelte";
   import Icon from "../components/Icon.svelte";
+  import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import Timeline from "../components/Timeline.svelte";
   import ErrorPage from "./ErrorPage.svelte";
 
-  let { engine, project, agent, tab }: { engine: string; project: string; agent: string; tab: "overview" | "logs" } = $props();
+  let { engine, project, agent, tab }: { engine: string; project: string; agent: string; tab: AgentTab } = $props();
 
   let data = $state<AgentAnswer | null>(null);
   let failure = $state<unknown>(null);
@@ -66,6 +67,7 @@
       <Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />
       {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting">waiting for an answer</span>{/if}
       {#if a.stale}<span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}
+      {#if a.denied}<a class="pill" data-s="error" href={href.agent(engine, project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}
       <span class="grow"></span>
       <span class="btn-group">
         {#if a.canOperate && a.running}<button class="btn" data-variant="primary" data-key="a" aria-label={isOpen ? "Go to terminal" : "Attach"} aria-keyshortcuts="a" onclick={attach}><Icon name="attach" />{isOpen ? "Go to terminal" : "Attach"} <span class="kbd">a</span></button>{/if}
@@ -102,6 +104,7 @@
 
     <div class="tabs" role="tablist">
       <a class="tab" role="tab" href={href.agent(engine, project, agent)} aria-selected={tab === "overview"}>Timeline</a>
+      <a class="tab" role="tab" href={href.agent(engine, project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
       <a class="tab" role="tab" href={href.agent(engine, project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
     </div>
 
@@ -120,6 +123,8 @@
           </div>
         </section>
       </div>
+    {:else if tab === "network"}
+      <NetworkView {engine} {project} {agent} />
     {:else if logs === null}
       <p class="muted">Loading…</p>
     {:else}

@@ -500,3 +500,35 @@ def test_a_disabled_person_is_signed_out_and_cannot_sign_in_again(hub, page, new
     alice.get_by_label("Who are you?").fill("alice")
     alice.get_by_role("button", name="Sign in").click()
     expect(alice.get_by_role("alert")).to_contain_text("Sign-in refused")
+
+
+def test_the_network_tab_says_why_a_host_was_denied_how_to_fix_it_and_when_it_is_fixed(single_hub, page):
+    for _ in range(2):
+        single_hub.world("audit", engine="local", project="web", agent="coder-1", host="registry.npmjs.org", decision="deny", code="not-in-profile",
+                         text="not allowed by the agent's egress profile")
+    single_hub.world("audit", engine="local", project="web", agent="coder-1", host="example.com", decision="allow", mode="tunnel")
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + "/e/local/p/web")
+    denied = page.locator('tr[data-agent="coder-1"]').get_by_test_id("denied")
+    expect(denied).to_have_text("1 denied")
+    denied.click()
+    expect(page).to_have_url(single_hub.url + "/e/local/p/web/a/coder-1/network")
+
+    row = page.get_by_test_id("denials").locator('tr[data-host="registry.npmjs.org"]')
+    expect(row).to_contain_text("not in the profile")
+    expect(row.locator("td").nth(2)).to_have_text("2")
+    row.get_by_role("button", name="How to fix").click()
+    expect(page.get_by_test_id("fix-yaml")).to_have_text("egress:\n  default:\n    allow: [registry.npmjs.org]")
+    expect(page.get_by_test_id("fix")).to_contain_text("egzo project up")
+    connections = page.get_by_test_id("connections")
+    expect(connections.locator('tr[data-host="example.com"]')).to_contain_text("allow")
+    page.get_by_label("denied and failed only").check()
+    expect(connections.locator('tr[data-host="example.com"]')).to_have_count(0)
+
+    # the profile was changed and the agent got through: the denial is fixed, and the list stops counting it
+    single_hub.world("audit", engine="local", project="web", agent="coder-1", host="registry.npmjs.org", decision="allow", mode="tunnel")
+    expect(page.get_by_test_id("denials")).to_contain_text("Nothing was denied that is not fixed since")
+    page.get_by_label("show fixed").check()
+    expect(row).to_contain_text("fixed")
+    page.goto(single_hub.url + "/e/local/p/web")
+    expect(page.locator('tr[data-agent="coder-1"]').get_by_test_id("denied")).to_have_count(0)
