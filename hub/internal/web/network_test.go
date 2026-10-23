@@ -22,7 +22,7 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	r.hub.Scan(ctx)
 	start := time.Now().UTC()
 	event := func(n int, e engines.AuditEvent) engines.AuditEvent {
-		e.Time, e.Conn, e.Agent, e.Instance, e.Profile, e.Protocol = start.Add(time.Duration(n)*time.Millisecond), "c1", "coder-1", a.ID, "default", proxy.HTTPS
+		e.Time, e.Conn, e.Agent, e.Instance, e.Profile, e.Protocol = start.Add(time.Duration(n)*time.Millisecond), "00000000000000c1", "coder-1", a.ID, "default", proxy.HTTPS
 		return e
 	}
 	r.fakes["local"].AddAudit("web",

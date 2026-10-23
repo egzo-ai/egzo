@@ -2,7 +2,6 @@ package hub
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -57,38 +56,6 @@ type hostKey struct{ instance, protocol, host string }
 
 func (k groupKey) where() hostKey { return hostKey{k.instance, k.protocol, k.host} }
 
-// An agent chooses the host, the path and the command of what it asks the proxy for, and the proxy writes them as they were asked;
-// an engine the hub does not control writes whatever it likes. What the hub keeps of an event is cut to what a real one holds: a
-// name (a DNS name is at most 253 bytes), and a text to show.
-const (
-	maxName = 253
-	maxText = 1024
-)
-
-// boundedEvent is an event with every field cut to its bound, marked with an ellipsis where it was cut.
-func boundedEvent(e engines.AuditEvent) engines.AuditEvent {
-	for _, s := range []*string{&e.Conn, &e.Agent, &e.Instance, &e.Profile, &e.Host, &e.Server, &e.Method} {
-		*s = cut(*s, maxName)
-	}
-	e.Path, e.Command = cut(e.Path, maxText), cut(e.Command, maxText)
-	e.Protocol, e.Kind = proxy.Protocol(cut(string(e.Protocol), maxName)), proxy.Kind(cut(string(e.Kind), maxName))
-	e.Decision, e.Mode = proxy.Outcome(cut(string(e.Decision), maxName)), proxy.Mode(cut(string(e.Mode), maxName))
-	if e.Reason != nil {
-		reason := proxy.Reason{Code: proxy.Code(cut(string(e.Reason.Code), maxName)), Text: cut(e.Reason.Text, maxText)}
-		e.Reason = &reason
-	}
-	return e
-}
-
-// cut shortens s to at most n bytes, on a character boundary, ending in an ellipsis.
-func cut(s string, n int) string {
-	const ellipsis = "…"
-	if len(s) <= n {
-		return s
-	}
-	return strings.ToValidUTF8(s[:n-len(ellipsis)], "") + ellipsis
-}
-
 // maxOpen bounds the open groups a follower keeps in memory, as the database bounds the groups it keeps.
 const maxOpen = 2 * store.MaxDenials
 
@@ -117,6 +84,10 @@ type auditFollower struct {
 	pending   map[groupKey]*store.Denial
 	fixes     []fix
 	dirty     bool // the cursor moved since it was written
+	// ignored counts the lines that parse as events but are not events the proxy writes (proxy.Event.Check), and lastIgnored
+	// says why the last one was not
+	ignored     int
+	lastIgnored string
 }
 
 type fix struct {
@@ -208,7 +179,13 @@ func (m *feedManager) followAudit(ctx context.Context, key projectKey, f *auditF
 
 // handleAudit takes one event of the trail.
 func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.AuditEvent) {
-	e = boundedEvent(e)
+	if err := e.Check(); err != nil {
+		// not an event the proxy writes: the engine's log is not the proxy's, or not only
+		m.mu.Lock()
+		f.ignored, f.lastIgnored = f.ignored+1, err.Error()
+		m.mu.Unlock()
+		return
+	}
 	denial := isDenial(e)
 	var actor string
 	if denial && e.Instance != "" {
@@ -395,6 +372,10 @@ type NetworkView struct {
 	Feed    Feed
 	Denials []store.Denial
 	Events  []engines.AuditEvent
+	// Ignored is how many lines of the proxy's log the hub refused as events the proxy never writes, and IgnoredWhy why the last
+	// one was; an administrator's view only.
+	Ignored    int
+	IgnoredWhy string
 }
 
 // Network reads what a project's proxy recorded, or what it recorded for one agent (the instance of that name that exists now).
@@ -462,6 +443,9 @@ func (h *Hub) Network(ctx context.Context, user store.User, engine, project, age
 		var events []engines.AuditEvent
 		if f != nil {
 			events = append(events, f.events...)
+			if everyone {
+				view.Ignored, view.IgnoredWhy = f.ignored, f.lastIgnored
+			}
 		}
 		m.mu.Unlock()
 		for _, e := range events {

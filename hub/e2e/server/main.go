@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -204,7 +206,7 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 				http.Error(rw, "no agent "+c.Agent, http.StatusNotFound)
 				return
 			}
-			event := engines.AuditEvent{Conn: stack.NewInstanceID(), Protocol: proxy.HTTPS, Kind: proxy.KindConnect, Decision: proxy.Outcome(c.Decision),
+			event := engines.AuditEvent{Conn: connID(), Protocol: proxy.HTTPS, Kind: proxy.KindConnect, Decision: proxy.Outcome(c.Decision),
 				Mode: proxy.Mode(c.Mode), Agent: a.Name, Instance: a.ID, Profile: "default", Host: c.Host}
 			if c.Code != "" {
 				event.Reason = &proxy.Reason{Code: proxy.Code(c.Code), Text: orDefault(c.Text, c.Code)}
@@ -246,4 +248,11 @@ func orDefault(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// connID is a connection's id as the proxy makes them: 64 random bits in hex.
+func connID() string {
+	var raw [8]byte
+	rand.Read(raw[:])
+	return hex.EncodeToString(raw[:])
 }

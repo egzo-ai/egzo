@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
-// An agent chooses the host of every connection it asks the proxy for, and the proxy writes it in its audit trail as it was asked,
-// so what the hub reads of the trail is in part the agent's words. A host no DNS name can be (longer than 253 bytes) is junk, and the
-// Network view a person loads stays small whatever an agent asked for.
-func TestHostsNoNameCanBeAreNotKeptAndTheNetworkViewStaysSmall(t *testing.T) {
+// The proxy writes its trail by rules (proxy.Event.Check): its hosts are host names, its texts are clipped. An engine the hub does
+// not control can write any line in the proxy's log: what the proxy never writes is not kept, it is counted, and the Network view
+// a person loads stays small whatever the log holds.
+func TestEventsTheProxyNeverWritesAreNotKeptAndTheNetworkViewStaysSmall(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	op := r.operator()
@@ -36,18 +35,11 @@ func TestHostsNoNameCanBeAreNotKeptAndTheNetworkViewStaysSmall(t *testing.T) {
 			break
 		}
 	}
+	if view.Ignored != 600 || !strings.Contains(view.IgnoredWhy, "host") {
+		t.Errorf("ignored %d events (%s), want the 600 whose host no name has", view.Ignored, view.IgnoredWhy)
+	}
 	data, _ := json.Marshal(view)
 	if len(data) > 2<<20 {
 		t.Errorf("the Network view of one project is %d MiB, all of it chosen by an agent", len(data)>>20)
-	}
-}
-
-func TestAFieldIsCutOnACharacterBoundary(t *testing.T) {
-	got := cut(strings.Repeat("é", 200), maxName)
-	if len(got) > maxName || !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
-		t.Errorf("cut = %d bytes %q", len(got), got)
-	}
-	if cut("registry.npmjs.org", maxName) != "registry.npmjs.org" {
-		t.Error("a short field is cut")
 	}
 }
