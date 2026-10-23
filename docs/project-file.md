@@ -6,7 +6,8 @@ agents may use. It has five parts: **vaults** (where secrets come from), **egres
 
 `egzo project check --resolved` prints the file validated and fully resolved: the quickest way to see what a short
 file expands to. The project name defaults to the directory name (`name:`, `-p` or `EGZO_PROJECT_NAME` override it);
-renaming a project creates a new one.
+renaming a project creates a new one. A name is 1 to 63 lowercase letters, digits, `-` and `_`, starting with a letter or
+digit, like every name in the file.
 
 ## The smallest useful file
 

@@ -71,6 +71,7 @@ The reason codes:
 | `no-policy` | deny | the proxy was restarted and has no policy: `egzo restart proxy` or `egzo project up` |
 | `no-credentials` | challenge | no proxy credentials yet |
 | `credentials` | deny | wrong proxy credentials |
+| `host` | deny | the CONNECT target is not a host name or address; it is said in the text, and the event has no `host` |
 | `port` | deny | only port 443 is allowed |
 | `not-in-profile` | deny | the host is not in the agent's profile |
 | `private-address` | deny | the host is a private address |
