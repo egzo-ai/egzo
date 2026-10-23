@@ -14,7 +14,6 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -114,7 +113,7 @@ func ProbeLogs(ctx context.Context, c *engine.Client, image string) (LogProbe, e
 	}
 	defer reader.Close()
 	out, errs := newStamped("egzo-probe-out", "egzo-probe-late"), newStamped("egzo-probe-err")
-	if _, copyErr := stdcopy.StdCopy(out, errs, reader); copyErr != nil && copyErr != io.EOF && ctx.Err() == nil {
+	if _, copyErr := engine.Demux(out, errs, reader); copyErr != nil && copyErr != io.EOF && ctx.Err() == nil {
 		probe.ReadError = firstLineOf(copyErr.Error())
 	}
 	probe.Readable = strings.Contains(out.text(), "egzo-probe-out") || strings.Contains(errs.text(), "egzo-probe-err")

@@ -14,7 +14,6 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/stack"
@@ -358,7 +357,7 @@ func (d *Docker) Logs(ctx context.Context, project, name string, tail int) (stri
 	}
 	defer reader.Close()
 	var out bytes.Buffer
-	if _, err := stdcopy.StdCopy(&out, &out, io.LimitReader(reader, 4<<20)); err != nil && !errors.Is(err, io.EOF) {
+	if _, err := engine.Demux(&out, &out, io.LimitReader(reader, 4<<20)); err != nil && !errors.Is(err, io.EOF) {
 		// a container with a terminal logs one raw stream
 		return "", err
 	}

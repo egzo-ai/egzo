@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // ExecResult is the outcome of a command run inside a container.
@@ -51,7 +50,7 @@ func (c *Client) Exec(ctx context.Context, containerID string, command []string,
 		}()
 	}
 	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, attached.Reader); err != nil && err != io.EOF {
+	if _, err := Demux(&stdout, &stderr, attached.Reader); err != nil && err != io.EOF {
 		return result, err
 	}
 	result.Stdout, result.Stderr = stdout.Bytes(), stderr.Bytes()

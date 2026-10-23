@@ -13,7 +13,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -134,7 +133,7 @@ func followLines(ctx context.Context, d *Docker, id string, options container.Lo
 
 	lines, writer := io.Pipe()
 	go func() {
-		_, copyErr := stdcopy.StdCopy(writer, io.Discard, reader)
+		_, copyErr := engine.Demux(writer, io.Discard, reader)
 		writer.CloseWithError(copyErr)
 	}()
 	scanner := bufio.NewScanner(lines)
