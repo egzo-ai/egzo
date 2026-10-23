@@ -9,9 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // Message kinds.
@@ -299,16 +300,14 @@ func conflict(format string, a ...any) *apiError {
 	return &apiError{http.StatusConflict, fmt.Sprintf(format, a...)}
 }
 
-var userAddress = regexp.MustCompile(`^user:[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$`)
-
 // parseAddress accepts operator, user:<id> and agent:<name>.
 func parseAddress(address string) (kind, name string, ok bool) {
 	switch {
 	case address == "operator":
 		return "operator", "", true
-	case userAddress.MatchString(address):
+	case strings.HasPrefix(address, "user:") && names.Actor(address, "user"):
 		return "user", strings.TrimPrefix(address, "user:"), true
-	case strings.HasPrefix(address, "agent:") && safeName.MatchString(strings.TrimPrefix(address, "agent:")):
+	case strings.HasPrefix(address, "agent:") && names.Instance(strings.TrimPrefix(address, "agent:")):
 		return "agent", strings.TrimPrefix(address, "agent:"), true
 	}
 	return "", "", false

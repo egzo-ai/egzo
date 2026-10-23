@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/version"
 )
 
@@ -30,7 +31,7 @@ func callerOf(req *mcp.CallToolRequest) (string, error) {
 		return "", errors.New("unauthorized")
 	}
 	user, _, ok := (&http.Request{Header: req.Extra.Header}).BasicAuth()
-	if !ok || !safeName.MatchString(user) {
+	if !ok || !names.Instance(user) {
 		return "", errors.New("unauthorized")
 	}
 	return user, nil

@@ -11,13 +11,13 @@ import (
 	"net"
 	"net/http"
 	"os/signal"
-	"regexp"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/operator"
 )
 
@@ -99,12 +99,6 @@ func Run(cfg Config, audit io.Writer) error {
 	}
 }
 
-// agentName is what an instance may be called (the identifier rule of the project file).
-var agentName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
-// instanceID is the form of an instance's id: a ULID.
-var instanceID = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
-
 // operatorHandler is the proxy's operator API: load a policy, report which one is loaded, bind agents
 // to its profiles.
 func operatorHandler(server *Server, ca *CA, cfg Config, hostKey ssh.Signer) http.Handler {
@@ -135,7 +129,7 @@ func operatorHandler(server *Server, ca *CA, cfg Config, hostKey ssh.Signer) htt
 	})
 	mux.HandleFunc("PUT /agents/{name}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		if !agentName.MatchString(name) {
+		if !names.Instance(name) {
 			http.Error(w, "invalid agent name", http.StatusBadRequest)
 			return
 		}
@@ -152,7 +146,7 @@ func operatorHandler(server *Server, ca *CA, cfg Config, hostKey ssh.Signer) htt
 	})
 	mux.HandleFunc("DELETE /agents/{name}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		if !agentName.MatchString(name) {
+		if !names.Instance(name) {
 			http.Error(w, "invalid agent name", http.StatusBadRequest)
 			return
 		}

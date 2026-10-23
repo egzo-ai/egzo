@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 const (
@@ -49,7 +51,7 @@ func (a *agentAPI) handler() http.Handler {
 // identify checks HTTP basic credentials, the agent name and its token, and returns the agent.
 func (a *agentAPI) identify(r *http.Request) (string, bool) {
 	agent, token, ok := r.BasicAuth()
-	if !ok || !safeName.MatchString(agent) {
+	if !ok || !names.Instance(agent) {
 		return "", false
 	}
 	// A removed agent that is still running, and a name nobody spawned, are not agents of the project.

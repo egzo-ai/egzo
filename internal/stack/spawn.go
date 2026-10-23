@@ -7,13 +7,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // SpawnRequest says what to spawn.
@@ -28,8 +28,6 @@ type SpawnRequest struct {
 	// Reuse continues with a worktree or a branch an earlier instance of the name left, instead of refusing it.
 	Reuse bool
 }
-
-var actorName = regexp.MustCompile(`^(operator|(user|service):[A-Za-z0-9][A-Za-z0-9._@-]{0,62})$`)
 
 // Spawned is the instance a spawn made.
 type Spawned struct {
@@ -125,7 +123,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if actor == "" {
 		actor = "operator"
 	}
-	if !actorName.MatchString(actor) {
+	if !names.Actor(actor, "user", "service") {
 		return Spawned{}, fmt.Errorf("invalid actor %q: use operator, user:<id> or service:<name>", actor)
 	}
 

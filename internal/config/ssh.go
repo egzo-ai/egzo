@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // ResolvedSSH is an ssh server of a profile after validation: the port is always set, the key is a secret reference.
@@ -24,8 +26,6 @@ type ResolvedSSH struct {
 const defaultSSHPort = 22
 
 var (
-	// The name is the `Host` alias in the agent, so it is a lowercase label. "root" would read as the remote user.
-	sshServerName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	// A plain account name: never something ssh would take for an option, and nothing that needs quoting.
 	sshUserName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,31}$`)
 	// The unpadded base64 SHA-256 that `ssh-keygen -lf` prints and ssh shows.
@@ -52,14 +52,14 @@ func (r *egressResolver) checkSSH(profile, name string, def SSHServer) *Resolved
 		r.problems.addf("egress profile %q: ssh server %q: %s", profile, name, fmt.Sprintf(format, args...))
 		failed = true
 	}
-	if !sshServerName.MatchString(name) || name == "root" {
-		fail("the name is what an agent types: 1 to 32 lowercase letters, digits and '-', starting with a letter, and not \"root\"")
+	if !names.SSHServer(name) {
+		fail("the name is what an agent types: " + names.SSHServerRule)
 	}
-	host := normalizeHost(def.Host)
+	host := names.NormalizeHost(def.Host)
 	switch {
 	case def.Host == "":
 		fail("needs a host")
-	case !validHost(host):
+	case !names.Host(host):
 		fail("invalid host %q: one exact host name or address, with no port, scheme or wildcard (the port is its own key)", def.Host)
 	}
 	switch {

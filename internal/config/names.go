@@ -9,12 +9,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-)
 
-// Names become container, network and volume names, DNS names, labels and git refs, and the control
-// sidecar accepts only a plain form of them. One rule, checked when the file is read, keeps a later
-// step from failing on a name or two resources from landing on the same engine name.
-var identifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+	"github.com/egzo-ai/egzo/internal/names"
+)
 
 // reservedAgents are names egzo gives to its own containers, networks, DNS aliases or directories.
 var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": true}
@@ -24,8 +21,8 @@ var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": tru
 // and must not make a container, network or directory that egzo already uses for something else.
 func CheckInstanceName(name string, templates []string) error {
 	switch {
-	case !identifier.MatchString(name):
-		return fmt.Errorf("invalid instance name %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
+	case !names.Instance(name):
+		return fmt.Errorf("invalid instance name %q: a name is %s", name, names.IdentifierRule)
 	case reservedAgents[name]:
 		return fmt.Errorf("invalid instance name %q: it is reserved for egzo's own use", name)
 	case name == "control-1" || name == "proxy-1":
@@ -53,13 +50,13 @@ func checkNames(file *File, p *problems) {
 		switch {
 		case reservedAgents[name]:
 			p.addf("agent %q: %q is reserved for egzo's own use", name, name)
-		case !identifier.MatchString(name):
-			p.addf("agent %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
+		case !names.Identifier(name):
+			p.addf("agent %q: a name is %s", name, names.IdentifierRule)
 		}
 	}
 	for _, name := range sortedWorkspaceNames(file) {
-		if !identifier.MatchString(name) {
-			p.addf("workspace %q: a name is 1 to 63 lowercase letters, digits, '-' and '_', starting with a letter or digit", name)
+		if !names.Identifier(name) {
+			p.addf("workspace %q: a name is %s", name, names.IdentifierRule)
 		}
 	}
 }
@@ -130,9 +127,4 @@ func placeholderReserved(key string) bool {
 
 func reservedEnvName(key string) bool {
 	return strings.HasPrefix(key, "EGZO_") || reservedEnv[strings.ToUpper(key)]
-}
-
-// normalizeHost lowercases a host pattern and drops a trailing dot, the way the proxy compares.
-func normalizeHost(host string) string {
-	return strings.TrimSuffix(strings.ToLower(host), ".")
 }

@@ -15,16 +15,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
-)
 
-var safeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	"github.com/egzo-ai/egzo/internal/names"
+)
 
 // server holds the control sidecar's state on its volume. It is the operator API: reached only
 // through `engine exec`, never from the network.
@@ -173,7 +172,7 @@ func (s *server) agentToken(agent string) (string, error) {
 
 func (s *server) token(w http.ResponseWriter, r *http.Request) {
 	agent := r.PathValue("agent")
-	if !safeName.MatchString(agent) {
+	if !names.Instance(agent) {
 		http.Error(w, "invalid agent name", http.StatusBadRequest)
 		return
 	}
@@ -190,7 +189,7 @@ func (s *server) token(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) specPath(hash string) (string, bool) {
-	if !safeName.MatchString(hash) {
+	if !names.Hash(hash) {
 		return "", false
 	}
 	return filepath.Join(s.dir, "specs", hash+".yaml"), true
@@ -302,8 +301,6 @@ func (s *server) listSpecs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var actorName = regexp.MustCompile(`^(operator|(user|agent):[A-Za-z0-9][A-Za-z0-9._@-]{0,127})$`)
-
 // streamEvents writes the event stream as JSON lines; with follow=1 it stays open for new events.
 func (s *server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
@@ -346,7 +343,7 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 	if body.From == "" {
 		body.From = "operator"
 	}
-	if !actorName.MatchString(body.From) || !isHuman(body.From) {
+	if !names.Actor(body.From, "user", "agent") || !isHuman(body.From) {
 		http.Error(w, "from must be operator or user:<id>", http.StatusBadRequest)
 		return
 	}
@@ -404,7 +401,7 @@ func (s *server) resolveForOperator(w http.ResponseWriter, r *http.Request) {
 	if body.Outcome == "" {
 		body.Outcome = "done"
 	}
-	if !actorName.MatchString(body.Actor) || !isHuman(body.Actor) {
+	if !names.Actor(body.Actor, "user", "agent") || !isHuman(body.Actor) {
 		http.Error(w, "invalid actor", http.StatusBadRequest)
 		return
 	}
@@ -422,7 +419,7 @@ func (s *server) agents(w http.ResponseWriter, r *http.Request) {
 // agentFile is the registration of one agent: a file of its own, so adding and removing agents never
 // reads, rewrites or races over a list.
 func (s *server) agentFile(name string) (string, bool) {
-	if !safeName.MatchString(name) {
+	if !names.Instance(name) {
 		return "", false
 	}
 	return filepath.Join(s.dir, "agents", name), true
@@ -492,14 +489,14 @@ func (s *server) projectAgents() []string {
 	if err != nil {
 		return nil
 	}
-	names := make([]string, 0, len(entries))
+	agents := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() && safeName.MatchString(entry.Name()) {
-			names = append(names, entry.Name())
+		if !entry.IsDir() && names.Instance(entry.Name()) {
+			agents = append(agents, entry.Name())
 		}
 	}
-	sort.Strings(names)
-	return names
+	sort.Strings(agents)
+	return agents
 }
 
 // knownAgent reports whether name is a registered agent of the project.

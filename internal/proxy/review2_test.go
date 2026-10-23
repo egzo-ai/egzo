@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // A deadline set from outside, such as net/http aborting a pending read with one in the past, must never
@@ -85,7 +87,7 @@ func TestAMalformedHostInsideATerminatedConnectionIsAudited(t *testing.T) {
 func TestAnIPv6LiteralHostHeaderMatchesItsConnectTarget(t *testing.T) {
 	// net.SplitHostPort gives the CONNECT target without brackets.
 	host, _, _ := net.SplitHostPort("[2001::1]:443")
-	if got, ok := requestHost("[2001::1]:443"); !ok || got != normalizeHost(host) {
+	if got, ok := names.HostHeader("[2001::1]:443"); !ok || got != names.NormalizeHost(host) {
 		t.Errorf("the Host header names %q, the CONNECT target %q", got, host)
 	}
 }
