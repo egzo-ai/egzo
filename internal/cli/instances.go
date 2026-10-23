@@ -92,7 +92,7 @@ func newSpawnCommand(opts *options) *cobra.Command {
 
 			switch {
 			case asJSON && !wait:
-				data, _ := json.Marshal(map[string]string{"name": spawned.Name, "service": spawned.Template, "container": spawned.Container, "actor": spawned.Actor})
+				data, _ := json.Marshal(map[string]string{"name": spawned.Name, "id": spawned.ID, "service": spawned.Template, "container": spawned.Container, "actor": spawned.Actor})
 				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 			case wait:
 				fmt.Fprintln(cmd.ErrOrStderr(), spawned.Name)

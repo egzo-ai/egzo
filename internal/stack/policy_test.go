@@ -73,7 +73,7 @@ func TestThePolicyHoldsOnlyTheProfilesSomeAgentUses(t *testing.T) {
 }
 
 func TestTheBindingOfAnInstanceHoldsNoSecret(t *testing.T) {
-	binding := BindingFor("tok", "default")
+	binding := BindingFor("01JBX7Q0000000000000000000", "tok", "default")
 	if binding.Token != "tok" || binding.Profile != "default" {
 		t.Errorf("binding = %+v", binding)
 	}
@@ -245,12 +245,12 @@ func TestBuildPolicyCarriesTheSSHServersOfAProfileWithTheirKey(t *testing.T) {
 }
 
 func TestTheBindingOfAnInstanceCarriesItsSSHIdentityDerivedFromItsToken(t *testing.T) {
-	binding := BindingFor("tok", "default")
+	binding := BindingFor("01JBX7Q0000000000000000000", "tok", "default")
 	want, _ := proxy.IdentityPublicKey("tok")
 	if binding.SSHKey == "" || binding.SSHKey != want {
 		t.Errorf("ssh key = %q", binding.SSHKey)
 	}
-	if other := BindingFor("other", "default"); other.SSHKey == binding.SSHKey {
+	if other := BindingFor("01JBX7Q0000000000000000001", "other", "default"); other.SSHKey == binding.SSHKey {
 		t.Error("two tokens share an identity")
 	}
 }

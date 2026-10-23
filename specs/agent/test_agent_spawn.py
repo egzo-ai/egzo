@@ -84,7 +84,8 @@ def wait_for(check, what, timeout=60):
 def test_an_instance_is_a_running_container_with_its_own_network_and_its_own_identity(sandbox, engine):
     p = sandbox.project
     result = p.ok("agent spawn --json coder issue-1", timeout=300)
-    assert json.loads(result.stdout) == {"name": "issue-1", "service": "coder", "container": f"{p.name}-issue-1", "actor": "operator"}
+    spawned = json.loads(result.stdout)
+    assert spawned == {"name": "issue-1", "id": spawned["id"], "service": "coder", "container": f"{p.name}-issue-1", "actor": "operator"}
     assert result.stderr.strip(), "spawn says what it is doing, on stderr"
     plain = p.ok("agent spawn coder", timeout=300)
     assert plain.stdout == "coder-1\n", "stdout is the name and nothing else"
@@ -103,6 +104,25 @@ def test_an_instance_is_a_running_container_with_its_own_network_and_its_own_ide
     assert re.fullmatch(r"[0-9a-f]{64}", env["EGZO_TOKEN"]) and env["EGZO_TOKEN"] != sandbox.env("coder-1")["EGZO_TOKEN"]
     other = Agent(engine, p, "issue-1").exec('curl -sS -m 10 -o /dev/null -w "%{http_code}" -u "coder-1:$EGZO_TOKEN" "$EGZO_CONTROL_URL/v1/messages"')
     assert other.stdout == "401", "one instance's token must not work as another's"
+
+
+def test_an_instance_has_an_id_of_its_own_on_its_container_and_its_network(sandbox, engine):
+    p = sandbox.project
+    first = json.loads(p.ok("agent spawn --json coder issue-2", timeout=300).stdout)["id"]
+    second = json.loads(p.ok("agent spawn --json coder issue-3", timeout=300).stdout)["id"]
+    assert re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", first), "a ULID"
+    assert first != second
+    assert first < second, "ids sort by creation"
+
+    key = f"{LABEL_PREFIX}instance-id"
+    assert engine.instance(p.name, "issue-2").labels[key] == first
+    networks = {r.name: r for r in engine.resources(p.name) if r.kind == "network"}
+    assert networks[f"{p.name}_issue-2"].labels[key] == first
+
+    rows = {row["name"]: row for row in json.loads(p.ok("agent ls --json").stdout)}
+    assert rows["issue-2"]["id"] == first and rows["issue-3"]["id"] == second
+    sidecars = [row for row in json.loads(p.ok("ps --json").stdout) if row["kind"] != "agent"]
+    assert sidecars and not [row for row in sidecars if row.get("id")], "a sidecar is not an instance"
 
 
 def test_names_count_up_from_the_template_name_and_a_free_number_is_reused(sandbox):

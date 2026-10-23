@@ -38,6 +38,7 @@ type Resource struct {
 	Instance     string
 	Actor        string
 	TemplateHash string
+	InstanceID   string    // on the container and the network of an instance
 	Created      time.Time // containers only
 }
 
@@ -73,6 +74,7 @@ func resourceFrom(kind, id, name string, labels map[string]string) Resource {
 		Instance:     labels[engine.LabelInstance],
 		Actor:        labels[engine.LabelActor],
 		TemplateHash: labels[engine.LabelTemplateHash],
+		InstanceID:   labels[engine.LabelInstanceID],
 	}
 }
 

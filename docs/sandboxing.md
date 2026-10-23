@@ -216,7 +216,7 @@ $ egzo proxy log         # the audit trail, one JSON event per line
 $ egzo project check --resolved            # every profile fully resolved
 ```
 
-Each event has a `host`, an `action` and, where it applies, the `agent` and a `reason`:
+Each event has a `host`, an `action` and, where it applies, the `agent`, the `instance` (the id of the agent's instance, never reused when a name is) and a `reason`:
 
 | action | meaning |
 |---|---|

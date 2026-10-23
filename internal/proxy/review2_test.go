@@ -102,7 +102,7 @@ func TestATokenLongerThanAnyRealOneIsRefused(t *testing.T) {
 	r := newRig(t, nil)
 	long := strings.Repeat("t", maxToken+1)
 	r.setPolicy("coder", long, []string{"example.com"})
-	if r.proxy.authenticate(r.proxy.policy.Load(), "coder", long) != nil {
+	if first(r.proxy.authenticate(r.proxy.policy.Load(), "coder", long)) != nil {
 		t.Error("a token over the limit was accepted")
 	}
 }

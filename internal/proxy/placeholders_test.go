@@ -345,7 +345,7 @@ func TestAnotherProfileIsUntouched(t *testing.T) {
 		"coder":    {Services: []Service{ph("secret")}},
 		"reviewer": {Services: []Service{{Name: "docs", Hosts: []string{"example.com"}, Inspect: true}}},
 	}})
-	if err := r.proxy.BindAgent("reviewer", Binding{Token: "rtok", Profile: "reviewer"}); err != nil {
+	if err := r.proxy.BindAgent("reviewer", Binding{Instance: testInstance, Token: "rtok", Profile: "reviewer"}); err != nil {
 		t.Fatal(err)
 	}
 	request, _ := http.NewRequest("POST", "https://example.com/", strings.NewReader(phA))

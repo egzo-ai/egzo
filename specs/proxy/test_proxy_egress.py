@@ -47,6 +47,7 @@ def test_each_instance_gets_the_profile_of_its_template_and_every_decision_is_in
     events = probe.audit(agent=allow)
     allowed = next(e for e in events if e["host"] == "example.com" and e["action"] == "allow")
     assert allowed["agent"] == allow
+    assert allowed["instance"] == probe.container(allow).labels["ai.egzo.instance-id"], "the name for people, the id for history"
     assert next(e for e in events if e["host"] == "example.org")["action"] == "deny"
     closed = [e for e in events if e["action"] == "close" and e["host"] == "example.com"]
     assert closed and closed[0]["bytes_up"] > 0 and closed[0]["bytes_down"] > 0 and "duration_ms" in closed[0]

@@ -34,6 +34,7 @@ var actorName = regexp.MustCompile(`^(operator|(user|service):[A-Za-z0-9][A-Za-z
 // Spawned is the instance a spawn made.
 type Spawned struct {
 	Name      string
+	ID        string
 	Template  string
 	Container string
 	Actor     string
@@ -130,7 +131,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 
 	instances := map[string]string{name: req.Template}
 	view := published.View(instances)
-	identity := InstanceIdentity{Template: req.Template, Actor: actor, TemplateHash: template.Hash}
+	identity := InstanceIdentity{ID: NewInstanceID(), Template: req.Template, Actor: actor, TemplateHash: template.Hash}
 	// The resources first: their specs do not depend on the token, which only exists once the instance is
 	// registered, and the registration must wait until the network has decided who wins a race.
 	desired, err := DesireInstance(view, dir, published.inputs(instances, map[string]string{}, nil), name, identity)
@@ -144,7 +145,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	homeExisted := observed.find("volume", homeVolume(project, name)) != nil
 
 	var undo undoStack
-	spawned := Spawned{Name: name, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
+	spawned := Spawned{Name: name, ID: identity.ID, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
 	plan := spawnPlan{
 		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
 		env: env, identity: identity, worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
@@ -240,7 +241,7 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	if err != nil {
 		return err
 	}
-	if err := bindProxy(ctx, c, p.project, p.name, tokens[p.name], p.template.Agent.Egress); err != nil {
+	if err := bindProxy(ctx, c, p.project, p.name, p.identity.ID, tokens[p.name], p.template.Agent.Egress); err != nil {
 		return err
 	}
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })

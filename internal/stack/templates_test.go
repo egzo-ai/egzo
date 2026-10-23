@@ -164,11 +164,23 @@ func TestAnInstanceIsDesiredFromItsTemplateAndCarriesItsOrigin(t *testing.T) {
 	view := published.View(instances)
 	in := published.inputs(instances, map[string]string{"issue-1": "tok"}, nil)
 	template := published.Templates["coder"]
-	d, err := DesireInstance(view, dir, in, "issue-1", InstanceIdentity{Template: "coder", Actor: "operator", TemplateHash: template.Hash})
+	d, err := DesireInstance(view, dir, in, "issue-1", InstanceIdentity{ID: "01JBX7Q0000000000000000000", Template: "coder", Actor: "operator", TemplateHash: template.Hash})
 	if err != nil {
 		t.Fatal(err)
 	}
 	spec := findContainer(t, d, "proj-issue-1")
+	// The id is on what is this instance's alone; the home can be taken up by the next instance of the name.
+	if got := spec.Identity.Labels()[engine.LabelInstanceID]; got != "01JBX7Q0000000000000000000" {
+		t.Errorf("the container's instance id = %q", got)
+	}
+	if got := d.Networks[0].Identity.Labels()[engine.LabelInstanceID]; got != "01JBX7Q0000000000000000000" {
+		t.Errorf("the network's instance id = %q", got)
+	}
+	for _, volume := range d.Volumes {
+		if got, ok := volume.Identity.Labels()[engine.LabelInstanceID]; ok {
+			t.Errorf("the volume %s has the instance id %q", volume.Name, got)
+		}
+	}
 	if spec.Network != "proj_issue-1" || spec.User != "1000:1000" || !spec.Init || spec.ReadonlyRootfs {
 		t.Errorf("spec = %+v", spec)
 	}

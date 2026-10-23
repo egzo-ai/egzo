@@ -373,7 +373,10 @@ said in the message. Anything else per instance belongs in another template.
   creation time); `ps --json` gives a script or a timer what it needs to decide. it asks first, unless `--yes`; `--dry-run` lists and changes nothing.
 - **Labels.** `ai.egzo.service=<template key>` (so `ps` groups by it), `ai.egzo.instance=<name>`,
   `ai.egzo.actor=<who>` (`operator` from the CLI; `user:<id>` or a service from another tool) and
-  `ai.egzo.template-hash=<hash>` on the instance's container, network and home volume.
+  `ai.egzo.template-hash=<hash>` on the instance's container, network and home volume. `ai.egzo.instance-id=<ULID>` on its
+  container and network only: spawn makes it and it is never reused, so history (the proxy's audit trail, the hub) tells two
+  instances of one name apart. A volume can be taken up by the next instance of the name and does not carry it
+  ([roadmap/instance-id.md](roadmap/instance-id.md)). `ps --json`, `agent ls --json` and `agent spawn --json` show it as `id`.
 - **Workspaces belong to the project; worktrees to the instance.** A worktree is a volume named after the
   instance; the base clone and every directory workspace are volumes shared by every instance that lists them.
 

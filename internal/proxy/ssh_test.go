@@ -253,7 +253,7 @@ func newSSHRig(t *testing.T, mutate func(*SSHServer), tune ...func(*Server)) *ss
 		mutate(&remote)
 	}
 	server.SetPolicy(&Policy{Hash: "h", Profiles: map[string]Profile{"ops": {SSH: []SSHServer{remote}}, "empty": {}}})
-	if err := server.BindAgent("a1", Binding{Token: "t", Profile: "ops", SSHKey: string(ssh.MarshalAuthorizedKey(identity.PublicKey()))}); err != nil {
+	if err := server.BindAgent("a1", Binding{Instance: testInstance, Token: "t", Profile: "ops", SSHKey: string(ssh.MarshalAuthorizedKey(identity.PublicKey()))}); err != nil {
 		t.Fatal(err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -407,7 +407,7 @@ func TestSSHRefusesAServerThatIsNotInTheProfile(t *testing.T) {
 func TestSSHRefusesAnAgentWhoseProfileHasNoServer(t *testing.T) {
 	r := newSSHRig(t, nil)
 	other, _ := newKey(t)
-	if err := r.server.BindAgent("a2", Binding{Token: "t2", Profile: "empty", SSHKey: string(ssh.MarshalAuthorizedKey(other.PublicKey()))}); err != nil {
+	if err := r.server.BindAgent("a2", Binding{Instance: testInstance, Token: "t2", Profile: "empty", SSHKey: string(ssh.MarshalAuthorizedKey(other.PublicKey()))}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.dial("prod", other); err == nil {
@@ -417,7 +417,7 @@ func TestSSHRefusesAnAgentWhoseProfileHasNoServer(t *testing.T) {
 
 func TestSSHAnAgentWithoutAnIdentityHasNoAccess(t *testing.T) {
 	r := newSSHRig(t, nil)
-	if err := r.server.BindAgent("a3", Binding{Token: "t3", Profile: "ops"}); err != nil {
+	if err := r.server.BindAgent("a3", Binding{Instance: testInstance, Token: "t3", Profile: "ops"}); err != nil {
 		t.Fatal(err)
 	}
 	empty, _ := newKey(t)
@@ -585,7 +585,7 @@ func TestSSHChangingTheIdentityClosesTheOldConnections(t *testing.T) {
 	session, _ := client.NewSession()
 	session.Start("wait")
 	next, _ := newKey(t)
-	if err := r.server.BindAgent("a1", Binding{Token: "t", Profile: "ops", SSHKey: string(ssh.MarshalAuthorizedKey(next.PublicKey()))}); err != nil {
+	if err := r.server.BindAgent("a1", Binding{Instance: testInstance, Token: "t", Profile: "ops", SSHKey: string(ssh.MarshalAuthorizedKey(next.PublicKey()))}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -695,7 +695,7 @@ func TestSSHTheIdentityKeyIsEd25519Only(t *testing.T) {
 		if line == "" {
 			continue
 		}
-		if err := r.server.BindAgent("x", Binding{Token: "t", Profile: "ops", SSHKey: line}); err == nil {
+		if err := r.server.BindAgent("x", Binding{Instance: testInstance, Token: "t", Profile: "ops", SSHKey: line}); err == nil {
 			t.Errorf("%q was accepted", line)
 		}
 	}
