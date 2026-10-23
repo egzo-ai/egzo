@@ -171,13 +171,15 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   the engine's log API and the engine's events for discovery, retries both with backoff, and serves the pages from what it holds. A
   running agent whose status cannot be read is **running**, never "starting", and the project says why. `egzo system check` tries the
   engine's default log driver. See `docs/hub.md`, "How the hub keeps up".
+- Monitoring agents' internet access ([proxy-audit.md](proxy-audit.md)): the hub follows each proxy's audit trail, groups what was
+  denied by instance, host and reason in its database, says why and how to fix it, and marks a group fixed when the agent gets through.
 - Settings for operators ([hub-settings.md](hub-settings.md)): Engines, and Users, where an operator makes or removes other
   operators; the last one cannot be removed.
 - Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the
   operator confirms its fingerprint); one engine down does not take the page down.
 - The web UI, a Svelte app on a JSON API ([web-ui-spa.md](web-ui-spa.md)): projects (engine badge and filter only with several
-  engines), project page (agents, spawn, start / stop / remove, services, timeline, spec, audit log, members), agent page (status,
-  timeline, logs), and terminals: several at once, in a sidebar, held by one person each with presence and take-over. No
+  engines), project page (agents, spawn, start / stop / remove, services, timeline, network, spec, audit log, members), agent page
+  (status, timeline, network, logs), and terminals: several at once, in a sidebar, held by one person each with presence and take-over. No
   messaging. A question an agent is waiting on is shown as a status.
 - Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
   the terminal websocket.
@@ -193,7 +195,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
   the templates once per five minutes. Following the event stream the way the status is followed (a second line type on the
   sidecar's standard output, or a stream of its own) would remove the last periodic command.
-- **Monitoring agents' internet access** (the proxy audit log in the UI): see [proxy-audit.md](proxy-audit.md).
 - **Hub settings, later parts** (a hub-level audit view, removing users, a richer users list, break-glass operator): see [hub-settings.md](hub-settings.md).
 - **Incompatible controls** (the rest of it: a version the hub can compare): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

@@ -1,7 +1,8 @@
 # Roadmap: monitoring agents' internet access
 
-**Status.** The audit event schema is built (code, specs, unit tests). The hub's Network view is in progress. Needs
-[instance-id.md](instance-id.md), which is built. Split out of [hub.md](hub.md), where the proxy audit log was listed on the
+**Status.** Built: the audit event schema (code, specs, unit tests) and the hub's Network view (unit, browser and
+real-engine tests). Needs [instance-id.md](instance-id.md), which is built. Decided on the way: the hub keeps the latest events
+in memory, from its follower, rather than reading the engine's log when the tab opens, so the Log needs no read of its own. Split out of [hub.md](hub.md), where the proxy audit log was listed on the
 project page and never built. No backward compatibility: the old `action` field is gone.
 
 ## The problem
@@ -103,20 +104,24 @@ Where it shows: a **Network** tab on the project page and on the agent page (fil
   last seen. Each group says why in plain words, which profile decided, and how to fix it: for `not-in-profile`, the YAML to add
   to that profile and `egzo project up`. A group that a later `allow` for the same instance and host follows is marked as fixed.
   `aborted` and `challenge` are not shown there.
-- **Log**: the raw events, read from the engine when the tab is open (the last lines, then followed), with filters (agent,
-  denied only, a host). One row per connection, from its `conn`.
+- **Connections**: the latest events the hub's follower heard (1000 per project, in memory), one row per connection from its
+  `conn`, with filters (agent, denied only, a host).
 
 **History.** The hub keeps the groups only, not the events. It follows each project's proxy log, as it already follows the control
-sidecar's, and writes the groups to its database: one row per distinct denial, bounded per project and dropped 30 days after it
-was last seen. After the hub was down it reads again from the time of the last event it saw. The raw log is the engine's, and
-how far back it goes is the sysadmin's log configuration (see `known-issues/container-logging-follows-the-engine-default.md`);
+sidecar's, and writes the groups to its database: one row per distinct denial, at most 500 per project and dropped 30 days after
+it was last seen. After the hub was down it reads again from the time of the last event it saw. Further back than the hub's latest
+events, the raw log is the engine's (`egzo proxy log`), and how far back it goes is the sysadmin's log configuration (see `known-issues/container-logging-follows-the-engine-default.md`);
 it ends with the proxy's container. Keeping every event would make the hub a log store, a second copy of hosts and paths with a
 retention of its own to answer for; long-term audit belongs to the sysadmin's log pipeline.
 
 **Who sees it.** Administrators and owners of the project see every agent's network events; a user sees those of the agents they
 spawned (the `actor` label), as for the agents themselves.
 
-The Agents list shows how many hosts were denied to each agent in the last hour.
+The Agents list shows how many hosts were denied to each agent in the last hour and not reached since.
+
+**Fixed.** A group is fixed when a later allowed step of the same instance, protocol and host shows the refused step works: a
+`connect` for a `connect`, a `request` for a `request` or a failed `handshake`, an ssh `exec`, `shell` or `sftp` for an `upstream`
+error. The next refusal opens it again.
 
 ## Later
 

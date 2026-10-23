@@ -229,6 +229,37 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 		t.Fatal("attach did not end when its context was cancelled")
 	}
 
+	// the proxy's audit trail: the agent asks for a host its profile does not allow, and the denial carries its instance's id
+	listed, _ := eng.Projects(ctx)
+	var id string
+	for _, p := range listed {
+		if p.Name == name && len(p.Agents) == 1 {
+			id = p.Agents[0].ID
+		}
+	}
+	if len(id) != 26 {
+		t.Fatalf("the agent's instance id = %q", id)
+	}
+	exec.Command("docker", "exec", name+"-coder-1", "curl", "-sS", "-m", "10", "-o", "/dev/null", "https://example.org/").Run()
+	audited := make(chan engines.AuditEvent, 256)
+	go eng.FollowAudit(streams, name, time.Time{}, func(e engines.AuditEvent) { audited <- e })
+	var denied engines.AuditEvent
+	waitFor(t, "the denial in the proxy's audit trail", func() bool {
+		for {
+			select {
+			case e := <-audited:
+				if e.Host == "example.org" && e.Decision == "deny" {
+					denied = e
+				}
+			default:
+				return denied.Conn != ""
+			}
+		}
+	})
+	if denied.Instance != id || denied.Agent != "coder-1" || denied.Reason == nil || denied.Reason.Code != "not-in-profile" {
+		t.Errorf("denial = %+v", denied)
+	}
+
 	// events: typed, with no message texts; the spec snapshot; logs
 	events, err := eng.Events(ctx, name, "", 20)
 	if err != nil {

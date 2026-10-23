@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/engines"
+	"github.com/egzo-ai/egzo/internal/stack"
 )
 
 // Engine is a fake engine. Its fields are guarded by mu; use the methods to change it from a test.
@@ -39,6 +40,11 @@ type Engine struct {
 	publishedBy map[string]engines.Published
 	publishedN  int
 	projectN    int
+
+	// the proxies' audit trails: what FollowAudit delivers
+	audit      map[string][]engines.AuditEvent
+	auditWake  map[string]map[*chan struct{}]struct{}
+	auditSince map[string][]time.Time // by project: the since of every FollowAudit
 }
 
 // New returns an engine with no projects.
@@ -47,6 +53,7 @@ func New() *Engine {
 		projects: map[string]*engines.Project{}, events: map[string][]engines.Event{}, attached: map[string]int{},
 		feedWake: map[string]map[*chan struct{}]struct{}{}, feedStarts: map[string]int{}, feedTries: map[string]int{}, feedErr: map[string]error{}, feedSilent: map[string]bool{},
 		feedEvery: 30 * time.Second, watchWake: map[*chan struct{}]struct{}{}, publishedBy: map[string]engines.Published{},
+		audit: map[string][]engines.AuditEvent{}, auditWake: map[string]map[*chan struct{}]struct{}{}, auditSince: map[string][]time.Time{},
 	}
 }
 
@@ -98,6 +105,14 @@ func (e *Engine) SetDown(err error) {
 	defer e.mu.Unlock()
 	e.down = err
 	e.changed("") // a watch of an engine that went down ends; the followers learn at their next line
+	for _, followers := range e.auditWake {
+		for wake := range followers {
+			select {
+			case *wake <- struct{}{}:
+			default:
+			}
+		}
+	}
 }
 
 // Calls lists what was done to the engine, as "verb project/agent actor".
@@ -206,7 +221,8 @@ func (e *Engine) Spawn(ctx context.Context, project, template, name, actor strin
 	}
 	e.record("spawn %s/%s %s", project, name, actor)
 	defer e.changed(project)
-	p.Agents = append(p.Agents, engines.Agent{Name: name, Template: template, State: "running", Activity: "idle", Actor: actor, Created: time.Now()})
+	p.Agents = append(p.Agents, engines.Agent{Name: name, ID: stack.NewInstanceID(), Template: template, State: "running", Activity: "idle", Actor: actor,
+		Created: time.Now()})
 	return name, nil
 }
 
@@ -585,6 +601,85 @@ func (e *Engine) Watch(ctx context.Context, changed func()) error {
 				return err
 			}
 			changed()
+		}
+	}
+}
+
+// AddAudit appends events to a project's audit trail, as its proxy writes them; an event without a time gets the current one.
+func (e *Engine) AddAudit(project string, events ...engines.AuditEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, event := range events {
+		if event.Time.IsZero() {
+			event.Time = time.Now().UTC()
+		}
+		e.audit[project] = append(e.audit[project], event)
+	}
+	for wake := range e.auditWake[project] {
+		select {
+		case *wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// AuditFollows lists the since of every FollowAudit of a project, in order.
+func (e *Engine) AuditFollows(project string) []time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]time.Time(nil), e.auditSince[project]...)
+}
+
+// FollowAudit delivers the trail after since (the last AuditBacklog events when since is zero), then each event as it is added.
+func (e *Engine) FollowAudit(ctx context.Context, project string, since time.Time, on func(engines.AuditEvent)) error {
+	e.mu.Lock()
+	if e.down != nil {
+		err := e.down
+		e.mu.Unlock()
+		return err
+	}
+	if _, ok := e.projects[project]; !ok {
+		e.mu.Unlock()
+		return engines.ErrNoProject{Name: project}
+	}
+	e.auditSince[project] = append(e.auditSince[project], since)
+	wake := make(chan struct{}, 1)
+	if e.auditWake[project] == nil {
+		e.auditWake[project] = map[*chan struct{}]struct{}{}
+	}
+	e.auditWake[project][&wake] = struct{}{}
+	trail := e.audit[project]
+	next := 0
+	if since.IsZero() {
+		next = max(0, len(trail)-engines.AuditBacklog)
+	} else {
+		for next < len(trail) && !trail[next].Time.After(since) {
+			next++
+		}
+	}
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.auditWake[project], &wake)
+		e.mu.Unlock()
+	}()
+	for {
+		e.mu.Lock()
+		if e.down != nil {
+			err := e.down
+			e.mu.Unlock()
+			return err
+		}
+		pending := append([]engines.AuditEvent(nil), e.audit[project][next:]...)
+		next = len(e.audit[project])
+		e.mu.Unlock()
+		for _, event := range pending {
+			on(event)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-wake:
 		}
 	}
 }
