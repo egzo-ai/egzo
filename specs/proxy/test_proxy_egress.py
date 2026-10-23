@@ -58,6 +58,16 @@ def test_each_instance_gets_the_profile_of_its_template_and_every_decision_is_in
     assert not [e for e in events if e["event"] == "request"], "an allowed host is a tunnel and no path is logged"
 
 
+def test_a_connect_target_that_is_no_host_name_is_refused_as_such_and_kept_out_of_the_audit_trail(sandbox, probe):
+    open_ = sandbox.spawn("open")
+    bad = "x" * 64 + ".example.com"  # a DNS label is at most 63 bytes: no host has this name, whatever the profile allows
+    refused = probe.status(open_, bad)
+    assert refused.returncode != 0 and "400" in refused.stderr
+    (denied,) = [e for e in probe.audit(agent=open_) if e["event"] == "connect"]
+    assert denied["decision"] == "deny" and denied["reason"]["code"] == "host" and denied["reason"]["text"]
+    assert "host" not in denied, "the audit trail holds host names; what the agent asked for is in the reason's text"
+
+
 def test_inspect_logs_the_method_path_and_status_and_a_wildcard_service_covers_what_its_pattern_says_and_an_exact_one_still_injects(sandbox, probe):
     inspect, wild, wildsub = sandbox.spawn("inspect"), sandbox.spawn("wild"), sandbox.spawn("wildsub")
     probe.curl(inspect, "-o", "/dev/null", "https://example.com/some/page?q=zq9query")

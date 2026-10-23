@@ -59,7 +59,7 @@ def test_every_field_but_the_port_is_required(project, field):
     assert "prod" in result.stderr and field in result.stderr
 
 
-@pytest.mark.parametrize("host", ["*.example.com", "*", "", "prod.example.com:22", "ssh://prod.example.com", "prod example.com"])
+@pytest.mark.parametrize("host", ["*.example.com", "*", "", "prod.example.com:22", "ssh://prod.example.com", "prod example.com", "prod..example.com", "x" * 64 + ".example.com"])
 def test_the_host_is_one_exact_name_or_address(project, host):
     result = project.config(ssh_spec(egress={"default": {"ssh": {"prod": server(host=host)}}}))
     assert result.returncode != 0

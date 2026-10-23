@@ -75,6 +75,13 @@ def test_allow_accepts_hosts_and_globs(project):
     assert set(profile(resolved, "default")["allow"]) == {"example.com", "*.pypi.org"}
 
 
+@pytest.mark.parametrize("host", ["a..example.com", ".example.com", "x" * 64 + ".example.com", ("a" * 63 + ".") * 4 + "com", "exa mple.com", "ex/ample.com"])
+def test_an_allowed_host_is_a_host_name_or_address(project, host):
+    result = project.config(spec(egress={"default": {"allow": [host]}}))
+    assert result.returncode != 0
+    assert "allow" in result.stderr or "host" in result.stderr
+
+
 # --- services ----------------------------------------------------------------------------------
 
 

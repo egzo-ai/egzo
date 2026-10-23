@@ -37,11 +37,15 @@ def test_names_are_normalized_to_lowercase(project):
     assert project.resolved(spec(name="MyProj"))["name"] == "myproj"
 
 
-@pytest.mark.parametrize("bad", ["-leading-dash", "_leading-underscore", "has space", "dots.not.allowed", ""])
+@pytest.mark.parametrize("bad", ["-leading-dash", "_leading-underscore", "has space", "dots.not.allowed", "", "x" * 64])
 def test_invalid_names_are_rejected(project, bad):
     result = project.config(spec(name=bad))
     assert result.returncode != 0
     assert "name" in result.stderr
+
+
+def test_a_name_may_be_63_characters_the_longest_an_engine_name_part_is(project):
+    assert project.resolved(spec(name="x" * 63))["name"] == "x" * 63
 
 
 def test_a_name_in_use_from_another_directory_refuses_every_command(live_project, make_project):

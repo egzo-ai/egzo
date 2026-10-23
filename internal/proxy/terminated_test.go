@@ -70,7 +70,7 @@ func TestRequestShapesInATerminatedConnectionOnlyEverReachExampleDotComOn443(t *
 		{"userinfo the other way", "GET / HTTP/1.1\r\nHost: example.com@other.example\r\nConnection: close\r\n\r\n", 400, 0},
 		{"a path after the port", "GET / HTTP/1.1\r\nHost: example.com:443/x\r\nConnection: close\r\n\r\n", 400, 0},
 		{"an IPv6 literal", "GET / HTTP/1.1\r\nHost: [::1]\r\nConnection: close\r\n\r\n", 421, 0},
-		{"two dots", "GET / HTTP/1.1\r\nHost: example.com..\r\nConnection: close\r\n\r\n", 421, 0},
+		{"two dots, which no host name has", "GET / HTTP/1.1\r\nHost: example.com..\r\nConnection: close\r\n\r\n", 400, 0},
 		{"duplicate Host", "GET / HTTP/1.1\r\nHost: example.com\r\nHost: other.example\r\nConnection: close\r\n\r\n", 400, 0},
 		{"absolute URI for another host", "GET https://other.example/ HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n", 421, 0},
 		{"another host in X-Forwarded-Host", "GET / HTTP/1.1\r\nHost: example.com\r\nX-Forwarded-Host: other.example\r\nConnection: close\r\n\r\n", 200, 1},
@@ -273,26 +273,10 @@ func TestAConnectHostWithATrailingDotIsTheSameHostAndIsLoggedNormalized(t *testi
 func TestATrailingDotDoesNotReachAnotherHost(t *testing.T) {
 	r := newRig(t, nil)
 	r.setPolicy("coder", "tok", []string{"example.com"})
-	for _, host := range []string{"other.example.", "example.com..", "example.com.other.example", "."} {
-		if response, _ := connectRequest(t, r, host, "443"); response.StatusCode != http.StatusForbidden {
-			t.Errorf("CONNECT %s: status = %d, want 403", host, response.StatusCode)
-		}
-	}
-}
-
-func TestRequestHost(t *testing.T) {
-	for header, want := range map[string]string{
-		"example.com": "example.com", "Example.COM.": "example.com", "example.com:443": "example.com", "[::1]": "::1", "[2001:DB8::1]:443": "2001:db8::1", "[::ffff:1.2.3.4]": "::ffff:1.2.3.4",
-		"1.2.3.4:80": "1.2.3.4", "a_b.example": "a_b.example",
-		"": "!", "evil@example.com": "!", "example.com@other": "!", "example.com:443/x": "!", "example.com:": "example.com",
-		"example.com:80:80": "!", "a b": "!", ":443": "!", "example.com/x": "!", "[::1]@x": "!", "[::1": "!", "[]": "!", "[example.com]": "!", "[::1]x": "!", "[::1]:80x": "!", "[::g]": "!", "[::1]/x": "!",
-	} {
-		got, ok := requestHost(header)
-		if !ok {
-			got = "!"
-		}
-		if got != want {
-			t.Errorf("requestHost(%q) = %q, want %q", header, got, want)
+	// a name with an empty label is no host at all, and is refused as such
+	for host, want := range map[string]int{"other.example.": http.StatusForbidden, "example.com.other.example": http.StatusForbidden, "example.com..": http.StatusBadRequest, ".": http.StatusBadRequest} {
+		if response, _ := connectRequest(t, r, host, "443"); response.StatusCode != want {
+			t.Errorf("CONNECT %s: status = %d, want %d", host, response.StatusCode, want)
 		}
 	}
 }

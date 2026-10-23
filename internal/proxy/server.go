@@ -22,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 const (
@@ -116,7 +118,7 @@ func (s *Server) BindAgent(name string, binding Binding) error {
 	if binding.Token == "" {
 		return errors.New("a binding needs a token")
 	}
-	if !instanceID.MatchString(binding.Instance) {
+	if !names.InstanceID(binding.Instance) {
 		return errors.New("a binding needs the instance's id (an instance spawned before ids existed: `egzo agent rm` it and spawn again)")
 	}
 	policy := s.policy.Load()
@@ -237,9 +239,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad CONNECT target", http.StatusBadRequest)
 		return
 	}
-	host = normalizeHost(host)
+	host = names.NormalizeHost(host)
 	c := newConn(s.audit, HTTPS)
-	c.host = host
+	// What no host is called is not one: it is kept out of the trail's hosts, and refused once the agent is known.
+	isHost := names.Host(host)
+	if isHost {
+		c.host = host
+	}
 
 	policy := s.policy.Load()
 	if policy == nil {
@@ -270,6 +276,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.from(agent, binding.Instance, binding.Profile)
 
+	if !isHost {
+		c.decide(KindConnect, OutcomeDeny, because(CodeHost, "the CONNECT target "+quoteName(clip(host))+" is not a host name or address"))
+		http.Error(w, "egzo: the CONNECT target is not a host name or address", http.StatusBadRequest)
+		return
+	}
 	if port != allowedPort {
 		c.decide(KindConnect, OutcomeDeny, because(CodePort, "only port 443 is allowed"))
 		http.Error(w, "only port 443 is allowed", http.StatusForbidden)
@@ -319,12 +330,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.tunnel(client, c)
-}
-
-// normalizeHost is the form a host is compared and logged in: lower case, without the one trailing dot
-// that names the same host in DNS (the configuration is normalized the same way).
-func normalizeHost(host string) string {
-	return strings.TrimSuffix(strings.ToLower(host), ".")
 }
 
 // proxyCredentials reads the agent name and token from Proxy-Authorization.
@@ -534,7 +539,7 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Requests inside the tunnel may only go to the host the tunnel was approved for.
-		requested, ok := requestHost(r.Host)
+		requested, ok := names.HostHeader(r.Host)
 		if !ok {
 			c.log(Event{Kind: KindRequest, Decision: OutcomeDeny, Method: r.Method, Reason: because(CodeHostHeader, "malformed Host header "+quoteName(clip(r.Host)))})
 			http.Error(w, "bad Host header", http.StatusBadRequest)
@@ -557,51 +562,6 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 		}
 		proxy.ServeHTTP(w, r)
 	})
-}
-
-// requestHost is the normalized host name of a Host header, with any port dropped. Anything that is not a
-// plain name, IPv4 address or bracketed IPv6 literal with an optional numeric port is refused (false), so a
-// header that some parser reads differently, such as "evil@example.com" or "example.com:443/x", is never
-// compared. An IPv6 literal comes back without its brackets, as the CONNECT target has it.
-func requestHost(header string) (string, bool) {
-	if strings.HasPrefix(header, "[") {
-		inside, rest, found := strings.Cut(header[1:], "]")
-		if !found || inside == "" || !strings.Contains(inside, ":") || (rest != "" && !validPort(rest)) {
-			return "", false
-		}
-		for _, c := range inside {
-			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' || c == ':' || c == '.') {
-				return "", false
-			}
-		}
-		return strings.ToLower(inside), true
-	}
-	name, port, _ := strings.Cut(header, ":")
-	if name == "" || strings.Contains(port, ":") {
-		return "", false
-	}
-	if port != "" && !validPort(":"+port) {
-		return "", false
-	}
-	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_') {
-			return "", false
-		}
-	}
-	return normalizeHost(name), true
-}
-
-// validPort reports whether text is ":" and digits, as after the host of a Host header.
-func validPort(text string) bool {
-	if text == "" || text[0] != ':' {
-		return false
-	}
-	for _, c := range text[1:] {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 type agentPathKey struct{}

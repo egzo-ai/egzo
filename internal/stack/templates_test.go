@@ -15,6 +15,7 @@ import (
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 func templateProject(t *testing.T) (*config.Resolved, string) {
@@ -372,12 +373,12 @@ func TestUndoRunsInReverseOrder(t *testing.T) {
 
 func TestOnlyPlainActorsAreWrittenToLabels(t *testing.T) {
 	for _, ok := range []string{"operator", "user:ann", "user:ann@example.org", "service:github-webhooks"} {
-		if !actorName.MatchString(ok) {
+		if !names.Actor(ok, "user", "service") {
 			t.Errorf("%q refused", ok)
 		}
 	}
-	for _, bad := range []string{"", "root", "user:", "user:a b", "service:" + strings.Repeat("x", 64), "operator\n", "agent:coder", "user:\x1b[2J"} {
-		if actorName.MatchString(bad) {
+	for _, bad := range []string{"", "root", "user:", "user:a b", "service:" + strings.Repeat("x", 129), "operator\n", "agent:coder", "user:\x1b[2J"} {
+		if names.Actor(bad, "user", "service") {
 			t.Errorf("%q accepted", bad)
 		}
 	}

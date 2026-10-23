@@ -113,6 +113,7 @@ const (
 	CodeLimit          Code = "limit"           // too many connections
 	CodeClientHello    Code = "client-hello"    // the client's TLS hello could not be read
 	CodeSNIMismatch    Code = "sni-mismatch"    // the TLS server name differs from the CONNECT host
+	CodeHost           Code = "host"            // the CONNECT target is not a host name or address
 	CodeHostHeader     Code = "host-header"     // a request's Host header is malformed
 	CodeHostMismatch   Code = "host-mismatch"   // a request names another host than its connection
 	CodePlaceholder    Code = "placeholder"     // a placeholder could not be swapped

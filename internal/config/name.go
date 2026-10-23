@@ -6,11 +6,10 @@ package config
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
-)
 
-var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	"github.com/egzo-ai/egzo/internal/names"
+)
 
 // EnvProjectName is the environment variable that overrides the name in the file.
 const EnvProjectName = "EGZO_PROJECT_NAME"
@@ -34,8 +33,8 @@ func ProjectName(flag, env string, file *string, dir string) (string, error) {
 
 func explicitName(source, value string) (string, error) {
 	name := strings.ToLower(value)
-	if !validName.MatchString(name) {
-		return "", fmt.Errorf("invalid project name %q from %s: use lowercase letters, digits, '-' and '_', starting with a letter or digit", value, source)
+	if !names.Project(name) {
+		return "", fmt.Errorf("invalid project name %q from %s: a project name is %s", value, source, names.IdentifierRule)
 	}
 	return name, nil
 }
@@ -52,8 +51,8 @@ func directoryName(dir string) (string, error) {
 		}
 	}
 	name := strings.TrimLeft(b.String(), "-_")
-	if name == "" {
-		return "", fmt.Errorf("cannot derive a project name from directory %q: set name: in %s or use --project-name", dir, FileName)
+	if !names.Project(name) {
+		return "", fmt.Errorf("cannot derive a project name from directory %q (a project name is %s): set name: in %s or use --project-name", dir, names.IdentifierRule, FileName)
 	}
 	return name, nil
 }

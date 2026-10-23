@@ -8,6 +8,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // ResolvedProfile is an egress profile after extend and built-in services are applied.
@@ -94,7 +96,7 @@ func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
 	}
 
 	for _, entry := range definition.Allow {
-		entry = normalizeHost(entry)
+		entry = names.NormalizeHost(entry)
 		if !validAllow(entry) {
 			r.problems.addf("egress profile %q: invalid allow entry %q (use a host, *.domain or *)", name, entry)
 			continue
@@ -149,7 +151,7 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 	def := *entry.Def
 	def.Hosts = make([]string, len(entry.Def.Hosts))
 	for i, host := range entry.Def.Hosts {
-		def.Hosts[i] = normalizeHost(host)
+		def.Hosts[i] = names.NormalizeHost(host)
 	}
 	valid := true
 	if len(def.Hosts) == 0 {
@@ -300,18 +302,15 @@ func sameInjection(a, b *ResolvedService) bool {
 	return *a.Inject == *b.Inject
 }
 
-func validHost(host string) bool {
-	return host != "" && !strings.ContainsAny(host, " \t/*:") && !strings.Contains(host, "://")
-}
-
+// validAllow reports whether entry is a host, *.<host> or *.
 func validAllow(entry string) bool {
 	switch {
 	case entry == "*":
 		return true
 	case strings.HasPrefix(entry, "*."):
-		return validHost(strings.TrimPrefix(entry, "*."))
+		return names.Host(strings.TrimPrefix(entry, "*."))
 	}
-	return validHost(entry)
+	return names.Host(entry)
 }
 
 // reaches reports whether a profile lets an agent reach host.

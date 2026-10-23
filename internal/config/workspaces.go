@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 const workspaceRoot = "/workspace"
@@ -28,7 +30,7 @@ func resolveWorkspaces(file *File, p *problems) map[string]ResolvedWorkspace {
 	resolved := map[string]ResolvedWorkspace{}
 	for _, name := range sortedWorkspaceNames(file) {
 		workspace := file.Workspaces[name]
-		if !identifier.MatchString(name) {
+		if !names.Identifier(name) {
 			continue // checkNames reports it
 		}
 		if workspace.Git != nil {

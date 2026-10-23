@@ -261,17 +261,6 @@ func TestProfileReaches(t *testing.T) {
 	}
 }
 
-func TestValidHost(t *testing.T) {
-	for host, want := range map[string]bool{
-		"example.com": true, "a-b.c": true, "localhost": true,
-		"": false, "a b": false, "a/b": false, "a:80": false, "*.a": false, "http://a": false, "a\tb": false,
-	} {
-		if got := validHost(host); got != want {
-			t.Errorf("validHost(%q) = %v, want %v", host, got, want)
-		}
-	}
-}
-
 func TestBuiltinsAreSortedAndComplete(t *testing.T) {
 	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "github", "opencode"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("builtinNames = %v, want %v", got, want)
