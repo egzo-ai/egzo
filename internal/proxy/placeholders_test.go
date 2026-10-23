@@ -103,7 +103,7 @@ func TestSecretWithALineBreakIsNeverSentInAHeader(t *testing.T) {
 	if strings.Contains(text, "Injected") || strings.Contains(r.audit.String(), "Injected") {
 		t.Error("the value leaked")
 	}
-	if !strings.Contains(r.audit.String(), `"action":"deny"`) {
+	if !strings.Contains(r.audit.String(), `"decision":"deny"`) {
 		t.Errorf("audit:\n%s", r.audit.String())
 	}
 }
@@ -380,7 +380,7 @@ func TestAuditNeverHoldsASecretABodyOrAQuery(t *testing.T) {
 			t.Errorf("the audit log holds %q:\n%s", leak, log)
 		}
 	}
-	if !strings.Contains(log, `"action":"inject"`) || !strings.Contains(log, `"path":"/p/`+phA+`"`) {
+	if !strings.Contains(log, `"mode":"inject"`) || !strings.Contains(log, `"path":"/p/`+phA+`"`) {
 		t.Errorf("audit should log the path as the agent wrote it:\n%s", log)
 	}
 }
@@ -388,7 +388,7 @@ func TestAuditNeverHoldsASecretABodyOrAQuery(t *testing.T) {
 func TestPlaceholderHostsAreInterceptedLikeInjectHosts(t *testing.T) {
 	r, _ := swapRig(t, ph("secret"))
 	body(t, do(t, r, "GET", "https://example.com/", "", nil))
-	if !strings.Contains(r.audit.String(), `"action":"inject"`) {
+	if !strings.Contains(r.audit.String(), `"mode":"inject"`) {
 		t.Errorf("audit:\n%s", r.audit.String())
 	}
 }
@@ -428,8 +428,8 @@ func assertDeny(t *testing.T, r *rig, text string) {
 	t.Helper()
 	for _, line := range strings.Split(strings.TrimSpace(r.audit.String()), "\n") {
 		var event Event
-		if json.Unmarshal([]byte(line), &event) == nil && event.Action == "deny" && event.Host == "example.com" &&
-			event.Agent == "coder" && strings.Contains(event.Reason, text) {
+		if json.Unmarshal([]byte(line), &event) == nil && event.Decision == OutcomeDeny && event.Host == "example.com" &&
+			event.Agent == "coder" && event.Reason.Code == CodePlaceholder && strings.Contains(event.Reason.Text, text) {
 			return
 		}
 	}
@@ -502,9 +502,9 @@ func TestIsUpgradeNeedsTheConnectionToken(t *testing.T) {
 func auditReasons(r *rig) []string {
 	var reasons []string
 	for _, line := range strings.Split(r.audit.String(), "\n") {
-		var event struct{ Reason string }
-		if json.Unmarshal([]byte(line), &event) == nil && event.Reason != "" {
-			reasons = append(reasons, event.Reason)
+		var event Event
+		if json.Unmarshal([]byte(line), &event) == nil && event.Reason != nil {
+			reasons = append(reasons, event.Reason.Text)
 		}
 	}
 	return reasons

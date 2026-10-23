@@ -216,20 +216,31 @@ $ egzo proxy log         # the audit trail, one JSON event per line
 $ egzo project check --resolved            # every profile fully resolved
 ```
 
-Each event has a `host`, an `action` and, where it applies, the `agent`, the `instance` (the id of the agent's instance, never reused when a name is) and a `reason`:
+Each event is one step of one connection:
 
-| action | meaning |
-|---|---|
-| `allow`, then `close` | a tunnel was opened to the host; `close` carries `bytes_up`, `bytes_down` and `duration_ms` |
-| `deny` | refused, with the `reason` (not in the profile, not port 443, a private address, a TLS server name that differs from the host, wrong proxy credentials) |
-| `challenge` | a connection arrived without proxy credentials; browsers start that way and send them once asked, so it is not a refusal and it names no agent |
-| `inject`, `inspect` | the host's TLS was terminated because a service injects a credential there, swaps a placeholder, or has `inspect: true` |
-| `request` | one request to such a host: method, path (never the query) and status |
-| `intercept`, then `close` | a client that sent Encrypted Client Hello was terminated instead of tunneled ([browsing](browser.md)) |
-| `ssh-open`, `ssh-close` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one); `ssh-close` carries the bytes and the duration |
-| `ssh-exec`, `ssh-shell`, `ssh-sftp` | a command (`command`), a shell or an sftp session (`scp`, `sftp`) the agent started on the server |
-| `ssh-deny`, `ssh-error` | refused (forwarding, a subsystem, an identity or server that is not the agent's, too many connections) or failed (the server did not answer, refused the key, or presented another host key than the pinned one) |
-| `error`, `aborted` | the connection failed (the `reason` says where) or the client left before the handshake |
+```json
+{"time":"…","conn":"5f0c3a9e1b2d4c6f","protocol":"https","event":"connect","decision":"deny","agent":"coder-1",
+ "instance":"01JBX…","profile":"default","host":"registry.npmjs.org",
+ "reason":{"code":"not-in-profile","text":"not allowed by the agent's egress profile"}}
+```
+
+- `conn` is the connection: its `connect`, its requests and its `close` share it.
+- `agent` is the instance's name, `instance` its id (never reused when a name is), `profile` the profile that decided.
+- `decision` is `allow`, `deny`, `error`, or `challenge`: a connection that arrived without proxy credentials. Browsers
+  start that way and send them once asked, so a challenge is not a refusal, and it names no agent.
+- `reason.code` is from a fixed list, for tools (the full list is in [the roadmap](../roadmap/proxy-audit.md)); `reason.text`
+  is for people.
+
+| protocol | event | meaning |
+|---|---|---|
+| `https` | `connect` | the decision about a CONNECT. Allowed, its `mode` says how: `tunnel` (the proxy sees the host name, never the traffic), `inject` (a service injects a credential or swaps a placeholder), `inspect` (`inspect: true`), or `intercept` (the client sent Encrypted Client Hello, [browsing](browser.md)). Denied: not in the profile, not port 443, a private address, a TLS server name that differs from the host, wrong proxy credentials, too many connections. An error: the host did not answer, or the client left |
+| `https` | `handshake` | the client's TLS handshake with the proxy failed on a terminated host: it does not trust the project CA |
+| `https` | `request` | one request to a terminated host: method, path (never the query) and status; or a request refused (another host, a placeholder that cannot be swapped) or failed upstream |
+| both | `close` | the end of an allowed connection, with `bytes_up`, `bytes_down` and `duration_ms` |
+| `ssh` | `connect` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one), or a refused one (an identity or server that is not the agent's, too many connections) |
+| `ssh` | `upstream` | the server did not answer, refused the key, presented another host key than the pinned one, or would not open a session |
+| `ssh` | `exec`, `shell`, `sftp` | a command (`command`), a shell or an sftp session (`scp`, `sftp`) the agent started on the server |
+| `ssh` | `channel`, `request` | refused: port forwarding, X11, agent forwarding, a subsystem other than sftp |
 
 Changing a profile and running `egzo project up` reloads the proxy with the new policy; running instances keep their
 binding by profile name. After a proxy restart, `egzo restart proxy` (or `egzo project up`) loads the policy again; until

@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -366,17 +367,29 @@ func (r *rig) events(host string) []Event {
 	return out
 }
 
-func actions(events []Event) []string {
+// steps names each event by its step, its decision and its mode: "connect/allow/intercept", "handshake/error", "close".
+func steps(events []Event) []string {
 	var out []string
 	for _, event := range events {
-		out = append(out, event.Action)
+		out = append(out, step(event))
 	}
 	return out
 }
 
-func (r *rig) hasAction(host, action string) bool {
+func step(event Event) string {
+	name := string(event.Kind)
+	for _, part := range []string{string(event.Decision), string(event.Mode)} {
+		if part != "" {
+			name += "/" + part
+		}
+	}
+	return name
+}
+
+// hasStep says whether an event of host is the step (see steps), or starts with it.
+func (r *rig) hasStep(host, prefix string) bool {
 	for _, event := range r.events(host) {
-		if event.Action == action {
+		if strings.HasPrefix(step(event), prefix) {
 			return true
 		}
 	}
@@ -398,7 +411,7 @@ func TestAnECHClientHelloForTheApprovedHostIsTerminatedAndTheUpstreamIsNeverDial
 		t.Fatal("the proxy did not answer with a ServerHello: the hello was refused or tunneled")
 	}
 	conn.Close()
-	waitFor(t, func() bool { return r.hasAction("example.com", "close") })
+	waitFor(t, func() bool { return r.hasStep("example.com", "close") })
 	if dialed.Load() {
 		t.Error("an ECH hello was tunneled: the upstream was dialed")
 	}
@@ -406,11 +419,14 @@ func TestAnECHClientHelloForTheApprovedHostIsTerminatedAndTheUpstreamIsNeverDial
 		t.Error("the upstream was contacted")
 	}
 	events := r.events("example.com")
-	if got := actions(events); got[0] != "intercept" || got[len(got)-1] != "close" || len(got) != 3 || (got[1] != "error" && got[1] != "aborted") { // the client left after the ServerHello
-		t.Fatalf("actions = %v", got)
+	if got := steps(events); !slices.Equal(got, []string{"connect/allow/intercept", "handshake/error", "close"}) { // the client left after the ServerHello
+		t.Fatalf("steps = %v", got)
 	}
-	if !strings.Contains(events[0].Reason, "Encrypted Client Hello") {
-		t.Errorf("reason = %q", events[0].Reason)
+	if events[0].Reason.Code != CodeECH || !strings.Contains(events[0].Reason.Text, "Encrypted Client Hello") {
+		t.Errorf("reason = %+v", events[0].Reason)
+	}
+	if events[0].Conn == "" || events[1].Conn != events[0].Conn || events[2].Conn != events[0].Conn {
+		t.Errorf("the events of one connection have different ids: %v", events)
 	}
 	closed := events[len(events)-1]
 	if closed.BytesUp < int64(len(echHello("example.com", true))) || closed.BytesDown == 0 {
@@ -459,15 +475,15 @@ func TestAHelloWithAnotherOrNoServerNameIsDeniedNeverTerminatedWithOrWithoutECH(
 			if n, _ := conn.Read(make([]byte, 1)); n != 0 {
 				t.Error("the proxy answered a hello with a name it did not approve")
 			}
-			waitFor(t, func() bool { return r.hasAction("example.com", "deny") })
+			waitFor(t, func() bool { return r.hasStep("example.com", "connect/deny") })
 			for _, event := range r.events("example.com") {
-				switch event.Action {
-				case "deny":
-					if !strings.Contains(event.Reason, "server name") {
-						t.Errorf("reason = %q", event.Reason)
+				switch {
+				case event.Decision == OutcomeDeny:
+					if event.Reason.Code != CodeSNIMismatch || !strings.Contains(event.Reason.Text, "server name") {
+						t.Errorf("reason = %+v", event.Reason)
 					}
-				case "intercept", "allow", "close":
-					t.Errorf("unexpected %q event", event.Action)
+				case event.Decision == OutcomeAllow, event.Kind == KindClose:
+					t.Errorf("unexpected %q event", step(event))
 				}
 			}
 			if dialed.Load() {
@@ -484,7 +500,7 @@ func TestAnECHClientHelloForAHostTheProfileDoesNotAllowIsRefusedAtCONNECT(t *tes
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d", response.StatusCode)
 	}
-	if r.hasAction("other.example", "intercept") {
+	if r.hasStep("other.example", "connect/allow") {
 		t.Error("a host outside the profile was terminated")
 	}
 }
@@ -497,7 +513,10 @@ func terminated(t *testing.T, r *rig, host string) (client net.Conn, done chan s
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
-		r.proxy.terminate(server, peer{agent: "coder", instance: testInstance}, host, Decision{}, true)
+		c := newConn(r.proxy.audit, HTTPS)
+		c.from("coder", testInstance, "coder")
+		c.host = host
+		r.proxy.terminate(server, c, Decision{}, true)
 	}()
 	t.Cleanup(func() { client.Close() })
 	return client, done
@@ -521,12 +540,12 @@ func TestARequestInsideATerminatedConnectionIsForwardedUnloggedAndTheConnectionI
 	client.Close()
 	<-done
 	log := r.audit.String()
-	if strings.Contains(log, `"action":"request"`) || strings.Contains(log, "some/page") || strings.Contains(log, "zq9query") {
+	if strings.Contains(log, `"event":"request"`) || strings.Contains(log, "some/page") || strings.Contains(log, "zq9query") {
 		t.Errorf("a terminated connection logged its requests:\n%s", log)
 	}
 	events := r.events("example.com")
-	if got := actions(events); len(got) != 2 || got[0] != "intercept" || got[1] != "close" {
-		t.Fatalf("actions = %v", got)
+	if got := steps(events); !slices.Equal(got, []string{"connect/allow/intercept", "close"}) {
+		t.Fatalf("steps = %v", got)
 	}
 	if events[1].BytesUp == 0 || events[1].BytesDown == 0 {
 		t.Errorf("close: up %d, down %d", events[1].BytesUp, events[1].BytesDown)
@@ -589,8 +608,8 @@ func TestAHandshakeFailureAfterECHSaysWhyAndAnInterceptedHostKeepsTheGenericMess
 	<-done
 	var reason string
 	for _, event := range r.events("example.com") {
-		if event.Action == "error" || event.Action == "aborted" {
-			reason = event.Reason
+		if event.Kind == KindHandshake && event.Decision == OutcomeError {
+			reason = event.Reason.Text
 		}
 	}
 	for _, want := range []string{"Encrypted Client Hello", "does not trust the project CA", "terminate TLS"} {
@@ -598,7 +617,7 @@ func TestAHandshakeFailureAfterECHSaysWhyAndAnInterceptedHostKeepsTheGenericMess
 			t.Errorf("reason %q lacks %q", reason, want)
 		}
 	}
-	if !r.hasAction("example.com", "close") {
+	if !r.hasStep("example.com", "close") {
 		t.Error("no close event")
 	}
 
@@ -629,7 +648,7 @@ func TestATerminatedECHConnectionHoldsItsConnectionSlotUntilItEnds(t *testing.T)
 		t.Errorf("a second connection got status %d while the first was terminated", response.StatusCode)
 	}
 	// the client goes quiet: the idle timeout ends the connection, which frees the slot
-	waitFor(t, func() bool { return r.hasAction("example.com", "close") })
+	waitFor(t, func() bool { return r.hasStep("example.com", "close") })
 	waitForASlot(t, r)
 }
 
@@ -657,7 +676,7 @@ func TestParseServerNameHandlesFragmentsAndLongNamesWithoutPanicking(t *testing.
 func TestAuditFieldsFromTheAgentAreTruncated(t *testing.T) {
 	var out syncBuffer
 	audit := NewAudit(&out)
-	audit.Log(Event{Agent: strings.Repeat("a", 5000), Host: strings.Repeat("h", 5000), Action: "deny", Reason: strings.Repeat("r", 5000)})
+	audit.Log(Event{Agent: strings.Repeat("a", 5000), Host: strings.Repeat("h", 5000), Kind: KindConnect, Decision: OutcomeDeny, Reason: because(CodeNotInProfile, strings.Repeat("r", 5000))})
 	line := out.String()
 	if len(line) > 1500 {
 		t.Fatalf("the audit line is %d bytes", len(line))
@@ -673,7 +692,7 @@ func TestAuditFieldsFromTheAgentAreTruncated(t *testing.T) {
 
 func TestAuditTruncationKeepsValidUTF8(t *testing.T) {
 	var out syncBuffer
-	NewAudit(&out).Log(Event{Action: "deny", Reason: strings.Repeat("é", 400)})
+	NewAudit(&out).Log(Event{Kind: KindConnect, Decision: OutcomeDeny, Reason: because(CodeNotInProfile, strings.Repeat("é", 400))})
 	if !json.Valid([]byte(out.String())) || strings.Contains(out.String(), "�") {
 		t.Errorf("line = %q", out.String())
 	}
@@ -690,10 +709,10 @@ func TestATunnelIsAuditedWhenItClosesWithTheBytesAndDuration(t *testing.T) {
 	io.WriteString(client, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
 	io.Copy(io.Discard, client)
 	conn.Close()
-	waitFor(t, func() bool { return strings.Contains(r.audit.String(), `"action":"close"`) })
+	waitFor(t, func() bool { return strings.Contains(r.audit.String(), `"event":"close"`) })
 	var closed Event
 	for _, line := range strings.Split(r.audit.String(), "\n") {
-		if strings.Contains(line, `"action":"close"`) {
+		if strings.Contains(line, `"event":"close"`) {
 			json.Unmarshal([]byte(line), &closed)
 		}
 	}

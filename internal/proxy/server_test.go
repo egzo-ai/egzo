@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -159,9 +160,50 @@ func TestInjectsTheCredentialAndReplacesWhatTheAgentSent(t *testing.T) {
 	if strings.Contains(r.audit.String(), "REAL-SECRET") {
 		t.Error("the audit log contains the secret")
 	}
-	if !strings.Contains(r.audit.String(), `"action":"inject"`) {
+	if !strings.Contains(r.audit.String(), `"mode":"inject"`) {
 		t.Errorf("audit should record the interception:\n%s", r.audit.String())
 	}
+}
+
+func TestTheEventsOfAConnectionShareItsIdAndATerminatedConnectionIsClosedLikeATunnel(t *testing.T) {
+	r := newRig(t, nil)
+	r.setPolicy("coder", "tok", nil, anthropic)
+	for range 2 {
+		client := r.client("coder", "tok", r.ca.Cert)
+		body(t, mustGet(t, client, "https://example.com/a"))
+		body(t, mustGet(t, client, "https://example.com/b"))
+		client.CloseIdleConnections()
+	}
+	waitFor(t, func() bool { return strings.Count(r.audit.String(), `"event":"close"`) == 2 })
+	byConn := map[string][]string{}
+	var order []string
+	for _, event := range r.events("example.com") {
+		if event.Protocol != HTTPS || event.Agent != "coder" || event.Instance != testInstance || event.Profile != "coder" {
+			t.Errorf("event = %+v", event)
+		}
+		if _, seen := byConn[event.Conn]; !seen {
+			order = append(order, event.Conn)
+		}
+		byConn[event.Conn] = append(byConn[event.Conn], step(event)+" "+event.Path)
+	}
+	if len(order) != 2 || len(order[0]) != 16 {
+		t.Fatalf("connections = %q", order)
+	}
+	for _, id := range order {
+		want := []string{"connect/allow/inject ", "request/allow /a", "request/allow /b", "close "}
+		if !slices.Equal(byConn[id], want) {
+			t.Errorf("connection %s = %q, want %q", id, byConn[id], want)
+		}
+	}
+}
+
+func mustGet(t *testing.T, client *http.Client, url string) *http.Response {
+	t.Helper()
+	response, err := client.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
 }
 
 func TestInjectsWithAValueTemplate(t *testing.T) {
@@ -247,7 +289,7 @@ func TestAllowedHostsWithoutInjectionAreTunnelledNotIntercepted(t *testing.T) {
 	if got := r.lastHeader().Get("x-api-key"); got != "" {
 		t.Errorf("a credential was injected into a tunnel: %q", got)
 	}
-	if !strings.Contains(r.audit.String(), `"action":"allow"`) {
+	if !strings.Contains(r.audit.String(), `"decision":"allow","mode":"tunnel"`) {
 		t.Errorf("audit:\n%s", r.audit.String())
 	}
 }
@@ -259,7 +301,7 @@ func TestDeniesHostsOutsideTheProfile(t *testing.T) {
 	if err == nil {
 		t.Fatal("a host outside the profile was reachable")
 	}
-	if !strings.Contains(r.audit.String(), `"action":"deny"`) || !strings.Contains(r.audit.String(), "evil.example") {
+	if !strings.Contains(r.audit.String(), `"decision":"deny"`) || !strings.Contains(r.audit.String(), `"code":"not-in-profile"`) || !strings.Contains(r.audit.String(), "evil.example") {
 		t.Errorf("audit:\n%s", r.audit.String())
 	}
 	if r.requests() != 0 {
@@ -342,7 +384,7 @@ func TestNoCredentialsIsAChallengeAndWrongCredentialsAreADenial(t *testing.T) {
 	if response.StatusCode != http.StatusProxyAuthRequired || response.Header.Get("Proxy-Authenticate") == "" {
 		t.Fatalf("no credentials: %d, challenge %q", response.StatusCode, response.Header.Get("Proxy-Authenticate"))
 	}
-	if events := r.events("example.com"); len(events) != 1 || events[0].Action != "challenge" || events[0].Agent != "" || events[0].Reason == "" {
+	if events := r.events("example.com"); len(events) != 1 || events[0].Decision != OutcomeChallenge || events[0].Agent != "" || events[0].Reason.Code != CodeNoCredentials {
 		t.Fatalf("events after a bare CONNECT = %+v", events)
 	}
 
@@ -357,7 +399,7 @@ func TestNoCredentialsIsAChallengeAndWrongCredentialsAreADenial(t *testing.T) {
 		t.Fatalf("events = %+v", events)
 	}
 	for _, event := range events {
-		if event.Action != "deny" || event.Reason != "invalid proxy credentials" {
+		if event.Decision != OutcomeDeny || event.Reason.Code != CodeCredentials || event.Instance != "" || event.Profile != "" {
 			t.Errorf("event = %+v", event)
 		}
 	}
@@ -451,7 +493,7 @@ func TestADroppedHandshakeIsLoggedAsAbortedNotDenied(t *testing.T) {
 	for i := 0; i < 100 && !strings.Contains(r.audit.String(), "aborted"); i++ {
 		waitABit()
 	}
-	if !strings.Contains(r.audit.String(), `"action":"aborted"`) || strings.Contains(r.audit.String(), `"action":"deny"`) {
+	if !strings.Contains(r.audit.String(), `"code":"aborted"`) || strings.Contains(r.audit.String(), `"decision":"deny"`) {
 		t.Errorf("audit:\n%s", r.audit.String())
 	}
 }
@@ -467,7 +509,7 @@ func TestRefusesATunnelWhoseTLSServerNameDiffersFromTheApprovedHost(t *testing.T
 	for i := 0; i < 100 && !strings.Contains(r.audit.String(), "differs"); i++ {
 		waitABit()
 	}
-	if !strings.Contains(r.audit.String(), `"action":"deny"`) || !strings.Contains(r.audit.String(), "other.example") {
+	if !strings.Contains(r.audit.String(), `"code":"sni-mismatch"`) || !strings.Contains(r.audit.String(), "other.example") {
 		t.Errorf("audit:\n%s", r.audit.String())
 	}
 	if r.requests() != 0 {

@@ -71,11 +71,14 @@ class Probe:
         return self.engine.exec(self.container(name).name, "sh", "-c", f"curl -sS -m 25 {script}")
 
     def audit(self, *args, agent=None, host=None):
+        """The events of the audit trail; with agent, those of the instance of that name that exists now (a name can come back,
+        an instance's id does not)."""
         events = [json.loads(line) for line in self.project.ok("proxy log", *args).stdout.splitlines() if line.startswith("{")]
-        return [e for e in events if (agent is None or e.get("agent") == agent) and (host is None or e.get("host") == host)]
+        instance = self.container(agent).labels[f"{LABEL_PREFIX}instance-id"] if agent is not None else None
+        return [e for e in events if (agent is None or e.get("instance") == instance) and (host is None or e.get("host") == host)]
 
     def requests_to(self, host, agent):
-        return [e for e in self.audit(agent=agent, host=host) if e["action"] == "request"]
+        return [e for e in self.audit(agent=agent, host=host) if e["event"] == "request"]
 
     def proxy_log(self):
         logs = self.engine.run("logs", self.container("proxy").name)

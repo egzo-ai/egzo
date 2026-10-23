@@ -59,7 +59,7 @@ def test_logs_and_exec_work_on_instances_and_sidecars_by_name_and_say_when_it_is
     p.sh("exec coder-1 -- curl -sS -m 10 -o /dev/null https://example.org/")
     audit = [json.loads(line) for line in p.ok("proxy log").stdout.splitlines() if line.startswith("{")]
     denied = [e for e in audit if e["host"] == "example.org"]
-    assert denied and denied[0]["action"] == "deny" and denied[0]["agent"] == "coder-1"
+    assert denied and denied[0]["decision"] == "deny" and denied[0]["agent"] == "coder-1"
     trail = p.pty("proxy log --follow")
     p.sh("exec coder-1 -- curl -sS -m 10 -o /dev/null https://example.net/")
     trail.expect(b"example.net")
