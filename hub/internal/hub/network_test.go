@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"testing"
 	"time"
 
@@ -28,7 +29,9 @@ func trailOf(a engines.Agent) *trail {
 func (t *trail) next(e engines.AuditEvent) engines.AuditEvent {
 	t.at = t.at.Add(time.Second)
 	e.Time, e.Agent, e.Instance, e.Profile = t.at, t.agent, t.instance, t.profile
-	e.Conn = t.agent + t.at.Format("150405.000")
+	id := fnv.New64a() // a connection's id, as the proxy makes them: 16 hex digits
+	id.Write([]byte(t.agent + t.at.Format(time.RFC3339Nano)))
+	e.Conn = fmt.Sprintf("%016x", id.Sum64())
 	if e.Protocol == "" {
 		e.Protocol = proxy.HTTPS
 	}

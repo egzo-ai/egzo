@@ -474,7 +474,11 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User
 		}
 		events = append(events, row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"feed": feedOf(view.Feed), "denials": denials, "events": events})
+	body := map[string]any{"feed": feedOf(view.Feed), "denials": denials, "events": events}
+	if view.Ignored > 0 {
+		body["ignored"] = map[string]any{"count": view.Ignored, "last": view.IgnoredWhy}
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request, user store.User) {
