@@ -150,7 +150,7 @@ func TestAListingWithoutEndIsCutOffInBoundedMemory(t *testing.T) {
 			}
 		}).dial()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // the hub's own deadline for a scan
 	defer cancel()
 	var err error
 	n := allocated(func() { _, err = d.Projects(ctx) })
