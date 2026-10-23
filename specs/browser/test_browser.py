@@ -161,9 +161,9 @@ def test_the_browser_is_part_of_the_image_registered_with_the_harness_and_browse
     assert "Page Title: Example Domain" in allowed["text"] and "Page Title: dev" in local["text"] and "net::ERR_" in refused["text"]
     # Chromium sent Encrypted Client Hello and the proxy answered it: nothing was refused for that, nothing was logged per request, and what
     # never went through the proxy (localhost) is not in its log
-    assert [e for e in audit(p, "example.com", name) if e["action"] == "intercept"]
-    assert not [e for e in audit(p, "example.com", name) if e["action"] in ("deny", "request")]
-    assert [e for e in audit(p, "example.org", name) if e["action"] == "deny" and "egress profile" in e["reason"]]
+    assert [e for e in audit(p, "example.com", name) if e.get("mode") == "intercept" and e["reason"]["code"] == "ech"]
+    assert not [e for e in audit(p, "example.com", name) if e.get("decision") == "deny" or e["event"] == "request"]
+    assert [e for e in audit(p, "example.org", name) if e.get("decision") == "deny" and e["reason"]["code"] == "not-in-profile"]
     assert audit(p, "localhost", name) == []
     found = engine.exec(container, "sh", "-c", "find / \\( -path /proc -o -path /sys \\) -prune -o -name .playwright-mcp -print 2>/dev/null")
     assert found.stdout.strip() == "" and ".playwright-mcp" not in json.dumps([allowed, refused, local]), "the browser leaves nothing where the agent works"
@@ -191,9 +191,9 @@ def test_with_everything_audited_the_pages_the_browser_loads_are_logged_and_a_pa
     wild = p.spawn("wild", timeout=900)
     (page,) = call_tools(engine, p, wild, "claude-code", [navigate("https://example.com/")])
     assert "Page Title: Example Domain" in page["text"]
-    requests = [e for e in audit(p, "example.com", wild) if e["action"] == "request"]
+    requests = [e for e in audit(p, "example.com", wild) if e["event"] == "request"]
     assert any(r["method"] == "GET" and r["path"] == "/" and r["status"] == 200 for r in requests)
-    assert not [e for e in audit(p, "example.com", wild) if e["action"] in ("deny", "intercept")]
+    assert not [e for e in audit(p, "example.com", wild) if e.get("decision") == "deny" or e.get("mode") == "intercept"]
 
     login = p.spawn("login", timeout=900)
     container = engine.instance(p.name, login).name

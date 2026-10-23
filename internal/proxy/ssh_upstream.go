@@ -111,26 +111,27 @@ func sshControl(network, address string, _ syscall.RawConn) error {
 
 // dialFailure says, in a sentence safe to show an agent, why a server could not be reached.
 type dialFailure struct {
+	Code   Code   // why, for the audit
 	Public string // what the agent is told
 	Detail string // what the audit records
 }
 
 func (f *dialFailure) Error() string { return f.Detail }
 
-func failure(public string, err error) *dialFailure {
-	return &dialFailure{Public: public, Detail: public + ": " + err.Error()}
+func failure(code Code, public string, err error) *dialFailure {
+	return &dialFailure{Code: code, Public: public, Detail: public + ": " + err.Error()}
 }
 
 // dialSSH connects to a server of a profile as its user with its key, checks the pinned host key, and returns the client.
 func (s *Server) dialSSH(ctx context.Context, server SSHServer) (*ssh.Client, *dialFailure) {
 	pinned, err := parsePin(server.HostKey)
 	if err != nil {
-		return nil, failure("the server's host key is not usable", err)
+		return nil, failure(CodeHostKey, "the server's host key is not usable", err)
 	}
 	signer, err := ssh.ParsePrivateKey([]byte(server.Key))
 	if err != nil {
 		// The error of the parser can quote the key; say nothing of it.
-		return nil, &dialFailure{Public: "the key for this server is not usable", Detail: "the private key could not be parsed"}
+		return nil, &dialFailure{Code: CodeKey, Public: "the key for this server is not usable", Detail: "the private key could not be parsed"}
 	}
 	address := net.JoinHostPort(server.Host, strconv.Itoa(server.Port))
 
@@ -139,7 +140,7 @@ func (s *Server) dialSSH(ctx context.Context, server SSHServer) (*ssh.Client, *d
 	for _, algorithms := range pinned.algorithms() {
 		conn, err := s.dialSSHConn(ctx, address)
 		if err != nil {
-			return nil, failure("could not connect to the server", err)
+			return nil, failure(CodeDial, "could not connect to the server", err)
 		}
 		config := &ssh.ClientConfig{
 			User:              server.User,
@@ -170,11 +171,11 @@ func (s *Server) dialSSH(ctx context.Context, server SSHServer) (*ssh.Client, *d
 	}
 	switch {
 	case mismatch != nil:
-		return nil, &dialFailure{Public: "the server's host key is not the pinned one", Detail: mismatch.Error()}
+		return nil, &dialFailure{Code: CodeHostKey, Public: "the server's host key is not the pinned one", Detail: mismatch.Error()}
 	case last != nil && strings.Contains(last.Error(), "unable to authenticate"):
-		return nil, failure("the server refused the key", last)
+		return nil, failure(CodeAuth, "the server refused the key", last)
 	}
-	return nil, failure("could not open an ssh connection to the server", last)
+	return nil, failure(CodeDial, "could not open an ssh connection to the server", last)
 }
 
 func (s *Server) dialSSHConn(ctx context.Context, address string) (net.Conn, error) {

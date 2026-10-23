@@ -483,8 +483,8 @@ egress:
   body or a query string, JSON-escaped in a JSON body, as is elsewhere. `Content-Length` is recomputed.
 - Bodies are scanned when they are uncompressed and at most 1 MiB. **A request to a placeholder host with a
   body that cannot be scanned (compressed, or over 1 MiB) is refused**, never forwarded half-handled: the proxy
-  answers `413` (too large) or `415` (compressed) with a message that names the reason, and logs a `deny`
-  with the same reason. The rule depends only on the request, so a given request always succeeds or always
+  answers `413` (too large) or `415` (compressed) with a message that names the reason, and logs the request as
+  denied (code `placeholder`) with the same reason. The rule depends only on the request, so a given request always succeeds or always
   fails, and the failure says why. The reason is a fixed sentence: nothing taken from the request is ever put
   in it, since the agent controls the request (it could otherwise put its own placeholder there). Hosts of a placeholder service are meant for logins and API calls, not
   uploads; see `known-issues/secret-injection-limits.md`.
@@ -574,9 +574,8 @@ egress:
   its hello). It therefore never tunnels such a hello: if the outer SNI is the approved host it terminates TLS with the
   project CA, replaying the bytes it read (failing closed to interception, never to passthrough); a missing or different
   name is denied as for any hello. This needs no switch and no client change. A terminated-because-ECH connection is
-  logged as `intercept` (reason Encrypted Client Hello) and `close` with bytes, not per request (a host with `inspect`
-  never gets there: it is intercepted for every client from the start and logs each request, with `inspect` and no
-  `intercept`). Every ECH codepoint of the drafts and the legacy ESNI extension count as ECH. A client that does not
+  logged as a `connect` with the mode `intercept` (reason code `ech`) and a `close` with bytes, not per request (a host with `inspect`
+  never gets there: it is intercepted for every client from the start and logs each request, with the mode `inspect`). Every ECH codepoint of the drafts and the legacy ESNI extension count as ECH. A client that does not
   trust the project CA fails the handshake and the audit says why and what to do. The handshake has a hard time limit
   that a trickle of bytes cannot extend; the idle timeout counts after it. Hosts are compared lower case with one
   trailing dot trimmed (CONNECT target and Host header alike), and a Host header that is not a plain name is a 400. Clients that send
@@ -849,9 +848,11 @@ Decisions taken while building (reversible; each is covered by specs):
   tunnel when the server name is missing or differs from the approved host (domain fronting), and terminates
   instead of tunneling when the hello carries Encrypted Client Hello with the approved name. A CONNECT with no
   `Proxy-Authorization` at all (how a browser starts: it sends credentials once challenged) is answered 407 and logged as
-  `challenge`; credentials that are present and wrong are a `deny` naming the agent. Plain HTTP is refused (405); agents get `HTTP_PROXY`
+  the decision `challenge`; credentials that are present and wrong are a `deny` naming the agent the client claimed, with no instance
+  or profile. Plain HTTP is refused (405); agents get `HTTP_PROXY`
   too so `http://` fails loudly. Audit lines (JSON, no bodies or query strings) go to the proxy's
-  stdout (`egzo proxy log [--agent]`).
+  stdout (`egzo proxy log [--agent]`): one event per step of a connection, with the connection's id, its protocol, the
+  decision and a reason code from a fixed list ([docs/sandboxing.md](docs/sandboxing.md), [roadmap/proxy-audit.md](roadmap/proxy-audit.md)).
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
   init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. There is no runtime setting: containers run under the engine's default runtime, which is the host administrator's choice (gVisor included).

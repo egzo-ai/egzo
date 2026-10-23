@@ -138,11 +138,11 @@ func TestAnECHClientHelloAtAnInspectedHostIsTheExplicitPathAndIsNotLoggedAsTermi
 		t.Fatal(err)
 	}
 	body(t, response)
-	waitFor(t, func() bool { return r.hasAction("example.com", "request") })
-	if r.hasAction("example.com", "intercept") {
+	waitFor(t, func() bool { return r.hasStep("example.com", "request/allow") })
+	if r.hasStep("example.com", "connect/allow/intercept") {
 		t.Errorf("an inspected host was logged as a terminated ECH connection:\n%s", r.audit.String())
 	}
-	if !r.hasAction("example.com", "inspect") {
+	if !r.hasStep("example.com", "connect/allow/inspect") {
 		t.Errorf("no inspect event:\n%s", r.audit.String())
 	}
 }
@@ -175,8 +175,8 @@ func TestAHelloThatRepeatsTheServerNameOrIsSplitOverTwoRecordsIsDeniedEvenWithEC
 			if n, _ := conn.Read(make([]byte, 1)); n != 0 {
 				t.Error("the proxy answered a hello it should have refused")
 			}
-			waitFor(t, func() bool { return r.hasAction("example.com", "deny") })
-			if r.hasAction("example.com", "intercept") || r.hasAction("example.com", "allow") {
+			waitFor(t, func() bool { return r.hasStep("example.com", "connect/deny") })
+			if r.hasStep("example.com", "connect/allow") {
 				t.Errorf("the hello was served:\n%s", r.audit.String())
 			}
 			mu.Lock()
@@ -209,7 +209,7 @@ func TestASlowHandshakeIsCutAtTheHandshakeTimeoutWhateverTheIdleTimeout(t *testi
 	case <-time.After(3 * time.Second):
 		t.Fatal("a handshake that trickled in was still being served after the handshake timeout")
 	}
-	if !r.hasAction("example.com", "error") && !r.hasAction("example.com", "aborted") {
+	if !r.hasStep("example.com", "handshake/error") {
 		t.Errorf("the failed handshake was not logged:\n%s", r.audit.String())
 	}
 }
@@ -262,7 +262,9 @@ func TestAConnectHostWithATrailingDotIsTheSameHostAndIsLoggedNormalized(t *testi
 		t.Fatalf("status = %d", response.StatusCode)
 	}
 	conn.Close()
-	waitFor(t, func() bool { return r.hasAction("example.com", "aborted") || r.hasAction("example.com", "deny") })
+	waitFor(t, func() bool {
+		return r.hasStep("example.com", "handshake/error") || r.hasStep("example.com", "connect/deny")
+	})
 	if strings.Contains(r.audit.String(), "example.com.") {
 		t.Errorf("the audit holds the host unnormalized:\n%s", r.audit.String())
 	}

@@ -66,25 +66,25 @@ func (s *Server) sshIdleTimeout() time.Duration {
 
 // sshIdentity finds the agent whose identity key is key. It looks at every binding, so the time it takes does not tell
 // how many agents there are or which one matched.
-func (s *Server) sshIdentity(key ssh.PublicKey) (who peer, ok bool) {
+func (s *Server) sshIdentity(key ssh.PublicKey) (agent string, binding Binding, ok bool) {
 	current := s.agents.Load()
 	if current == nil {
-		return peer{}, false
+		return "", Binding{}, false
 	}
 	wire := key.Marshal()
-	for name, binding := range *current {
-		if binding.SSHKey == "" {
+	for name, candidate := range *current {
+		if candidate.SSHKey == "" {
 			continue
 		}
-		known, _, _, _, err := ssh.ParseAuthorizedKey([]byte(binding.SSHKey))
+		known, _, _, _, err := ssh.ParseAuthorizedKey([]byte(candidate.SSHKey))
 		if err != nil {
 			continue
 		}
 		if subtle.ConstantTimeCompare(known.Marshal(), wire) == 1 {
-			who, ok = peer{agent: name, instance: binding.Instance}, true
+			agent, binding, ok = name, candidate, true
 		}
 	}
-	return who, ok
+	return agent, binding, ok
 }
 
 // sshServerOf finds the server an agent's profile names.
@@ -117,14 +117,16 @@ func (s *Server) sshServerConfig() (*ssh.ServerConfig, error) {
 		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			// What is decided here is returned in the permissions of this very key: x/crypto calls the callback for every key
 			// a client offers, and only the one that signs is the identity (CVE-2024-45337).
-			who, ok := s.sshIdentity(key)
+			agent, binding, ok := s.sshIdentity(key)
 			if !ok {
 				return nil, errors.New("unknown identity")
 			}
-			if _, ok := s.sshServerOf(who.agent, meta.User()); !ok {
+			if _, ok := s.sshServerOf(agent, meta.User()); !ok {
 				return nil, errors.New("no such server")
 			}
-			return &ssh.Permissions{Extensions: map[string]string{"agent": who.agent, "instance": who.instance, "server": meta.User()}}, nil
+			return &ssh.Permissions{Extensions: map[string]string{
+				"agent": agent, "instance": binding.Instance, "profile": binding.Profile, "server": meta.User(),
+			}}, nil
 		},
 	}
 	config.AddHostKey(*hostKey)
@@ -137,10 +139,11 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 		s.handshakes.Add(-1)
 		return
 	}
+	c := newConn(s.audit, SSH)
 	config, err := s.sshServerConfig()
 	if err != nil {
 		s.handshakes.Add(-1)
-		s.audit.Log(Event{Action: "ssh-error", Reason: err.Error()})
+		c.decide(KindConnect, OutcomeError, because(CodeConfig, err.Error()))
 		return
 	}
 	raw.SetDeadline(time.Now().Add(s.handshakeTimeout()))
@@ -148,26 +151,28 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 	s.handshakes.Add(-1)
 	if err != nil {
 		// Nothing about the attempt is trusted, so it is recorded without a name.
-		s.audit.Log(Event{Action: "ssh-deny", Reason: "no valid identity for a server of a profile"})
+		c.decide(KindConnect, OutcomeDeny, because(CodeIdentity, "no valid identity for a server of a profile"))
 		return
 	}
 	raw.SetDeadline(time.Time{})
-	agent, name := sc.Permissions.Extensions["agent"], sc.Permissions.Extensions["server"]
-	who := peer{agent: agent, instance: sc.Permissions.Extensions["instance"]}
+	extensions := sc.Permissions.Extensions
+	agent, name := extensions["agent"], extensions["server"]
 	server, ok := s.sshServerOf(agent, name)
 	if !ok {
 		sc.Close()
 		return
 	}
+	c.from(agent, extensions["instance"], extensions["profile"])
+	c.host, c.server = server.Host, name
 	release, reason := s.limits.acquire(agent, s.MaxPerAgent, s.MaxTotal)
 	if release == nil {
-		s.audit.Log(who.event(Event{Host: server.Host, Server: name, Action: "ssh-deny", Reason: reason}))
+		c.decide(KindConnect, OutcomeDeny, because(CodeLimit, reason))
 		sc.Close()
 		return
 	}
 	defer release()
 
-	conn := &sshConn{s: s, agent: agent, who: who, name: name, client: sc, started: time.Now()}
+	conn := &sshConn{s: s, agent: agent, audit: c, name: name, client: sc, started: time.Now()}
 	conn.server.Store(&server)
 	conn.touch()
 	if !s.trackSSH(agent, conn) {
@@ -175,7 +180,7 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 		return
 	}
 	defer s.untrackSSH(agent, conn)
-	s.audit.Log(who.event(Event{Host: server.Host, Server: name, Action: "ssh-open"}))
+	c.decide(KindConnect, OutcomeAllow, nil)
 	conn.run(channels, requests)
 }
 
@@ -226,7 +231,7 @@ func (s *Server) closeSSH(agent string) {
 type sshConn struct {
 	s       *Server
 	agent   string
-	who     peer
+	audit   *conn                     // the host follows the entry in use
 	server  atomic.Pointer[SSHServer] // the entry in use: the one at sign-in, then the one dialed
 	name    string
 	client  *ssh.ServerConn
@@ -236,6 +241,8 @@ type sshConn struct {
 	up   atomic.Int64 // bytes from the agent to the server
 	down atomic.Int64
 
+	idled atomic.Bool // closed by the proxy for being idle
+
 	mu       sync.Mutex
 	upstream *ssh.Client
 	failed   *dialFailure
@@ -244,9 +251,14 @@ type sshConn struct {
 
 func (c *sshConn) touch() { c.last.Store(time.Now().UnixNano()) }
 
-func (c *sshConn) audit(event Event) {
-	event.Host, event.Server = c.server.Load().Host, c.name
-	c.s.audit.Log(c.who.event(event))
+// log writes an event of the connection, with the host of the entry in use.
+func (c *sshConn) log(event Event) {
+	event.Host = c.server.Load().Host
+	c.audit.log(event)
+}
+
+func (c *sshConn) decide(k Kind, decision Outcome, reason *Reason) {
+	c.log(Event{Kind: k, Decision: decision, Reason: reason})
 }
 
 // connect dials the server once for all the sessions of this connection.
@@ -260,14 +272,14 @@ func (c *sshConn) connect() (*ssh.Client, *dialFailure) {
 	// A server whose entry changed or went away since the agent signed in is not dialed with the old entry.
 	server, ok := c.s.sshServerOf(c.agent, c.name)
 	if !ok {
-		c.failed = &dialFailure{Public: "this server is not in your egress profile any more", Detail: "server no longer in the profile"}
+		c.failed = &dialFailure{Code: CodeNotInProfile, Public: "this server is not in your egress profile any more", Detail: "server no longer in the profile"}
 		return nil, c.failed
 	}
 	c.server.Store(&server)
 	client, failed := c.s.dialSSH(context.Background(), server)
 	if failed != nil {
 		c.failed = failed
-		c.audit(Event{Action: "ssh-error", Reason: failed.Detail})
+		c.decide(KindUpstream, OutcomeError, because(failed.Code, failed.Detail))
 		return nil, failed
 	}
 	c.upstream = client
@@ -289,7 +301,7 @@ func (c *sshConn) run(channels <-chan ssh.NewChannel, requests <-chan *ssh.Reque
 				ok = true
 			default:
 				// tcpip-forward, streamlocal-forward and the rest: nothing is listened on for an agent.
-				c.audit(Event{Action: "ssh-deny", Reason: "global request refused: " + request.Type})
+				c.decide(KindRequest, OutcomeDeny, because(CodeForwarding, "global request refused: "+request.Type))
 			}
 			if request.WantReply {
 				request.Reply(ok, nil)
@@ -302,7 +314,7 @@ func (c *sshConn) run(channels <-chan ssh.NewChannel, requests <-chan *ssh.Reque
 	for channel := range channels {
 		if channel.ChannelType() != "session" {
 			// direct-tcpip, forwarded-tcpip, x11, streamlocal: the agent gets a shell or a command, never a way onward.
-			c.audit(Event{Action: "ssh-deny", Reason: "channel refused: " + channel.ChannelType()})
+			c.decide(KindChannel, OutcomeDeny, because(CodeChannel, "channel refused: "+channel.ChannelType()))
 			channel.Reject(ssh.Prohibited, "egzo only relays ssh sessions")
 			continue
 		}
@@ -325,7 +337,11 @@ func (c *sshConn) run(channels <-chan ssh.NewChannel, requests <-chan *ssh.Reque
 		c.upstream.Close()
 	}
 	c.mu.Unlock()
-	c.audit(Event{Action: "ssh-close", BytesUp: c.up.Load(), BytesDown: c.down.Load(), DurationMs: time.Since(c.started).Milliseconds()})
+	var reason *Reason
+	if c.idled.Load() {
+		reason = because(CodeIdle, "closed after being idle")
+	}
+	c.log(Event{Kind: KindClose, BytesUp: c.up.Load(), BytesDown: c.down.Load(), DurationMs: time.Since(c.started).Milliseconds(), Reason: reason})
 }
 
 // watchIdle closes the connection when no session has moved data for the idle timeout.
@@ -343,7 +359,7 @@ func (c *sshConn) watchIdle(done <-chan struct{}) {
 			return
 		case <-ticker.C:
 			if time.Since(time.Unix(0, c.last.Load())) > idle {
-				c.audit(Event{Action: "ssh-error", Reason: "closed after being idle"})
+				c.idled.Store(true)
 				c.client.Close()
 				return
 			}
@@ -390,7 +406,7 @@ func (c *sshConn) session(newChannel ssh.NewChannel) {
 	}
 	remote, remoteRequests, err := upstream.OpenChannel("session", nil)
 	if err != nil {
-		c.audit(Event{Action: "ssh-error", Reason: "could not open a session on the server: " + err.Error()})
+		c.decide(KindUpstream, OutcomeError, because(CodeSession, "could not open a session on the server: "+err.Error()))
 		c.refuse(newChannel, "the server did not open a session")
 		return
 	}
@@ -471,25 +487,25 @@ func (c *sshConn) forward(request *ssh.Request, remote ssh.Channel) {
 				c.reply(request, false)
 				return
 			}
-			c.audit(Event{Action: "ssh-exec", Command: command.Command})
+			c.log(Event{Kind: KindExec, Decision: OutcomeAllow, Command: command.Command})
 		case "shell":
-			c.audit(Event{Action: "ssh-shell"})
+			c.decide(KindShell, OutcomeAllow, nil)
 		}
 		ok, err := remote.SendRequest(request.Type, request.WantReply, request.Payload)
 		c.reply(request, ok && err == nil)
 	case "subsystem":
 		var subsystem struct{ Name string }
 		if ssh.Unmarshal(request.Payload, &subsystem) != nil || subsystem.Name != "sftp" {
-			c.audit(Event{Action: "ssh-deny", Reason: "request refused: subsystem"})
+			c.decide(KindRequest, OutcomeDeny, because(CodeRequest, "request refused: subsystem"))
 			c.reply(request, false)
 			return
 		}
-		c.audit(Event{Action: "ssh-sftp"})
+		c.decide(KindSFTP, OutcomeAllow, nil)
 		ok, err := remote.SendRequest(request.Type, request.WantReply, request.Payload)
 		c.reply(request, ok && err == nil)
 	default:
 		// x11-req, auth-agent-req@openssh.com and anything unknown.
-		c.audit(Event{Action: "ssh-deny", Reason: "request refused: " + request.Type})
+		c.decide(KindRequest, OutcomeDeny, because(CodeRequest, "request refused: "+request.Type))
 		c.reply(request, false)
 	}
 }

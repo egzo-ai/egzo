@@ -67,10 +67,13 @@ def test_agents_are_pointed_at_the_proxy_trust_its_ca_and_cannot_use_it_without_
     refused = probe.curl(name, "--proxy", "http://proxy:3128", "-o", "/dev/null", "https://example.com/")
     assert refused.returncode != 0 and "407" in refused.stderr
     # asking for credentials is how a browser starts (it sends them only once challenged), so it is not a denial; wrong ones are
-    assert [e["action"] for e in probe.audit(host="example.com")] == ["challenge"]
+    (challenge,) = probe.audit(host="example.com")
+    assert challenge["decision"] == "challenge" and challenge["reason"]["code"] == "no-credentials" and "agent" not in challenge
     wrong = probe.curl(name, "--proxy", "http://" + name + ":wrong@proxy:3128", "-o", "/dev/null", "https://example.com/")
     assert "407" in wrong.stderr
-    assert [e["agent"] for e in probe.audit(host="example.com") if e["action"] == "deny"] == [name]
+    denied = [e for e in probe.audit(host="example.com") if e["decision"] == "deny"]
+    assert [(e["agent"], e["reason"]["code"]) for e in denied] == [(name, "credentials")]
+    assert "instance" not in denied[0] and "profile" not in denied[0], "credentials that do not match prove nothing about who sent them"
 
     huge = "h" * 4000  # the audit log cannot be filled by one long value
     probe.curl(name, "-o", "/dev/null", "--proxy", f"http://{huge}:x@proxy:3128", "https://example.com/")
@@ -82,7 +85,8 @@ def test_the_proxy_never_connects_to_a_private_address_or_another_agent_even_whe
     for target in ("10.0.0.1", "169.254.169.254", "192.168.1.1", "172.17.0.1"):
         result = probe.status(name, target)
         assert result.returncode != 0 and "403" in result.stderr, target
-    assert "not a public address" in probe.proxy_log()
+    refused = [e for e in probe.audit(agent=name) if e["decision"] == "deny"]
+    assert len(refused) == 4 and {e["reason"]["code"] for e in refused} == {"private-address"}
 
     address = probe.container(other).raw["NetworkSettings"]["Networks"][f"{sandbox.name}_{other}"]["IPAddress"]
     through = probe.status(name, address)
@@ -97,25 +101,27 @@ def test_an_encrypted_client_hello_is_terminated_and_never_tunneled_nor_widens_w
     name = sandbox.spawn("ech")
     # without the extension the proxy tunnels, and there is nothing to tunnel to
     assert hello(probe, name, ECH_HOST) == "closed"
-    assert [e for e in probe.audit(agent=name, host=ECH_HOST) if e["action"] == "error"]
+    assert [e for e in probe.audit(agent=name, host=ECH_HOST) if e["event"] == "connect" and e["decision"] == "error" and e["reason"]["code"] == "dial"]
     # with it, the proxy is the TLS server (a client that sends its first bytes right behind CONNECT included)
     assert hello(probe, name, ECH_HOST, "--ech") == "server-hello"
     assert hello(probe, name, ECH_HOST, "--ech", "--pipelined") == "server-hello"
     events = probe.audit(agent=name, host=ECH_HOST)
-    assert len([e for e in events if e["action"] == "intercept"]) == 2
-    assert "Encrypted Client Hello" in next(e for e in events if e["action"] == "intercept")["reason"]
-    assert [e for e in events if e["action"] == "close" and e.get("bytes_up", 0) > 0 and e.get("bytes_down", 0) > 0], "logged like a tunnel"
-    assert not [e for e in events if e["action"] in ("deny", "request")]
+    intercepted = [e for e in events if e.get("mode") == "intercept"]
+    assert len(intercepted) == 2 and all(e["event"] == "connect" and e["decision"] == "allow" for e in intercepted)
+    assert intercepted[0]["reason"]["code"] == "ech" and "Encrypted Client Hello" in intercepted[0]["reason"]["text"]
+    closed = [e for e in events if e["event"] == "close" and e["conn"] in {i["conn"] for i in intercepted}]
+    assert len(closed) == 2 and all(e.get("bytes_up", 0) > 0 and e.get("bytes_down", 0) > 0 for e in closed), "logged like a tunnel"
+    assert not [e for e in events if e.get("decision") == "deny" or e["event"] == "request"]
 
     # an allowed name cannot front for another one, with or without encryption
     for flags in (["--sni", "other.egzo-spec.invalid"], ["--no-sni"], ["--ech", "--sni", "other.egzo-spec.invalid"], ["--ech", "--no-sni"]):
         assert hello(probe, name, ECH_HOST, *flags) == "closed", flags
-    denied = [e for e in probe.audit(agent=name, host=ECH_HOST) if e["action"] == "deny"]
-    assert len(denied) == 4 and all("server name" in e["reason"] for e in denied)
+    denied = [e for e in probe.audit(agent=name, host=ECH_HOST) if e.get("decision") == "deny"]
+    assert len(denied) == 4 and {e["reason"]["code"] for e in denied} == {"sni-mismatch"}
 
     assert hello(probe, name, "other.egzo-spec.invalid", "--ech") == "refused 403"
-    assert [e for e in probe.audit(agent=name, host="other.egzo-spec.invalid") if e["action"] == "deny"]
-    assert len([e for e in probe.audit(agent=name) if e["action"] == "intercept"]) == 2, "no more interceptions than the approved host's two"
+    assert [e for e in probe.audit(agent=name, host="other.egzo-spec.invalid") if e.get("decision") == "deny"]
+    assert len([e for e in probe.audit(agent=name) if e.get("mode") == "intercept"]) == 2, "no more interceptions than the approved host's two"
 
 
 def test_a_proxy_that_has_no_policy_tells_the_agent_what_to_do_until_egzo_loads_it_again(sandbox, probe):
@@ -127,6 +133,7 @@ def test_a_proxy_that_has_no_policy_tells_the_agent_what_to_do_until_egzo_loads_
     refused = probe.curl(name, "-o", "/dev/null", "https://example.com/")
     assert refused.returncode != 0 and ("503" in refused.stderr or "egzo project up" in refused.stderr)
     assert "407" not in refused.stderr, "a missing policy is not an authentication problem"
+    assert [e for e in probe.audit(host="example.com") if e["decision"] == "deny" and e["reason"]["code"] == "no-policy"]
     sandbox.ok("restart proxy")  # through egzo it is loaded again
     assert "503" not in probe.curl(name, "--proxy", "http://proxy:3128", "-o", "/dev/null", "https://example.com/").stderr
 

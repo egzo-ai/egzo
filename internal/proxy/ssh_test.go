@@ -218,9 +218,24 @@ func (s *safeBuffer) events() []Event {
 	return events
 }
 
-func (s *safeBuffer) has(action, containing string) bool {
+// has says whether an ssh event of the step kind has containing in its reason or its command.
+func (s *safeBuffer) has(kind Kind, containing string) bool {
 	for _, e := range s.events() {
-		if e.Action == action && strings.Contains(e.Reason+e.Command, containing) {
+		text := e.Command
+		if e.Reason != nil {
+			text += e.Reason.Text
+		}
+		if e.Protocol == SSH && e.Kind == kind && strings.Contains(text, containing) {
+			return true
+		}
+	}
+	return false
+}
+
+// failed says whether the server could not be reached, for the reason code, with containing in the text.
+func (s *safeBuffer) failed(code Code, containing string) bool {
+	for _, e := range s.events() {
+		if e.Kind == KindUpstream && e.Decision == OutcomeError && e.Reason.Code == code && strings.Contains(e.Reason.Text, containing) {
 			return true
 		}
 	}
@@ -306,7 +321,7 @@ func TestSSHRunsACommandOnTheServerAndAuditsIt(t *testing.T) {
 	if err != nil || out != "hello\n" {
 		t.Fatalf("out %q err %v", out, err)
 	}
-	if !r.audit.has("ssh-exec", "echo") || !r.audit.has("ssh-open", "") {
+	if !r.audit.has(KindExec, "echo") || !r.audit.has(KindConnect, "") {
 		t.Fatalf("audit: %+v", r.audit.events())
 	}
 	// The server saw the user of the profile, not the one the agent typed.
@@ -364,7 +379,7 @@ func TestSSHRelaysAShellWithATerminal(t *testing.T) {
 	if !strings.Contains(out.String(), "welcome") || !r.fake.saw("pty-req") {
 		t.Fatalf("out %q requests %v", out.String(), r.fake.requests)
 	}
-	if !r.audit.has("ssh-shell", "") {
+	if !r.audit.has(KindShell, "") {
 		t.Fatal("the shell is audited")
 	}
 }
@@ -478,7 +493,7 @@ func TestSSHRelaysTheSftpSubsystemAndAuditsIt(t *testing.T) {
 	if err := session.RequestSubsystem("sftp"); err != nil {
 		t.Fatalf("sftp: %v", err)
 	}
-	if !r.fake.saw("subsystem") || !r.audit.has("ssh-sftp", "") {
+	if !r.fake.saw("subsystem") || !r.audit.has(KindSFTP, "") {
 		t.Fatalf("requests %v audit %+v", r.fake.requests, r.audit.events())
 	}
 }
@@ -494,7 +509,7 @@ func TestSSHRefusesAServerWhoseHostKeyIsNotThePinnedOne(t *testing.T) {
 	if len(r.fake.users) != 0 {
 		t.Fatal("the key was offered to a server that is not the pinned one")
 	}
-	if !r.audit.has("ssh-error", ssh.FingerprintSHA256(r.fake.hostKey.PublicKey())) {
+	if !r.audit.failed(CodeHostKey, ssh.FingerprintSHA256(r.fake.hostKey.PublicKey())) {
 		t.Fatalf("the audit should name the key the server presented: %+v", r.audit.events())
 	}
 }
@@ -553,7 +568,7 @@ func TestSSHAnUnreadableKeyNeverQuotesIt(t *testing.T) {
 		t.Fatalf("stderr %q", stderr)
 	}
 	for _, e := range r.audit.events() {
-		if strings.Contains(e.Reason, "secret-material") {
+		if e.Reason != nil && strings.Contains(e.Reason.Text, "secret-material") {
 			t.Fatal("the audit quotes the key")
 		}
 	}
@@ -617,7 +632,11 @@ func TestSSHAnIdleConnectionIsClosed(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a silent connection stayed open")
 	}
-	if !r.audit.has("ssh-error", "idle") {
+	// the close is logged once the connection's sessions have wound down
+	for i := 0; i < 100 && !r.audit.has(KindClose, "idle"); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !r.audit.has(KindClose, "idle") {
 		t.Fatalf("audit: %+v", r.audit.events())
 	}
 }

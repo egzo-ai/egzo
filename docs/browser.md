@@ -51,10 +51,10 @@ from one that hides the real destination, so egzo does not tunnel it: for a clie
 with the project CA, as it does for a host with `inspect`, and fetches the page itself, checking the site's real
 certificate. Clients that do not send it (curl, git, Node, Python) are tunneled as before. The harness images trust the
 project CA in Chromium's own store, so this needs nothing from you. In the log (`egzo proxy log`) such a connection shows
-as `intercept` and then `close` with the bytes that went through, not as one line per request. A host with `inspect: true` is terminated for every client and logs each request instead.
+as a `connect` with the mode `intercept` and then a `close` with the bytes that went through, not as one line per request. A host with `inspect: true` is terminated for every client and logs each request instead.
 
 A browser also opens every proxy connection without credentials and sends them when challenged, so you will see a
-`challenge` per connection. That is not a refusal.
+`challenge` decision per connection. That is not a refusal.
 
 ## Limits
 

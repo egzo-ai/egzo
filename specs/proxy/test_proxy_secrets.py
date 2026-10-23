@@ -98,8 +98,10 @@ def test_the_agent_types_a_placeholder_and_the_proxy_swaps_it_for_the_secret_whe
     container = probe.container(name).name
     assert engine.exec(container, "sh", "-c", f"head -c 2097152 /dev/zero | {post} --data-binary @-").stdout.strip() == "413"
     assert engine.exec(container, "sh", "-c", f'{post} -H "Content-Encoding: gzip" -d x').stdout.strip() == "415"
-    reasons = [e["reason"] for e in probe.audit(agent=name, host="httpbin.org") if e["action"] == "deny"]
-    assert len(reasons) == 2 and any("1 MiB" in r for r in reasons) and any("compressed" in r for r in reasons)
+    denied = [e for e in probe.audit(agent=name, host="httpbin.org") if e.get("decision") == "deny"]
+    assert len(denied) == 2 and all(e["event"] == "request" and e["reason"]["code"] == "placeholder" for e in denied)
+    reasons = [e["reason"]["text"] for e in denied]
+    assert any("1 MiB" in r for r in reasons) and any("compressed" in r for r in reasons)
     refused = engine.exec(container, "sh", "-c", 'curl -sS -m 25 -H "Content-Encoding: $SITE_PASSWORD" -d x https://httpbin.org/post')
     assert "compressed" in refused.stdout or "egzo:" in refused.stdout
     assert SITE_SECRET not in refused.stdout + refused.stderr and SITE_SECRET not in json.dumps(probe.audit())

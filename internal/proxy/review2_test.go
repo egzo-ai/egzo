@@ -75,7 +75,7 @@ func TestAMalformedHostInsideATerminatedConnectionIsAudited(t *testing.T) {
 	if status := rawRequestThroughTermination(t, r, "GET / HTTP/1.1\r\nHost: "+long+"\r\nConnection: close\r\n\r\n"); status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", status)
 	}
-	waitFor(t, func() bool { return r.hasAction("example.com", "deny") })
+	waitFor(t, func() bool { return r.hasStep("example.com", "request/deny") })
 	log := r.audit.String()
 	if !strings.Contains(log, "malformed Host header") || strings.Contains(log, strings.Repeat("a", 400)) {
 		t.Errorf("the denial is missing, or the Host was not clipped:\n%.600s", log)
