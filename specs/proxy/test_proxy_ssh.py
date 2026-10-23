@@ -78,9 +78,13 @@ class Ssh:
         logs = self.engine.run("logs", self.server.name)  # sshd logs to standard error
         return (logs.stdout + logs.stderr).count("Accepted publickey for ops")
 
-    def audit(self, action=None):
+    def audit(self, event=None):
         events = [json.loads(line) for line in self.sandbox.ok("proxy log").stdout.splitlines() if line.startswith("{")]
-        return [e for e in events if e.get("agent") == self.name and (action is None or e["action"] == action)]
+        return [e for e in events if e.get("agent") == self.name and e["protocol"] == "ssh" and (event is None or e["event"] == event)]
+
+    def failed(self, code):
+        """The texts of the upstream failures of the code."""
+        return [e["reason"]["text"] for e in self.audit("upstream") if e["decision"] == "error" and e["reason"]["code"] == code]
 
 
 @pytest.fixture
@@ -120,10 +124,12 @@ def test_the_proxy_records_the_sessions_and_the_commands_the_agent_ran(ssh_of):
     a.ssh("prod", "echo audited-command")
     assert a.logins() == before + 1, "the server saw the proxy sign in, with the key of the profile"
     events = a.audit()
-    assert any(e["action"] == "ssh-open" and e["server"] == "prod" for e in events)
-    assert any(e["action"] == "ssh-exec" and e["command"] == "echo audited-command" and e["server"] == "prod" for e in events)
-    closed = [e for e in events if e["action"] == "ssh-close"]
-    assert closed and closed[-1]["bytes_down"] > 0
+    opened = [e for e in events if e["event"] == "connect" and e["decision"] == "allow" and e["server"] == "prod"]
+    assert opened and opened[-1]["profile"] == "ops" and opened[-1]["instance"]
+    conn = opened[-1]["conn"]
+    assert [e for e in events if e["conn"] == conn and e["event"] == "exec" and e["command"] == "echo audited-command" and e["decision"] == "allow"]
+    (closed,) = [e for e in events if e["conn"] == conn and e["event"] == "close"]
+    assert closed["bytes_down"] > 0 and "reason" not in closed
 
 
 def test_a_server_of_another_profile_is_out_of_reach_and_nothing_reaches_the_server(ssh_of):
@@ -142,7 +148,7 @@ def test_the_pinned_host_key_is_checked_before_the_key_is_offered(ssh_of):
     assert refused.returncode == 255
     assert "host key" in refused.stderr
     assert a.logins() == before, "the key was offered to a server that is not the pinned one"
-    assert any(e["action"] == "ssh-error" and "pinned" in e["reason"] for e in a.audit())
+    assert any("pinned" in text for text in a.failed("host-key"))
 
 
 def test_a_server_can_be_pinned_by_its_public_key_as_well(ssh_of):
@@ -153,18 +159,20 @@ def test_the_proxy_never_connects_to_a_cloud_metadata_address(ssh_of):
     a = ssh_of("metadata")
     refused = a.ssh("prod", "true")
     assert refused.returncode == 255
-    assert any(e["action"] == "ssh-error" and "metadata" in e["reason"] for e in a.audit())
+    assert any("metadata" in text for text in a.failed("dial"))
 
 
 def test_a_server_that_refuses_the_key_or_does_not_answer_is_reported_the_way_ssh_would_and_audited(ssh_of):
-    refused = ssh_of("refused").ssh("prod", "true")
+    b = ssh_of("refused")
+    refused = b.ssh("prod", "true")
     assert refused.returncode == 255 and "refused the key" in refused.stderr
     assert "PRIVATE KEY" not in refused.stderr
+    assert b.failed("auth")
 
     a = ssh_of("dead")
     dead = a.ssh("prod", "true")
     assert dead.returncode == 255 and "could not connect" in dead.stderr
-    assert any(e["action"] == "ssh-error" and "could not connect" in e["reason"] for e in a.audit())
+    assert any("could not connect" in text for text in a.failed("dial"))
 
 
 def test_forwarding_and_every_subsystem_but_sftp_are_refused(ssh_of):
@@ -172,8 +180,10 @@ def test_forwarding_and_every_subsystem_but_sftp_are_refused(ssh_of):
     assert a.ssh("-o", "ExitOnForwardFailure=yes", "-R", "19000:127.0.0.1:80", "prod", "true").returncode != 0
     assert a.ssh("-W", "10.0.0.1:80", "prod").returncode != 0
     assert a.ssh("-s", "prod", "netconf").returncode != 0  # sftp is the one subsystem that is relayed
-    reasons = " ".join(e.get("reason", "") for e in a.audit("ssh-deny"))
-    assert "tcpip-forward" in reasons and "direct-tcpip" in reasons
+    denied = [e for e in a.audit() if e.get("decision") == "deny"]
+    by_code = {code: " ".join(e["reason"]["text"] for e in denied if e["reason"]["code"] == code) for code in ("forwarding", "channel", "request")}
+    assert "tcpip-forward" in by_code["forwarding"] and "direct-tcpip" in by_code["channel"] and "subsystem" in by_code["request"]
+    assert {e["event"] for e in denied if e["reason"]["code"] == "channel"} == {"channel"}
 
 
 def test_files_move_both_ways_with_scp_and_sftp(ssh_of):
@@ -184,7 +194,7 @@ def test_files_move_both_ways_with_scp_and_sftp(ssh_of):
     assert a.inside("scp -q prod:/tmp/egzo-up.txt /tmp/down.txt && cat /tmp/down.txt").stdout.strip() == "from-the-agent"
     listed = a.inside("echo 'ls /tmp' | sftp -q -b - prod")
     assert listed.returncode == 0 and "egzo-up.txt" in listed.stdout
-    assert any(e["action"] == "ssh-sftp" for e in a.audit())
+    assert any(e["event"] == "sftp" and e["decision"] == "allow" for e in a.audit())
 
 
 def test_an_agent_without_the_proxys_host_key_cannot_be_led_to_another_server(ssh_of):

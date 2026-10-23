@@ -160,7 +160,9 @@ def test_spawn_gives_each_instance_its_own_worktree_volume_on_its_own_branch_of_
 def test_the_fetch_goes_through_the_proxy_as_the_instance_and_no_credential_or_hook_reaches_an_agent(sandbox, engine):
     p = sandbox
     p.spawn("coder", "issue-9")
-    assert "issue-9" in {e["agent"] for e in github_audit(p, "issue-9") if e["action"] == "allow"}, "the fetch has the instance's identity"
+    fetched = [e for e in github_audit(p, "issue-9") if e["event"] == "connect" and e["decision"] == "allow"]
+    assert fetched, "the fetch has the instance's identity"
+    assert {e["instance"] for e in fetched} == {engine.instance(p.name, "issue-9").labels[f"{LABEL_PREFIX}instance-id"]}
     p.ok("agent spawn coder quiet --no-fetch", timeout=400)
     assert has_file(engine, p, "README", "quiet") and not github_audit(p, "quiet"), "--no-fetch does not touch the network"
 

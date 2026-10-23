@@ -21,7 +21,7 @@ Start with `egzo system check` ([installing](install.md)), then `egzo ps`, then 
 ## The agent cannot reach something
 
 ```console
-$ egzo proxy log            # look for "deny" and its reason
+$ egzo proxy log            # look for "decision":"deny" and its reason
 $ egzo proxy rules          # what this agent may reach
 ```
 
@@ -39,16 +39,16 @@ A TLS error on an injected host usually means the tool pins certificates or igno
 ## A browser page does not load
 
 ```console
-$ egzo proxy log                     # the host, and `deny` with its reason (`--agent NAME` for one agent)
+$ egzo proxy log                     # the host, and the decision with its reason (`--agent NAME` for one agent)
 ```
 
-- `deny` ... `not allowed by the agent's egress profile`: the page pulls from a host the profile does not list. Add it, or
+- `deny` with the code `not-in-profile`: the page pulls from a host the profile does not list. Add it, or
   use a wildcard (`allow: ["*.cdn.example.com"]`); [browsing](browser.md) says how much to open.
-- `intercept` followed by `error` ... `tls handshake`: the browser does not trust the project CA. The stock images
+- the mode `intercept` followed by a `handshake` error with the code `tls-handshake`: the browser does not trust the project CA. The stock images
   import it into Chromium's store; an image of your own needs `certutil` (the `libnss3-tools` package) and the `egzo
   agent run` entrypoint. Chromium ignores `SSL_CERT_FILE`.
-- A site that loads for curl but not for the browser, with `intercept` in the log: it pins its certificate.
-- `challenge` lines are not failures: a browser asks for the proxy credentials before it sends them. They name no agent,
+- A site that loads for curl but not for the browser, with the mode `intercept` in the log: it pins its certificate.
+- `challenge` decisions are not failures: a browser asks for the proxy credentials before it sends them. They name no agent,
   so `--agent` does not show them.
 - `Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED`: the proxy refused the host (see its `deny`).
 

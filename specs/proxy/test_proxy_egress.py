@@ -45,20 +45,27 @@ def test_each_instance_gets_the_profile_of_its_template_and_every_decision_is_in
     assert probe.container(allow).labels["ai.egzo.service"] == "allow"
 
     events = probe.audit(agent=allow)
-    allowed = next(e for e in events if e["host"] == "example.com" and e["action"] == "allow")
-    assert allowed["agent"] == allow
+    allowed = next(e for e in events if e["host"] == "example.com" and e["event"] == "connect")
+    assert allowed["decision"] == "allow" and allowed["mode"] == "tunnel" and allowed["protocol"] == "https"
+    assert allowed["agent"] == allow and allowed["profile"] == "allow"
     assert allowed["instance"] == probe.container(allow).labels["ai.egzo.instance-id"], "the name for people, the id for history"
-    assert next(e for e in events if e["host"] == "example.org")["action"] == "deny"
-    closed = [e for e in events if e["action"] == "close" and e["host"] == "example.com"]
-    assert closed and closed[0]["bytes_up"] > 0 and closed[0]["bytes_down"] > 0 and "duration_ms" in closed[0]
-    assert not [e for e in events if e["action"] == "request"], "an allowed host is a tunnel and no path is logged"
+    denied = next(e for e in events if e["host"] == "example.org")
+    assert denied["event"] == "connect" and denied["decision"] == "deny" and denied["profile"] == "allow"
+    assert denied["reason"]["code"] == "not-in-profile" and denied["reason"]["text"], "a code for tools, a text for people"
+    (closed,) = [e for e in events if e["conn"] == allowed["conn"] and e["event"] == "close"]
+    assert closed["bytes_up"] > 0 and closed["bytes_down"] > 0 and "duration_ms" in closed and "decision" not in closed
+    assert denied["conn"] != allowed["conn"], "each connection has an id of its own"
+    assert not [e for e in events if e["event"] == "request"], "an allowed host is a tunnel and no path is logged"
 
 
 def test_inspect_logs_the_method_path_and_status_and_a_wildcard_service_covers_what_its_pattern_says_and_an_exact_one_still_injects(sandbox, probe):
     inspect, wild, wildsub = sandbox.spawn("inspect"), sandbox.spawn("wild"), sandbox.spawn("wildsub")
     probe.curl(inspect, "-o", "/dev/null", "https://example.com/some/page?q=zq9query")
     (request,) = probe.requests_to("example.com", inspect)
-    assert request["method"] == "GET" and request["path"] == "/some/page" and request["status"] >= 200
+    assert request["method"] == "GET" and request["path"] == "/some/page" and request["status"] >= 200 and request["decision"] == "allow"
+    connection = [e["event"] for e in probe.audit(agent=inspect) if e["conn"] == request["conn"]]
+    assert connection == ["connect", "request", "close"], "a terminated host's requests belong to its connection, which is closed like a tunnel"
+    assert next(e for e in probe.audit(agent=inspect) if e["conn"] == request["conn"])["mode"] == "inspect"
     assert "zq9query" not in json.dumps(probe.audit())
 
     probe.curl(wild, "-o", "/dev/null", "https://example.com/some/page?q=zq9query")
