@@ -9,6 +9,8 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // Resolver turns a request into the public base URL.
@@ -94,16 +96,8 @@ func first(v string) string {
 	return strings.TrimSpace(v)
 }
 
+// validHost reports whether h is what a Host header holds: a host and an optional port (names.HostHeader).
 func validHost(h string) bool {
-	if h == "" || len(h) > 255 {
-		return false
-	}
-	for _, c := range h {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-', c == ':', c == '[', c == ']':
-		default:
-			return false
-		}
-	}
-	return true
+	_, ok := names.HostHeader(h)
+	return ok
 }
