@@ -163,3 +163,39 @@ func TestAListingWithoutEndIsCutOffInBoundedMemory(t *testing.T) {
 		t.Errorf("a listing without end allocated %d MiB before it was refused: a listing larger than any real engine sends must be refused as it is read", n>>20)
 	}
 }
+
+func TestProjectsAndAgentsWhoseNamesEgzoWouldNeverMakeAreNotListed(t *testing.T) {
+	agent := func(project, instance string) map[string]string {
+		return map[string]string{engine.LabelProject: project, engine.LabelKind: kindAgent, engine.LabelInstance: instance, engine.LabelService: "coder"}
+	}
+	junk := []string{"../../etc", "<img src=x onerror=alert(1)>", "UPPER", "a/b", "\xff\xfe", strings.Repeat("x", 1<<16), "-dash", "has space"}
+	labels := []map[string]string{sidecar("web", kindControl), sidecar("web", kindProxy), agent("web", "coder-1")}
+	for _, name := range junk {
+		labels = append(labels, sidecar(name, kindControl), agent(name, "coder-1"), agent("web", name))
+	}
+	d := newHostileEngine(t).on("containers/json", containers(labels...)).dial()
+
+	projects, err := d.Projects(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range projects {
+		names = append(names, fmt.Sprintf("%.40q", p.Name))
+		if p.Name != "web" {
+			continue
+		}
+		for _, a := range p.Agents {
+			if a.Name != "coder-1" {
+				t.Errorf("agent %.40q of web is listed: egzo names an instance with config's identifier rule, and nothing else is one", a.Name)
+			}
+		}
+	}
+	if len(projects) != 1 {
+		t.Fatalf("projects = %s: only web has a name egzo would give a project", strings.Join(names, ", "))
+	}
+	// what claims web without being egzo's is told, so a person can see why it is not shown
+	if got := len(projects[0].Ignored); got != len(junk) {
+		t.Errorf("web tells of %d containers it ignored, want %d: %v", got, len(junk), projects[0].Ignored)
+	}
+}
