@@ -1,6 +1,6 @@
 # Roadmap: egzo-hub and web UI
 
-**Status.** The hub and its web UI are built (`hub/`, see [hub/docs/README.md](../hub/docs/README.md) and "Built" at the end of
+**Status.** The hub and its web UI are built (`hub/`, see [docs/hub.md](../docs/hub.md) and "Built" at the end of
 this page). The messaging adapters (NATS, `egzo-discord`) are a separate item: [messaging-adapters.md](messaging-adapters.md). Login through Dex
 and "the first user is an operator" were replaced by [hub-login.md](hub-login.md).
 
@@ -87,7 +87,7 @@ Information model: engine → projects → agents, services.
     hub/cmd/egzo-hub/              the hub binary
     hub/internal/...               hub and adapter code (all of it: nothing importable outside hub/)
     hub/web/                       the web UI source (frontend toolchain stays inside hub/)
-    hub/docs/, hub/Dockerfile*, hub/compose.yaml   hub documentation, images, the compose stack
+    hub/Dockerfile*, hub/compose.yaml   images, the compose stack
 
 - **A separate Go module** (`hub/go.mod`). Core's `go.mod`, `staticcheck` and `govulncheck` never see NATS, OIDC,
   the frontend or Discord libraries. The hub requires core with `replace github.com/egzo-ai/egzo => ../`. Go's
@@ -102,7 +102,7 @@ Information model: engine → projects → agents, services.
 - **Tests**: hub and adapters do **not** use the `specs/` first model. They use plain Go unit tests and other best
   practices (the engine seam faked, an embedded NATS, `httptest`), and a separate CI job. `specs/` stays core only.
 - `make lint`, `make test` and the images get hub targets that run inside `hub/`; core's targets do not touch it.
-- Core docs and roadmap stay in `docs/` and `roadmap/`; hub documentation goes in `hub/docs/`.
+- Core docs and roadmap stay in `docs/` and `roadmap/`; hub documentation is part of them (`docs/hub.md`, `docs/hub-access.md`, `docs/hub-api.md`).
 
 ## Core ↔ hub contract (public API; version it)
 
@@ -170,7 +170,7 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   sidecar logs the agents' status as JSON on standard output (on change, and a heartbeat every 30 seconds); the hub follows it through
   the engine's log API and the engine's events for discovery, retries both with backoff, and serves the pages from what it holds. A
   running agent whose status cannot be read is **running**, never "starting", and the project says why. `egzo system check` tries the
-  engine's default log driver. See `hub/docs/README.md`, "How the hub keeps up".
+  engine's default log driver. See `docs/hub.md`, "How the hub keeps up".
 - Settings for operators ([hub-settings.md](hub-settings.md)): Engines, and Users, where an operator makes or removes other
   operators; the last one cannot be removed.
 - Engines as data in the database (credentials sealed with `EGZO_SECRET_KEY`, write-only; ssh host key pinned after the

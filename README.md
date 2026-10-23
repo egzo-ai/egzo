@@ -1,6 +1,9 @@
 # egzo: simple agent sandboxing and orchestration
 
-Egzo is a simple CLI tool to sandbox coding agents and keep your projects organized.
+![The egzo hub: the agents of a project, then a live Claude Code session in the browser](assets/hub.gif)
+
+Egzo is a simple CLI tool to sandbox coding agents and keep your projects organized, with an optional web UI, [the hub](docs/hub.md),
+to watch and drive them from a browser.
 
 Define your project in a simple YAML document, spin up the project with `egzo project up`, then spawn isolated Claude Code instances using
 `egzo agent spawn [template]`. Monitor with `egzo ps`, and destroy them once done with `egzo agent rm`.
@@ -31,7 +34,7 @@ For gVisor, register `runsc` with Docker and make it the engine's default runtim
 
 ## Documentation
 
-See [`docs/`](docs/README.md).
+See [`docs/`](docs/README.md): the CLI and the project file, then [the hub](docs/hub.md), the web UI.
 
 ## Features
 
@@ -49,6 +52,8 @@ See [`docs/`](docs/README.md).
 - **Messaging.** Send messages or tasks to agents without opening their full UI, opening the door for quick work or automated jobs.
 - **Built-in browser.** Chromium and the Playwright MCP just works out of the box; ([docs/browser.md](docs/browser.md)).
 - **Your own tools.** Extend a harness image with extra software, or run any image with the `custom` harness.
+- **The hub, a web UI.** Every project on one or more engines, what each agent is doing, and their real TUIs in the browser,
+  several side by side. Single sign-on (any OpenID Connect provider) and per-project roles for a team; [docs/hub.md](docs/hub.md).
 
 ## Example: architect with Claude, code with OpenCode
 
@@ -122,6 +127,7 @@ anything not allowed is denied by default.
 
 - Agents can reach only the proxy and the control sidecar, never each other or your network.
 - Messages and status flow through harness hooks and a small MCP tool set, not screen scraping.
+- [The hub](docs/hub.md) is one more container that reads the same engines; it adds people, roles and a browser terminal, not state.
 - Projects are plain containers with labels, like Compose projects. `egzo project up` converges the infrastructure to the file
   and publishes the templates; `egzo agent spawn` makes agents from them, so day-to-day work needs no file edits.
 

@@ -1,6 +1,6 @@
 # Roadmap: hub login, without Dex and with a starter account
 
-**Status.** Built (`hub/`; operator docs in [hub/docs/README.md](../hub/docs/README.md), "Signing in"). Where the build settled
+**Status.** Built (`hub/`; operator docs in [docs/hub-access.md](../docs/hub-access.md)). Where the build settled
 a detail the proposal left open, this page now says what was built: the generated password is 26 characters (`crypto/rand.Text`),
 a hub with local login off and no operator refuses to start, and Link and Unlink are on the user's Account page (Settings,
 Account, reached from their name in the sidebar).
@@ -221,7 +221,7 @@ the provider's keys, identity is issuer plus `sub`. To be generic enough without
 
 ## Documentation
 
-`hub/docs/README.md` is rewritten around this:
+`docs/hub-access.md` is written around this:
 
 - **Quick start**: `docker compose up`, set `EGZO_SECRET_KEY`, read the `admin` password in `docker compose logs hub`.
 - **Reaching it**: one port, meant for a private network (a LAN, Tailscale, a tunnel), not the open internet. `EGZO_PUBLIC_URL`

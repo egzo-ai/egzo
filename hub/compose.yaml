@@ -5,7 +5,7 @@
 #   docker compose logs hub  # the admin password, printed once
 #   open http://localhost:8080
 #
-# Read hub/docs/README.md first: mounting the engine socket is root-equivalent on the host.
+# Read docs/hub.md first: mounting the engine socket is root-equivalent on the host.
 name: egzo-hub
 
 services:
@@ -19,7 +19,7 @@ services:
       # The starter account, admin: a password from here (saved at every start), else one printed once in the log.
       EGZO_ADMIN_PASSWORD: ${EGZO_ADMIN_PASSWORD:-}
       EGZO_LOCAL_LOGIN: ${EGZO_LOCAL_LOGIN:-true}
-      # Single sign-on, optional: your OpenID Connect provider. See hub/docs/README.md.
+      # Single sign-on, optional: your OpenID Connect provider. See docs/hub-access.md.
       EGZO_OIDC_ISSUER: ${EGZO_OIDC_ISSUER:-}
       EGZO_OIDC_CLIENT_ID: ${EGZO_OIDC_CLIENT_ID:-}
       EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:-}
@@ -30,7 +30,7 @@ services:
       EGZO_LOCAL_ENGINE: ${EGZO_LOCAL_ENGINE:-unix:///var/run/docker.sock}
     volumes:
       - hub-data:/data
-      - /var/run/docker.sock:/var/run/docker.sock   # root-equivalent: see hub/docs/README.md for safer ways
+      - /var/run/docker.sock:/var/run/docker.sock   # root-equivalent: see docs/hub.md for safer ways
     group_add:
       - "${DOCKER_GID:-0}"      # the group that owns the socket: stat -c %g /var/run/docker.sock
 

@@ -26,7 +26,7 @@ host; it does not ask egzo for anything. See `specs/README.md`.
 - The specs-first model is for **core**. The hub and the adapters (`hub/`) are tested with ordinary Go unit tests.
   Core never imports anything from `hub/`; the hub imports core. See `roadmap/hub.md`, "Code layout and rules".
 - The hub: `make hub-test` (unit), `make hub-e2e` (Playwright in docker), `make hub-integration` (real engine), `make hub-stack`
-  (compose, Dex, a real project). Docs in `hub/docs/`. A change to core that the hub needs still gets specs and unit tests first.
+  (compose, Dex, a real project). Docs in `docs/hub*.md`, part of the main docs. A change to core that the hub needs still gets specs and unit tests first.
 - Docker is the engine to run the specs against day to day; do not run the whole suite more than needed
   (about 12 minutes).
 - Commit when something meaningful works.

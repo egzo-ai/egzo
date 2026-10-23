@@ -19,8 +19,14 @@ detail, and the executable specs in `specs/` are the status report.
 8. [Overriding base images](images.md): adding tools to an agent
 9. [Browsing](browser.md): the browser every agent has, and what it may reach
 
+## The hub (web UI)
+
+10. [The hub](hub.md): running it, the terminal in the browser, engines, settings
+11. [Hub sign-in and roles](hub-access.md): the starter account, single sign-on, people, roles
+12. [The hub API](hub-api.md): the JSON API the web app talks to
+
 ## Safety and problems
 
-10. [Sandboxing agents](sandboxing.md): writing egress policies
-11. [The security model](security.md): what is enforced and what is not
-12. [Troubleshooting](troubleshooting.md)
+13. [Sandboxing agents](sandboxing.md): writing egress policies
+14. [The security model](security.md): what is enforced and what is not
+15. [Troubleshooting](troubleshooting.md)

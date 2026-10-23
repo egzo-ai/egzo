@@ -57,4 +57,4 @@ The need: a hub-level **Settings** area, outside any project, with two views:
   `operator.revoke` (refusals too) have no engine and no project. A change that changes nothing is not audited.
 - **Settings.** An operator-only Settings entry in the sidebar, with Engines (moved; `/engines` and `/settings` land on
   `/settings/engines`) and Users. Keys: `g e`, `g u`; both are in the command menu.
-- The recovery from a lost operator sign-in is written in `hub/docs/README.md`; the break-glass setting is not built.
+- The recovery from a lost operator sign-in is written in `docs/hub-access.md`; the break-glass setting is not built.

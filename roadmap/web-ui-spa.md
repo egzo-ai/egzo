@@ -49,7 +49,7 @@ per terminal.
 
 ## What was built
 
-- `hub/internal/web`: the JSON API (`api.go`, documented in `hub/docs/api.md`), the login redirects, the terminal websocket (now at
+- `hub/internal/web`: the JSON API (`api.go`, documented in `docs/hub-api.md`), the login redirects, the terminal websocket (now at
   `/api/v1/e/.../terminal`), and `appHandler`, which serves the embedded app and falls back to `index.html`. The templates, the
   `?fragment=1` refresh and the form posts are gone. State changes need JSON and the hub's Origin.
 - `hub/web`: Svelte 5 + TypeScript + Vite. The sidebar, the pages, the dialogs, and the terminal workspace of the design: terminals

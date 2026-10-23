@@ -33,6 +33,8 @@ In short:
 - An agent can reach only the proxy and the control sidecar, never another agent and never your network.
 - Messages and status flow through harness hooks and a small MCP tool set (`egzo` tools such as `resolve`, `ask`),
   not through screen scraping.
+- [The hub](hub.md), optional, is a web UI over the projects of one or more engines: what every agent is doing, and their
+  terminals in the browser, for a team with roles. It reads the same containers, so the CLI and the hub see the same thing.
 
 ## Requirements
 
@@ -60,5 +62,5 @@ something misbehaves, see [troubleshooting](troubleshooting.md).
 
 Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
 credential injection, git workspaces, Claude Code and OpenCode, message delivery, and the operator commands. Not yet:
-the `pi` harness; the Podman and gVisor spec runs are reported in CI but are not required checks. A separate web UI, [the hub](../hub/docs/README.md), is built and is not part
+the `pi` harness; the Podman and gVisor spec runs are reported in CI but are not required checks. A separate web UI, [the hub](hub.md), is built and is not part
 of the CLI. Binaries and images are published for Linux (amd64 and arm64), still as early 0.x releases ([`roadmap/initial-release.md`](../roadmap/initial-release.md)).

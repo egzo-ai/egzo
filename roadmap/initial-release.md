@@ -21,7 +21,7 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [ ] **Check the releases.** `0.4.0` has a tag but no GitHub release and no images, and `0.1.0` and `0.0.1-rc1` have images
       but no release: find out why, and make sure a tag cannot half-publish.
 - [x] The hub image (`ghcr.io/egzo-ai/egzo-hub`) is built and pushed by `release.yml` with the other images, public, for amd64 and
-      arm64 (published with `0.5.0`), and `egzo-hub --version` reports the tag. The quick start in `hub/docs/README.md` pulls it.
+      arm64 (published with `0.5.0`), and `egzo-hub --version` reports the tag. The quick start in `docs/hub.md` pulls it.
 - [ ] The hub's web UI shows its version (the binary already reports it with `--version` and in the startup log).
 - [ ] Decide whether `hub/compose.yaml` belongs in this repository: it pulls an image this repository publishes, so what ships with a
       release cannot name that release's image before the release exists (it defaults to `latest`).
@@ -37,7 +37,7 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [ ] **A hub with no engine is tested and supported.** Users may run the hub without the local socket and add engines in the UI
       after they log in. `EGZO_LOCAL_ENGINE=none` already starts it, but nothing tests it: add a Go test that boots the hub with no
       engine, an e2e test that logs in as the first operator and adds an engine, and fix the empty home page (it says "You don't have a
-      role on any project" instead of pointing the operator to Settings, Engines). Document it in `hub/docs/README.md` as a supported
+      role on any project" instead of pointing the operator to Settings, Engines). Document it in `docs/hub.md` as a supported
       setup, including the quick start without the `docker.sock` mount.
 - [ ] Check the name, domain, org and registry (DESIGN.md, "Naming": availability was never really checked).
 - [ ] **A CI matrix running the specs** on every reference platform ([`ci-test-matrix.md`](ci-test-matrix.md),

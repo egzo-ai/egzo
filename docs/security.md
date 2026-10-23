@@ -41,7 +41,8 @@ Be clear about these before running agents on something you care about.
 - **The workspace is writable.** Agents can delete or corrupt what you mount read-write. Use `:ro` for directories and git for
   code. Every agent has its own worktree.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
-  that is root-equivalent. Prefer a rootless engine.
+  that is root-equivalent. Prefer a rootless engine. [The hub](hub.md) holds engine access too: whoever controls it, or is
+  an operator in it, controls those engines.
 - **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.
 
 ## How secret injection works

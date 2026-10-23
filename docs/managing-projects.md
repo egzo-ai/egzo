@@ -1,7 +1,8 @@
 # Managing projects
 
 Quick pointers only. See also [the project file](project-file.md), [messaging](messaging.md) for `message send`, `message ls`
-and `message reply`, and [troubleshooting](troubleshooting.md). Commands are grouped: `project`, `agent`, `message`, `workspace` and `system`,
+and `message reply`, and [troubleshooting](troubleshooting.md). [The hub](hub.md) does the daily loop below (spawn, attach,
+stop, remove) from a browser; creating and changing projects stays with the CLI. Commands are grouped: `project`, `agent`, `message`, `workspace` and `system`,
 with `ps`, `logs`, `exec`, `start`, `stop`, `restart`, `events` and `proxy` at the top. `egzo --help` lists them and `egzo <command> --help` explains each. Commands find
 `egzo.yaml` in the current directory or the nearest parent (`-f` names another file, `-p` the project).
 
