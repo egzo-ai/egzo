@@ -26,7 +26,9 @@ type hostileEngine struct {
 	handlers map[string]http.HandlerFunc
 }
 
-func newHostileEngine(t *testing.T) *hostileEngine { return &hostileEngine{t: t, handlers: map[string]http.HandlerFunc{}} }
+func newHostileEngine(t *testing.T) *hostileEngine {
+	return &hostileEngine{t: t, handlers: map[string]http.HandlerFunc{}}
+}
 
 func (h *hostileEngine) on(suffix string, f http.HandlerFunc) *hostileEngine {
 	h.handlers[suffix] = f

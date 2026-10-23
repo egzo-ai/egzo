@@ -14,7 +14,6 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -104,7 +103,7 @@ func prepLogs(ctx context.Context, c *engine.Client, id string) (stdout, stderr 
 	}
 	defer reader.Close()
 	var out, errs bytes.Buffer
-	_, _ = stdcopy.StdCopy(&out, &errs, reader)
+	_, _ = engine.Demux(&out, &errs, reader)
 	return out.String(), errs.String()
 }
 

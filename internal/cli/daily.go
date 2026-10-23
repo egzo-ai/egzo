@@ -14,7 +14,6 @@ import (
 	"syscall"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -96,7 +95,7 @@ func streamLogs(ctx context.Context, s *session, name string, follow bool, tail 
 		return err
 	}
 	defer reader.Close()
-	_, err = stdcopy.StdCopy(cmd.OutOrStdout(), cmd.ErrOrStderr(), reader)
+	_, err = engine.Demux(cmd.OutOrStdout(), cmd.ErrOrStderr(), reader)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

@@ -8,7 +8,6 @@ import (
 	"io"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // noDetach replaces the engine's own detach sequence (Ctrl-P Ctrl-Q) on terminals, which would
@@ -83,7 +82,7 @@ func (c *Client) ExecStream(ctx context.Context, containerID string, command []s
 	if s.TTY {
 		_, err = io.Copy(s.Out, attached.Reader)
 	} else {
-		_, err = stdcopy.StdCopy(s.Out, s.Err, attached.Reader)
+		_, err = Demux(s.Out, s.Err, attached.Reader)
 	}
 	if err != nil && err != io.EOF {
 		return 1, err
