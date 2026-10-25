@@ -1,10 +1,29 @@
-# The actions are pinned by commit (a tag can be moved); this keeps the pins current, one pull request a week.
+# The actions are pinned by commit and the base images by digest (a tag can be moved); this keeps both current, one pull
+# request a week per ecosystem. A release is only proposed once it is a few days old, so one that is pulled soon after it is
+# published (a hijacked package) is not. The versions in ARG lines (the harness TUIs, Playwright MCP, git, Go) are bumped by
+# .github/workflows/bump.yml, which Dependabot cannot do.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
     groups:
       actions:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directories: [/, /hub, /harness/base]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    # A new Node or Alpine major is a decision, not a weekly bump: only the digest of the current tag moves.
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    groups:
+      base-images:
         patterns: ['*']
