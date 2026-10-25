@@ -10,14 +10,15 @@ FROM ${EGZO_IMAGE} AS egzo
 
 # git >= 2.48: egzo makes worktrees with relative links (`git worktree add --relative-paths`) and sets the
 # relativeWorktrees repository extension, which Debian's git (2.39 on bookworm) refuses with "unknown repository
-# extension". Built from source so the version does not depend on the distribution.
+# extension". Built from source so the version does not depend on the distribution. NO_RUST: since 2.56 git builds its Rust
+# parts unless told not to, and Rust stays optional until Git 3.0; the image carries no Rust toolchain.
 FROM docker.io/library/node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS git
 ARG GIT_VERSION
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gcc make libc6-dev libssl-dev libcurl4-openssl-dev zlib1g-dev libexpat1-dev \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.xz | tar -xJ -C /tmp \
- && make -C /tmp/git-${GIT_VERSION} -j"$(nproc)" prefix=/usr/local NO_GETTEXT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 NO_INSTALL_HARDLINKS=1 install
+ && make -C /tmp/git-${GIT_VERSION} -j"$(nproc)" prefix=/usr/local NO_GETTEXT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 NO_RUST=1 NO_INSTALL_HARDLINKS=1 install
 
 FROM docker.io/library/node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 RUN apt-get update \
