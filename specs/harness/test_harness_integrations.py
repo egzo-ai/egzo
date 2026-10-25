@@ -346,9 +346,8 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     def context():
         asked = model_requests(engine, p, name) or []
         seen = "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events(p) if e.get("agent") == name)
-        rows = [json.dumps({k: v for k, v in r.items() if k != "described"}) for r in asked]
-        execute = [t["description"] for r in asked for t in r.get("described") or [] if t["name"] == "execute"][:1]
-        return "the model was asked:\n" + "\n".join(rows) + f"\nexecute says: {execute}\nthe agent's events:\n{seen}"
+        rows = [json.dumps({k: v for k, v in r.items() if k not in ("described", "system")}) for r in asked]
+        return "the model was asked:\n" + "\n".join(rows) + f"\nthe agent's events:\n{seen}"
 
     wait_until(lambda: (rows := mine("activity")) and rows[-1]["text"] == "idle", "the harness to report that its session started", 45)
     before = max((e["seq"] for e in events(p)), default=0)
@@ -367,8 +366,10 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     offered = turns[0]["tools"]
     assert any(t.endswith("list_messages") for t in offered), f"the egzo MCP tools are offered to the model: {offered}"
     if harness == "opencode":
-        execute = next((t for t in turns[0]["described"] if t["name"] == "execute"), None)
-        assert execute and "playwright" in execute["description"], f"the browser's tools are behind Code Mode's execute: {execute}"
+        # Code Mode's catalog of the tools behind `execute` is in the system prompt; egzo's own instructions never name a browser tool
+        system = turns[0]["system"] or ""
+        around = system[max(system.find("browser_"), 0):][:1500]
+        assert "execute" in offered and "browser_navigate" in system, f"the browser's tools are in Code Mode's catalog: {around or system[-3000:]}"
         assert not any(t.endswith("browser_navigate") for t in offered), f"the browser's tools are not on the native list: {offered}"
     else:
         assert any(t.endswith("browser_navigate") for t in offered), f"the browser's MCP tools are offered to the model: {offered}"
