@@ -435,6 +435,27 @@ func TestTheAuditLogIsKeptPerProjectNewestFirst(t *testing.T) {
 	}
 }
 
+func TestWrongCredentialsAreGroupedByTheNameClaimedAndKeepTheLatestClient(t *testing.T) {
+	s := open(t)
+	at := time.Now().Truncate(time.Millisecond)
+	attempt := func(claimed, client string, n int) Denial {
+		return Denial{Engine: "local", Project: "web", ClaimedAgent: claimed, Client: client, UserAgent: "curl/8.11.1", Protocol: "https",
+			Host: "example.com", Code: "credentials", Event: "connect", Decision: "deny", Count: 1, First: at.Add(time.Duration(n) * time.Second),
+			Last: at.Add(time.Duration(n) * time.Second)}
+	}
+	if err := s.RecordDenials(ctx, []Denial{attempt("coder-1", "10.0.0.2", 0), attempt("coder-2", "10.0.0.3", 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordDenials(ctx, []Denial{attempt("coder-1", "10.0.0.4", 2)}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Denials(ctx, "local", "web")
+	if len(got) != 2 || got[0].ClaimedAgent != "coder-1" || got[0].Count != 2 || got[0].Client != "10.0.0.4" || got[0].UserAgent != "curl/8.11.1" ||
+		got[1].ClaimedAgent != "coder-2" || got[1].Agent != "" {
+		t.Fatalf("groups = %+v", got)
+	}
+}
+
 func TestDenialsGroupAndAreBoundedAndAFixHoldsUntilTheNextOne(t *testing.T) {
 	s := open(t)
 	at := time.Now().Truncate(time.Millisecond)

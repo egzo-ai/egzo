@@ -238,7 +238,7 @@ func TestAFollowerKeepsABoundedNumberOfOpenGroupsAndForgetsTheOldest(t *testing.
 	f := &auditFollower{open: map[hostKey]map[string]openGroup{}}
 	start := time.Now()
 	for i := range maxOpen + 5 {
-		f.opened(groupKey{"i", "https", fmt.Sprintf("h%d.example", i), "not-in-profile"}, openGroup{event: proxy.KindConnect, last: start.Add(time.Duration(i) * time.Second)})
+		f.opened(groupKey{"i", "", "https", fmt.Sprintf("h%d.example", i), "not-in-profile"}, openGroup{event: proxy.KindConnect, last: start.Add(time.Duration(i) * time.Second)})
 	}
 	n := 0
 	for _, codes := range f.open {

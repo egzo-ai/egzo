@@ -51,7 +51,8 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	}
 	d := denials[0]
 	if d["host"] != "registry.npmjs.org" || d["code"] != "not-in-profile" || d["profile"] != "default" || d["agent"] != "coder-1" ||
-		d["count"] != float64(1) || d["fixed"] != nil || d["creator"] == "" {
+		d["count"] != float64(1) || d["fixed"] != nil || d["creator"] == "" || d["claimedAgent"] != "coder-1" || d["client"] != "10.89.3.2" ||
+		d["userAgent"] != "curl/8.11.1" {
 		t.Errorf("denial = %v", d)
 	}
 	events := list(page, "events")

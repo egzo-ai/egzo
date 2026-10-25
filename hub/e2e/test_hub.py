@@ -582,4 +582,7 @@ def test_the_network_tab_is_in_the_sidebar_and_says_where_a_connection_came_from
     expect(claimed.locator("td").nth(1)).to_have_text("coder-1?")
     claimed.click()
     expect(page.get_by_test_id("from")).to_contain_text("claimed to be coder-1, not proved")
-    expect(page.get_by_test_id("denials").locator('tr[data-host="api.example.com"]')).to_contain_text("(unauthenticated)")
+    denial = page.get_by_test_id("denials").locator('tr[data-host="api.example.com"]')
+    expect(denial).to_contain_text("coder-1? (unauthenticated)")
+    denial.get_by_role("button", name="How to fix").click()
+    expect(page.get_by_test_id("denial-from")).to_have_text("Latest from 10.89.3.2, curl/8.11.1, claimed to be coder-1, not proved.")

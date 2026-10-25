@@ -49,7 +49,9 @@ func isDenial(e engines.AuditEvent) bool {
 	return e.Reason == nil || e.Reason.Code != proxy.CodeAborted
 }
 
-type groupKey struct{ instance, protocol, host, code string }
+// groupKey is a group: the claimed name is part of it, so attempts with wrong credentials are told apart by the name they used (an
+// authenticated one always claims its own).
+type groupKey struct{ instance, claimed, protocol, host, code string }
 
 // hostKey is where a group was refused: what an allowed event is compared with to see a fix.
 type hostKey struct{ instance, protocol, host string }
@@ -119,7 +121,7 @@ func (m *feedManager) followAudit(ctx context.Context, key projectKey, f *auditF
 	f.cursor, f.resumed = cursor, !cursor.IsZero()
 	for _, d := range groups {
 		if d.Fixed.IsZero() {
-			f.opened(groupKey{d.Instance, d.Protocol, d.Host, d.Code}, openGroup{event: proxy.Kind(d.Event), last: d.Last})
+			f.opened(groupKey{d.Instance, d.ClaimedAgent, d.Protocol, d.Host, d.Code}, openGroup{event: proxy.Kind(d.Event), last: d.Last})
 		}
 	}
 	m.mu.Unlock()
@@ -211,14 +213,15 @@ func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.Au
 		if e.Reason != nil {
 			code, text = string(e.Reason.Code), e.Reason.Text
 		}
-		k := groupKey{e.Instance, string(e.Protocol), e.Host, code}
+		k := groupKey{e.Instance, e.ClaimedAgent, string(e.Protocol), e.Host, code}
 		d := f.pending[k]
 		if d == nil {
-			d = &store.Denial{Engine: key.engine, Project: key.project, Instance: e.Instance, Protocol: string(e.Protocol), Host: e.Host,
-				Code: code, First: e.Time}
+			d = &store.Denial{Engine: key.engine, Project: key.project, Instance: e.Instance, ClaimedAgent: e.ClaimedAgent, Protocol: string(e.Protocol),
+				Host: e.Host, Code: code, First: e.Time}
 			f.pending[k] = d
 		}
 		d.Event, d.Decision, d.Agent, d.Profile, d.Server, d.Text, d.Last = string(e.Kind), string(e.Decision), e.Agent, e.Profile, e.Server, text, e.Time
+		d.Client, d.UserAgent = e.Client, e.UserAgent
 		if actor != "" {
 			d.Actor = actor
 		}
@@ -237,7 +240,7 @@ func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.Au
 		for _, by := range fixers[g.event] {
 			if by == e.Kind {
 				delete(f.open[where], code)
-				f.fixes = append(f.fixes, fix{key: groupKey{where.instance, where.protocol, where.host, code}, events: []string{string(g.event)}, at: e.Time})
+				f.fixes = append(f.fixes, fix{key: groupKey{instance: where.instance, protocol: where.protocol, host: where.host, code: code}, events: []string{string(g.event)}, at: e.Time})
 				break
 			}
 		}

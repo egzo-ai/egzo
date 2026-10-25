@@ -12,6 +12,9 @@ import (
 type Denial struct {
 	Engine, Project string
 	Instance        string // the instance's id; empty when the proxy could not tell who it was
+	ClaimedAgent    string // the name the client sent in its proxy credentials: part of the group, so wrong ones are told apart by name
+	Client          string // the address of the latest
+	UserAgent       string // what the latest client said it was
 	Protocol, Host  string
 	Code            string
 	Event, Decision string
@@ -39,15 +42,16 @@ func (s *Store) RecordDenials(ctx context.Context, seen []Denial) error {
 	projects := map[[2]string]bool{}
 	for _, d := range seen {
 		_, err := tx.ExecContext(ctx, `INSERT INTO denials
-			(engine, project, instance, protocol, host, code, event, decision, agent, actor, profile, server, text, count, first_at, last_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (engine, project, instance, protocol, host, code) DO UPDATE SET
-				event = excluded.event, decision = excluded.decision, agent = excluded.agent,
+			(engine, project, instance, claimed_agent, protocol, host, code, event, decision, agent, client, user_agent, actor, profile, server, text,
+				count, first_at, last_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (engine, project, instance, claimed_agent, protocol, host, code) DO UPDATE SET
+				event = excluded.event, decision = excluded.decision, agent = excluded.agent, client = excluded.client, user_agent = excluded.user_agent,
 				actor = CASE WHEN excluded.actor = '' THEN denials.actor ELSE excluded.actor END,
 				profile = excluded.profile, server = excluded.server, text = excluded.text, count = denials.count + excluded.count,
 				first_at = MIN(denials.first_at, excluded.first_at), last_at = MAX(denials.last_at, excluded.last_at), fixed_at = NULL`,
-			d.Engine, d.Project, d.Instance, d.Protocol, d.Host, d.Code, d.Event, d.Decision, d.Agent, d.Actor, d.Profile, d.Server, d.Text,
-			d.Count, d.First.UnixMilli(), d.Last.UnixMilli())
+			d.Engine, d.Project, d.Instance, d.ClaimedAgent, d.Protocol, d.Host, d.Code, d.Event, d.Decision, d.Agent, d.Client, d.UserAgent, d.Actor,
+			d.Profile, d.Server, d.Text, d.Count, d.First.UnixMilli(), d.Last.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -78,8 +82,8 @@ func (s *Store) FixDenials(ctx context.Context, engine, project, instance, proto
 
 // Denials lists a project's groups, the most recently seen first.
 func (s *Store) Denials(ctx context.Context, engine, project string) ([]Denial, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT engine, project, instance, protocol, host, code, event, decision, agent, actor, profile,
-		server, text, count, first_at, last_at, fixed_at FROM denials WHERE engine = ? AND project = ? ORDER BY last_at DESC, host`, engine, project)
+	rows, err := s.db.QueryContext(ctx, `SELECT engine, project, instance, claimed_agent, protocol, host, code, event, decision, agent, client,
+		user_agent, actor, profile, server, text, count, first_at, last_at, fixed_at FROM denials WHERE engine = ? AND project = ? ORDER BY last_at DESC, host`, engine, project)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +93,8 @@ func (s *Store) Denials(ctx context.Context, engine, project string) ([]Denial, 
 		var d Denial
 		var first, last int64
 		var fixed sql.NullInt64
-		if err := rows.Scan(&d.Engine, &d.Project, &d.Instance, &d.Protocol, &d.Host, &d.Code, &d.Event, &d.Decision, &d.Agent, &d.Actor,
-			&d.Profile, &d.Server, &d.Text, &d.Count, &first, &last, &fixed); err != nil {
+		if err := rows.Scan(&d.Engine, &d.Project, &d.Instance, &d.ClaimedAgent, &d.Protocol, &d.Host, &d.Code, &d.Event, &d.Decision, &d.Agent,
+			&d.Client, &d.UserAgent, &d.Actor, &d.Profile, &d.Server, &d.Text, &d.Count, &first, &last, &fixed); err != nil {
 			return nil, err
 		}
 		d.First, d.Last = time.UnixMilli(first), time.UnixMilli(last)

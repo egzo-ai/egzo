@@ -107,7 +107,7 @@ The reason codes:
 Where it shows: a **Network** tab on the project page (and in the sidebar) and on the agent page (filtered to that agent), with
 two parts.
 
-- **Denied**: the denials and errors, grouped by `(instance, protocol, host, reason.code)` with a count and when each was first and
+- **Denied**: the denials and errors, grouped by `(instance, claimed_agent, protocol, host, reason.code)` with a count and when each was first and
   last seen. Each group says why in plain words, which profile decided, and how to fix it: for `not-in-profile`, the YAML to add
   to that profile and `egzo project up`. A group that a later `allow` for the same instance and host follows is marked as fixed.
   `aborted` and `challenge` are not shown there.

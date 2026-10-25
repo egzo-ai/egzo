@@ -78,7 +78,8 @@ When an agent cannot reach something, the **Network** tab of its page (and of th
 sidebar) says what the proxy refused, why, and how to fix it. An agent that was refused a host in the last hour shows **N denied** in the agents list.
 
 - **Denied** groups what the proxy refused or failed at by agent, host and reason, with how many times and when it was last
-  seen. **How to fix** says what the reason means and what to change: for a host that is not in the profile, the YAML to add to
+  seen. Wrong proxy credentials are grouped by the name they claimed, shown with `?`; **How to fix** says where the latest one
+  came from. **How to fix** says what the reason means and what to change: for a host that is not in the profile, the YAML to add to
   that profile in `egzo.yaml`, then `egzo project up`. The hub never changes the project file. When several hosts under one
   domain were refused, it says which wildcard covers them. A group is marked **fixed** once the same agent gets through to the
   host, and opens again at the next refusal.

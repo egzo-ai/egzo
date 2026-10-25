@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -97,6 +97,9 @@ CREATE TABLE IF NOT EXISTS denials (
 	event TEXT NOT NULL,                 -- the step that was refused or failed
 	decision TEXT NOT NULL,              -- deny or error
 	agent TEXT NOT NULL DEFAULT '',      -- the instance's name when it was last seen
+	claimed_agent TEXT NOT NULL DEFAULT '', -- the name the client sent in its proxy credentials, proved or not
+	client TEXT NOT NULL DEFAULT '',     -- the address of the latest one
+	user_agent TEXT NOT NULL DEFAULT '', -- what the latest client said it was
 	actor TEXT NOT NULL DEFAULT '',      -- who spawned the instance, when the hub knew it
 	profile TEXT NOT NULL DEFAULT '',
 	server TEXT NOT NULL DEFAULT '',
@@ -105,7 +108,7 @@ CREATE TABLE IF NOT EXISTS denials (
 	first_at INTEGER NOT NULL,           -- Unix milliseconds
 	last_at INTEGER NOT NULL,
 	fixed_at INTEGER,                    -- the same instance got through since the last one
-	PRIMARY KEY (engine, project, instance, protocol, host, code)
+	PRIMARY KEY (engine, project, instance, claimed_agent, protocol, host, code)
 );
 CREATE INDEX IF NOT EXISTS denials_recent ON denials (engine, project, last_at);
 -- How far the hub read each project's audit trail: the time of the last event it handled.

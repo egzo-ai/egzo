@@ -68,8 +68,9 @@ or an ssh client's identification string (`SSH-2.0-OpenSSH_9.6p1`). Declared by 
 closed without an event (the policy changed between the sign-in and the session) are logged as `deny`, `identity`.
 
 **The hub.** The Network view shows `client` and `user_agent` in a connection's steps, and the claimed name of a connection that
-is not authenticated, marked as claimed. The groups of denials do not change (no new columns: the hub's database has no
-migrations before 1.0): a group the proxy could not attribute is shown as unauthenticated.
+is not authenticated, marked as claimed. A group of denials is keyed by the claimed name too (an authenticated one always claims
+its own, so only wrong credentials are split, by the name they used) and keeps the latest `client` and `user_agent`. The schema
+version goes up: before 1.0 the hub has no migrations, and no hub database needed keeping.
 
 ## Rejected
 
