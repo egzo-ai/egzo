@@ -5,7 +5,7 @@
 ARG EGZO_IMAGE=ghcr.io/egzo-ai/egzo:latest
 # The pinned versions of git and of the Playwright MCP server (its Chromium comes with it); bump them deliberately.
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
-ARG GIT_VERSION=2.53.0
+ARG GIT_VERSION=2.56.0
 FROM ${EGZO_IMAGE} AS egzo
 
 # git >= 2.48: egzo makes worktrees with relative links (`git worktree add --relative-paths`) and sets the
