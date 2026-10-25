@@ -1,0 +1,45 @@
+name: bump
+
+# One pull request per version pinned in an ARG line that is behind (scripts/bump-pins.sh): the harness TUIs, Playwright MCP,
+# git and Go. Dependabot does the actions and the base images (.github/dependabot.yml).
+#
+# The pull requests are opened with a token of the repository's GitHub App (secrets BUMP_APP_CLIENT_ID and BUMP_APP_PRIVATE_KEY;
+# Contents and Pull requests, read and write, on this repository only): a pull request opened with the workflow's own
+# GITHUB_TOKEN does not run the CI, and the CI (the specs build the real harness images) is what says a bump works.
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump
+
+jobs:
+  bump:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.BUMP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BUMP_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          fetch-depth: 0
+      - name: Open or update the pull requests
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          # The commits are the app's, as GitHub shows a bot: <id>+<slug>[bot]@users.noreply.github.com
+          id=$(gh api "/users/$SLUG%5Bbot%5D" -q .id)
+          git config user.name "$SLUG[bot]"
+          git config user.email "$id+$SLUG[bot]@users.noreply.github.com"
+          scripts/bump-pins.sh --pr
