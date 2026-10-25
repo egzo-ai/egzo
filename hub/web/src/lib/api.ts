@@ -73,6 +73,8 @@ export const api = {
   /** Answered at once: the hub runs the spawn, and the project lists it until it has ended. */
   spawn: (engine: string, name: string, template: string, agentName: string) =>
     request<{ spawn: Spawn }>("POST", `${project(engine, name)}/spawn`, { template, name: agentName }),
+  /** Takes an ended spawn off the project's list. */
+  dismissSpawn: (engine: string, name: string, id: string) => request<{ ok: true }>("DELETE", `${project(engine, name)}/spawns/${enc(id)}`),
   spec: (engine: string, name: string) => request<{ text: string }>("GET", `${project(engine, name)}/spec`).then((r) => r.text),
   members: (engine: string, name: string) => request<Members>("GET", `${project(engine, name)}/members`),
   setRole: (engine: string, name: string, user: string, role: string) =>

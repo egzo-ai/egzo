@@ -102,3 +102,52 @@ func TestTheSpawnsOfAProjectRunOneAfterTheOther(t *testing.T) {
 		t.Errorf("the engine was asked in order, one at a time: %v", calls)
 	}
 }
+
+func TestAnEndedSpawnIsDismissedByWhoMayOperateItsAgentAndARunningOneIsNot(t *testing.T) {
+	r := newRig(t, "local")
+	r.fakes["local"].AddProject(project("web", "coder"))
+	r.operator()
+	alice, bob := r.login("alice"), r.login("bob")
+	r.scan()
+	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
+	r.store.SetRole(ctx, "local", "web", bob.ID, rbac.User)
+
+	r.fakes["local"].HoldSpawns()
+	running, _ := r.hub.StartSpawn(ctx, alice, "local", "web", "coder", "")
+	if view, _ := r.hub.Project(ctx, alice, "local", "web"); view.Spawns[0].CanDismiss {
+		t.Error("a running spawn can be dismissed")
+	}
+	if err := r.hub.DismissSpawn(ctx, alice, "local", "web", running.ID); !errors.Is(err, ErrSpawnRunning) {
+		t.Errorf("dismissing a running spawn: %v", err)
+	}
+	r.fakes["local"].ReleaseSpawns()
+	r.hub.WaitForSpawns()
+
+	failed, _ := r.hub.StartSpawn(ctx, alice, "local", "web", "ghost", "")
+	r.hub.WaitForSpawns()
+	// bob sees it, and may not take it away: it is alice's, as the agent would have been
+	view, _ := r.hub.Project(ctx, bob, "local", "web")
+	if len(view.Spawns) != 2 || view.Spawns[1].ID != failed.ID || view.Spawns[1].CanDismiss {
+		t.Fatalf("bob's view = %+v", view.Spawns)
+	}
+	if err := r.hub.DismissSpawn(ctx, bob, "local", "web", failed.ID); !errors.Is(err, ErrForbidden) {
+		t.Errorf("bob dismissing alice's spawn: %v", err)
+	}
+	view, _ = r.hub.Project(ctx, alice, "local", "web")
+	if !view.Spawns[1].CanDismiss {
+		t.Fatalf("alice cannot dismiss her failed spawn: %+v", view.Spawns)
+	}
+	if err := r.hub.DismissSpawn(ctx, alice, "local", "web", failed.ID); err != nil {
+		t.Fatal(err)
+	}
+	view, _ = r.hub.Project(ctx, bob, "local", "web")
+	if len(view.Spawns) != 1 || view.Spawns[0].ID != running.ID {
+		t.Errorf("after dismissing = %+v", view.Spawns)
+	}
+	if err := r.hub.DismissSpawn(ctx, alice, "local", "web", failed.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("dismissing it again: %v", err)
+	}
+	if err := r.hub.DismissSpawn(ctx, r.login("carol"), "local", "web", running.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("without a role on the project: %v", err)
+	}
+}

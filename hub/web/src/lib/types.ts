@@ -136,6 +136,8 @@ export interface Spawn {
   error?: string;
   startedAt: string;
   endedAt?: string;
+  /** The user may take it off the list: it has ended, and they may operate its agent. */
+  canDismiss: boolean;
 }
 
 export interface AgentAnswer {

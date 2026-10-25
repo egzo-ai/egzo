@@ -5,6 +5,10 @@ lets people spawn, start, stop, remove and attach to agents (the agent's real TU
 who may do what. It is optional and separate from the CLI: a container of its own (`ghcr.io/egzo-ai/egzo-hub`), which reads
 the engines like `egzo` does, so a project made with the CLI shows up in it and an agent spawned in it shows up in `egzo ps`.
 
+A spawn runs in the background and is listed in the project's agents until it has ended. One that failed stays there with why
+(a name or a git branch that already exists, for instance) for ten minutes, or until whoever may operate its agent dismisses it
+with its trash icon.
+
 ![Two agents' terminals side by side in the hub: one waiting on a question, one answering](../assets/hub-terminals.png)
 
 It does not create or change projects: the project file and the `egzo` CLI stay the only way to do that (`egzo project up`,

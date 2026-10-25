@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"time"
 
@@ -34,6 +35,9 @@ const (
 	SpawnFailed  = "failed"
 )
 
+// ErrSpawnRunning is returned for a spawn that cannot be dismissed because it has not ended.
+var ErrSpawnRunning = errors.New("the spawn has not ended")
+
 // Spawn is one spawn the hub was asked for.
 type Spawn struct {
 	ID       string
@@ -45,6 +49,13 @@ type Spawn struct {
 	Err      string // why it failed
 	Started  time.Time
 	Ended    time.Time
+}
+
+// SpawnView is a spawn as a user sees it in a project.
+type SpawnView struct {
+	Spawn
+	// CanDismiss: it has ended, and the user may operate the agent it was for (rbac.Operate, as for removing an agent).
+	CanDismiss bool
 }
 
 type spawning struct {
@@ -161,6 +172,37 @@ func (h *Hub) spawnsOf(engine, project string) []Spawn {
 		h.spawns.byProj[key] = kept
 	}
 	return list
+}
+
+// DismissSpawn takes an ended spawn off its project's list before the hub would forget it, for a failed one the user has read. Who
+// may is who may operate the agent it was for. A spawn that runs cannot be: it ends on its own, ready or failed.
+func (h *Hub) DismissSpawn(ctx context.Context, user store.User, engine, project, id string) error {
+	if _, err := h.access(ctx, user, engine, project); err != nil {
+		return err
+	}
+	s, ok := h.spawnByID(engine, project, id)
+	if !ok {
+		return ErrNotFound
+	}
+	if _, err := h.authorize(ctx, user, engine, project, s.Name, rbac.Operate, s.Actor, "spawn.dismiss"); err != nil {
+		return err
+	}
+	key := projectKey{engine, project}
+	h.spawns.mu.Lock()
+	defer h.spawns.mu.Unlock()
+	list := h.spawns.byProj[key]
+	for i, x := range list {
+		if x.ID != id {
+			continue
+		}
+		if x.State == SpawnPending {
+			return ErrSpawnRunning
+		}
+		h.spawns.byProj[key] = append(list[:i:i], list[i+1:]...)
+		delete(h.spawns.done, id)
+		return nil
+	}
+	return ErrNotFound // dismissed meanwhile
 }
 
 func (h *Hub) spawnByID(engine, project, id string) (Spawn, bool) {
