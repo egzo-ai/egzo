@@ -79,10 +79,13 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 		"customApiKeyResponses":  map[string]any{"approved": []any{claudeKey[len(claudeKey)-20:]}, "rejected": []any{}},
 		"projects":               trusted,
 		"mcpServers": map[string]any{
+			// Claude Code defers an MCP server's tools behind tool search unless told otherwise. egzo's tools stay on the model's own
+			// tool list, by the names the instructions use; the browser's many tools are left to tool search, where they take no context.
 			"egzo": map[string]any{
-				"type":    "http",
-				"url":     strings.TrimRight(o.ControlURL, "/") + "/mcp",
-				"headers": map[string]any{"Authorization": o.Authorization},
+				"type":       "http",
+				"url":        strings.TrimRight(o.ControlURL, "/") + "/mcp",
+				"headers":    map[string]any{"Authorization": o.Authorization},
+				"alwaysLoad": true,
 			},
 		},
 	}

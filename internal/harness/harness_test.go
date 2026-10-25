@@ -144,6 +144,9 @@ func TestClaudeCodeGetsTheControlToolsOverMCPWithTheAgentsCredentials(t *testing
 	if get(t, server, "type") != "http" || get(t, server, "url") != "http://control:7777/mcp" || get(t, server, "headers", "Authorization") != o.Authorization {
 		t.Errorf("server = %v", server)
 	}
+	if get(t, server, "alwaysLoad") != true {
+		t.Errorf("egzo's tools must stay on the model's tool list, not behind tool search: alwaysLoad = %v", get(t, server, "alwaysLoad"))
+	}
 }
 
 func TestClaudeCodeTrustsEveryWorkspaceAndAddsThemWhenThereAreSeveral(t *testing.T) {
