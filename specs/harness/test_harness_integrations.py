@@ -233,7 +233,8 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     assert server["codemode"] is False
     assert "codemode" not in config["mcp"]["servers"]["playwright"]
     plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugins/egzo.js").stdout
-    assert "session.idle" in plugin
+    # a turn that finishes is session.execution.succeeded in OpenCode 2, which declares session.idle but never sends it
+    assert "session.execution.succeeded" in plugin
     assert "/v1/state" in plugin and "blocked" in plugin and "working" in plugin and "idle" in plugin
 
     configured = read_json(engine, p, model, "$HOME/.config/opencode/opencode.json")

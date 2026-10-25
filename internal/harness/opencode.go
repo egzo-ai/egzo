@@ -60,10 +60,16 @@ export default {
       try {
         for await (const event of ctx.event.subscribe({ signal: stop.signal })) {
           switch (event.type) {
-            case "session.idle":
+            // A turn that ends is session.execution.*: OpenCode 2 declares session.idle and session.status but does not send them
+            // (anomalyco/opencode#55358); they are handled for the day it does.
+            case "session.execution.succeeded":
             case "session.execution.failed":
             case "session.execution.interrupted":
+            case "session.idle":
               await state("idle", { reason: event.type })
+              break
+            case "session.status":
+              if ((event.properties?.status?.type ?? event.properties?.status) === "idle") await state("idle", { reason: event.type })
               break
             case "permission.asked":
               await state("blocked", { reason: "permission" })
