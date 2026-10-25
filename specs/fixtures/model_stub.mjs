@@ -98,7 +98,8 @@ http
       }
       const { tools, step, done, block, stop } = reply(request)
       const described = step === null ? undefined : (request.tools ?? []).map((t) => ({
-        name: t.name, description: String(t.description ?? "").slice(0, 300), takes: Object.keys(t.input_schema?.properties ?? {}),
+        // Code Mode's `execute` describes the MCP tools it holds: kept whole
+        name: t.name, description: String(t.description ?? "").slice(0, t.name === "execute" ? 20000 : 300), takes: Object.keys(t.input_schema?.properties ?? {}),
       }))
       fs.appendFileSync(log, JSON.stringify({ path, key, stream: Boolean(request.stream), tools, step, results: done ?? [], described }) + "\n")
       const model = request.model ?? "claude-egzo-spec"

@@ -228,6 +228,10 @@ def test_opencode_is_configured_to_allow_every_tool_report_through_a_plugin_and_
     assert config["permissions"] == [{"action": "*", "resource": "*", "effect": "allow"}]
     server = config["mcp"]["servers"]["egzo"]
     assert server["type"] == "remote" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
+    # egzo's tools stay on the model's own tool list, by the names the instructions use; the browser's many tools stay behind Code Mode's
+    # `execute`, where OpenCode puts every MCP server's tools by default
+    assert server["codemode"] is False
+    assert "codemode" not in config["mcp"]["servers"]["playwright"]
     plugin = in_instance(engine, p, default, "cat $HOME/.config/opencode/plugins/egzo.js").stdout
     assert "session.idle" in plugin
     assert "/v1/state" in plugin and "blocked" in plugin and "working" in plugin and "idle" in plugin
@@ -326,8 +330,9 @@ def point_opencode_at_the_stub(engine, project, name):
 @pytest.mark.parametrize("harness", HARNESSES)
 def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egzo_tool_with_no_prompt(sandbox, engine, harness):
     """The agent loop of the real harness, on a message: the model asks for a shell command and then for the egzo MCP tool list_messages,
-    and the harness runs both without asking anyone (bypass mode works), reaches control's MCP server and the browser's itself (the tools are
-    offered to the model), sends the placeholder key egzo gave it, and reports working and then idle, never blocked."""
+    and the harness runs both without asking anyone (bypass mode works), reaches control's MCP server and the browser's itself (their tools
+    are offered to the model: egzo's by name in both; the browser's by name in Claude Code and behind Code Mode's `execute` in OpenCode),
+    sends the placeholder key egzo gave it, and reports working and then idle, never blocked."""
     p = sandbox
     name = p.spawn(SCRIPTED[harness], f"{harness}-scripted", timeout=900)
     if harness == "opencode":
@@ -341,7 +346,9 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     def context():
         asked = model_requests(engine, p, name) or []
         seen = "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events(p) if e.get("agent") == name)
-        return "the model was asked:\n" + "\n".join(json.dumps(r)[:4000] for r in asked) + f"\nthe agent's events:\n{seen}"
+        rows = [json.dumps({k: v for k, v in r.items() if k != "described"}) for r in asked]
+        execute = [t["description"] for r in asked for t in r.get("described") or [] if t["name"] == "execute"][:1]
+        return "the model was asked:\n" + "\n".join(rows) + f"\nexecute says: {execute}\nthe agent's events:\n{seen}"
 
     wait_until(lambda: (rows := mine("activity")) and rows[-1]["text"] == "idle", "the harness to report that its session started", 45)
     before = max((e["seq"] for e in events(p)), default=0)
@@ -359,7 +366,12 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     turns = [r for r in model_requests(engine, p, name) if r.get("step") is not None]
     offered = turns[0]["tools"]
     assert any(t.endswith("list_messages") for t in offered), f"the egzo MCP tools are offered to the model: {offered}"
-    assert any(t.endswith("browser_navigate") for t in offered), f"the browser's MCP tools are offered to the model: {offered}"
+    if harness == "opencode":
+        execute = next((t for t in turns[0]["described"] if t["name"] == "execute"), None)
+        assert execute and "playwright" in execute["description"], f"the browser's tools are behind Code Mode's execute: {execute}"
+        assert not any(t.endswith("browser_navigate") for t in offered), f"the browser's tools are not on the native list: {offered}"
+    else:
+        assert any(t.endswith("browser_navigate") for t in offered), f"the browser's MCP tools are offered to the model: {offered}"
     placeholder = env_of(engine, p, name)["ANTHROPIC_API_KEY"]
     assert {r["key"] for r in turns} == {placeholder}, "every call to the model carries the placeholder egzo gave the harness"
 

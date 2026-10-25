@@ -86,11 +86,14 @@ export default {
 `
 
 func (o openCode) Plan(opts Options, args []string) (Plan, error) {
+	// OpenCode puts an MCP server's tools behind Code Mode's `execute` unless told otherwise. egzo's tools stay on the model's own
+	// tool list, by the names the instructions use; the browser's many tools are left to Code Mode, where they take no context.
 	servers := map[string]any{
 		"egzo": map[string]any{
-			"type":    "remote",
-			"url":     strings.TrimRight(opts.ControlURL, "/") + "/mcp",
-			"headers": map[string]any{"Authorization": opts.Authorization},
+			"type":     "remote",
+			"url":      strings.TrimRight(opts.ControlURL, "/") + "/mcp",
+			"headers":  map[string]any{"Authorization": opts.Authorization},
+			"codemode": false,
 		},
 	}
 	config := map[string]any{
