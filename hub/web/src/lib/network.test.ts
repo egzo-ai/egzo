@@ -44,6 +44,19 @@ describe("the network view", () => {
     expect(rows[2]!.decision).toBe("error");
   });
 
+  it("says where a connection came from and what its client is, and keeps a claimed name apart from a proved one", () => {
+    const at = (n: number) => `2026-10-25T14:00:0${n}Z`;
+    const rows = connections([
+      { time: at(4), conn: "b", protocol: "https", event: "connect", decision: "deny", claimedAgent: "coder-1", client: "10.89.3.2", userAgent: "curl/8.11.1", host: "example.com", reason: { code: "credentials", text: "" } },
+      { time: at(2), conn: "a", protocol: "https", event: "close", agent: "coder-1", claimedAgent: "coder-1", client: "10.89.3.2", userAgent: "Chrome/155", host: "example.com" },
+      { time: at(1), conn: "a", protocol: "https", event: "connect", decision: "allow", agent: "coder-1", claimedAgent: "coder-1", client: "10.89.3.2", userAgent: "Chrome/155", host: "example.com" },
+    ] as NetworkEvent[]);
+    expect(rows.map((r) => [r.conn, r.agent, r.claimedAgent, r.client, r.userAgent])).toEqual([
+      ["b", "", "coder-1", "10.89.3.2", "curl/8.11.1"],
+      ["a", "coder-1", "", "10.89.3.2", "Chrome/155"],
+    ]);
+  });
+
   it("writes sizes and durations for people", () => {
     expect([bytes(512), bytes(2048), bytes(5 * 1024 * 1024)]).toEqual(["512 B", "2.0 KB", "5.0 MB"]);
     expect([duration(250), duration(1500), duration(75_000), duration(7_260_000)]).toEqual(["250 ms", "1.5 s", "1 min 15 s", "2 h 1 min"]);

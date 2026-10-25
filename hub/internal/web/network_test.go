@@ -23,6 +23,7 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	start := time.Now().UTC()
 	event := func(n int, e engines.AuditEvent) engines.AuditEvent {
 		e.Time, e.Conn, e.Agent, e.Instance, e.Profile, e.Protocol = start.Add(time.Duration(n)*time.Millisecond), "00000000000000c1", "coder-1", a.ID, "default", proxy.HTTPS
+		e.ClaimedAgent, e.Client, e.UserAgent = "coder-1", "10.89.3.2", "curl/8.11.1"
 		return e
 	}
 	r.fakes["local"].AddAudit("web",
@@ -59,6 +60,9 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	}
 	if reason := events[2]["reason"].(map[string]any); reason["code"] != "not-in-profile" {
 		t.Errorf("reason = %v", reason)
+	}
+	if e := events[0]; e["claimedAgent"] != "coder-1" || e["client"] != "10.89.3.2" || e["userAgent"] != "curl/8.11.1" {
+		t.Errorf("who and from where = %v", e)
 	}
 	_, one := b.get("/e/local/p/web/network?agent=coder-1")
 	if len(list(one, "denials")) != 1 {

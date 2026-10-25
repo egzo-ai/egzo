@@ -560,3 +560,26 @@ def test_the_network_tab_says_why_a_host_was_denied_how_to_fix_it_and_when_it_is
     expect(row).to_contain_text("fixed")
     page.goto(single_hub.url + "/e/local/p/web")
     expect(page.locator('tr[data-agent="coder-1"]').get_by_test_id("denied")).to_have_count(0)
+
+
+def test_the_network_tab_is_in_the_sidebar_and_says_where_a_connection_came_from_and_who_it_only_claimed_to_be(single_hub, page):
+    single_hub.world("audit", engine="local", project="web", agent="coder-1", host="example.com", decision="allow", mode="tunnel")
+    single_hub.world("audit", engine="local", project="web", agent="coder-1", host="api.example.com", decision="deny", code="credentials",
+                     text="invalid proxy credentials")
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + "/e/local/p/web")
+    page.get_by_role("navigation", name="Main").get_by_role("link", name="Network").click()
+    expect(page).to_have_url(single_hub.url + "/e/local/p/web/network")
+
+    connections = page.get_by_test_id("connections")
+    proved = connections.locator('tr[data-host="example.com"]')
+    expect(proved.locator("td").nth(1)).to_have_text("coder-1")
+    proved.click()
+    expect(page.get_by_test_id("from")).to_contain_text("From 10.89.3.2, curl/8.11.1")
+    proved.click()
+
+    claimed = connections.locator('tr[data-host="api.example.com"]')
+    expect(claimed.locator("td").nth(1)).to_have_text("coder-1?")
+    claimed.click()
+    expect(page.get_by_test_id("from")).to_contain_text("claimed to be coder-1, not proved")
+    expect(page.get_by_test_id("denials").locator('tr[data-host="api.example.com"]')).to_contain_text("(unauthenticated)")
