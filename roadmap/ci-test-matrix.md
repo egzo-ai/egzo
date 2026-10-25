@@ -18,14 +18,15 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
   a network pool with another: Docker and Podman are never on the same machine. `ubuntu-26.04` carries Docker and Podman
   already (the runner image README lists Docker 29.4.2 and Podman 5.7.0); gVisor and the Podman API sockets are set up by
   `scripts/ci-engine.sh`.
-- **When it runs** (`.github/workflows/specs.yml`, one reusable workflow):
+- **When it runs** (`.github/workflows/specs.yml`):
 
   | Event | Platforms | Blocks? |
   |---|---|---|
   | `pull_request` | `docker` (the whole matrix while the workflow is tried out, `PR_FULL` in `specs.yml`) | yes, once it is a required check |
   | `merge_group` (the merge queue) | all | yes: the gate in front of `main` |
+  | a push to `main` | all | no; a release tag requires its required cells to have passed |
   | nightly, and by hand | all | no; a red night is a finding |
-  | a release tag (`release.yml` calls it first) | all | yes: nothing is built or pushed if a required cell fails |
+  | a release tag | none | `release.yml` does not run them again: it builds nothing unless the tagged commit is on `main` and its push passed the required cells |
 
   A pull request gets the Docker cell for a fast answer; the whole matrix runs once per merge, in the queue, on the result of
   merging, so `main` never gets a change a platform rejects. The nightly run catches what no push touched: a new runner image
