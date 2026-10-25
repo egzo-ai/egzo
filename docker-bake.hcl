@@ -12,9 +12,17 @@ variable "HARNESSES" { default = ["claude-code", "opencode"] }
 variable "CACHE_ARCH" { default = "" }
 # true when the cache can be written (main and releases); a pull request only reads it.
 variable "CACHE_WRITE" { default = false }
+# true for the release, which pushes by digest: an image pushed by digest is named by its repository alone, without a tag (the
+# tags are put on afterwards, on the multi-architecture manifest).
+variable "PUSH_BY_DIGEST" { default = false }
 
 group "default" {
   targets = ["egzo", "hub", "harness-base", "harness"]
+}
+
+function "tags" {
+  params = [image]
+  result = PUSH_BY_DIGEST ? ["${REGISTRY}/${image}"] : ["${REGISTRY}/${image}:${VERSION}"]
 }
 
 function "cache_from" {
@@ -39,7 +47,7 @@ target "egzo" {
   inherits   = ["_common"]
   context    = "."
   args       = { VERSION = VERSION }
-  tags       = ["${REGISTRY}/egzo:${VERSION}"]
+  tags       = tags("egzo")
   cache-from = cache_from("egzo")
   cache-to   = cache_to("egzo")
 }
@@ -50,7 +58,7 @@ target "hub" {
   context    = "."
   dockerfile = "hub/Dockerfile"
   args       = { VERSION = VERSION }
-  tags       = ["${REGISTRY}/egzo-hub:${VERSION}"]
+  tags       = tags("egzo-hub")
   cache-from = cache_from("egzo-hub")
   cache-to   = cache_to("egzo-hub")
 }
@@ -60,7 +68,7 @@ target "harness-base" {
   context    = "harness/base"
   contexts   = { egzo-image = "target:egzo" }
   args       = { EGZO_IMAGE = "egzo-image" }
-  tags       = ["${REGISTRY}/egzo-harness-base:${VERSION}"]
+  tags       = tags("egzo-harness-base")
   cache-from = cache_from("egzo-harness-base")
   cache-to   = cache_to("egzo-harness-base")
 }
@@ -72,7 +80,7 @@ target "harness" {
   context    = "harness/${h}"
   contexts   = { base-image = "target:harness-base" }
   args       = { BASE_IMAGE = "base-image" }
-  tags       = ["${REGISTRY}/egzo-harness-${h}:${VERSION}"]
+  tags       = tags("egzo-harness-${h}")
   cache-from = cache_from("egzo-harness-${h}")
   cache-to   = cache_to("egzo-harness-${h}")
 }

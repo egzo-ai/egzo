@@ -115,6 +115,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
           CACHE_ARCH: ${{ matrix.arch }}
           CACHE_WRITE: true
+          PUSH_BY_DIGEST: true
         run: |
           docker buildx bake --progress=plain --metadata-file metadata.json \
             --set '*.platform=linux/${{ matrix.arch }}' \
@@ -149,9 +150,8 @@ jobs:
         run: |
           set -euo pipefail
           for target in $(jq -r 'keys[] | select(. != "buildx.build.warnings")' metadata-amd64/metadata.json); do
-            # image.name is the target's tag, ghcr.io/egzo-ai/<image>:<version>; the repository is what is before the last ":".
-            name=$(jq -r --arg t "$target" '.[$t]["image.name"] | split(",")[0]' metadata-amd64/metadata.json)
-            repo=${name%:*}
+            # image.name is the target's repository, ghcr.io/egzo-ai/<image>, untagged since it was pushed by digest.
+            repo=$(jq -r --arg t "$target" '.[$t]["image.name"] | split(",")[0]' metadata-amd64/metadata.json)
             tags="-t $repo:$GITHUB_REF_NAME"
             case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags -t $repo:latest" ;; esac
             sources=""
