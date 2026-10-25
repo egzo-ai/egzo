@@ -2,9 +2,10 @@
   import { api } from "../lib/api";
   import { app, errorText, multiEngine, toast } from "../lib/app.svelte";
   import { operate } from "../lib/agentops";
-  import { activityKind, activityLabel, initials } from "../lib/format";
+  import { activityKind, activityLabel, ago, initials } from "../lib/format";
   import { poll } from "../lib/live";
-  import { href, navigate, type ProjectTab } from "../lib/router.svelte";
+  import { href, type ProjectTab } from "../lib/router.svelte";
+  import { followSpawn } from "../lib/spawns";
   import type { AuditEntry, Members, Project, TimelineEvent } from "../lib/types";
   import { openTerm, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
@@ -29,6 +30,7 @@
   let spawning = $state(false);
   let spawnForm = $state({ template: "", name: "" });
   let spawnError = $state("");
+  let submitting = $state(false);
 
   const multi = $derived(multiEngine());
 
@@ -64,6 +66,8 @@
   });
 
   const agents = $derived(project?.agents ?? []);
+  // a ready spawn is its agent's row; one that runs or failed has a row of its own until the hub forgets it
+  const pending = $derived((project?.spawns ?? []).filter((s) => s.state !== "ready"));
   const running = $derived(agents.filter((a) => a.running).length);
   const waiting = $derived(agents.filter((a) => a.waiting).length);
   const tabs = $derived.by(() => {
@@ -79,16 +83,21 @@
     spawning = true;
   }
 
+  // The hub answers at once and runs the spawn; the project lists it, and a toast says how it ended.
   async function spawn(e: Event) {
     e.preventDefault();
     spawnError = "";
+    submitting = true;
     try {
-      const { agent } = await api.spawn(engine, name, spawnForm.template, spawnForm.name);
+      const { spawn: started } = await api.spawn(engine, name, spawnForm.template, spawnForm.name);
       spawning = false;
-      toast(`Spawned ${agent}`);
-      navigate(href.agent(engine, name, agent));
+      followSpawn(engine, name, started);
+      toast(`Spawning ${started.name || started.template}…`);
+      await loadProject();
     } catch (err) {
       spawnError = errorText(err);
+    } finally {
+      submitting = false;
     }
   }
 
@@ -137,11 +146,21 @@
     </div>
 
     {#if tab === "agents"}
-      {#if agents.length}
+      {#if agents.length || pending.length}
         <div class="table-wrap">
           <table class="table" data-testid="agents">
             <thead><tr><th>Agent</th><th>Activity</th><th>Status</th><th>Terminal</th><th>Spawned by</th><th></th></tr></thead>
             <tbody>
+              {#each pending as s (s.id)}
+                <tr data-spawn={s.id}>
+                  <td><span class="name">{s.name || "(automatic)"}</span> <span class="muted">{s.template}</span></td>
+                  <td>{#if s.state === "spawning"}<Pill kind="starting" label="spawning" testid="spawn-state" />{:else}<Pill kind="error" label="failed" testid="spawn-state" />{/if}</td>
+                  <td class="wrap" style="white-space:normal;min-width:18ch">{#if s.error}<span class="status" style:color="var(--status-error)">{s.error}</span>{:else}<span class="muted">started {ago(s.startedAt)}</span>{/if}</td>
+                  <td><span class="muted">—</span></td>
+                  <td>{s.creator}</td>
+                  <td></td>
+                </tr>
+              {/each}
               {#each agents as a (a.name)}
                 {@const open = workspace.terms.some((t) => t.engine === engine && t.project === name && t.agent === a.name)}
                 <tr data-row tabindex="-1" data-agent={a.name} aria-selected={open}>
@@ -209,7 +228,7 @@
       </form>
       {#snippet footer()}
         <button class="btn" onclick={() => (spawning = false)}>Cancel</button>
-        <button class="btn" data-variant="primary" type="submit" form="spawn-form" disabled={!project?.templates.length}>Spawn</button>
+        <button class="btn" data-variant="primary" type="submit" form="spawn-form" disabled={!project?.templates.length || submitting} aria-busy={submitting}>Spawn</button>
       {/snippet}
     </Modal>
   {/if}

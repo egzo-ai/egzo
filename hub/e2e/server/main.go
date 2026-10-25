@@ -218,6 +218,10 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			e.AddProject(engines.Project{Name: c.Project, Templates: []string{"coder"}})
 		case "remove-project":
 			e.RemoveProject(c.Project)
+		case "hold-spawns": // spawns wait until release-spawns, as a spawn that takes long does
+			e.HoldSpawns()
+		case "release-spawns":
+			e.ReleaseSpawns()
 		case "calls":
 			json.NewEncoder(rw).Encode(e.Calls())
 			return

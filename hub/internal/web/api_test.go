@@ -208,9 +208,24 @@ func TestSpawnStopStartAndRemove(t *testing.T) {
 	b.signIn("admin")
 	uid := r.userID("admin")
 
+	// a spawn is answered at once, before the agent exists; the project lists it until it has ended, and then how it ended
+	r.fakes["local"].HoldSpawns()
 	code, out := b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "fix-bug"})
-	if code != 200 || out["agent"] != "fix-bug" {
+	started, _ := out["spawn"].(map[string]any)
+	if code != http.StatusAccepted || started["state"] != "spawning" || started["id"] == "" || started["name"] != "fix-bug" || started["template"] != "coder" {
 		t.Fatalf("spawn = %d %v", code, out)
+	}
+	spawns := func() []map[string]any {
+		_, v := b.get("/e/local/p/web")
+		return list(v, "spawns")
+	}
+	if got := spawns(); len(got) != 1 || got[0]["id"] != started["id"] || got[0]["state"] != "spawning" || got[0]["creator"] != "admin" {
+		t.Errorf("while it runs: %v", got)
+	}
+	r.fakes["local"].ReleaseSpawns()
+	r.hub.WaitForSpawns()
+	if got := spawns(); len(got) != 1 || got[0]["state"] != "ready" || got[0]["agent"] != "fix-bug" || got[0]["endedAt"] == nil {
+		t.Errorf("once it has ended: %v", got)
 	}
 	if calls := r.fakes["local"].Calls(); calls[0] != "spawn web/fix-bug user:"+uid {
 		t.Errorf("calls = %v", calls)
@@ -232,8 +247,13 @@ func TestSpawnStopStartAndRemove(t *testing.T) {
 	if code, _ := b.get("/e/local/p/web/a/fix-bug"); code != 404 {
 		t.Errorf("a removed agent = %d", code)
 	}
-	if code, out := b.post("/e/local/p/web/spawn", json_{"template": "ghost"}); code != http.StatusBadGateway || !strings.Contains(out["message"].(string), "Could not spawn") {
-		t.Errorf("a spawn that fails = %d %v", code, out)
+	code, out = b.post("/e/local/p/web/spawn", json_{"template": "ghost"})
+	failed, _ := out["spawn"].(map[string]any)
+	r.hub.WaitForSpawns()
+	for _, s := range spawns() {
+		if s["id"] == failed["id"] && (s["state"] != "failed" || !strings.Contains(s["error"].(string), "ghost")) {
+			t.Errorf("a spawn that fails = %d %v", code, s)
+		}
 	}
 	if code, _ := b.post("/e/local/p/web/a/x/explode", nil); code != 404 {
 		t.Errorf("an unknown verb = %d", code)

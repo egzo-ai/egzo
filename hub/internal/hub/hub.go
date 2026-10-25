@@ -42,6 +42,7 @@ type Hub struct {
 	pubMu    sync.Mutex
 	pub      map[projectKey]*publishedEntry
 	signIn   SignInOptions // set by SetupSignIn
+	spawns   spawning      // the spawns started from the hub (spawn.go)
 }
 
 type engineScan struct {
@@ -280,6 +281,7 @@ type ProjectView struct {
 	// Feed says how far what the agents are doing can be trusted.
 	Feed      Feed
 	Agents    []AgentView
+	Spawns    []Spawn // started from the hub and not yet ended, or ended a short while ago
 	CanSpawn  bool
 	CanManage bool
 }
@@ -381,6 +383,7 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 		}
 		view.Agents = append(view.Agents, av)
 	}
+	view.Spawns = h.spawnsOf(engine, name)
 	return view, nil
 }
 
@@ -455,20 +458,6 @@ func (h *Hub) creatorOf(ctx context.Context, engine, project, agent string) (str
 		return "", ErrNotFound
 	}
 	return found, err
-}
-
-// Spawn makes an agent from a template; it belongs to the user.
-func (h *Hub) Spawn(ctx context.Context, user store.User, engine, project, template, name string) (string, error) {
-	if _, err := h.authorize(ctx, user, engine, project, name, rbac.Spawn, "", "agent.spawn"); err != nil {
-		return "", err
-	}
-	var spawned string
-	err := h.call(ctx, engine, func(e engines.Engine) (err error) {
-		spawned, err = e.Spawn(ctx, project, template, name, rbac.Actor(user.ID))
-		return err
-	})
-	h.afterOperation(ctx, engine)
-	return spawned, err
 }
 
 // Operate runs start, stop or rm on an agent.

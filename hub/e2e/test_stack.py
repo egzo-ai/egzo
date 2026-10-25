@@ -53,7 +53,9 @@ def test_the_admin_links_dex_signs_in_with_it_and_works_with_a_real_project(page
 
     page.get_by_role("button", name="Spawn agent").click()
     page.get_by_role("dialog").get_by_role("button", name="Spawn", exact=True).click()
-    expect(page.get_by_role("status")).to_contain_text("Spawned coder-1")
+    # the hub answers at once and runs the spawn: the real engine takes a while, and a toast says when the agent is ready
+    expect(page.get_by_role("status").filter(has_text="Spawned coder-1")).to_be_visible(timeout=120000)
+    page.locator("tr[data-agent=coder-1]").get_by_role("link", name="coder-1").click()
     expect(page.get_by_test_id("activity")).not_to_have_text("stopped", timeout=15000)
 
     # the terminal of the real session holder

@@ -117,9 +117,25 @@ export interface Project {
   templates: string[];
   services: Service[];
   agents: Agent[] | null;
+  /** Spawns started from the hub that are running, or ended a short while ago. */
+  spawns: Spawn[];
   canSpawn: boolean;
   canManage: boolean;
   canAudit: boolean;
+}
+
+/** A spawn the hub runs in the background: `agent` once it is ready, `error` when it failed. */
+export interface Spawn {
+  id: string;
+  template: string;
+  /** As asked: empty when the engine chooses. */
+  name: string;
+  creator: string;
+  state: "spawning" | "ready" | "failed";
+  agent?: string;
+  error?: string;
+  startedAt: string;
+  endedAt?: string;
 }
 
 export interface AgentAnswer {
