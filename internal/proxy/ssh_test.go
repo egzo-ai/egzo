@@ -410,6 +410,60 @@ func TestSSHRefusesAnIdentityNobodyHas(t *testing.T) {
 	}
 }
 
+func TestSSHASignInSaysWhereFromAndWhatTheClientIsAndClaimsNoName(t *testing.T) {
+	r := newSSHRig(t, nil)
+	run(t, r.connect(), "echo")
+	connect := r.audit.events()[0]
+	if connect.Kind != KindConnect || connect.Decision != OutcomeAllow || connect.Agent != "a1" || connect.Server != "prod" {
+		t.Fatalf("connect = %+v", connect)
+	}
+	if connect.Client != "127.0.0.1" || connect.UserAgent != "SSH-2.0-Go" || connect.ClaimedAgent != "" {
+		t.Fatalf("client %q, user agent %q, claimed %q", connect.Client, connect.UserAgent, connect.ClaimedAgent)
+	}
+}
+
+func TestSSHARefusedSignInNamesTheServerAskedForButNoAgent(t *testing.T) {
+	r := newSSHRig(t, nil)
+	stranger, _ := newKey(t)
+	r.dial("prod", stranger)
+	r.dial("not a server name", r.identity)
+	events := r.events(2)
+	for i, server := range []string{"prod", ""} {
+		e := events[i]
+		if e.Decision != OutcomeDeny || e.Reason.Code != CodeIdentity || e.Agent != "" || e.Instance != "" || e.Server != server {
+			t.Errorf("event %d = %+v", i, e)
+		}
+		if e.Client != "127.0.0.1" || e.UserAgent != "SSH-2.0-Go" {
+			t.Errorf("event %d: client %q, user agent %q", i, e.Client, e.UserAgent)
+		}
+	}
+}
+
+func TestSSHAClientThatLeavesBeforeSigningInIsAborted(t *testing.T) {
+	r := newSSHRig(t, nil)
+	conn, err := net.Dial("tcp", r.address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	e := r.events(1)[0]
+	if e.Decision != OutcomeError || e.Reason.Code != CodeAborted || e.UserAgent != "" || e.Server != "" || e.Client != "127.0.0.1" {
+		t.Fatalf("event = %+v", e)
+	}
+}
+
+// events waits for n events and returns them.
+func (r *sshRig) events(n int) []Event {
+	r.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if events := r.audit.events(); len(events) >= n {
+			return events
+		}
+	}
+	r.t.Fatalf("fewer than %d events: %+v", n, r.audit.events())
+	return nil
+}
+
 func TestSSHRefusesAServerThatIsNotInTheProfile(t *testing.T) {
 	r := newSSHRig(t, nil)
 	for _, user := range []string{"staging", "deploy", "root", ""} {

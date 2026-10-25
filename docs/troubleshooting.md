@@ -48,8 +48,8 @@ $ egzo proxy log                     # the host, and the decision with its reaso
   import it into Chromium's store; an image of your own needs `certutil` (the `libnss3-tools` package) and the `egzo
   agent run` entrypoint. Chromium ignores `SSL_CERT_FILE`.
 - A site that loads for curl but not for the browser, with the mode `intercept` in the log: it pins its certificate.
-- `challenge` decisions are not failures: a browser asks for the proxy credentials before it sends them. They name no agent,
-  so `--agent` does not show them.
+- The browser's connections, Chromium's own background requests included, are the agent's: the browser sends nothing
+  without the agent's credentials, so it leaves no `challenge` decisions.
 - `Page.goto: net::ERR_TUNNEL_CONNECTION_FAILED`: the proxy refused the host (see its `deny`).
 
 ## An agent is not doing what you sent

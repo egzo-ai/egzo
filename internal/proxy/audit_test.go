@@ -67,20 +67,24 @@ func TestEveryEventTheProxyWritesPassesCheck(t *testing.T) {
 
 func TestCheckRefusesWhatTheProxyNeverWrites(t *testing.T) {
 	good := Event{Time: time.Now(), Conn: "0123456789abcdef", Protocol: HTTPS, Kind: KindConnect, Decision: OutcomeDeny, Agent: "coder-1",
-		Instance: "01JAB3C4D5E6F7G8H9JKMNPQRS", Profile: "default", Host: "example.com", Reason: because(CodeNotInProfile, "not in the profile")}
+		Instance: "01JAB3C4D5E6F7G8H9JKMNPQRS", Profile: "default", ClaimedAgent: "coder-1", Client: "10.89.3.2", UserAgent: "curl/8.11.1",
+		Host: "example.com", Reason: because(CodeNotInProfile, "not in the profile")}
 	if err := good.Check(); err != nil {
 		t.Fatal(err)
 	}
 	for field, bad := range map[string]func(*Event){
-		"conn":     func(e *Event) { e.Conn = "x" },
-		"time":     func(e *Event) { e.Time = time.Time{} },
-		"agent":    func(e *Event) { e.Agent = "<img src=x>" },
-		"instance": func(e *Event) { e.Instance = "nope" },
-		"host":     func(e *Event) { e.Host = strings.Repeat("x", 300) },
-		"server":   func(e *Event) { e.Server = "root" },
-		"path":     func(e *Event) { e.Path = strings.Repeat("/", MaxField+4) },
-		"reason":   func(e *Event) { e.Reason = because("Not A Code", "") },
-		"counts":   func(e *Event) { e.BytesUp = -1 },
+		"conn":          func(e *Event) { e.Conn = "x" },
+		"time":          func(e *Event) { e.Time = time.Time{} },
+		"agent":         func(e *Event) { e.Agent = "<img src=x>" },
+		"instance":      func(e *Event) { e.Instance = "nope" },
+		"claimed_agent": func(e *Event) { e.ClaimedAgent = "a token:typed here" },
+		"client":        func(e *Event) { e.Client = "proxy:3128" },
+		"user_agent":    func(e *Event) { e.UserAgent = strings.Repeat("u", MaxField+4) },
+		"host":          func(e *Event) { e.Host = strings.Repeat("x", 300) },
+		"server":        func(e *Event) { e.Server = "root" },
+		"path":          func(e *Event) { e.Path = strings.Repeat("/", MaxField+4) },
+		"reason":        func(e *Event) { e.Reason = because("Not A Code", "") },
+		"counts":        func(e *Event) { e.BytesUp = -1 },
 	} {
 		e := good
 		bad(&e)

@@ -17,24 +17,38 @@ func TestTheChildGetsTheBrowsersPathWhenTheHarnessDidNotPassItOn(t *testing.T) {
 	defer func() { browsersPath = old }()
 	browsersPath = t.TempDir()
 
-	reduced := childEnvironment([]string{"PATH=/usr/bin"}) // no HTTPS_PROXY either
+	reduced := childEnvironment([]string{"PATH=/usr/bin"}, "") // no HTTPS_PROXY either
 	if got := lookup(reduced, "PLAYWRIGHT_BROWSERS_PATH"); got != browsersPath {
 		t.Errorf("PLAYWRIGHT_BROWSERS_PATH = %q", got)
 	}
 	if got := lookup(reduced, "PATH"); got != "/usr/bin" {
 		t.Errorf("PATH = %q", got)
 	}
-	if got := lookup(childEnvironment([]string{"PLAYWRIGHT_BROWSERS_PATH=/mine"}), "PLAYWRIGHT_BROWSERS_PATH"); got != "/mine" {
+	if got := lookup(childEnvironment([]string{"PLAYWRIGHT_BROWSERS_PATH=/mine"}, ""), "PLAYWRIGHT_BROWSERS_PATH"); got != "/mine" {
 		t.Errorf("a value that was set is replaced: %q", got)
 	}
 	browsersPath = filepath.Join(browsersPath, "missing")
-	if got := lookup(childEnvironment(nil), "PLAYWRIGHT_BROWSERS_PATH"); got != "" {
+	if got := lookup(childEnvironment(nil, ""), "PLAYWRIGHT_BROWSERS_PATH"); got != "" {
 		t.Errorf("a directory that does not exist was announced: %q", got)
 	}
 	in := []string{"A=1"}
-	childEnvironment(in)
+	childEnvironment(in, "")
 	if len(in) != 1 {
 		t.Error("the caller's environment was modified")
+	}
+}
+
+func TestTheChildsProxyIsTheForwarderAndNeverHoldsTheCredentials(t *testing.T) {
+	credentials := "http://coder:tok@proxy:3128"
+	out := childEnvironment([]string{"HTTPS_PROXY=" + credentials, "https_proxy=" + credentials, "HTTP_PROXY=" + credentials,
+		"http_proxy=" + credentials, "NO_PROXY=control"}, "http://127.0.0.1:4567")
+	for _, name := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if got := lookup(out, name); got != "http://127.0.0.1:4567" {
+			t.Errorf("%s = %q", name, got)
+		}
+	}
+	if lookup(out, "NO_PROXY") != "control" || strings.Contains(strings.Join(out, " "), "tok") {
+		t.Errorf("environment = %v", out)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"regexp"
 	"sync"
 	"time"
@@ -28,10 +29,17 @@ type Event struct {
 	Decision Outcome  `json:"decision,omitempty"` // none on a close
 	Mode     Mode     `json:"mode,omitempty"`     // on an allowed https connect
 
-	// Who, once the proxy credentials are checked: the agent's name, its instance's id and the profile that decided.
+	// Who, once the proxy credentials (or, for ssh, the key's signature) are checked: the agent's name, its instance's id and the
+	// profile that decided. Never set otherwise.
 	Agent    string `json:"agent,omitempty"`
 	Instance string `json:"instance,omitempty"`
 	Profile  string `json:"profile,omitempty"`
+	// ClaimedAgent is the name the client sent in its proxy credentials, right or wrong (https only: an ssh client sends no name).
+	ClaimedAgent string `json:"claimed_agent,omitempty"`
+	// Client is the address the connection came from, and UserAgent what the client says it is: the User-Agent of a CONNECT, an
+	// ssh client's identification string. What the proxy saw, never proof of who.
+	Client    string `json:"client,omitempty"`
+	UserAgent string `json:"user_agent,omitempty"`
 
 	Host string `json:"host,omitempty"`
 	// Server is an ssh server's name in the profile.
@@ -193,6 +201,9 @@ func (e Event) Check() error {
 		{"agent", e.Agent, optional(e.Agent, names.Instance)},
 		{"instance", e.Instance, optional(e.Instance, names.InstanceID)},
 		{"profile", e.Profile, clipped(e.Profile)},
+		{"claimed_agent", e.ClaimedAgent, optional(e.ClaimedAgent, names.Instance)},
+		{"client", e.Client, optional(e.Client, func(a string) bool { return net.ParseIP(a) != nil })},
+		{"user_agent", e.UserAgent, clipped(e.UserAgent)},
 		{"host", e.Host, optional(e.Host, names.Host)},
 		{"server", e.Server, optional(e.Server, names.SSHServer)},
 		{"method", e.Method, clipped(e.Method)},
@@ -221,7 +232,8 @@ func (a *Audit) Log(event Event) {
 		return
 	}
 	event.Time = time.Now().UTC()
-	event.Agent, event.Host, event.Path = clip(event.Agent), clip(event.Host), clip(event.Path)
+	event.Agent, event.ClaimedAgent, event.Host, event.Path = clip(event.Agent), clip(event.ClaimedAgent), clip(event.Host), clip(event.Path)
+	event.UserAgent = clip(event.UserAgent)
 	event.Server, event.Command = clip(event.Server), clip(event.Command)
 	if event.Reason != nil {
 		event.Reason = &Reason{Code: event.Reason.Code, Text: clip(event.Reason.Text)}
@@ -235,21 +247,45 @@ func (a *Audit) Log(event Event) {
 	a.out.Write(append(line, '\n'))
 }
 
-// conn is one connection as the audit sees it: what every event of it carries. The fields after protocol are filled in as
+// conn is one connection as the audit sees it: what every event of it carries. The fields after client are filled in as
 // they become known (who it is from once the credentials are checked, the server once an ssh user is signed in).
 type conn struct {
-	audit    *Audit
-	id       string
-	protocol Protocol
-	agent    string
-	instance string
-	profile  string
-	host     string
-	server   string
+	audit     *Audit
+	id        string
+	protocol  Protocol
+	client    string
+	userAgent string
+	claimed   string
+	agent     string
+	instance  string
+	profile   string
+	host      string
+	server    string
 }
 
-func newConn(audit *Audit, protocol Protocol) *conn {
-	return &conn{audit: audit, id: newConnID(), protocol: protocol}
+// newConn starts the audit of a connection from remote, the client's address and port.
+func newConn(audit *Audit, protocol Protocol, remote string) *conn {
+	return &conn{audit: audit, id: newConnID(), protocol: protocol, client: clientAddress(remote)}
+}
+
+// clientAddress is the address of remote without its port, or empty when it has none.
+func clientAddress(remote string) string {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+// claims records the name the client sent in its credentials, when it is a name an instance can have: anything else may be a
+// token typed in the wrong place, and is not logged.
+func (c *conn) claims(agent string) {
+	if names.Instance(agent) {
+		c.claimed = agent
+	}
 }
 
 // newConnID is 64 random bits: no two connections share one, across restarts too.
@@ -267,6 +303,7 @@ func (c *conn) from(agent, instance, profile string) {
 // log writes e as an event of this connection.
 func (c *conn) log(e Event) {
 	e.Conn, e.Protocol = c.id, c.protocol
+	e.Client, e.UserAgent, e.ClaimedAgent = c.client, c.userAgent, c.claimed
 	e.Agent, e.Instance, e.Profile = c.agent, c.instance, c.profile
 	if e.Host == "" {
 		e.Host = c.host
