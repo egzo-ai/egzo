@@ -1,14 +1,16 @@
 // A stand-in for the Anthropic Messages API that does not think: it scripts the turn of a harness's agent loop.
 //   node model_stub.mjs <port> <log> <command>
-// A request that offers a shell tool is the agent's turn. The stub answers with one tool call per step, chosen by how many of
-// its own tool calls the conversation already holds a result for: the shell tool running <command>, then the egzo MCP tool
-// list_messages, then a closing text. Any other request (a title, a quota check) gets a short text. Every request is logged
-// as one JSON line: the path, the key it carried, the tools it offered, the step and the results of the stub's own calls.
+// A request that offers a shell tool (Claude Code's `Bash`, OpenCode's `shell`) is the agent's turn. The stub answers with one
+// tool call per step, chosen by how many of its own tool calls the conversation already holds a result for: the shell tool
+// running <command>, then the egzo MCP tool list_messages, then a closing text. Any other request (a title, a quota check) gets
+// a short text. Every request is logged as one JSON line: the path, the key it carried, the tools it offered (with what each
+// says it is and takes, for a failure to show), the step and the results of the stub's own calls.
 import fs from "node:fs"
 import http from "node:http"
 
 const [port, log, command] = process.argv.slice(2)
 const PREFIX = "toolu_egzo_spec_"
+const SHELLS = ["bash", "shell"]
 
 function results(messages) {
   const found = []
@@ -23,15 +25,22 @@ function results(messages) {
   return found
 }
 
+// What the shell tool takes, from its schema: the command under the name it uses, and a description if it has one.
+function shellInput(tool) {
+  const fields = Object.keys(tool.input_schema?.properties ?? {})
+  const input = { [["command", "cmd", "script"].find((f) => fields.includes(f)) ?? "command"]: command }
+  if (fields.includes("description")) input.description = "Run the command the spec asked for"
+  return input
+}
+
 function reply(request) {
   const tools = (request.tools ?? []).map((t) => t.name).filter(Boolean)
-  const shell = tools.find((name) => name.toLowerCase() === "bash")
+  const shell = (request.tools ?? []).find((t) => SHELLS.includes(String(t.name).toLowerCase()))
   if (!shell) return { tools, step: null, block: { type: "text", text: "ok" }, stop: "end_turn" }
   const done = results(request.messages)
   const step = done.length
   if (step === 0) {
-    const input = { command, description: "Run the command the spec asked for" }
-    return { tools, step, done, block: { type: "tool_use", id: PREFIX + "0", name: shell, input }, stop: "tool_use" }
+    return { tools, step, done, block: { type: "tool_use", id: PREFIX + "0", name: shell.name, input: shellInput(shell) }, stop: "tool_use" }
   }
   if (step === 1) {
     const egzo = tools.find((name) => name.endsWith("list_messages"))
@@ -88,7 +97,10 @@ http
         return
       }
       const { tools, step, done, block, stop } = reply(request)
-      fs.appendFileSync(log, JSON.stringify({ path, key, stream: Boolean(request.stream), tools, step, results: done ?? [] }) + "\n")
+      const described = step === null ? undefined : (request.tools ?? []).map((t) => ({
+        name: t.name, description: String(t.description ?? "").slice(0, 300), takes: Object.keys(t.input_schema?.properties ?? {}),
+      }))
+      fs.appendFileSync(log, JSON.stringify({ path, key, stream: Boolean(request.stream), tools, step, results: done ?? [], described }) + "\n")
       const model = request.model ?? "claude-egzo-spec"
       if (request.stream) stream(res, model, block, stop)
       else {

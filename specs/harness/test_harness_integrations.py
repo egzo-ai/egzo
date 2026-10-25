@@ -341,7 +341,7 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     def context():
         asked = model_requests(engine, p, name) or []
         seen = "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events(p) if e.get("agent") == name)
-        return "the model was asked:\n" + "\n".join(json.dumps(r)[:400] for r in asked) + f"\nthe agent's events:\n{seen}"
+        return "the model was asked:\n" + "\n".join(json.dumps(r)[:4000] for r in asked) + f"\nthe agent's events:\n{seen}"
 
     wait_until(lambda: (rows := mine("activity")) and rows[-1]["text"] == "idle", "the harness to report that its session started", 45)
     before = max((e["seq"] for e in events(p)), default=0)
