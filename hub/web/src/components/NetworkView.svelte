@@ -85,7 +85,7 @@
             {@const e = explain(d)}
             <tr data-host={d.host} data-code={d.code} class:fixed={!!d.fixed}>
               <td><span class="name">{d.host}</span>{#if d.protocol === "ssh"} <span class="badge">ssh{#if d.server} {d.server}{/if}</span>{/if}</td>
-              {#if !agent}<td>{d.agent || "–"}{#if !d.instance} <span class="muted" title="the proxy could not tell which agent it was">(unknown)</span>{/if}</td>{/if}
+              {#if !agent}<td>{d.agent || "–"}{#if !d.instance} <span class="muted" title="no credentials proved which agent it was">(unauthenticated)</span>{/if}</td>{/if}
               <td class="wrap"><span class="pill" data-s={d.decision === "deny" ? "error" : "warn"}>{e.title}</span>{#if d.fixed} <span class="pill" data-s="done" title={stamp(d.fixed)}>fixed</span>{/if}</td>
               <td>{d.count}</td>
               <td title={stamp(d.last)}>{ago(d.last) || clock(d.last)}</td>
@@ -135,7 +135,7 @@
           {#each rows as c (c.conn)}
             <tr data-conn={c.conn} data-host={c.host} onclick={() => (expandedConn = expandedConn === c.conn ? null : c.conn)} style="cursor:pointer">
               <td title={stamp(c.time)}>{clock(c.time)}</td>
-              {#if !agent}<td>{c.agent || "–"}</td>{/if}
+              {#if !agent}<td>{#if c.agent}{c.agent}{:else if c.claimedAgent}<span class="muted" title="the name the client sent; its credentials were wrong">{c.claimedAgent}?</span>{:else}<span class="muted" title="no credentials">–</span>{/if}</td>{/if}
               <td><span class="name">{c.host}</span>{#if c.server} <span class="badge">ssh {c.server}</span>{/if}</td>
               <td class="wrap">{c.protocol}{#if c.mode} · {c.mode}{/if}{#if c.requests} · {c.requests} request{c.requests === 1 ? "" : "s"}{/if}{#if c.commands.length} · {c.commands.length} command{c.commands.length === 1 ? "" : "s"}{/if}</td>
               <td class="wrap">{#if c.decision}<span class="pill" data-s={decisionKind(c.decision)}>{c.decision}</span>{/if}{#if c.reason && c.decision !== "allow"} <span class="muted">{c.reason.text}</span>{/if}</td>
@@ -144,6 +144,10 @@
             {#if expandedConn === c.conn}
               <tr class="detail">
                 <td colspan={agent ? 5 : 6}>
+                  <p class="from" data-testid="from">
+                    {#if c.client}From <code>{c.client}</code>{/if}{#if c.userAgent}{c.client ? ", " : ""}<span title="what the client says it is, not proof">{c.userAgent}</span>{/if}
+                    {#if !c.agent && c.claimedAgent} · claimed to be <b>{c.claimedAgent}</b>, not proved{:else if !c.agent} · no agent proved{/if}
+                  </p>
                   <ol class="steps">
                     {#each c.steps as s}
                       <li><span class="muted">{clock(s.time)}</span> <b>{s.event}</b>{#if s.decision} {s.decision}{/if}{#if s.mode} ({s.mode}){/if}{#if s.method} {s.method} {s.path}{/if}{#if s.status} → {s.status}{/if}{#if s.command} <code>{s.command}</code>{/if}{#if s.reason} <span class="muted">[{s.reason.code}] {s.reason.text}</span>{/if}</li>
@@ -173,6 +177,7 @@
   tr.detail p { margin: 0 0 var(--space-2); }
   .snippet { display: flex; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-2); }
   .snippet pre { margin: 0; padding: var(--space-2); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-1); overflow-x: auto; }
+  .from { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
   .steps { margin: 0; padding-left: var(--space-4); font-size: var(--text-sm); }
   section.panel { margin-bottom: var(--space-4); }
 </style>

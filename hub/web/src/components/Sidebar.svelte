@@ -74,6 +74,7 @@
         ["agents", "Agents", p.agents.length],
         ["services", "Services", null],
         ["timeline", "Timeline", null],
+        ["network", "Network", null],
         ["spec", "Spec", null],
         ...(admin ? [["audit", "Audit log", null]] : []),
         ...(p.role === "owner" ? [["members", "Members", null]] : []),

@@ -74,8 +74,8 @@ resize changes it for the other, and what both type reaches the program. Avoid i
 
 ## Network
 
-When an agent cannot reach something, the **Network** tab of its page (and of the project page, for every agent) says what the
-proxy refused, why, and how to fix it. An agent that was refused a host in the last hour shows **N denied** in the agents list.
+When an agent cannot reach something, the **Network** tab of its page (and of the project page, for every agent, also in the
+sidebar) says what the proxy refused, why, and how to fix it. An agent that was refused a host in the last hour shows **N denied** in the agents list.
 
 - **Denied** groups what the proxy refused or failed at by agent, host and reason, with how many times and when it was last
   seen. **How to fix** says what the reason means and what to change: for a host that is not in the profile, the YAML to add to
@@ -83,7 +83,10 @@ proxy refused, why, and how to fix it. An agent that was refused a host in the l
   domain were refused, it says which wildcard covers them. A group is marked **fixed** once the same agent gets through to the
   host, and opens again at the next refusal.
 - **Connections** are the latest the hub heard, one row per connection: the host, how it was handled (tunnel, inject, inspect,
-  intercept), its requests, the decision and the traffic. A row opens on its steps. Filters keep the refused ones, a host or an agent.
+  intercept), its requests, the decision and the traffic. A row opens on its steps, with the address it came from and what the
+  client says it is (`curl/8.11.1`, Chrome's user agent, an ssh client's version). The agent is shown only when the proxy
+  credentials proved it; a connection with wrong ones shows the name it claimed, marked with `?`. Filters keep the refused ones,
+  a host or an agent.
 
 A user sees the network of the agents they may operate; administrators see every agent's, and the refusals the proxy could not
 tie to an agent (wrong credentials). An agent whose name comes back is another instance and starts with an empty history.

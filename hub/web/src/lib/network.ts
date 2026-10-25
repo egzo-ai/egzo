@@ -92,7 +92,12 @@ export interface Connection {
   conn: string;
   time: string;
   protocol: "https" | "ssh";
+  /** Proved by the credentials; empty when the proxy could not tell. */
   agent: string;
+  /** The name the client sent, when it is not proved. */
+  claimedAgent: string;
+  client: string;
+  userAgent: string;
   host: string;
   server: string;
   decision: "allow" | "deny" | "error" | "challenge" | "";
@@ -115,13 +120,16 @@ export function connections(events: NetworkEvent[]): Connection[] {
   for (const e of [...events].reverse()) {
     let c = byConn.get(e.conn);
     if (!c) {
-      c = { conn: e.conn, time: e.time, protocol: e.protocol, agent: e.agent ?? "", host: e.host ?? "", server: e.server ?? "", decision: "", mode: "",
-        requests: 0, bytesUp: 0, bytesDown: 0, durationMs: null, commands: [], steps: [] };
+      c = { conn: e.conn, time: e.time, protocol: e.protocol, agent: e.agent ?? "", claimedAgent: "", client: e.client ?? "", userAgent: e.userAgent ?? "",
+        host: e.host ?? "", server: e.server ?? "", decision: "", mode: "", requests: 0, bytesUp: 0, bytesDown: 0, durationMs: null, commands: [], steps: [] };
       byConn.set(e.conn, c);
     }
     c.steps.push(e);
     c.time = e.time;
     if (e.agent) c.agent = e.agent;
+    if (e.claimedAgent) c.claimedAgent = e.claimedAgent;
+    if (e.client) c.client = e.client;
+    if (e.userAgent) c.userAgent = e.userAgent;
     if (e.host) c.host = e.host;
     if (e.server) c.server = e.server;
     if (e.mode) c.mode = e.mode;
@@ -138,6 +146,7 @@ export function connections(events: NetworkEvent[]): Connection[] {
       }
     }
   }
+  for (const c of byConn.values()) if (c.agent) c.claimedAgent = ""; // proved: nothing is only claimed
   return [...byConn.values()].sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
 }
 

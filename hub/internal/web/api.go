@@ -437,6 +437,9 @@ type networkEventJSON struct {
 	Agent      string      `json:"agent,omitempty"`
 	Instance   string      `json:"instance,omitempty"`
 	Profile    string      `json:"profile,omitempty"`
+	Claimed    string      `json:"claimedAgent,omitempty"`
+	Client     string      `json:"client,omitempty"`
+	UserAgent  string      `json:"userAgent,omitempty"`
 	Host       string      `json:"host,omitempty"`
 	Server     string      `json:"server,omitempty"`
 	Method     string      `json:"method,omitempty"`
@@ -490,7 +493,8 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User
 	for i := len(view.Events) - 1; i >= 0; i-- { // newest first
 		e := view.Events[i]
 		row := networkEventJSON{Time: e.Time, Conn: e.Conn, Protocol: string(e.Protocol), Event: string(e.Kind), Decision: string(e.Decision),
-			Mode: string(e.Mode), Agent: e.Agent, Instance: e.Instance, Profile: e.Profile, Host: e.Host, Server: e.Server, Method: e.Method,
+			Mode: string(e.Mode), Agent: e.Agent, Instance: e.Instance, Profile: e.Profile, Claimed: e.ClaimedAgent, Client: e.Client,
+			UserAgent: e.UserAgent, Host: e.Host, Server: e.Server, Method: e.Method,
 			Path: e.Path, Status: e.Status, Command: e.Command, BytesUp: e.BytesUp, BytesDown: e.BytesDown, DurationMs: e.DurationMs}
 		if e.Reason != nil {
 			row.Reason = &reasonJSON{Code: string(e.Reason.Code), Text: e.Reason.Text}

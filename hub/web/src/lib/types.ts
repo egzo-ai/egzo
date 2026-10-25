@@ -196,9 +196,16 @@ export interface NetworkEvent {
   event: string;
   decision?: "allow" | "deny" | "error" | "challenge";
   mode?: "tunnel" | "inject" | "inspect" | "intercept";
+  /** Who, once the proxy checked the credentials (for ssh, the key's signature); never set otherwise. */
   agent?: string;
   instance?: string;
   profile?: string;
+  /** The name the client sent in its proxy credentials, right or wrong (https only). */
+  claimedAgent?: string;
+  /** The address the connection came from. */
+  client?: string;
+  /** What the client says it is: a hint, never proof. */
+  userAgent?: string;
   host?: string;
   server?: string;
   method?: string;
