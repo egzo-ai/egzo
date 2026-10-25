@@ -5,6 +5,9 @@
 #
 # A release is only taken once it is COOLDOWN_DAYS old, so one that is pulled soon after it is published (a hijacked package) is
 # not proposed. A version that does not look like one (digits and dots) is never written into a file.
+#
+# Node is pinned with the hashes of its two builds (harness/base checks the download against them): a Node bump writes all three,
+# from SHASUMS256.txt once its signature checks against the Node release team's active keys (nodejs/release-keys).
 set -euo pipefail
 
 COOLDOWN_DAYS=${COOLDOWN_DAYS:-3}
@@ -15,7 +18,7 @@ PINS='
 CLAUDE_CODE_VERSION|harness/claude-code/Dockerfile|npm:@anthropic-ai/claude-code|Claude Code
 OPENCODE_VERSION|harness/opencode/Dockerfile|npm:@opencode/cli|OpenCode
 PLAYWRIGHT_MCP_VERSION|harness/base/Dockerfile|npm:@playwright/mcp|Playwright MCP (and its Chromium)
-GIT_VERSION|harness/base/Dockerfile|git|git
+NODE_VERSION|harness/base/Dockerfile|node|Node
 GO_VERSION|Dockerfile hub/Dockerfile|go|Go
 '
 
@@ -28,13 +31,26 @@ latest_npm() {
 		| .key' | sort -V | tail -1
 }
 
-# The newest git release tarball on kernel.org (where harness/base downloads it from) published before the cutoff.
-latest_git() {
-	curl -fsSL https://www.kernel.org/pub/software/scm/git/ \
-		| sed -n 's|.*>git-\([0-9]*\.[0-9]*\.[0-9]*\)\.tar\.xz</a> *\([0-9]*-[A-Za-z]*-[0-9]* [0-9:]*\).*|\1 \2|p' \
-		| while read -r version day time; do
-			[ "$(date -d "${day//-/ } $time" +%s)" -le "$cutoff" ] && echo "$version"
-		done | sort -V | tail -1
+# The newest LTS release of the Node major pinned in harness/base released before the cutoff: a new major is a decision, not a bump.
+latest_node() {
+	local major
+	major=$(current NODE_VERSION harness/base/Dockerfile | cut -d. -f1)
+	curl -fsSL https://nodejs.org/dist/index.json | jq -r --argjson cutoff "$cutoff" --arg major "v$major." '
+		.[] | select(.lts != false and (.version | startswith($major)))
+		| select(.date + "T00:00:00Z" | fromdateiso8601 <= $cutoff)
+		| .version | ltrimstr("v")' | sort -V | tail -1
+}
+
+# The SHA-256 of Node <version>'s Linux build for <arch> (x64, arm64), from its signed checksums.
+node_sha256() {
+	local work
+	work=$(mktemp -d)
+	curl -fsSL -o "$work/SHASUMS256.txt.asc" "https://nodejs.org/dist/v$1/SHASUMS256.txt.asc"
+	curl -fsSL -o "$work/keys.kbx" https://github.com/nodejs/release-keys/raw/HEAD/gpg-only-active-keys/pubring.kbx
+	gpgv --keyring "$work/keys.kbx" "$work/SHASUMS256.txt.asc" 2>/dev/null || { echo "Node $1: SHASUMS256.txt is not signed by a release key" >&2; rm -rf "$work"; return 1; }
+	gpg --batch --quiet --no-default-keyring --keyring "$work/keys.kbx" --decrypt "$work/SHASUMS256.txt.asc" 2>/dev/null \
+		| awk -v f="node-v$1-linux-$2.tar.xz" '$2 == f && $1 ~ /^[0-9a-f]{64}$/ {print $1}'
+	rm -rf "$work"
 }
 
 # The newest stable Go that has a golang:<version>-alpine image (what the Dockerfiles build with). Go releases come from the Go
@@ -51,7 +67,7 @@ latest_go() {
 latest() {
 	case "$1" in
 	npm:*) latest_npm "${1#npm:}" ;;
-	git) latest_git ;;
+	node) latest_node ;;
 	go) latest_go ;;
 	esac
 }
@@ -88,8 +104,17 @@ while IFS='|' read -r arg files source label; do
 		echo "  $branch already proposes $want"
 		continue
 	fi
+	edits=("s/^ARG $arg=.*/ARG $arg=$want/")
+	if [ "$source" = node ]; then
+		amd64=$(node_sha256 "$want" x64) && arm64=$(node_sha256 "$want" arm64) && [ -n "$amd64" ] && [ -n "$arm64" ] || {
+			echo "  Node $want: no verified hashes, not proposed" >&2
+			status=1
+			continue
+		}
+		edits+=("s/^ARG NODE_SHA256_AMD64=.*/ARG NODE_SHA256_AMD64=$amd64/" "s/^ARG NODE_SHA256_ARM64=.*/ARG NODE_SHA256_ARM64=$arm64/")
+	fi
 	git switch -q -C "$branch" origin/main
-	sed -i "s/^ARG $arg=.*/ARG $arg=$want/" "${paths[@]}"
+	for edit in "${edits[@]}"; do sed -i "$edit" "${paths[@]}"; done
 	title="$label $want"
 	git commit -q -m "$title" -m "Bumped by scripts/bump-pins.sh: $arg from $have to $want." -- "${paths[@]}"
 	git push -q -f origin "$branch"

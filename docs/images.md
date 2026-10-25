@@ -1,6 +1,6 @@
 # Overriding base images
 
-The stock harness images ([harnesses](harnesses.md)) are small: Node, git, ripgrep, curl, a browser and the harness. They all share one base image, `egzo-harness-base`, which carries everything but the harness itself. If your agents need a compiler, a
+The stock harness images ([harnesses](harnesses.md)) are small: Ubuntu 26.04 with git, Python 3 (with `venv`), ripgrep, jq and curl, Node (its LTS, the official build), a browser and the harness. They all share one base image, `egzo-harness-base`, which carries everything but the harness itself. If your agents need a compiler, a
 language runtime, `psql` or a linter, build an image of your own on top of the stock one and name it in the template.
 
 ## Extend a stock image
@@ -11,7 +11,7 @@ FROM ghcr.io/egzo-ai/egzo-harness-claude-code:latest
 
 USER root
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-pip build-essential postgresql-client \
+ && apt-get install -y --no-install-recommends build-essential postgresql-client \
  && rm -rf /var/lib/apt/lists/*
 ```
 

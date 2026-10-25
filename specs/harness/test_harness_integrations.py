@@ -117,8 +117,16 @@ def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_cre
     assert entry[5] == "/home/agent", f"the passwd entry of the user says {entry}"
     version = in_instance(engine, p, name, f"{BINARY[harness]} --version")
     assert version.returncode == 0 and re.search(r"\d+\.\d+", version.stdout), version.stderr
-    for tool in ("egzo", "git", "curl", "rg", "node"):
+    for tool in ("egzo", "git", "curl", "rg", "node", "python3", "jq"):
         assert in_instance(engine, p, name, f"command -v {tool}").returncode == 0, f"{tool} is missing from the harness image"
+    # git >= 2.48: egzo makes worktrees with relative links; Node: a version Playwright supports (22, 24 or 26)
+    git = re.search(r"(\d+)\.(\d+)", in_instance(engine, p, name, "git --version").stdout)
+    assert git and (int(git[1]), int(git[2])) >= (2, 48), f"git {git and git[0]} is older than 2.48"
+    node = re.search(r"v(\d+)\.", in_instance(engine, p, name, "node --version").stdout)
+    assert node and int(node[1]) >= 22, f"node {node and node[0]} is older than 22"
+    # an agent installs a project's Python packages into a virtual environment of its own, with that environment's pip
+    venv = in_instance(engine, p, name, "python3 -m venv /tmp/spec-venv && /tmp/spec-venv/bin/pip --version")
+    assert venv.returncode == 0, f"python3 -m venv does not give a working pip: {venv.stderr}"
 
     find = (
         "for p in /proc/[0-9]*; do c=$(tr '\\0' ' ' < $p/cmdline 2>/dev/null); "
