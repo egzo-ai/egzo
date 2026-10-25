@@ -216,6 +216,9 @@ func TestOpenCodeModelInstructionsAndControlTools(t *testing.T) {
 	if get(t, server, "type") != "remote" || get(t, server, "url") != "http://control:7777/mcp" || get(t, server, "headers", "Authorization") != o.Authorization {
 		t.Errorf("server = %v", server)
 	}
+	if get(t, server, "codemode") != false {
+		t.Errorf("egzo's tools must stay on the model's tool list, not behind Code Mode: codemode = %v", get(t, server, "codemode"))
+	}
 }
 
 func TestOpenCodePluginReportsEgzosStates(t *testing.T) {

@@ -21,6 +21,8 @@ session holder (`egzo agent run`), so what you see on `egzo agent attach` is the
   to answer requests, ask a person, and message another agent. Messages ([messaging](messaging.md)) are announced by a short line typed into
   the terminal; the agent fetches the content with a tool.
 - **A browser.** Chromium and the Playwright MCP server are in the image and registered with the harness ([browsing](browser.md)).
+  OpenCode 2 reaches an MCP server's tools through Code Mode (one `execute` tool that runs a script) unless told otherwise: egzo keeps its own
+  tools on OpenCode's tool list by name, and leaves the browser's in Code Mode.
 - **Persistent home.** Each instance has a home volume, so conversations survive recreating the container.
 
 ## Claude Code
