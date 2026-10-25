@@ -4,7 +4,7 @@
 // tool call per step, chosen by how many of its own tool calls the conversation already holds a result for: the shell tool
 // running <command>, then the egzo MCP tool list_messages, then a closing text. Any other request (a title, a quota check) gets
 // a short text. Every request is logged as one JSON line: the path, the key it carried, the tools it offered (with what each
-// says it is and takes, for a failure to show), the step, the results of the stub's own calls, and on the first turn the system prompt.
+// says it is and takes, for a failure to show), the step, the results of the stub's own calls, and on the first turn the system prompt and the text of the messages.
 import fs from "node:fs"
 import http from "node:http"
 
@@ -103,7 +103,10 @@ http
       // the system prompt of the agent's first turn: where a harness lists what it does not put on the tool list (Code Mode's catalog)
       const system = step !== 0 ? undefined : typeof request.system === "string" ? request.system
         : (request.system ?? []).map((block) => block.text ?? "").join("\n")
-      fs.appendFileSync(log, JSON.stringify({ path, key, stream: Boolean(request.stream), tools, step, results: done ?? [], described, system }) + "\n")
+      // and the text of its messages: where a harness may name the tools it defers (Claude Code's tool search)
+      const prompt = step !== 0 ? undefined : (request.messages ?? []).flatMap((m) =>
+        typeof m.content === "string" ? [m.content] : (m.content ?? []).map((block) => block.text ?? "")).join("\n")
+      fs.appendFileSync(log, JSON.stringify({ path, key, stream: Boolean(request.stream), tools, step, results: done ?? [], described, system, prompt }) + "\n")
       const model = request.model ?? "claude-egzo-spec"
       if (request.stream) stream(res, model, block, stop)
       else {

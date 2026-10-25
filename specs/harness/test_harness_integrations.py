@@ -32,6 +32,8 @@ STUB_PORT = 8124
 STUB_LOG = "/tmp/model-stub.log"
 # the templates whose harness talks to the scripted model: Claude Code reads its base URL from the environment, OpenCode from its config
 SCRIPTED = {"claude-code": "cc-scripted", "opencode": "oc-scripted"}
+# the tool through which each harness reaches the MCP tools it keeps off the model's tool list (Claude Code's tool search, OpenCode's Code Mode)
+DEFERRING = {"claude-code": "ToolSearch", "opencode": "execute"}
 ANTHROPIC = {"allow": ["platform.claude.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}
 OAUTH = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/CLAUDE_CODE_OAUTH_TOKEN"}}
 OAUTH_TOKEN = "sk-ant-oat01-egzo-spec-not-a-real-token-" + "0" * 40
@@ -199,6 +201,10 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
     assert any("egzo state idle" in c for c in notifications["idle_prompt"]) and any("egzo state blocked" in c for c in notifications["permission_prompt|elicitation_dialog"])
     server = state["mcpServers"]["egzo"]
     assert server["type"] == "http" and server["url"] == "http://control:7777/mcp" and server["headers"]["Authorization"].startswith("Basic ")
+    # egzo's tools stay on the model's tool list, by the names the instructions use; the browser's stay behind tool search, where
+    # Claude Code puts every MCP server's tools by default
+    assert server["alwaysLoad"] is True
+    assert "alwaysLoad" not in state["mcpServers"].get("playwright", {})
 
     assert "--append-system-prompt" in cmdline(engine, p, scratch, "claude")
     instructions = read(engine, p, scratch, "$HOME/.egzo/instructions.md")
@@ -332,7 +338,7 @@ def point_opencode_at_the_stub(engine, project, name):
 def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egzo_tool_with_no_prompt(sandbox, engine, harness):
     """The agent loop of the real harness, on a message: the model asks for a shell command and then for the egzo MCP tool list_messages,
     and the harness runs both without asking anyone (bypass mode works), reaches control's MCP server and the browser's itself (their tools
-    are offered to the model: egzo's by name in both; the browser's by name in Claude Code and behind Code Mode's `execute` in OpenCode),
+    are offered to the model: egzo's by name; the browser's behind Claude Code's tool search and OpenCode's Code Mode),
     sends the placeholder key egzo gave it, and reports working and then idle, never blocked."""
     p = sandbox
     name = p.spawn(SCRIPTED[harness], f"{harness}-scripted", timeout=900)
@@ -347,7 +353,7 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     def context():
         asked = model_requests(engine, p, name) or []
         seen = "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events(p) if e.get("agent") == name)
-        rows = [json.dumps({k: v for k, v in r.items() if k not in ("described", "system")}) for r in asked]
+        rows = [json.dumps({k: v for k, v in r.items() if k not in ("described", "system", "prompt")}) for r in asked]
         return "the model was asked:\n" + "\n".join(rows) + f"\nthe agent's events:\n{seen}"
 
     wait_until(lambda: (rows := mine("activity")) and rows[-1]["text"] == "idle", "the harness to report that its session started", 45)
@@ -366,14 +372,12 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     turns = [r for r in model_requests(engine, p, name) if r.get("step") is not None]
     offered = turns[0]["tools"]
     assert any(t.endswith("list_messages") for t in offered), f"the egzo MCP tools are offered to the model: {offered}"
-    if harness == "opencode":
-        # Code Mode's catalog of the tools behind `execute` is in the system prompt; egzo's own instructions never name a browser tool
-        system = turns[0]["system"] or ""
-        around = system[max(system.find("browser_"), 0):][:1500]
-        assert "execute" in offered and "browser_navigate" in system, f"the browser's tools are in Code Mode's catalog: {around or system[-3000:]}"
-        assert not any(t.endswith("browser_navigate") for t in offered), f"the browser's tools are not on the native list: {offered}"
-    else:
-        assert any(t.endswith("browser_navigate") for t in offered), f"the browser's MCP tools are offered to the model: {offered}"
+    # the browser's tools are not on the tool list: they are behind the harness's own way to the tools it defers, which names them to the
+    # model (OpenCode's Code Mode catalog in the system prompt, Claude Code's list of deferred tools); egzo's own instructions never name one
+    told = (turns[0]["system"] or "") + "\n" + (turns[0]["prompt"] or "")
+    around = told[max(told.find("browser_"), 0):][:1500]
+    assert not any(t.endswith("browser_navigate") for t in offered), f"the browser's tools are kept off the tool list: {offered}"
+    assert DEFERRING[harness] in offered and "browser_navigate" in told, f"the browser's tools are behind {DEFERRING[harness]}: {around or told[-3000:]}"
     placeholder = env_of(engine, p, name)["ANTHROPIC_API_KEY"]
     assert {r["key"] for r in turns} == {placeholder}, "every call to the model carries the placeholder egzo gave the harness"
 
