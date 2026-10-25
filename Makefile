@@ -6,10 +6,12 @@ BIN := bin/egzo
 
 VERSION ?= dev
 REGISTRY ?= ghcr.io/egzo-ai
+# The Dockerfiles build on $BUILDPLATFORM, which only BuildKit sets; passing it keeps `docker build` working without buildx.
+BUILD_PLATFORM := --build-arg BUILDPLATFORM=linux/$(shell $(GO) env GOARCH)
 
 # The sidecar image, the harness base image built on it, and the harness images built on that. VERSION is also what the CLI looks for.
 image:
-	docker build --build-arg VERSION=$(VERSION) -t $(REGISTRY)/egzo:$(VERSION) .
+	docker build $(BUILD_PLATFORM) --build-arg VERSION=$(VERSION) -t $(REGISTRY)/egzo:$(VERSION) .
 
 images: image
 	docker build --build-arg EGZO_IMAGE=$(REGISTRY)/egzo:$(VERSION) -t $(REGISTRY)/egzo-harness-base:$(VERSION) harness/base
@@ -61,7 +63,7 @@ hub-lint:
 
 # The hub image: the context is the repository, because the hub module requires core from ../
 hub-image:
-	docker build -f hub/Dockerfile --build-arg VERSION=$(VERSION) -t $(REGISTRY)/egzo-hub:$(VERSION) .
+	docker build $(BUILD_PLATFORM) -f hub/Dockerfile --build-arg VERSION=$(VERSION) -t $(REGISTRY)/egzo-hub:$(VERSION) .
 
 # The browser tests, in Playwright's image, against the hub with fake engines and a test login provider.
 hub-e2e: hub-web

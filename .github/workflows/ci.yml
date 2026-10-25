@@ -11,24 +11,24 @@ jobs:
   go:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: go build ./...
       - run: go vet ./...
       - run: go test -race ./...
       - run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           make lint
 
   # The hub is its own Go module (hub/); core's job above never sees it, and this one never changes core's checks.
   hub:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - run: make hub-web
@@ -36,8 +36,8 @@ jobs:
       - run: make hub-build
       - run: make hub-test
       - run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           make hub-lint
       - name: The Docker engine implementation against a real engine and project
         run: make hub-integration
@@ -46,35 +46,33 @@ jobs:
       - name: The whole stack (hub image, Dex, a real project)
         run: make hub-stack
 
-  # Every image builds for both architectures without being pushed, so a broken Dockerfile shows on the pull request
-  # and not when a tag is pushed. The arm64 builds run under QEMU, with a cache.
+  # Every image builds for both architectures without being pushed, so a broken Dockerfile shows on the pull request and not
+  # when a tag is pushed. One job per architecture, each on a runner of that architecture (no emulation), builds the whole graph
+  # of docker-bake.hcl. The registry cache is written by main and by releases; a pull request only reads it.
   images:
-    runs-on: ubuntu-26.04
+    name: images (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-26.04 }
+          - { arch: arm64, runner: ubuntu-26.04-arm }
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: egzo (sidecar) image
-        uses: docker/build-push-action@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: github.event_name == 'push'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=egzo
-          cache-to: type=gha,scope=egzo,mode=max
-      - name: hub image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: hub/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=hub
-          cache-to: type=gha,scope=hub,mode=max
-      # The harness base copies the binary out of the egzo image and the harness images build on the base; neither is pushed
-      # here, so they build on the runner's own engine (amd64 only), one on the other.
-      - name: harness images
-        run: |
-          docker build -t egzo-ci:local .
-          docker build --build-arg EGZO_IMAGE=egzo-ci:local -t egzo-harness-base-ci:local harness/base
-          for h in claude-code opencode; do
-            docker build --build-arg BASE_IMAGE=egzo-harness-base-ci:local harness/$h
-          done
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build every image
+        env:
+          CACHE_ARCH: ${{ matrix.arch }}
+          CACHE_WRITE: ${{ github.event_name == 'push' }}
+        run: docker buildx bake --progress=plain --set '*.platform=linux/${{ matrix.arch }}' --set '*.output=type=cacheonly'

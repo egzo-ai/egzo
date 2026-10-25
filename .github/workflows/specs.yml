@@ -5,8 +5,8 @@ name: specs
 #   merge_group    every platform, the gate in front of main when the branch uses a merge queue (it must list this event);
 #   push           every platform, on main: what a merge produced, whatever way it got there (queue or not);
 #   schedule       every platform, nightly, to catch what no push touched (runner images, new engine releases, online services);
-#   dispatch       every platform, by hand;
-#   workflow_call  every platform when `full` is true: release.yml runs it before it publishes anything.
+#   dispatch       every platform, by hand.
+# release.yml does not run them again: it requires that the push to main of the tagged commit passed here.
 # Only the cells that are not `experimental` can fail the run. A platform becomes required (in the branch rules, by the name
 # `specs (<platform>)`) and loses its `experimental` mark after a clean history; see roadmap/ci-test-matrix.md.
 on:
@@ -17,11 +17,6 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      full:
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -38,7 +33,7 @@ jobs:
     steps:
       - id: cells
         env:
-          FULL: ${{ github.event_name != 'pull_request' || inputs.full == true }}
+          FULL: ${{ github.event_name != 'pull_request' }}
         run: |
           docker='{"name":"docker","engine":"docker","runner":"ubuntu-26.04","experimental":false}'
           if [ "$FULL" = true ]; then
@@ -63,11 +58,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.cells) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       # The specs build the sidecar image and both harness images (Chromium among them) on the runner's own engine.
@@ -89,7 +84,7 @@ jobs:
       # Docker, which every runner has, for the Podman platforms too.
       - name: Test registry
         run: |
-          docker run -d --name spec-registry -p 5000:5000 registry:2 2>registry-${{ matrix.name }}.log || {
+          docker run -d --name spec-registry -p 5000:5000 registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 2>registry-${{ matrix.name }}.log || {
             docker logs spec-registry >>registry-${{ matrix.name }}.log 2>&1
             scripts/ci-annotate.sh "${{ matrix.name }} registry" registry-${{ matrix.name }}.log tail
             exit 1
@@ -108,7 +103,7 @@ jobs:
           scripts/ci-annotate.sh "${{ matrix.name }} platform" engine-${{ matrix.name }}.log tail
           scripts/ci-annotate.sh "${{ matrix.name }} specs" specs-${{ matrix.name }}.log specs
       # The summary per area is at the end of the log: it is what shows a regression on one platform as a change of a column.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: specs-${{ matrix.name }}

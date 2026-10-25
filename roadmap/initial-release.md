@@ -25,12 +25,14 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [ ] The hub's web UI shows its version (the binary already reports it with `--version` and in the startup log).
 - [ ] Decide whether `hub/compose.yaml` belongs in this repository: it pulls an image this repository publishes, so what ships with a
       release cannot name that release's image before the release exists (it defaults to `latest`).
-- [x] `ci.yml` builds the sidecar and hub images for amd64 and arm64 without pushing (QEMU, GHA cache) and the harness images for amd64,
-      so a broken Dockerfile shows before a tag does. The harness images are not built for arm64 in CI: they need the egzo image from a registry.
+- [x] `ci.yml` builds every image (`docker-bake.hcl`) for amd64 and arm64 without pushing, so a broken Dockerfile shows before a
+      tag does: one job per architecture on a runner of that architecture, Go cross-compiled, with a registry cache per architecture
+      that main and releases write.
 - [ ] **arm64 has to be run**, not only built: no spec runs on arm64, and the browser has not been tried there. Until then do not
       claim arm64 support beyond "builds".
 - [ ] Optional: keyless cosign signing of the images and the binaries.
-- [ ] Native arm runners (`ubuntu-26.04-arm`) instead of QEMU, if the arm64 builds are too slow.
+- [x] Native arm runners (`ubuntu-26.04-arm`) instead of QEMU: the images build on them, and the release pushes each architecture by
+      digest and then tags both together.
 - [ ] An install wrapper (after the plain download works, which it now does): a script that detects the platform, downloads the
       right binary, verifies its checksum and installs it, for a `curl ... | sh` style install and perhaps a package
       (Homebrew tap, `.deb`). Then update `docs/install.md` to lead with it and keep the manual download as the fallback.

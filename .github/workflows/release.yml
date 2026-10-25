@@ -11,22 +11,65 @@ permissions:
 
 env:
   REGISTRY: ghcr.io/egzo-ai
-  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
-  # Nothing is built or pushed unless the specs pass on the platforms that are required (see specs.yml), so a tag cannot
-  # publish half of a release for a build the specs reject.
-  specs:
-    uses: ./.github/workflows/specs.yml
-    with:
-      full: true
+  # Nothing is built or pushed unless the tagged commit is on main and the specs passed there, on the platforms that are
+  # required (specs.yml runs every platform on each push to main). The specs are not run again: a tag cannot publish a build
+  # the specs reject, and the experimental platforms do not hold a release.
+  gate:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      # The cells of specs.yml that are not experimental.
+      REQUIRED: specs (docker)
+    steps:
+      - name: The tag is on main
+        run: |
+          status=$(gh api "repos/$GH_REPO/compare/main...$GITHUB_SHA" -q .status)
+          case "$status" in identical|behind) ;; *)
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main (compare: $status); tag a commit of main"
+            exit 1 ;;
+          esac
+      # The specs of the push to main may still be running when the tag is pushed right after the merge: wait for them.
+      - name: The specs passed on main
+        run: |
+          for attempt in $(seq 1 50); do
+            runs=$(gh api "repos/$GH_REPO/actions/workflows/specs.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main" -q '.workflow_runs')
+            if [ "$(echo "$runs" | jq length)" = 0 ]; then
+              echo "::error::no run of specs for $GITHUB_SHA on main"
+              exit 1
+            fi
+            run=$(echo "$runs" | jq -r '[.[] | select(.status == "completed")][0].id // empty')
+            if [ -n "$run" ]; then
+              failed=0
+              while IFS= read -r cell; do
+                conclusion=$(gh api "repos/$GH_REPO/actions/runs/$run/jobs?filter=latest&per_page=100" \
+                  -q "[.jobs[] | select(.name == \"$cell\")][0].conclusion // \"missing\"")
+                echo "$cell: $conclusion (run $run)"
+                [ "$conclusion" = success ] || failed=1
+              done <<< "$(echo "$REQUIRED" | tr ',' '\n')"
+              if [ "$failed" = 0 ]; then exit 0; fi
+              echo "::error::a required platform did not pass for $GITHUB_SHA: $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$run"
+              exit 1
+            fi
+            echo "the specs of $GITHUB_SHA are still running; waiting"
+            sleep 60
+          done
+          echo "::error::the specs of $GITHUB_SHA did not finish in time; re-run this job once they have"
+          exit 1
 
   binaries:
-    needs: specs
+    needs: gate
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Build
@@ -38,112 +81,97 @@ jobs:
               -o dist/egzo-linux-$arch ./cmd/egzo
           done
           cd dist && sha256sum egzo-linux-* > SHA256SUMS && cat SHA256SUMS
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binaries
           path: dist/*
           if-no-files-found: error
 
+  # Every image (docker-bake.hcl), once per architecture on a runner of that architecture, pushed by digest only. The tags are
+  # put on in `manifests`, once both architectures are pushed, so a tag never points at one architecture alone.
   images:
-    needs: specs
-    runs-on: ubuntu-26.04
+    needs: gate
+    name: images (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-26.04 }
+          - { arch: arm64, runner: ubuntu-26.04-arm }
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tags
-        id: tags
+      - name: Build and push by digest
+        env:
+          VERSION: ${{ github.ref_name }}
+          CACHE_ARCH: ${{ matrix.arch }}
+          CACHE_WRITE: true
         run: |
-          # `latest` only for a full release, never for a pre-release tag
-          for image in egzo egzo-harness-base egzo-harness-claude-code egzo-harness-opencode egzo-hub; do
-            tags="$REGISTRY/$image:$GITHUB_REF_NAME"
-            case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags,$REGISTRY/$image:latest" ;; esac
-            echo "$image=$tags" >> "$GITHUB_OUTPUT"
+          docker buildx bake --progress=plain --metadata-file metadata.json \
+            --set '*.platform=linux/${{ matrix.arch }}' \
+            --set '*.attest=type=provenance,mode=max' \
+            --set '*.output=type=image,push-by-digest=true,name-canonical=true,push=true'
+          jq . metadata.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: metadata-${{ matrix.arch }}
+          path: metadata.json
+          if-no-files-found: error
+
+  # One multi-architecture tag per image, from the two digests; `latest` only for a full release, never for a pre-release tag.
+  manifests:
+    needs: images
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: metadata-*
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag both architectures
+        run: |
+          set -euo pipefail
+          for target in $(jq -r 'keys[] | select(. != "buildx.build.warnings")' metadata-amd64/metadata.json); do
+            # image.name is the target's tag, ghcr.io/egzo-ai/<image>:<version>; the repository is what is before the last ":".
+            name=$(jq -r --arg t "$target" '.[$t]["image.name"] | split(",")[0]' metadata-amd64/metadata.json)
+            repo=${name%:*}
+            tags="-t $repo:$GITHUB_REF_NAME"
+            case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags -t $repo:latest" ;; esac
+            sources=""
+            for arch in amd64 arm64; do
+              digest=$(jq -r --arg t "$target" '.[$t]["containerimage.digest"]' metadata-$arch/metadata.json)
+              sources="$sources $repo@$digest"
+            done
+            echo "$repo:$GITHUB_REF_NAME <-$sources"
+            docker buildx imagetools create $tags $sources
+            docker buildx imagetools inspect "$repo:$GITHUB_REF_NAME"
           done
-      - name: egzo (sidecar) image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          provenance: mode=max
-          build-args: VERSION=${{ github.ref_name }}
-          tags: ${{ steps.tags.outputs['egzo'] }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=AGPL-3.0-only
-      # The harness base copies the binary out of the egzo image pushed just above; the harness images build on the base.
-      - name: harness base image
-        uses: docker/build-push-action@v7
-        with:
-          context: harness/base
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          provenance: mode=max
-          build-args: EGZO_IMAGE=${{ env.REGISTRY }}/egzo:${{ github.ref_name }}
-          tags: ${{ steps.tags.outputs['egzo-harness-base'] }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=AGPL-3.0-only
-      - name: claude-code harness image
-        uses: docker/build-push-action@v7
-        with:
-          context: harness/claude-code
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          provenance: mode=max
-          build-args: BASE_IMAGE=${{ env.REGISTRY }}/egzo-harness-base:${{ github.ref_name }}
-          tags: ${{ steps.tags.outputs['egzo-harness-claude-code'] }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=AGPL-3.0-only
-      - name: opencode harness image
-        uses: docker/build-push-action@v7
-        with:
-          context: harness/opencode
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          provenance: mode=max
-          build-args: BASE_IMAGE=${{ env.REGISTRY }}/egzo-harness-base:${{ github.ref_name }}
-          tags: ${{ steps.tags.outputs['egzo-harness-opencode'] }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=AGPL-3.0-only
-      # The hub imports core as source, so it does not wait for the images above.
-      - name: hub image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: hub/Dockerfile
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          provenance: mode=max
-          build-args: VERSION=${{ github.ref_name }}
-          tags: ${{ steps.tags.outputs['egzo-hub'] }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=AGPL-3.0-only
 
   release:
-    needs: [binaries, images]
+    needs: [binaries, manifests]
     runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binaries
           path: dist

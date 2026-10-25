@@ -1,0 +1,10 @@
+# The actions are pinned by commit (a tag can be moved); this keeps the pins current, one pull request a week.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
