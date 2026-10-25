@@ -5,7 +5,7 @@
   import { activityKind, activityLabel, ago, initials } from "../lib/format";
   import { poll } from "../lib/live";
   import { href, type ProjectTab } from "../lib/router.svelte";
-  import { followSpawn } from "../lib/spawns";
+  import { followSpawn, unfollowSpawn } from "../lib/spawns";
   import type { AuditEntry, Members, Project, TimelineEvent } from "../lib/types";
   import { openTerm, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
@@ -101,6 +101,16 @@
     }
   }
 
+  async function dismiss(id: string) {
+    try {
+      unfollowSpawn(id);
+      await api.dismissSpawn(engine, name, id);
+      await loadProject();
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+  }
+
   async function act(agent: string, verb: "start" | "stop" | "rm") {
     if (await operate(engine, name, agent, verb)) await loadProject();
   }
@@ -158,7 +168,13 @@
                   <td class="wrap" style="white-space:normal;min-width:18ch">{#if s.error}<span class="status" style:color="var(--status-error)">{s.error}</span>{:else}<span class="muted">started {ago(s.startedAt)}</span>{/if}</td>
                   <td><span class="muted">—</span></td>
                   <td>{s.creator}</td>
-                  <td></td>
+                  <td class="actions">
+                    {#if s.canDismiss}
+                      <span class="row-actions">
+                        <button class="btn" data-size="sm" data-icon-only aria-label="Dismiss the failed spawn of {s.name || s.template}" title="Dismiss" onclick={() => dismiss(s.id)}><Icon name="trash" size="sm" /></button>
+                      </span>
+                    {/if}
+                  </td>
                 </tr>
               {/each}
               {#each agents as a (a.name)}

@@ -20,6 +20,12 @@ export function followSpawn(engine: string, project: string, spawn: Spawn): void
   if (!timer) timer = window.setInterval(() => void tick(), 2000);
 }
 
+/** Stops following a spawn that is taken off the list, so it is not reported as forgotten. */
+export function unfollowSpawn(id: string): void {
+  const i = followed.findIndex((f) => f.id === id);
+  if (i >= 0) followed.splice(i, 1);
+}
+
 async function tick(): Promise<void> {
   if (busy) return;
   busy = true;

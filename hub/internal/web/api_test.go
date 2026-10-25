@@ -251,10 +251,29 @@ func TestSpawnStopStartAndRemove(t *testing.T) {
 	failed, _ := out["spawn"].(map[string]any)
 	r.hub.WaitForSpawns()
 	for _, s := range spawns() {
-		if s["id"] == failed["id"] && (s["state"] != "failed" || !strings.Contains(s["error"].(string), "ghost")) {
+		if s["id"] == failed["id"] && (s["state"] != "failed" || !strings.Contains(s["error"].(string), "ghost") || s["canDismiss"] != true) {
 			t.Errorf("a spawn that fails = %d %v", code, s)
 		}
 	}
+	// an ended spawn can be taken off the list; then it is gone
+	if code, out := b.del("/e/local/p/web/spawns/" + failed["id"].(string)); code != 200 || out["ok"] != true {
+		t.Errorf("dismiss = %d %v", code, out)
+	}
+	for _, s := range spawns() {
+		if s["id"] == failed["id"] {
+			t.Errorf("a dismissed spawn is listed: %v", s)
+		}
+	}
+	if code, _ := b.del("/e/local/p/web/spawns/" + failed["id"].(string)); code != 404 {
+		t.Errorf("dismissing it again = %d", code)
+	}
+	r.fakes["local"].HoldSpawns()
+	_, out = b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "slow"})
+	if code, _ := b.del("/e/local/p/web/spawns/" + out["spawn"].(map[string]any)["id"].(string)); code != 409 {
+		t.Errorf("dismissing a running spawn = %d", code)
+	}
+	r.fakes["local"].ReleaseSpawns()
+	r.hub.WaitForSpawns()
 	if code, _ := b.post("/e/local/p/web/a/x/explode", nil); code != 404 {
 		t.Errorf("an unknown verb = %d", code)
 	}

@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	api("GET "+project, s.project)
 	api("GET "+project+"/events", s.events)
 	api("POST "+project+"/spawn", s.spawn)
+	api("DELETE "+project+"/spawns/{id}", s.dismissSpawn)
 	api("GET "+project+"/spec", s.spec)
 	api("GET "+project+"/members", s.members)
 	api("POST "+project+"/members", s.setRole)

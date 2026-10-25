@@ -170,6 +170,11 @@ def test_a_spawn_that_takes_long_is_listed_while_it_runs_and_a_toast_says_how_it
     expect(failed.get_by_test_id("spawn-state")).to_have_text("failed")
     expect(failed).to_contain_text("already exists")
 
+    # once read, it is dismissed with its trash icon, and the list is the agents again
+    failed.get_by_role("button", name="Dismiss the failed spawn of coder-1").click()
+    expect(page.locator("tr[data-spawn]")).to_have_count(0)
+    expect(page.locator("tr[data-agent=coder-1]")).to_be_visible()
+
 
 def test_the_page_follows_the_agent_without_reloading(single_hub, page):
     sign_in(page, single_hub, "admin")

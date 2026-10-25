@@ -59,6 +59,8 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusConflict, "conflict", "That user is disabled. Enable them first.")
 	case errors.Is(err, hub.ErrLastWayIn):
 		s.apiFail(w, http.StatusConflict, "conflict", "That is your last way to sign in: link another account first.")
+	case errors.Is(err, hub.ErrSpawnRunning):
+		s.apiFail(w, http.StatusConflict, "conflict", "The spawn is still running: it ends on its own.")
 	case errors.Is(err, hub.ErrNotDisabled):
 		s.apiFail(w, http.StatusConflict, "conflict", "Only a disabled user's account can be removed. Disable the user first.")
 	default:
@@ -210,6 +212,8 @@ type spawnJSON struct {
 	Error     string     `json:"error,omitempty"`
 	StartedAt time.Time  `json:"startedAt"`
 	EndedAt   *time.Time `json:"endedAt,omitempty"`
+	// CanDismiss: the user may take it off the list (an ended spawn, for who may operate its agent).
+	CanDismiss bool `json:"canDismiss"`
 }
 
 func spawnOf(sp hub.Spawn, n namer) spawnJSON {
@@ -240,7 +244,9 @@ func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 		p.Agents = append(p.Agents, s.agentOf(a, n))
 	}
 	for _, sp := range v.Spawns {
-		p.Spawns = append(p.Spawns, spawnOf(sp, n))
+		j := spawnOf(sp.Spawn, n)
+		j.CanDismiss = sp.CanDismiss
+		p.Spawns = append(p.Spawns, j)
 	}
 	if p.CanAudit {
 		p.Ignored = v.Project.Ignored
@@ -399,6 +405,15 @@ func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) 
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]spawnJSON{"spawn": spawnOf(started, s.namer(r.Context()))})
+}
+
+// dismissSpawn takes an ended spawn off the project's list.
+func (s *Server) dismissSpawn(w http.ResponseWriter, r *http.Request, user store.User) {
+	if err := s.hub.DismissSpawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("id")); err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User) {

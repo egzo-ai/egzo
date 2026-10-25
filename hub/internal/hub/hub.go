@@ -281,7 +281,7 @@ type ProjectView struct {
 	// Feed says how far what the agents are doing can be trusted.
 	Feed      Feed
 	Agents    []AgentView
-	Spawns    []Spawn // started from the hub and not yet ended, or ended a short while ago
+	Spawns    []SpawnView // started from the hub and not yet ended, or ended a short while ago
 	CanSpawn  bool
 	CanManage bool
 }
@@ -383,7 +383,9 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 		}
 		view.Agents = append(view.Agents, av)
 	}
-	view.Spawns = h.spawnsOf(engine, name)
+	for _, s := range h.spawnsOf(engine, name) {
+		view.Spawns = append(view.Spawns, SpawnView{Spawn: s, CanDismiss: s.State != SpawnPending && rbac.Can(user.Subject(), role, rbac.Operate, s.Actor)})
+	}
 	return view, nil
 }
 
