@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Network, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, TimelineEvent,
+  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Network, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, Spawn, TimelineEvent,
   UserRow,
 } from "./types";
 
@@ -70,8 +70,9 @@ export const api = {
   project: (engine: string, name: string) => request<Project>("GET", project(engine, name)),
   events: (engine: string, name: string, agentName = "", limit = 40) =>
     request<{ events: TimelineEvent[] }>("GET", `${project(engine, name)}/events?limit=${limit}${agentName ? "&agent=" + enc(agentName) : ""}`).then((r) => r.events),
+  /** Answered at once: the hub runs the spawn, and the project lists it until it has ended. */
   spawn: (engine: string, name: string, template: string, agentName: string) =>
-    request<{ agent: string }>("POST", `${project(engine, name)}/spawn`, { template, name: agentName }),
+    request<{ spawn: Spawn }>("POST", `${project(engine, name)}/spawn`, { template, name: agentName }),
   spec: (engine: string, name: string) => request<{ text: string }>("GET", `${project(engine, name)}/spec`).then((r) => r.text),
   members: (engine: string, name: string) => request<Members>("GET", `${project(engine, name)}/members`),
   setRole: (engine: string, name: string, user: string, role: string) =>

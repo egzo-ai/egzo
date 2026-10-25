@@ -38,6 +38,7 @@ type Engine struct {
 	watchStarts int
 	watchTries  int
 	publishedBy map[string]engines.Published
+	spawnGate   chan struct{} // while not nil, a spawn waits for it to close: HoldSpawns, ReleaseSpawns
 	publishedN  int
 	projectN    int
 
@@ -192,7 +193,36 @@ func (e *Engine) agent(project, name string) (*engines.Agent, error) {
 	return nil, fmt.Errorf("no agent %q in project %q", name, project)
 }
 
+// HoldSpawns makes every spawn wait, from now until ReleaseSpawns, as a spawn that takes long does.
+func (e *Engine) HoldSpawns() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.spawnGate == nil {
+		e.spawnGate = make(chan struct{})
+	}
+}
+
+// ReleaseSpawns lets the spawns that wait go on.
+func (e *Engine) ReleaseSpawns() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.spawnGate != nil {
+		close(e.spawnGate)
+		e.spawnGate = nil
+	}
+}
+
 func (e *Engine) Spawn(ctx context.Context, project, template, name, actor string) (string, error) {
+	e.mu.Lock()
+	gate := e.spawnGate
+	e.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.down != nil {

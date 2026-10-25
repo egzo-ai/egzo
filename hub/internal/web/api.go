@@ -191,11 +191,34 @@ type projectJSON struct {
 	Templates []string      `json:"templates"`
 	Services  []serviceJSON `json:"services"`
 	Agents    []agentJSON   `json:"agents"`
+	Spawns    []spawnJSON   `json:"spawns"`
 	CanSpawn  bool          `json:"canSpawn"`
 	CanManage bool          `json:"canManage"`
 	CanAudit  bool          `json:"canAudit"`
 	// Ignored is what claims the project with labels egzo never writes, for whoever may audit it.
 	Ignored []string `json:"ignored,omitempty"`
+}
+
+// spawnJSON is a spawn started from the hub: state spawning, ready (agent says which) or failed (error says why).
+type spawnJSON struct {
+	ID        string     `json:"id"`
+	Template  string     `json:"template"`
+	Name      string     `json:"name"` // as asked: empty when the engine chooses
+	Creator   string     `json:"creator"`
+	State     string     `json:"state"`
+	Agent     string     `json:"agent,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	StartedAt time.Time  `json:"startedAt"`
+	EndedAt   *time.Time `json:"endedAt,omitempty"`
+}
+
+func spawnOf(sp hub.Spawn, n namer) spawnJSON {
+	j := spawnJSON{ID: sp.ID, Template: sp.Template, Name: sp.Name, Creator: n.actor(sp.Actor), State: sp.State, Agent: sp.Agent, Error: sp.Err,
+		StartedAt: sp.Started}
+	if !sp.Ended.IsZero() {
+		j.EndedAt = &sp.Ended
+	}
+	return j
 }
 
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
@@ -206,7 +229,7 @@ func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Operator: v.Operator, Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
-		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
+		Services: []serviceJSON{}, Agents: []agentJSON{}, Spawns: []spawnJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
 	if p.Templates == nil {
 		p.Templates = []string{}
 	}
@@ -215,6 +238,9 @@ func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 	}
 	for _, a := range v.Agents {
 		p.Agents = append(p.Agents, s.agentOf(a, n))
+	}
+	for _, sp := range v.Spawns {
+		p.Spawns = append(p.Spawns, spawnOf(sp, n))
 	}
 	if p.CanAudit {
 		p.Ignored = v.Project.Ignored
@@ -366,16 +392,13 @@ func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) 
 	if !decode(w, r, &body) {
 		return
 	}
-	spawned, err := s.hub.Spawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
-	if errors.Is(err, hub.ErrNotFound) || errors.Is(err, hub.ErrForbidden) {
+	// answered at once: the spawn runs on in the hub, and the project lists it until it has ended (hub/internal/hub/spawn.go)
+	started, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
+	if err != nil {
 		s.problem(w, r, err)
 		return
 	}
-	if err != nil {
-		s.apiFail(w, http.StatusBadGateway, "operation_failed", "Could not spawn: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"agent": spawned})
+	writeJSON(w, http.StatusAccepted, map[string]spawnJSON{"spawn": spawnOf(started, s.namer(r.Context()))})
 }
 
 func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User) {
