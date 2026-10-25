@@ -53,8 +53,10 @@ certificate. Clients that do not send it (curl, git, Node, Python) are tunneled 
 project CA in Chromium's own store, so this needs nothing from you. In the log (`egzo proxy log`) such a connection shows
 as a `connect` with the mode `intercept` and then a `close` with the bytes that went through, not as one line per request. A host with `inspect: true` is terminated for every client and logs each request instead.
 
-A browser also opens every proxy connection without credentials and sends them when challenged, so you will see a
-`challenge` decision per connection. That is not a refusal.
+Everything Chromium sends reaches the proxy as the agent, Chromium's own background requests included (push messaging,
+update checks): `egzo agent browser` gives Chromium a forwarder on `127.0.0.1` that adds the agent's credentials. So those
+requests show in the log as the agent's, usually denied with `not-in-profile`, and the browser's connections carry a
+`user_agent` with `Chrome/`.
 
 ## Limits
 

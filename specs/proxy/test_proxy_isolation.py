@@ -66,17 +66,27 @@ def test_agents_are_pointed_at_the_proxy_trust_its_ca_and_cannot_use_it_without_
 
     refused = probe.curl(name, "--proxy", "http://proxy:3128", "-o", "/dev/null", "https://example.com/")
     assert refused.returncode != 0 and "407" in refused.stderr
-    # asking for credentials is how a browser starts (it sends them only once challenged), so it is not a denial; wrong ones are
+    # asking for credentials is how a browser starts (it sends them only once challenged), so it is not a denial; wrong ones are.
+    # Every event says where the connection came from and what the client said it is, never who it is unless the credentials prove it
+    addresses = {n["IPAddress"] for n in probe.container(name).raw["NetworkSettings"]["Networks"].values()}
     (challenge,) = probe.audit(host="example.com")
     assert challenge["decision"] == "challenge" and challenge["reason"]["code"] == "no-credentials" and "agent" not in challenge
+    assert challenge["client"] in addresses and challenge["user_agent"].startswith("curl/") and "claimed_agent" not in challenge
     wrong = probe.curl(name, "--proxy", "http://" + name + ":wrong@proxy:3128", "-o", "/dev/null", "https://example.com/")
     assert "407" in wrong.stderr
     denied = [e for e in probe.audit(host="example.com") if e["decision"] == "deny"]
-    assert [(e["agent"], e["reason"]["code"]) for e in denied] == [(name, "credentials")]
+    assert [(e.get("agent"), e.get("claimed_agent"), e["reason"]["code"]) for e in denied] == [(None, name, "credentials")]
     assert "instance" not in denied[0] and "profile" not in denied[0], "credentials that do not match prove nothing about who sent them"
+    assert denied[0]["client"] in addresses
+
+    # with its own credentials, every event of the connection says who, by the credentials, and what was claimed is the same name
+    probe.status(name, "unknown.egzo-spec.invalid")  # allowed by the profile, and never resolves: the internet is not needed
+    events = probe.audit(agent=name, host="unknown.egzo-spec.invalid")
+    assert events and all(e["agent"] == e["claimed_agent"] == name and e["client"] in addresses for e in events)
+    assert all(e["user_agent"].startswith("curl/") for e in events)
 
     huge = "h" * 4000  # the audit log cannot be filled by one long value
-    probe.curl(name, "-o", "/dev/null", "--proxy", f"http://{huge}:x@proxy:3128", "https://example.com/")
+    probe.curl(name, "-o", "/dev/null", "-A", huge, "--proxy", f"http://{huge}:x@proxy:3128", "https://example.com/")
     assert all(len(line) < 2000 for line in probe.proxy_log().splitlines())
 
 

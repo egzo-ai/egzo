@@ -60,6 +60,8 @@ class Ssh:
 
     def __init__(self, sandbox, engine, server, template):
         self.sandbox, self.engine, self.server = sandbox, engine, server
+        # an address can come back with the next instance: what is told apart by address is what was logged after this one began
+        self.since = len(self.events())
         self.name = sandbox.spawn(template)
         self.container = f"{sandbox.name}-{self.name}"
         # `egzo agent run` writes the identity as it starts.
@@ -78,9 +80,20 @@ class Ssh:
         logs = self.engine.run("logs", self.server.name)  # sshd logs to standard error
         return (logs.stdout + logs.stderr).count("Accepted publickey for ops")
 
+    def events(self):
+        return [json.loads(line) for line in self.sandbox.ok("proxy log").stdout.splitlines() if line.startswith("{")]
+
     def audit(self, event=None):
-        events = [json.loads(line) for line in self.sandbox.ok("proxy log").stdout.splitlines() if line.startswith("{")]
+        events = self.events()
         return [e for e in events if e.get("agent") == self.name and e["protocol"] == "ssh" and (event is None or e["event"] == event)]
+
+    def addresses(self):
+        raw = json.loads(self.engine.run("inspect", self.container).stdout)[0]
+        return {n["IPAddress"] for n in raw["NetworkSettings"]["Networks"].values()}
+
+    def unattributed(self):
+        """The ssh events from this agent's container that no identity was proved for."""
+        return [e for e in self.events()[self.since:] if e["protocol"] == "ssh" and "agent" not in e and e.get("client") in self.addresses()]
 
     def failed(self, code):
         """The texts of the upstream failures of the code."""
@@ -126,6 +139,9 @@ def test_the_proxy_records_the_sessions_and_the_commands_the_agent_ran(ssh_of):
     events = a.audit()
     opened = [e for e in events if e["event"] == "connect" and e["decision"] == "allow" and e["server"] == "prod"]
     assert opened and opened[-1]["profile"] == "ops" and opened[-1]["instance"]
+    # where it came from and what the client said it is; an ssh client sends no name, so nothing is claimed
+    assert opened[-1]["client"] in a.addresses() and opened[-1]["user_agent"].startswith("SSH-2.0-OpenSSH")
+    assert "claimed_agent" not in opened[-1]
     conn = opened[-1]["conn"]
     assert [e for e in events if e["conn"] == conn and e["event"] == "exec" and e["command"] == "echo audited-command" and e["decision"] == "allow"]
     (closed,) = [e for e in events if e["conn"] == conn and e["event"] == "close"]
@@ -139,6 +155,18 @@ def test_a_server_of_another_profile_is_out_of_reach_and_nothing_reaches_the_ser
     assert refused.returncode != 0
     assert "Permission denied" in refused.stderr or "denied" in refused.stderr
     assert a.logins() == before
+    # refused without a name, but with the server it asked for, where it came from and what the client said it is
+    (signin,) = a.unattributed()
+    assert signin["event"] == "connect" and signin["decision"] == "deny" and signin["reason"]["code"] == "identity"
+    assert signin["server"] == "prod" and signin["user_agent"].startswith("SSH-2.0-OpenSSH") and "instance" not in signin
+
+
+def test_a_client_that_leaves_before_signing_in_is_an_aborted_connection_not_a_refused_identity(ssh_of):
+    a = ssh_of()
+    a.inside("bash -c 'exec 3<>/dev/tcp/proxy/2222; sleep 1'")  # connects, sends nothing, leaves
+    (left,) = a.unattributed()
+    assert left["event"] == "connect" and left["decision"] == "error" and left["reason"]["code"] == "aborted"
+    assert "server" not in left and "user_agent" not in left
 
 
 def test_the_pinned_host_key_is_checked_before_the_key_is_offered(ssh_of):

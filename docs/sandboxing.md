@@ -225,9 +225,15 @@ Each event is one step of one connection:
 ```
 
 - `conn` is the connection: its `connect`, its requests and its `close` share it.
-- `agent` is the instance's name, `instance` its id (never reused when a name is), `profile` the profile that decided.
-- `decision` is `allow`, `deny`, `error`, or `challenge`: a connection that arrived without proxy credentials. Browsers
-  start that way and send them once asked, so a challenge is not a refusal, and it names no agent.
+- `agent` is the instance's name, `instance` its id (never reused when a name is), `profile` the profile that decided. They
+  are set only once the proxy has checked the credentials (for ssh, the key's signature): `agent` always means proved.
+- `claimed_agent` is the name the client sent in its proxy credentials, right or wrong: on wrong credentials it is the only
+  name (https only; an ssh client sends none).
+- `client` is the address the connection came from, and `user_agent` what the client says it is (the `User-Agent` of the
+  CONNECT, or an ssh client's version, such as `SSH-2.0-OpenSSH_9.6p1`). Both are what the proxy saw, never proof of who.
+- `decision` is `allow`, `deny`, `error`, or `challenge`: a connection that arrived without proxy credentials. A client
+  may start that way and send them once asked, so a challenge is not a refusal, and it names no agent; its `client` says
+  where it came from.
 - `reason.code` is from a fixed list, for tools (the full list is in [the roadmap](../roadmap/proxy-audit.md)); `reason.text`
   is for people.
 
@@ -237,7 +243,7 @@ Each event is one step of one connection:
 | `https` | `handshake` | the client's TLS handshake with the proxy failed on a terminated host: it does not trust the project CA |
 | `https` | `request` | one request to a terminated host: method, path (never the query) and status; or a request refused (another host, a placeholder that cannot be swapped) or failed upstream |
 | both | `close` | the end of an allowed connection, with `bytes_up`, `bytes_down` and `duration_ms` |
-| `ssh` | `connect` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one), or a refused one (an identity or server that is not the agent's, too many connections) |
+| `ssh` | `connect` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one), or a refused one (an identity or server that is not the agent's, too many connections; `server` is then the one asked for), or an error when the client left before it signed in |
 | `ssh` | `upstream` | the server did not answer, refused the key, presented another host key than the pinned one, or would not open a session |
 | `ssh` | `exec`, `shell`, `sftp` | a command (`command`), a shell or an sftp session (`scp`, `sftp`) the agent started on the server |
 | `ssh` | `channel`, `request` | refused: port forwarding, X11, agent forwarding, a subsystem other than sftp |

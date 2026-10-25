@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // The ssh listener is the ssh analogue of a TLS-intercepted host. An agent signs in with the key egzo made for its
@@ -139,31 +141,49 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 		s.handshakes.Add(-1)
 		return
 	}
-	c := newConn(s.audit, SSH)
+	c := newConn(s.audit, SSH, raw.RemoteAddr().String())
 	config, err := s.sshServerConfig()
 	if err != nil {
 		s.handshakes.Add(-1)
 		c.decide(KindConnect, OutcomeError, because(CodeConfig, err.Error()))
 		return
 	}
+	// Called once, at the client's first sign-in attempt: what the client says it is and the server it asks for are known by then.
+	// A client that leaves before it is called never tried to sign in.
+	signingIn := false
+	config.BannerCallback = func(meta ssh.ConnMetadata) string {
+		signingIn = true
+		c.userAgent = string(meta.ClientVersion())
+		if names.SSHServer(meta.User()) {
+			c.server = meta.User()
+		}
+		return ""
+	}
 	raw.SetDeadline(time.Now().Add(s.handshakeTimeout()))
 	sc, channels, requests, err := ssh.NewServerConn(raw, config)
 	s.handshakes.Add(-1)
 	if err != nil {
-		// Nothing about the attempt is trusted, so it is recorded without a name.
+		if !signingIn {
+			c.decide(KindConnect, OutcomeError, because(CodeAborted, "the client left before it signed in"))
+			return
+		}
+		// Nothing about the attempt is proved (a key can be offered without a signature), so it is recorded without a name.
 		c.decide(KindConnect, OutcomeDeny, because(CodeIdentity, "no valid identity for a server of a profile"))
 		return
 	}
 	raw.SetDeadline(time.Time{})
 	extensions := sc.Permissions.Extensions
 	agent, name := extensions["agent"], extensions["server"]
+	c.from(agent, extensions["instance"], extensions["profile"])
+	c.server = name
 	server, ok := s.sshServerOf(agent, name)
 	if !ok {
+		// the policy changed between the sign-in and now
+		c.decide(KindConnect, OutcomeDeny, because(CodeIdentity, "the server is no longer in the agent's profile"))
 		sc.Close()
 		return
 	}
-	c.from(agent, extensions["instance"], extensions["profile"])
-	c.host, c.server = server.Host, name
+	c.host = server.Host
 	release, reason := s.limits.acquire(agent, s.MaxPerAgent, s.MaxTotal)
 	if release == nil {
 		c.decide(KindConnect, OutcomeDeny, because(CodeLimit, reason))
@@ -176,6 +196,7 @@ func (s *Server) serveSSHConn(raw net.Conn) {
 	conn.server.Store(&server)
 	conn.touch()
 	if !s.trackSSH(agent, conn) {
+		c.decide(KindConnect, OutcomeDeny, because(CodeIdentity, "the agent is no longer bound to the proxy"))
 		sc.Close()
 		return
 	}

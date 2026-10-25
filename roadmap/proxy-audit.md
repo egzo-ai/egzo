@@ -42,7 +42,10 @@ One JSON object per line, on the proxy's standard output, as before:
 | `event` | the step: `connect`, `request`, `close`; for https also `handshake`; for ssh also `upstream`, `exec`, `shell`, `sftp`, `channel` |
 | `decision` | `allow`, `deny`, `error`, or `challenge` (below); a `close` has none |
 | `mode` | on an allowed https `connect`: `tunnel`, `inject`, `inspect` or `intercept` |
-| `agent`, `instance`, `profile` | who, once the proxy credentials are checked: the name, the instance's id, the profile that decided |
+| `agent`, `instance`, `profile` | who, once the proxy credentials (for ssh, the key's signature) are checked: the name, the instance's id, the profile that decided. Never set otherwise |
+| `claimed_agent` | the name the client sent in its proxy credentials, right or wrong; only a name an instance can have (https only) |
+| `client` | the address the connection came from |
+| `user_agent` | what the client says it is: the `User-Agent` of the CONNECT, an ssh client's identification string. A hint, never proof |
 | `host`, `server` | the host; for ssh, `server` is the server's name in the profile |
 | `method`, `path`, `status` | on a `request` (never the query string) |
 | `command` | on an ssh `exec` |
@@ -57,12 +60,14 @@ The steps:
   An allowed connection always ends with a `close`. A terminated host (`inject`, `inspect`) has a `request` per request, allowed
   (with the status), denied (a request for another host, a placeholder that cannot be swapped) or failed (the upstream).
 - **ssh.** An agent's connection to the ssh listener is one connection. `connect` is the sign-in (`allow` names the `server`;
-  `deny` when the identity is not one of a profile's, or too many connections). `upstream` is an `error` when the proxy cannot
+  `deny` when the identity is not one of a profile's, with the `server` asked for, or too many connections; `error`, `aborted`
+  when the client left before it tried to sign in). `upstream` is an `error` when the proxy cannot
   reach the server or open a session on it. `exec`, `shell` and `sftp` are what the agent ran; `channel` and `request` are refused
   channels, forwarding and other requests. `close` carries the bytes, and the reason `idle` when the proxy closed it.
 - **`challenge`.** A connection that arrives without proxy credentials gets a 407 and `decision: challenge`: browsers start that
-  way and send the credentials once asked. It is not a denial and has no agent. A tool that never sends credentials shows up as
-  nothing but challenges.
+  way and send the credentials once asked. It is not a denial and has no agent; its `client` says where it came from. A tool
+  that never sends credentials shows up as nothing but challenges. egzo's browser sends none: its forwarder adds the credentials
+  to everything Chromium sends ([proxy-client-identity.md](proxy-client-identity.md)).
 
 The reason codes:
 
@@ -70,7 +75,7 @@ The reason codes:
 |---|---|---|
 | `no-policy` | deny | the proxy was restarted and has no policy: `egzo restart proxy` or `egzo project up` |
 | `no-credentials` | challenge | no proxy credentials yet |
-| `credentials` | deny | wrong proxy credentials |
+| `credentials` | deny | wrong proxy credentials: the name is in `claimed_agent`, never in `agent` |
 | `host` | deny | the CONNECT target is not a host name or address; it is said in the text, and the event has no `host` |
 | `port` | deny | only port 443 is allowed |
 | `not-in-profile` | deny | the host is not in the agent's profile |
@@ -81,12 +86,12 @@ The reason codes:
 | `host-header` | deny | a request's `Host` header is malformed |
 | `host-mismatch` | deny | a request names another host than its connection |
 | `placeholder` | deny | a placeholder could not be swapped (a compressed or too large body, a secret that cannot go in a header) |
-| `aborted` | error | the client left before the handshake (clients open connections ahead of time) |
+| `aborted` | error | the client left before the handshake (clients open connections ahead of time); for ssh, before it tried to sign in |
 | `dial` | error | the upstream did not answer (for ssh too, a cloud metadata address included) |
 | `tls-handshake` | error | the client's TLS handshake with the proxy failed: it does not trust the project CA |
 | `upstream` | error | a request to the upstream failed |
 | `ech` | allow | why the mode is `intercept`: the client sent Encrypted Client Hello |
-| `identity` | deny | ssh: no valid identity for a server of a profile |
+| `identity` | deny | ssh: no valid identity for a server of a profile, or the agent's binding or profile changed while it signed in |
 | `channel` | deny | ssh: a channel that is not a session (port forwarding, X11) |
 | `forwarding` | deny | ssh: a global request (remote forwarding) |
 | `request` | deny | ssh: a session request that is not relayed (agent forwarding, a subsystem other than sftp) |
@@ -99,7 +104,8 @@ The reason codes:
 
 ## The hub's Network view
 
-Where it shows: a **Network** tab on the project page and on the agent page (filtered to that agent), with two parts.
+Where it shows: a **Network** tab on the project page (and in the sidebar) and on the agent page (filtered to that agent), with
+two parts.
 
 - **Denied**: the denials and errors, grouped by `(instance, protocol, host, reason.code)` with a count and when each was first and
   last seen. Each group says why in plain words, which profile decided, and how to fix it: for `not-in-profile`, the YAML to add

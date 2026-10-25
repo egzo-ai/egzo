@@ -513,7 +513,7 @@ func terminated(t *testing.T, r *rig, host string) (client net.Conn, done chan s
 	done = make(chan struct{})
 	go func() {
 		defer close(done)
-		c := newConn(r.proxy.audit, HTTPS)
+		c := newConn(r.proxy.audit, HTTPS, "10.0.0.2:40000")
 		c.from("coder", testInstance, "coder")
 		c.host = host
 		r.proxy.terminate(server, c, Decision{}, true)

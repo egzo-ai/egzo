@@ -45,9 +45,9 @@ func newAgentCommand(opts *options) *cobra.Command {
 		Use:    "browser",
 		Short:  "Run the Playwright MCP server, configured for this agent's proxy",
 		Hidden: true,
-		Long: "Run `playwright-mcp` with a configuration built from this container's environment: the proxy of\n" +
-			"HTTPS_PROXY with its credentials as separate fields, a headless isolated Chromium, and its output in a\n" +
-			"temporary directory. The harness's MCP configuration starts this instead of `playwright-mcp`.",
+		Long: "Run `playwright-mcp` with a configuration built from this container's environment: a forwarder on\n" +
+			"127.0.0.1 that adds the credentials of HTTPS_PROXY to everything Chromium sends, a headless isolated Chromium,\n" +
+			"and its output in a temporary directory. The harness's MCP configuration starts this instead of `playwright-mcp`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			code, err := browser.Run(os.Environ(), os.Stdin, os.Stdout, os.Stderr)

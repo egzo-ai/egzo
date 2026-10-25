@@ -4,6 +4,7 @@
 package browser
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -47,41 +48,9 @@ func TestTheConfigurationRunsAnIsolatedHeadlessChromiumWithoutTheSandbox(t *test
 	}
 }
 
-func TestTheProxyCredentialsAreSeparateFieldsAndThePasswordIsDecoded(t *testing.T) {
-	config := decode(t, "http://coder:s3cr%22t%20p%26ss%3Dw0rd%2B%2F%25@proxy:3128")
-	proxy := launch(t, config)["proxy"].(map[string]any)
-	want := map[string]any{
-		"server": "http://proxy:3128", "username": "coder", "password": `s3cr"t p&ss=w0rd+/%`, "bypass": "localhost,127.0.0.1",
-	}
-	for key, value := range want {
-		if proxy[key] != value {
-			t.Errorf("proxy[%s] = %v, want %v", key, proxy[key], value)
-		}
-	}
-	if strings.Contains(proxy["server"].(string), "@") || strings.Contains(proxy["server"].(string), "coder") {
-		t.Errorf("the server field carries the credentials: %v", proxy["server"])
-	}
-}
-
-func TestAnIPv6ProxyHostKeepsItsBrackets(t *testing.T) {
-	for raw, server := range map[string]string{
-		"http://a:b@[fd00::2]:3128": "http://[fd00::2]:3128",
-		"http://a:b@[fd00::2]":      "http://[fd00::2]:3128",
-		"http://a:b@proxy":          "http://proxy:3128",
-	} {
-		proxy := launch(t, decode(t, raw))["proxy"].(map[string]any)
-		if proxy["server"] != server {
-			t.Errorf("%s: server = %v, want %s", raw, proxy["server"], server)
-		}
-	}
-}
-
-func TestAProxyWithoutCredentialsHasNoUserOrPasswordFields(t *testing.T) {
-	proxy := launch(t, decode(t, "http://proxy:3128"))["proxy"].(map[string]any)
-	if _, ok := proxy["username"]; ok {
-		t.Errorf("proxy = %v", proxy)
-	}
-	if _, ok := proxy["password"]; ok {
+func TestTheProxyIsTheForwarderWithoutCredentialsAndLocalhostBypassesIt(t *testing.T) {
+	proxy := launch(t, decode(t, "http://127.0.0.1:4567"))["proxy"].(map[string]any)
+	if len(proxy) != 2 || proxy["server"] != "http://127.0.0.1:4567" || proxy["bypass"] != "localhost,127.0.0.1" {
 		t.Errorf("proxy = %v", proxy)
 	}
 }
@@ -92,9 +61,32 @@ func TestWithoutAProxyThereIsNoProxyBlock(t *testing.T) {
 	}
 }
 
+func TestTheUpstreamIsTheProxyOfHTTPSProxyWithItsCredentialsDecoded(t *testing.T) {
+	up, err := upstreamFrom("http://coder:s3cr%22t%20p%26ss%3Dw0rd%2B%2F%25@proxy:3128")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte(`coder:s3cr"t p&ss=w0rd+/%`))
+	if up.address != "proxy:3128" || up.authorization != want {
+		t.Errorf("upstream = %+v", up)
+	}
+	for raw, address := range map[string]string{
+		"http://a:b@[fd00::2]:3128": "[fd00::2]:3128",
+		"http://a:b@[fd00::2]":      "[fd00::2]:3128",
+		"http://a:b@proxy":          "proxy:3128",
+	} {
+		if up, _ := upstreamFrom(raw); up.address != address {
+			t.Errorf("%s: address = %q, want %s", raw, up.address, address)
+		}
+	}
+	if up, _ := upstreamFrom("http://proxy:3128"); up.authorization != "" {
+		t.Errorf("without credentials: %+v", up)
+	}
+}
+
 func TestABrokenProxyURLIsAnErrorThatDoesNotRepeatTheCredentials(t *testing.T) {
-	for _, raw := range []string{"http://coder:hunter2@proxy:99999999999%zz", "http://coder:hunter2@:3128", "%%%hunter2"} {
-		_, err := Config(raw, "/tmp/out")
+	for _, raw := range []string{"http://coder:hunter2@proxy:99999999999%zz", "http://coder:hunter2@:3128", "%%%hunter2", "https://coder:hunter2@proxy:3128"} {
+		_, err := upstreamFrom(raw)
 		if err == nil {
 			t.Errorf("%q was accepted", raw)
 			continue
@@ -113,6 +105,7 @@ func TestRunWritesAPrivateConfigurationForTheServerAndRemovesItAfterwards(t *tes
 		`[ "$1" = "--config" ] && [ "$#" = 2 ] || exit 90` + "\n" +
 		`echo "$2" > ` + seen + "\n" +
 		`stat -c %a "$2" >> ` + seen + "\n" +
+		`echo "$HTTPS_PROXY" >> ` + seen + "\n" +
 		`cat "$2" >> ` + seen + "\n" +
 		"exit 7\n"
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
@@ -126,13 +119,17 @@ func TestRunWritesAPrivateConfigurationForTheServerAndRemovesItAfterwards(t *tes
 		t.Fatalf("run = %d, %v; want the server's exit code", code, err)
 	}
 	data, _ := os.ReadFile(seen)
-	lines := strings.SplitN(string(data), "\n", 3)
-	path, mode := lines[0], lines[1]
+	lines := strings.SplitN(string(data), "\n", 4)
+	path, mode, proxy := lines[0], lines[1], lines[2]
 	if mode != "600" {
 		t.Errorf("the configuration had mode %s", mode)
 	}
-	if !strings.Contains(lines[2], `"password": "tok@en"`) || !strings.Contains(lines[2], `"outputDir": "`+filepath.Dir(path)) {
-		t.Errorf("configuration = %s", lines[2])
+	// the server and Chromium are given the forwarder, never the credentials
+	if !strings.HasPrefix(proxy, "http://127.0.0.1:") || !strings.Contains(lines[3], `"server": "`+proxy+`"`) || strings.Contains(string(data), "tok") {
+		t.Errorf("HTTPS_PROXY %s, configuration = %s", proxy, lines[3])
+	}
+	if !strings.Contains(lines[3], `"outputDir": "`+filepath.Dir(path)) {
+		t.Errorf("configuration = %s", lines[3])
 	}
 	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
 		t.Errorf("the temporary directory outlived the server: %v", err)

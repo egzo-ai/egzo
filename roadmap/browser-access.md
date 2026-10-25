@@ -80,9 +80,10 @@ silent (it is a documented, deliberate choice; a warning on every `project up` w
   `libnss3-tools` (`certutil`). Everything is installed at build time because anything fetched at run time has to pass the
   egress profile. The images grow by roughly 400-600 MB.
 - **`egzo agent browser`** (in-container role, same binary): builds the Playwright MCP configuration from the agent's
-  environment (the proxy URL's credentials as separate fields, `localhost` and `127.0.0.1` bypassing the proxy, headless,
-  isolated profile, no sandbox, `--disable-dev-shm-usage`, output in a temporary directory, never the workspace) and
-  runs `playwright-mcp` with it. No credential is written to disk beyond that process's own temporary config.
+  environment (the proxy is a forwarder of its own on `127.0.0.1` that adds the agent's credentials, `localhost` and
+  `127.0.0.1` bypassing the proxy, headless, isolated profile, no sandbox, `--disable-dev-shm-usage`, output in a temporary
+  directory, never the workspace) and runs `playwright-mcp` with it. No credential is written to disk or given to Playwright
+  ([proxy-client-identity.md](proxy-client-identity.md)).
 - **Registration**: the harness integration writes a `playwright` MCP server (stdio) next to the `egzo` one, in Claude
   Code's `~/.claude.json` and OpenCode's `opencode.json`, **only when `playwright-mcp` is on the `PATH`**, so an image
   without a browser gets no dangling server.
@@ -128,5 +129,6 @@ refusals, wildcard `inspect` and injection side by side), `test_egress.py` (wild
 ## Related ideas (not Chrome-specific)
 
 - **Authenticating agents by source address** on their own network, so a client needs no proxy credentials (the Playwright
-  wrapper exists only because Chromium cannot send them in the proxy URL). A separate decision.
+  wrapper exists only because Chromium cannot send them in the proxy URL). Not needed: the wrapper's forwarder adds the
+  credentials to everything Chromium sends, its background services included ([proxy-client-identity.md](proxy-client-identity.md)).
 - **General per-template sidecars**: only if something needs a separate runtime or limits, never one feature per tool.

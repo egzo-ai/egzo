@@ -240,13 +240,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host = names.NormalizeHost(host)
-	c := newConn(s.audit, HTTPS)
+	c := newConn(s.audit, HTTPS, r.RemoteAddr)
+	c.userAgent = r.Header.Get("User-Agent")
 	// What no host is called is not one: it is kept out of the trail's hosts, and refused once the agent is known.
 	isHost := names.Host(host)
 	if isHost {
 		c.host = host
 	}
 
+	agent, token, hasCredentials := proxyCredentials(r)
+	if hasCredentials {
+		c.claims(agent)
+	}
 	policy := s.policy.Load()
 	if policy == nil {
 		// Not the agent's fault, and no use asking for credentials: the proxy lost its policy (it
@@ -255,7 +260,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "egzo: this proxy has no egress policy loaded (it was restarted): run `egzo project up`", http.StatusServiceUnavailable)
 		return
 	}
-	agent, token, hasCredentials := proxyCredentials(r)
 	var agentPolicy *Profile
 	var binding Binding
 	if hasCredentials {
@@ -266,11 +270,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// How a browser starts: it sends credentials only once challenged. Not a denial.
 			c.decide(KindConnect, OutcomeChallenge, because(CodeNoCredentials, "proxy credentials required"))
 		} else {
-			// The name is what the client claimed; nothing proves it, so nothing more is said of it, and only a name an
-			// instance can have is said at all.
-			if names.Instance(agent) {
-				c.agent = agent
-			}
+			// The name is only claimed: nothing proves it, so it is no agent.
 			c.decide(KindConnect, OutcomeDeny, because(CodeCredentials, "invalid proxy credentials"))
 		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="egzo"`)

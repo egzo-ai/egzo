@@ -3,17 +3,15 @@
 
 // Package browser configures the Playwright MCP server (`playwright-mcp`) of an agent container from the
 // agent's environment, and runs it. It is the `egzo agent browser` role: the harness is told to start that
-// instead of `playwright-mcp`, because the proxy's credentials have to reach Chromium as separate fields (it
-// ignores `user:pass@` in a proxy URL and `--proxy-server` has no credentials) and nothing of the kind may sit
-// on a command line.
+// instead of `playwright-mcp`, because Chromium cannot be given the proxy's credentials so that everything it sends
+// carries them (it ignores `user:pass@` in a proxy URL, `--proxy-server` has no credentials, and the ones Playwright
+// supplies are only for pages). The role runs a forwarder that adds them (forwarder.go), and gives Chromium that.
 package browser
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -29,10 +27,8 @@ const Program = "playwright-mcp"
 const bypass = "localhost,127.0.0.1"
 
 type proxySettings struct {
-	Server   string `json:"server"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	Bypass   string `json:"bypass"`
+	Server string `json:"server"`
+	Bypass string `json:"bypass"`
 }
 
 type launchOptions struct {
@@ -57,9 +53,9 @@ type config struct {
 	OutputDir string `json:"outputDir"`
 }
 
-// Config returns the configuration file for the proxy in proxyURL (credentials in the URL, as in
-// HTTPS_PROXY; empty for none) and the directory for the server's output. Errors never carry the URL.
-func Config(proxyURL, outputDir string) ([]byte, error) {
+// Config returns the configuration file for the proxy at proxyServer (the forwarder's URL, without credentials; empty for
+// none) and the directory for the server's output.
+func Config(proxyServer, outputDir string) ([]byte, error) {
 	settings := config{
 		Browser: browserSettings{
 			BrowserName: "chromium",
@@ -75,39 +71,15 @@ func Config(proxyURL, outputDir string) ([]byte, error) {
 		},
 		OutputDir: outputDir,
 	}
-	if proxyURL != "" {
-		proxy, err := proxyFrom(proxyURL)
-		if err != nil {
-			return nil, err
-		}
-		settings.Browser.LaunchOptions.Proxy = proxy
+	if proxyServer != "" {
+		settings.Browser.LaunchOptions.Proxy = &proxySettings{Server: proxyServer, Bypass: bypass}
 	}
 	return json.MarshalIndent(settings, "", "  ")
 }
 
-func proxyFrom(raw string) (*proxySettings, error) {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return nil, errors.New("HTTPS_PROXY is not a URL")
-	}
-	if parsed.Hostname() == "" {
-		return nil, errors.New("HTTPS_PROXY has no host")
-	}
-	host := parsed.Host
-	if parsed.Port() == "" {
-		host = net.JoinHostPort(parsed.Hostname(), "3128")
-	}
-	proxy := &proxySettings{Server: parsed.Scheme + "://" + host, Bypass: bypass}
-	if parsed.User != nil {
-		// url.Userinfo hands back the decoded name and password: a token or a password with `@`, `:` or `%` works.
-		proxy.Username = parsed.User.Username()
-		proxy.Password, _ = parsed.User.Password()
-	}
-	return proxy, nil
-}
-
-// Run writes the configuration into a private temporary directory, runs `playwright-mcp --config` on it with
-// the environment given, and removes the directory when the server exits. Signals go to the server, and its
+// Run starts the forwarder to the proxy of HTTPS_PROXY, writes the configuration into a private temporary directory, runs
+// `playwright-mcp --config` on it with the environment given (its proxy the forwarder too), and removes the directory and
+// closes the forwarder when the server exits. Signals go to the server, and its
 // exit code is returned (128+n when a signal ended it).
 func Run(environ []string, stdin, stdout, stderr *os.File) (int, error) {
 	return run(Program, environ, stdin, stdout, stderr)
@@ -127,7 +99,21 @@ func run(program string, environ []string, stdin, stdout, stderr *os.File) (int,
 	if proxyURL == "" {
 		proxyURL = lookup(environ, "https_proxy")
 	}
-	data, err := Config(proxyURL, output)
+	proxyServer := ""
+	if proxyURL != "" {
+		up, err := upstreamFrom(proxyURL)
+		if err != nil {
+			return 0, err
+		}
+		f, err := listenForwarder(up)
+		if err != nil {
+			return 0, err
+		}
+		defer f.Close()
+		go f.serve()
+		proxyServer = f.URL()
+	}
+	data, err := Config(proxyServer, output)
 	if err != nil {
 		return 0, err
 	}
@@ -137,7 +123,7 @@ func run(program string, environ []string, stdin, stdout, stderr *os.File) (int,
 	}
 
 	cmd := exec.Command(program, "--config", path)
-	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = childEnvironment(environ), stdin, stdout, stderr
+	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = childEnvironment(environ, proxyServer), stdin, stdout, stderr
 	// Signals are caught before the server starts, so none is lost between starting it and forwarding.
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -172,10 +158,22 @@ func run(program string, environ []string, stdin, stdout, stderr *os.File) (int,
 var browsersPath = "/opt/ms-playwright"
 
 // childEnvironment is the server's environment: the one it was given, with the browsers' location added when the
-// harness did not pass it on (a harness may hand an MCP server a reduced environment). The proxy is read from
-// the environment egzo itself was started with; nothing about it is added here.
-func childEnvironment(environ []string) []string {
-	out := append([]string{}, environ...)
+// harness did not pass it on (a harness may hand an MCP server a reduced environment), and the proxy variables pointed at the
+// forwarder, so the credentials never reach the server and what it fetches itself goes out as the agent too.
+func childEnvironment(environ []string, proxyServer string) []string {
+	var out []string
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		switch name {
+		case "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy":
+			if proxyServer != "" {
+				entry = name + "=" + proxyServer
+			}
+			out = append(out, entry)
+		default:
+			out = append(out, entry)
+		}
+	}
 	if lookup(out, "PLAYWRIGHT_BROWSERS_PATH") == "" {
 		if info, err := os.Stat(browsersPath); err == nil && info.IsDir() {
 			out = append(out, "PLAYWRIGHT_BROWSERS_PATH="+browsersPath)

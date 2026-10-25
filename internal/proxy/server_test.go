@@ -403,8 +403,39 @@ func TestNoCredentialsIsAChallengeAndWrongCredentialsAreADenial(t *testing.T) {
 			t.Errorf("event = %+v", event)
 		}
 	}
-	if events[0].Agent != "coder" || events[1].Agent != "ghost" || events[2].Agent != "" {
-		t.Errorf("agents = %q, %q, %q", events[0].Agent, events[1].Agent, events[2].Agent)
+	// the name is only claimed: it is never the agent
+	for i, want := range []string{"coder", "ghost", "", "", ""} {
+		if events[i].Agent != "" || events[i].ClaimedAgent != want {
+			t.Errorf("event %d: agent %q, claimed %q; want claimed %q", i, events[i].Agent, events[i].ClaimedAgent, want)
+		}
+	}
+	for _, event := range r.events("example.com") {
+		if event.Client != "127.0.0.1" {
+			t.Errorf("client = %q", event.Client)
+		}
+	}
+}
+
+func TestAnAuthenticatedConnectionSaysWhoByTheCredentialsWhatWasClaimedWhereFromAndTheUserAgent(t *testing.T) {
+	r := newRig(t, nil)
+	r.setPolicy("coder", "tok", []string{"*"})
+	conn, err := net.Dial("tcp", strings.TrimPrefix(r.front.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	io.WriteString(conn, "CONNECT 10.0.0.1:443 HTTP/1.1\r\nHost: 10.0.0.1:443\r\nUser-Agent: curl/8.11.1\r\n"+
+		"Proxy-Authorization: Basic "+base64.StdEncoding.EncodeToString([]byte("coder:tok"))+"\r\n\r\n")
+	if _, err := http.ReadResponse(bufio.NewReader(conn), nil); err != nil {
+		t.Fatal(err)
+	}
+	events := r.events("10.0.0.1")
+	if len(events) != 1 {
+		t.Fatalf("events = %+v", events)
+	}
+	e := events[0]
+	if e.Agent != "coder" || e.ClaimedAgent != "coder" || e.Instance != testInstance || e.Client != "127.0.0.1" || e.UserAgent != "curl/8.11.1" {
+		t.Errorf("event = %+v", e)
 	}
 }
 
