@@ -221,7 +221,13 @@ export interface NetworkEvent {
 /** What the proxy refused, or failed at, for one instance, one host and one reason, however many times. */
 export interface Denial {
   instance: string;
+  /** Proved by the credentials; empty when the proxy could not tell. */
   agent: string;
+  /** The name the client sent in its proxy credentials: part of the group. */
+  claimedAgent?: string;
+  /** The address of the latest one, and what its client said it was. */
+  client?: string;
+  userAgent?: string;
   creator: string;
   protocol: "https" | "ssh";
   host: string;

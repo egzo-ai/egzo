@@ -32,7 +32,7 @@
   let hostFilter = $state("");
   let agentFilter = $state("");
 
-  const key = (d: Denial) => `${d.instance} ${d.protocol} ${d.host} ${d.code}`;
+  const key = (d: Denial) => `${d.instance} ${d.claimedAgent ?? ""} ${d.protocol} ${d.host} ${d.code}`;
   const denials = $derived(data?.denials ?? []);
   const open = $derived(denials.filter((d) => !d.fixed));
   const fixed = $derived(denials.filter((d) => d.fixed));
@@ -85,7 +85,7 @@
             {@const e = explain(d)}
             <tr data-host={d.host} data-code={d.code} class:fixed={!!d.fixed}>
               <td><span class="name">{d.host}</span>{#if d.protocol === "ssh"} <span class="badge">ssh{#if d.server} {d.server}{/if}</span>{/if}</td>
-              {#if !agent}<td>{d.agent || "–"}{#if !d.instance} <span class="muted" title="no credentials proved which agent it was">(unauthenticated)</span>{/if}</td>{/if}
+              {#if !agent}<td>{#if d.agent}{d.agent}{:else if d.claimedAgent}<span class="muted" title="the name the client sent; its credentials were wrong">{d.claimedAgent}?</span>{:else}–{/if}{#if !d.instance}{" "}<span class="muted" title="no credentials proved which agent it was">(unauthenticated)</span>{/if}</td>{/if}
               <td class="wrap"><span class="pill" data-s={d.decision === "deny" ? "error" : "warn"}>{e.title}</span>{#if d.fixed} <span class="pill" data-s="done" title={stamp(d.fixed)}>fixed</span>{/if}</td>
               <td>{d.count}</td>
               <td title={stamp(d.last)}>{ago(d.last) || clock(d.last)}</td>
@@ -96,6 +96,7 @@
                 <td colspan={agent ? 5 : 6}>
                   <p>{e.why}{#if d.profile} The agent's profile is <code>{d.profile}</code>.{/if}</p>
                   {#if d.text && d.text !== e.why}<p class="muted">The proxy said: {d.text}</p>{/if}
+                  {#if d.client || d.userAgent}<p class="muted" data-testid="denial-from">Latest from {#if d.client}<code>{d.client}</code>{/if}{#if d.userAgent}{d.client ? ", " : ""}{d.userAgent}{/if}{#if !d.instance && d.claimedAgent}, claimed to be <b>{d.claimedAgent}</b>, not proved{/if}.</p>{/if}
                   <p>{e.fix}</p>
                   {#if e.yaml}
                     <div class="snippet"><pre data-testid="fix-yaml">{e.yaml}</pre><button class="btn" data-size="sm" onclick={() => copy(e.yaml!)}>Copy</button></div>

@@ -453,21 +453,24 @@ type networkEventJSON struct {
 }
 
 type denialJSON struct {
-	Instance string     `json:"instance"`
-	Agent    string     `json:"agent"`
-	Creator  string     `json:"creator"`
-	Protocol string     `json:"protocol"`
-	Host     string     `json:"host"`
-	Server   string     `json:"server,omitempty"`
-	Code     string     `json:"code"`
-	Event    string     `json:"event"`
-	Decision string     `json:"decision"`
-	Profile  string     `json:"profile"`
-	Text     string     `json:"text"`
-	Count    int        `json:"count"`
-	First    time.Time  `json:"first"`
-	Last     time.Time  `json:"last"`
-	Fixed    *time.Time `json:"fixed"`
+	Instance  string     `json:"instance"`
+	Agent     string     `json:"agent"`
+	Claimed   string     `json:"claimedAgent,omitempty"`
+	Client    string     `json:"client,omitempty"`
+	UserAgent string     `json:"userAgent,omitempty"`
+	Creator   string     `json:"creator"`
+	Protocol  string     `json:"protocol"`
+	Host      string     `json:"host"`
+	Server    string     `json:"server,omitempty"`
+	Code      string     `json:"code"`
+	Event     string     `json:"event"`
+	Decision  string     `json:"decision"`
+	Profile   string     `json:"profile"`
+	Text      string     `json:"text"`
+	Count     int        `json:"count"`
+	First     time.Time  `json:"first"`
+	Last      time.Time  `json:"last"`
+	Fixed     *time.Time `json:"fixed"`
 }
 
 // network answers what the project's proxy recorded, or what it recorded for one agent with ?agent=: the groups of denials, the
@@ -481,7 +484,7 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User
 	n := s.namer(r.Context())
 	denials := make([]denialJSON, 0, len(view.Denials))
 	for _, d := range view.Denials {
-		row := denialJSON{Instance: d.Instance, Agent: d.Agent, Creator: n.actor(d.Actor), Protocol: d.Protocol, Host: d.Host, Server: d.Server,
+		row := denialJSON{Instance: d.Instance, Agent: d.Agent, Claimed: d.ClaimedAgent, Client: d.Client, UserAgent: d.UserAgent, Creator: n.actor(d.Actor), Protocol: d.Protocol, Host: d.Host, Server: d.Server,
 			Code: d.Code, Event: d.Event, Decision: d.Decision, Profile: d.Profile, Text: d.Text, Count: d.Count, First: d.First, Last: d.Last}
 		if !d.Fixed.IsZero() {
 			fixed := d.Fixed
