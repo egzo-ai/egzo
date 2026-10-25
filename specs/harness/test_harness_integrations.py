@@ -8,13 +8,18 @@ report its life cycle through states they report, reach the control sidecar's MC
 The images are the real ones from `harness/<name>/Dockerfile`; no model is called, so no credential is needed.
 
 One project is up for the whole module, with a template for each way these specs set a harness up (a workspace, two, a model, a prompt,
-permissions left to the harness, a subscription token); an instance is spawned for what a spec reads, and removed after it."""
+permissions left to the harness, a subscription token, a scripted model); an instance is spawned for what a spec reads, and removed after it.
+
+A scripted model (fixtures/model_stub.mjs) stands in for the Anthropic API inside the instance, on its own localhost, which never goes through
+the proxy: it does not think, it answers the harness's turn with the tool calls a spec needs, so the real agent loop runs (a shell command, an
+egzo MCP tool) with no credential and no model."""
 
 import json
 import os
 import re
 import subprocess
 import time
+from pathlib import Path
 
 import pexpect
 import pytest
@@ -22,6 +27,11 @@ import pytest
 from support import agent, spec
 
 HARNESSES = ["claude-code", "opencode"]
+FIXTURES = Path(__file__).parent.parent / "fixtures"
+STUB_PORT = 8124
+STUB_LOG = "/tmp/model-stub.log"
+# the templates whose harness talks to the scripted model: Claude Code reads its base URL from the environment, OpenCode from its config
+SCRIPTED = {"claude-code": "cc-scripted", "opencode": "oc-scripted"}
 ANTHROPIC = {"allow": ["platform.claude.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}
 OAUTH = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/CLAUDE_CODE_OAUTH_TOKEN"}}
 OAUTH_TOKEN = "sk-ant-oat01-egzo-spec-not-a-real-token-" + "0" * 40
@@ -57,6 +67,8 @@ def sandbox(shared_project, engine, egzo):
                 "cc-oauth": agent(harness="claude-code", image=cc, egress="oauth"),
                 "oc-model": agent(harness="opencode", image=oc, model="anthropic/claude-sonnet-5-5", prompt="./coder.md"),
                 "oc-asks": agent(harness="opencode", image=oc, permissions="default"),
+                "cc-scripted": agent(harness="claude-code", image=cc, workspaces=["scratch"], env={"ANTHROPIC_BASE_URL": f"http://127.0.0.1:{STUB_PORT}"}, **quick),
+                "oc-scripted": agent(harness="opencode", image=oc, workspaces=["scratch"], model="anthropic/claude-sonnet-5-5", **quick),
                 "emit": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "emit"}),
             },
         ),
@@ -278,3 +290,80 @@ def test_the_real_tui_reports_idle_and_is_told_a_message_is_waiting(sandbox, har
     typed = wait_until(lambda: [e["data"]["prompt"] for e in mine("state") if e.get("data", {}).get("prompt")], "the TUI to submit the typed line", 40, context=context)
     assert typed[0] == f"check egzo message {sent} and handle the request for me."
     assert "TOP-SECRET-PAYLOAD" not in json.dumps(typed)
+
+
+def start_model_stub(engine, project, name, command):
+    """Run the scripted model in the instance; its shell step runs `command`."""
+    container = engine.instance(project.name, name).name
+    copied = engine.put_file(container, FIXTURES / "model_stub.mjs", "/tmp/model_stub.mjs")
+    assert copied.returncode == 0, copied.stderr
+    engine.exec(container, "node", "/tmp/model_stub.mjs", str(STUB_PORT), STUB_LOG, command, detach=True)
+    wait_until(lambda: model_requests(engine, project, name) is not None, "the scripted model to listen", 20)
+
+
+def model_requests(engine, project, name):
+    """What the scripted model was asked, in order; None until it listens."""
+    lines = in_instance(engine, project, name, f"cat {STUB_LOG} 2>/dev/null").stdout.splitlines()
+    rows = [json.loads(line) for line in lines if line.strip()]
+    if not any("listening" in row for row in rows):
+        return None
+    return [row for row in rows if "listening" not in row]
+
+
+def point_opencode_at_the_stub(engine, project, name):
+    """OpenCode takes a provider's base URL from its config; egzo merges its own keys into that file, so the entry survives a restart."""
+    script = (
+        "const fs=require('fs');const p=process.env.HOME+'/.config/opencode/opencode.json';const c=JSON.parse(fs.readFileSync(p));"
+        "c.provider={...(c.provider||{}),anthropic:{options:{baseURL:process.argv[1]}}};fs.writeFileSync(p,JSON.stringify(c))"
+    )
+    done = engine.exec(engine.instance(project.name, name).name, "node", "-e", script, f"http://127.0.0.1:{STUB_PORT}/v1")
+    assert done.returncode == 0, done.stderr
+    project.ok("restart", name, timeout=300)
+    wait_until(lambda: in_instance(engine, project, name, "pgrep -x opencode").returncode == 0, "OpenCode to start again", 60)
+    assert read_json(engine, project, name, "$HOME/.config/opencode/opencode.json")["provider"]["anthropic"]["options"]["baseURL"].endswith("/v1")
+
+
+@pytest.mark.parametrize("harness", HARNESSES)
+def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egzo_tool_with_no_prompt(sandbox, engine, harness):
+    """The agent loop of the real harness, on a message: the model asks for a shell command and then for the egzo MCP tool list_messages,
+    and the harness runs both without asking anyone (bypass mode works), reaches control's MCP server and the browser's itself (the tools are
+    offered to the model), sends the placeholder key egzo gave it, and reports working and then idle, never blocked."""
+    p = sandbox
+    name = p.spawn(SCRIPTED[harness], f"{harness}-scripted", timeout=900)
+    if harness == "opencode":
+        point_opencode_at_the_stub(engine, p, name)
+    marker = "/workspace/scratch/ran-by-the-model"
+    start_model_stub(engine, p, name, f"touch {marker}")
+
+    def mine(kind):
+        return [e for e in events(p) if e["type"] == kind and e.get("agent") == name]
+
+    def context():
+        asked = model_requests(engine, p, name) or []
+        seen = "\n".join(f'{e["seq"]} {e["type"]} {e.get("text", "")}' for e in events(p) if e.get("agent") == name)
+        return "the model was asked:\n" + "\n".join(json.dumps(r)[:400] for r in asked) + f"\nthe agent's events:\n{seen}"
+
+    wait_until(lambda: (rows := mine("activity")) and rows[-1]["text"] == "idle", "the harness to report that its session started", 45)
+    before = max((e["seq"] for e in events(p)), default=0)
+    sent = p.ok("message send", name, "run the scripted check").stdout.split()[1]
+
+    finished = wait_until(
+        lambda: [r for r in (model_requests(engine, p, name) or []) if r.get("step") == 2],
+        "the harness to come back to the model with the results of both tool calls", 180, context=context,
+    )
+    shell, egzo = finished[-1]["results"]
+    assert not shell["is_error"], f"the shell command failed or was refused: {shell['content']}"
+    assert in_instance(engine, p, name, f"test -f {marker}").returncode == 0, "the shell command ran in the workspace"
+    assert not egzo["is_error"] and sent in egzo["content"], f"list_messages reached control and listed the message: {egzo['content']}"
+
+    turns = [r for r in model_requests(engine, p, name) if r.get("step") is not None]
+    offered = turns[0]["tools"]
+    assert any(t.endswith("list_messages") for t in offered), f"the egzo MCP tools are offered to the model: {offered}"
+    assert any(t.endswith("browser_navigate") for t in offered), f"the browser's MCP tools are offered to the model: {offered}"
+    placeholder = env_of(engine, p, name)["ANTHROPIC_API_KEY"]
+    assert {r["key"] for r in turns} == {placeholder}, "every call to the model carries the placeholder egzo gave the harness"
+
+    wait_until(lambda: (rows := mine("activity")) and rows[-1]["text"] == "idle", "the harness to report idle when its turn is over", 60, context=context)
+    states = [e["text"] for e in mine("state") if e["seq"] > before]
+    assert "working" in states, f"the harness reports working while it works: {states}"
+    assert "blocked" not in states, f"nothing asked for a permission: {states}"
