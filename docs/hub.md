@@ -6,8 +6,8 @@ who may do what. It is optional and separate from the CLI: a container of its ow
 the engines like `egzo` does, so a project made with the CLI shows up in it and an agent spawned in it shows up in `egzo ps`.
 
 A spawn runs in the background and is listed in the project's agents until it has ended. One that failed stays there with why
-(a name or a git branch that already exists, for instance) for ten minutes, or until whoever may operate its agent dismisses it
-with its trash icon.
+(a name or a git branch that already exists, for instance) until whoever may operate its agent dismisses it with its trash icon,
+or the hub restarts.
 
 ![Two agents' terminals side by side in the hub: one waiting on a question, one answering](../assets/hub-terminals.png)
 

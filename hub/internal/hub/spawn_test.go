@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 )
@@ -149,5 +150,35 @@ func TestAnEndedSpawnIsDismissedByWhoMayOperateItsAgentAndARunningOneIsNot(t *te
 	}
 	if err := r.hub.DismissSpawn(ctx, r.login("carol"), "local", "web", running.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("without a role on the project: %v", err)
+	}
+}
+
+func TestAFailedSpawnStaysUntilItIsDismissedAndOneThatMadeItsAgentIsForgotten(t *testing.T) {
+	r := newRig(t, "local")
+	r.fakes["local"].AddProject(project("web", "coder"))
+	op := r.operator()
+	r.scan()
+	failed, _ := r.hub.StartSpawn(ctx, op, "local", "web", "ghost", "")
+	ready, _ := r.hub.StartSpawn(ctx, op, "local", "web", "coder", "")
+	r.hub.WaitForSpawns()
+	// long after both ended
+	r.hub.spawns.mu.Lock()
+	for _, s := range r.hub.spawns.byProj[projectKey{"local", "web"}] {
+		s.Ended = s.Ended.Add(-time.Hour)
+	}
+	r.hub.spawns.mu.Unlock()
+	view, _ := r.hub.Project(ctx, op, "local", "web")
+	if len(view.Spawns) != 1 || view.Spawns[0].ID != failed.ID {
+		t.Fatalf("an hour later = %+v, want only the failed one (not %s)", view.Spawns, ready.ID)
+	}
+
+	// nobody dismisses them: a project keeps the latest maxFailed
+	for i := 0; i < maxFailed; i++ {
+		r.hub.StartSpawn(ctx, op, "local", "web", "ghost", "")
+	}
+	r.hub.WaitForSpawns()
+	view, _ = r.hub.Project(ctx, op, "local", "web")
+	if len(view.Spawns) != maxFailed || view.Spawns[0].ID == failed.ID {
+		t.Errorf("%d failed spawns kept, the oldest first: %s", len(view.Spawns), view.Spawns[0].ID)
 	}
 }

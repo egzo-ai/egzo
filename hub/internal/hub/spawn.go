@@ -24,8 +24,12 @@ import (
 const (
 	// spawnDeadline is how long one spawn may take, waiting for the ones before it in the same project included.
 	spawnDeadline = 10 * time.Minute
-	// spawnKept is how long an ended spawn stays in its project's view, for whoever asked to learn how it ended.
+	// spawnKept is how long a spawn that made its agent stays in its project's view, for whoever asked to learn how it ended (the
+	// agent's own row is what people see). A failed one stays until it is dismissed: a row that went away by itself would leave
+	// people wondering what happened.
 	spawnKept = 10 * time.Minute
+	// maxFailed bounds the failed spawns a project keeps when nobody dismisses them: past it, the oldest goes.
+	maxFailed = 50
 )
 
 // The states of a spawn.
@@ -149,16 +153,27 @@ func (h *Hub) Spawn(ctx context.Context, user store.User, engine, project, templ
 // WaitForSpawns waits until every spawn that was started has ended.
 func (h *Hub) WaitForSpawns() { h.spawns.wg.Wait() }
 
-// spawnsOf is what a project's view lists: the spawns still running and those that ended less than spawnKept ago, oldest first.
+// spawnsOf is what a project's view lists, oldest first: the spawns still running, those that failed and were not dismissed (the
+// latest maxFailed), and those that made their agent less than spawnKept ago.
 func (h *Hub) spawnsOf(engine, project string) []Spawn {
 	key := projectKey{engine, project}
 	h.spawns.mu.Lock()
 	defer h.spawns.mu.Unlock()
 	h.spawns.init()
+	failed := 0
+	for _, s := range h.spawns.byProj[key] {
+		if s.State == SpawnFailed {
+			failed++
+		}
+	}
 	kept := h.spawns.byProj[key][:0]
 	var list []Spawn
 	for _, s := range h.spawns.byProj[key] {
-		if s.State != SpawnPending && time.Since(s.Ended) > spawnKept {
+		forget := s.State == SpawnReady && time.Since(s.Ended) > spawnKept
+		if s.State == SpawnFailed && failed > maxFailed {
+			forget, failed = true, failed-1
+		}
+		if forget {
 			delete(h.spawns.done, s.ID)
 			continue
 		}
