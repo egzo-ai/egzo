@@ -120,6 +120,7 @@ agents:
   coder:
     harness: claude-code          # claude-code | opencode | custom (see harnesses.md)
     image: registry.example/my-claude:1   # optional, see images.md
+    # build: { context: ./agent }         # or let `up` build it, instead of image: (images.md)
     workspaces: [repo]
     egress: default               # profile; omitted => default
     model: claude-sonnet-5-5

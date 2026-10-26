@@ -87,6 +87,12 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		secrets = resolved // a dry run compares the policy too, when the secrets can be read
 	}
 
+	// The images first: a build is where `up` is most likely to fail, and nothing is changed yet.
+	built, err := buildImages(ctx, c, project, dir, published, opts, out)
+	if err != nil {
+		return err
+	}
+
 	fresh := map[string]bool{} // resources created by this run: nothing can be stored in them yet
 	desired, err := Desire(project, dir, Inputs{Image: opts.Image, User: AgentUser(c), HarnessPrefix: opts.HarnessPrefix, Instances: observed.InstanceNames()})
 	if err != nil {
@@ -141,7 +147,7 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 			return err
 		}
 	}
-	if len(plan) == 0 && !pushed && !stored && !published2 {
+	if len(plan) == 0 && !built && !pushed && !stored && !published2 {
 		fmt.Fprintln(out, "nothing to do")
 	}
 	if !opts.DryRun {

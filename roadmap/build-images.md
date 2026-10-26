@@ -27,7 +27,8 @@ agents:
 ## How it works
 
 - **`egzo project up` builds, `egzo agent spawn` finds.** `up` sends the build context to the engine (Docker and Podman both have the
-  build endpoint) and tags the result by content: `egzo-build/<project>-<agent>:<hash>`, the hash covering the context (after
+  build endpoint) and tags the result by content: `localhost/egzo-build/<project>-<agent>:<hash>` (a registry nobody pulls from,
+  and Podman's name for local builds; an underscore of the names becomes a hyphen), the hash covering the context (after
   `.dockerignore`), the Dockerfile, the args, the target and the harness image. The tag goes into the published template, as
   `image:` does, so a changed file makes running instances stale (`up`, `agent rm`, spawn again) and an unchanged one is not
   rebuilt: the engine's layer cache and an existing tag are checked first.
@@ -142,8 +143,8 @@ possible `egzo system check --image X`):
   `build:` makes it part of `up`, so [docs/security.md](../docs/security.md) says it in one line: the Dockerfile is trusted.
 - **Build output.** Podman's build output is not always valid UTF-8 (the specs already met it); read it as bytes. Docker's
   is decoded from BuildKit's trace (see "How egzo builds").
-- **Cache and disk.** Old hash tags pile up. `project down` could remove the tags of its project; `egzo system prune` is the
-  alternative. Keep the last tag of each agent and remove the rest at `up`.
+- **Cache and disk.** Decided: the images carry the project's label; `up` removes the tags of the project that its templates no
+  longer name, and `project down` removes them all. An image is removed by its tag, so one someone else tagged too stays.
 - **Secrets at build time.** None: egzo passes no credentials to a build. BuildKit secrets are the user's tool.
 - **Rejected:** `packages:` and `setup:` keys (egzo would become a package manager); building through the proxy; pushing the
   result to a registry (use `docker build` and `image:` for that).

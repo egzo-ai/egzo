@@ -275,6 +275,9 @@ func ensureImage(ctx context.Context, c *engine.Client, ref string) error {
 	} else if !cerrdefs.IsNotFound(err) {
 		return err
 	}
+	if strings.HasPrefix(ref, BuildRepository) {
+		return fmt.Errorf("image %s was built by `egzo project up` and is no longer on the engine (removed or pruned): run `egzo project up` again", ref)
+	}
 	options := image.PullOptions{}
 	if data, err := os.ReadFile(filepath.Join(dockerConfigDir(), "config.json")); err == nil {
 		options.RegistryAuth = registryAuth(ref, data)
@@ -396,6 +399,9 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 		if err != nil {
 			return err
 		}
+	}
+	if _, err := removeBuilds(ctx, c, project, nil, out); err != nil {
+		return err
 	}
 	return ForgetWorktrees(ctx, c, env, project, dir, observed, observed.InstanceNames())
 }

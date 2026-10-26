@@ -21,7 +21,6 @@ import (
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/harness"
-	"github.com/egzo-ai/egzo/internal/version"
 )
 
 // revision is bumped when how egzo creates resources changes, so existing projects converge.
@@ -449,10 +448,7 @@ func agentImage(agent config.ResolvedAgent, prefix string) string {
 	if agent.Image != "" {
 		return agent.Image
 	}
-	if prefix == "" {
-		prefix = DefaultHarnessPrefix
-	}
-	return prefix + agent.Harness + ":" + version.Version
+	return harnessImage(agent.Harness, prefix)
 }
 
 func sortedKeys[V any](m map[string]V) []string {
