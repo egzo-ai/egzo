@@ -155,6 +155,22 @@ type Build struct {
 	Target     string            `yaml:"target,omitempty"`
 }
 
+// UnmarshalYAML accepts a string (the context, Compose's short form) or a mapping.
+func (b *Build) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag != "!!str" {
+			return fmt.Errorf("line %d: build must be a context directory like ./agent, or a mapping", node.Line)
+		}
+		*b = Build{Context: node.Value}
+		return nil
+	case yaml.MappingNode:
+		type plain Build
+		return node.Decode((*plain)(b))
+	}
+	return fmt.Errorf("line %d: build must be a context directory like ./agent, or a mapping", node.Line)
+}
+
 // AgentInject tunes how queued messages are typed into the agent's terminal.
 type AgentInject struct {
 	HumanQuiet string `yaml:"human_quiet,omitempty"`

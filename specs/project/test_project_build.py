@@ -89,6 +89,15 @@ def test_the_custom_harness_takes_a_build_instead_of_an_image(project):
     assert build["context"] == "./agent" and build["dockerfile"] == "Dockerfile" and build["args"] == {"A": "1"} and build["target"] == "dev"
 
 
+def test_build_as_a_string_is_the_context_as_in_compose(project):
+    write_context(project, "FROM scratch\n")
+    resolved = project.resolved(spec(agents={"coder": agent(harness="custom", build="./agent")}))
+    assert resolved["agents"]["coder"]["build"] == {"context": "./agent", "dockerfile": "Dockerfile"}
+
+    result = project.config(spec(agents={"coder": agent(harness="custom", build=3)}))
+    assert result.returncode != 0 and "build must be" in result.stderr
+
+
 # --- building ---
 
 
