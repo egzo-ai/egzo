@@ -71,6 +71,8 @@ agents:
     workspaces: [repo]
 ```
 
+As in Compose, `build: ./agent` is short for `build: { context: ./agent }`.
+
 ```dockerfile
 # agent/Dockerfile
 ARG EGZO_HARNESS_IMAGE
