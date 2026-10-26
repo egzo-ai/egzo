@@ -37,6 +37,9 @@ The harness images, against a local stub that records the requests (model, `thin
   `env` (the variables OpenCode reads), `api` (its base URL; 207 of 232 have one, the others use their SDK's built-in host) and
   `npm` (the SDK). Each model has `reasoning_options`, whose effort values matched what OpenCode accepted for the two models tried.
   It does not say how a key is sent.
+- OpenCode does not need the catalog host. With no network at all, `opencode models` answers at once from a snapshot built into
+  the binary (29 `opencode-go` models against 37 live, `deepseek-v4.1-flash` included): without `models.opencode.ai` it knows the
+  models of the day its image was built. What the TUI does with a configured model the snapshot lacks was not tried.
 
 ## Decisions
 
@@ -161,6 +164,16 @@ agents:
 Effort needs nothing else: `settings: { effortLevel: high }` or `env: { CLAUDE_CODE_EFFORT_LEVEL: high }` for Claude Code,
 `model: provider/model#variant` for OpenCode. The docs give both, and point to OpenCode's `/variants` for a model's values.
 
+### 5. OpenCode's catalog host belongs to the harness, and is optional
+
+`models.opencode.ai` is not added to the `opencode` service: a service injects its key into every host it lists, and the catalog
+takes none. It is not the provider's host either: an OpenCode agent that only uses `openai/…` fetches it too, and another client
+of the `opencode` service never does. It stays where it is, the harness's host (`harnesses` in `internal/config/builtins.go`).
+
+The warning for an OpenCode agent whose profile cannot reach it says something false today ("which opencode needs"). It says
+instead that OpenCode will use the model list built into its image, which lacks newer models. The docs keep recommending
+`models.opencode.ai` in an OpenCode profile, for a current list. (`docs/sandboxing.md` calls it the harness's provider host.)
+
 ## Specs and docs
 
 Specs:
@@ -170,7 +183,8 @@ Specs:
   `env`; an agent `env` that collides with a service's.
 - `test_harness_integrations.py`: `settings` reaches Claude Code as `--settings` and OpenCode as `OPENCODE_CONFIG_CONTENT`;
   OpenCode's TUI sends the effort of `model: …#high` (the scripted model can record it); `settings` refused for `custom`.
-- The config specs: the secret check on `settings`.
+- The config specs: the secret check on `settings`; the warning for an OpenCode agent that cannot reach `models.opencode.ai` says
+  the model list will be the image's.
 
 Docs: `docs/sandboxing.md` (the services table, `env`, the custom-service recipe from the catalog), `docs/harnesses.md`
 (providers, effort for each harness, `settings`, Bedrock), `docs/project-file.md` (`settings`).
