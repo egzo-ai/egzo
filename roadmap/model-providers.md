@@ -3,6 +3,11 @@
 **Status.** Decided, not built: the specs will be the status. No backward compatibility: the provider variables an agent gets
 change (below).
 
+**Fixed first: [a secret is injected into every request to its hosts](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md).** That known issue is a
+security shortcoming, not a limit to live with: a service cannot be narrowed to the paths of its API, so a key bound to a host
+that is also a website or a console goes with every request to it. Its mitigation (a service limited to path prefixes) is built
+before the services below, and each built-in service then declares the path prefix of its API.
+
 ## The problem
 
 - **Only three providers work out of the box.** The built-in services are `anthropic`, `anthropic-oauth` and `opencode` (and
@@ -71,6 +76,10 @@ through.
   is resellers, gateways and regional plans. A provider becomes built in when it is widely used, takes a static key in a header,
   has a fixed host, and has docs to cite (Together, Fireworks and Cerebras qualify the day someone asks). Everything else is a
   custom service (below).
+- **An API-only host wherever the provider has one.** Of the new services, only `openrouter` shares its host with a website
+  (`openrouter.ai`, the API under `/api/v1/`); it is built in anyway, limited to its API's path once the known issue above is
+  fixed, and the known issue lists it. Its docs advise a key with a credit limit, used for the agents only (to verify with
+  OpenRouter's docs when the row is written).
 - **Not built in, ever:** providers whose host depends on the account (Azure, Databricks, Cloudflare), local ones (LM Studio) and
   signed requests (Bedrock with AWS access keys).
 
