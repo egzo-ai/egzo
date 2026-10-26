@@ -28,7 +28,7 @@ type Template struct {
 	Workspaces map[string]config.ResolvedWorkspace // the declared workspaces its mounts name
 	// PromptText is the text of the agent's prompt file, read when `up` ran: an instance needs nothing on the host.
 	PromptText string
-	// Image is the harness image, resolved when `up` ran.
+	// Image is the harness image, resolved when `up` ran, or the image it built.
 	Image string
 	// Placeholders maps each variable the agent gets to its placeholder text. A placeholder is not a
 	// secret. The text is made once and never changes, so the hash leaves it out: what decides whether
@@ -67,12 +67,21 @@ func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user strin
 	published := Published{Version: publishedVersion, Project: project.Name, Dir: dir, Image: image, User: user, Templates: map[string]Template{}}
 	for _, name := range sortedKeys(project.Agents) {
 		agent := project.Agents[name]
+		image := agentImage(agent, harnessPrefix)
+		if agent.Build != nil {
+			// the tag `up` builds: it covers the context, so a changed file changes the template
+			plan, err := planBuild(project.Name, dir, name, agent, harnessPrefix)
+			if err != nil {
+				return Published{}, err
+			}
+			image = plan.Tag
+		}
 		template := Template{
 			Agent:        agent,
 			Profile:      project.Egress[agent.Egress],
 			Workspaces:   map[string]config.ResolvedWorkspace{},
 			PromptText:   prompts[name],
-			Image:        agentImage(agent, harnessPrefix),
+			Image:        image,
 			Placeholders: templatePlaceholders(project.Egress[agent.Egress], placeholders),
 		}
 		template.Agent.Prompt = "" // the text is in PromptText: the path means nothing to a spawn

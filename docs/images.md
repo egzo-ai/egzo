@@ -53,9 +53,52 @@ Rules for a derived image:
 - **Prefer the image to a runtime install.** Anything an agent installs into its home volume survives, but
   anything it installs system-wide does not, and an image gives every instance the same tools.
 
-A `build:` key that makes egzo build the Dockerfile on `egzo project up` is planned: [`roadmap/build-images.md`](../roadmap/build-images.md).
-
 After changing the image tag, the template changes, so running instances become stale: `egzo project up`, `egzo agent rm`, spawn again.
+
+## Let egzo build it
+
+Instead of `image:`, give the agent a `build:`, with Compose's keys, and `egzo project up` builds the image:
+
+```yaml
+agents:
+  coder:
+    harness: claude-code
+    build:
+      context: ./agent            # relative to egzo.yaml; default "."
+      dockerfile: Dockerfile      # relative to the context; default "Dockerfile"
+      args: { PYTHON_VERSION: "3.13" }
+      target: dev                 # optional
+    workspaces: [repo]
+```
+
+```dockerfile
+# agent/Dockerfile
+ARG EGZO_HARNESS_IMAGE
+FROM ${EGZO_HARNESS_IMAGE}
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential postgresql-client \
+ && rm -rf /var/lib/apt/lists/*
+```
+
+- **`EGZO_HARNESS_IMAGE`** is a build argument egzo sets to the stock image of the agent's harness, at the CLI's version, so
+  the `egzo` binary in the image always matches the CLI. The `custom` harness has none, and takes a `build:` instead of an
+  `image:`. `build:` and `image:` exclude each other.
+- **Built by content.** The image is tagged `localhost/egzo-build/<project>-<agent>:<hash>`, the hash covering the context (less
+  what `.dockerignore` excludes), the Dockerfile, the arguments, the target and the harness image. `up` builds only when that
+  tag is not on the engine, so an unchanged context is not built again. A changed one makes the agent's instances stale, as
+  a new `image:` does. `up` removes the images earlier builds of the project left, and `project down` removes the project's.
+- **Through the engine.** egzo sends the context to the engine's build endpoint: Docker builds with BuildKit, Podman with
+  buildah. No `docker` or `podman` command and no buildx plugin is needed. The build's steps and output are printed by `up`.
+- **Base images, on Docker.** Docker cannot fetch an image during a build that comes through its API, so egzo pulls the harness
+  image first, and any other image the build reports missing, with your `docker login` credentials, then builds again.
+- **`# syntax=` is not supported on Docker,** for the same reason. The built-in parser handles heredocs and `RUN --mount`.
+- **The Dockerfile is trusted.** A build runs on the engine, outside the egress proxy: its `RUN` steps reach whatever the engine
+  can, as when you build by hand.
+- **Only `up` builds.** A spawn, from the CLI or [the hub](hub.md), uses the image `up` built. If it was removed since (`docker
+  image prune`), the spawn says to run `egzo project up` again.
+
+The rules above for a derived image apply to a built one too.
 
 ## Pin it
 

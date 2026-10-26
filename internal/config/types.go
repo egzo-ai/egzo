@@ -134,6 +134,7 @@ type Git struct {
 type Agent struct {
 	Harness     string            `yaml:"harness"`
 	Image       string            `yaml:"image,omitempty"`
+	Build       *Build            `yaml:"build,omitempty"`
 	Workspaces  []string          `yaml:"workspaces,omitempty"`
 	Workdir     string            `yaml:"workdir,omitempty"`
 	Egress      string            `yaml:"egress,omitempty"`
@@ -143,6 +144,15 @@ type Agent struct {
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      *AgentInject      `yaml:"inject,omitempty"`
+}
+
+// Build is an image `up` builds from a Dockerfile, in Compose's terms. The context is relative to the project
+// file, the Dockerfile to the context.
+type Build struct {
+	Context    string            `yaml:"context,omitempty"`
+	Dockerfile string            `yaml:"dockerfile,omitempty"`
+	Args       map[string]string `yaml:"args,omitempty"`
+	Target     string            `yaml:"target,omitempty"`
 }
 
 // AgentInject tunes how queued messages are typed into the agent's terminal.

@@ -41,6 +41,7 @@ type ResolvedProxy struct {
 type ResolvedAgent struct {
 	Harness     string            `yaml:"harness"`
 	Image       string            `yaml:"image,omitempty"`
+	Build       *ResolvedBuild    `yaml:"build,omitempty"`
 	Workdir     string            `yaml:"workdir"`
 	Egress      string            `yaml:"egress"`
 	Workspaces  []Mount           `yaml:"workspaces"`
@@ -51,6 +52,18 @@ type ResolvedAgent struct {
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      ResolvedInject    `yaml:"inject"`
 }
+
+// ResolvedBuild is an agent's build with its defaults: the context as the file wrote it (relative to the project
+// file) and the Dockerfile relative to the context.
+type ResolvedBuild struct {
+	Context    string            `yaml:"context"`
+	Dockerfile string            `yaml:"dockerfile"`
+	Args       map[string]string `yaml:"args,omitempty"`
+	Target     string            `yaml:"target,omitempty"`
+}
+
+// HarnessImageArg is the build argument that carries the stock image of the agent's harness, at the CLI's version.
+const HarnessImageArg = "EGZO_HARNESS_IMAGE"
 
 // ResolvedInject is how messages reach the agent's terminal, with defaults applied.
 type ResolvedInject struct {
@@ -176,9 +189,10 @@ func resolveAgent(
 			p.addf("agent %q: unknown harness %q (one of: %s)", name, agent.Harness, strings.Join(HarnessNames(), ", "))
 		}
 	}
-	if agent.Harness == "custom" && agent.Image == "" {
-		p.addf("agent %q: the custom harness needs an image", name)
+	if agent.Harness == "custom" && agent.Image == "" && agent.Build == nil {
+		p.addf("agent %q: the custom harness needs an image or a build", name)
 	}
+	build := resolveBuild(name, agent, dir, p)
 	if agent.Permissions != "" && agent.Permissions != "bypass" && agent.Permissions != "default" {
 		p.addf("agent %q: unknown permissions %q (use bypass or default)", name, agent.Permissions)
 	}
@@ -243,6 +257,7 @@ func resolveAgent(
 	return ResolvedAgent{
 		Harness:     agent.Harness,
 		Image:       agent.Image,
+		Build:       build,
 		Workdir:     workdir,
 		Egress:      profileName,
 		Workspaces:  mounts,
@@ -253,6 +268,47 @@ func resolveAgent(
 		Env:         agent.Env,
 		Inject:      resolveInject(name, agent, p),
 	}, warnings
+}
+
+// resolveBuild applies the defaults of an agent's build and checks that its context and Dockerfile exist, the
+// Dockerfile inside the context, where the engine reads it.
+func resolveBuild(name string, agent Agent, dir string, p *problems) *ResolvedBuild {
+	if agent.Build == nil {
+		return nil
+	}
+	if agent.Image != "" {
+		p.addf("agent %q: build and image exclude each other: build makes the image", name)
+	}
+	build := &ResolvedBuild{Context: agent.Build.Context, Dockerfile: agent.Build.Dockerfile, Args: agent.Build.Args, Target: agent.Build.Target}
+	if build.Context == "" {
+		build.Context = "."
+	}
+	if build.Dockerfile == "" {
+		build.Dockerfile = "Dockerfile"
+	}
+	if _, set := build.Args[HarnessImageArg]; set {
+		p.addf("agent %q: build argument %s is set by egzo (the stock image of the harness)", name, HarnessImageArg)
+	}
+	context := BuildContext(dir, build.Context)
+	if info, err := os.Stat(context); err != nil || !info.IsDir() {
+		p.addf("agent %q: build context %q is not an existing directory (%s)", name, build.Context, context)
+		return build
+	}
+	dockerfile := filepath.Clean(filepath.FromSlash(build.Dockerfile))
+	if filepath.IsAbs(dockerfile) || dockerfile == ".." || strings.HasPrefix(dockerfile, ".."+string(filepath.Separator)) {
+		p.addf("agent %q: build dockerfile %q is outside the build context %q: the engine reads it from the context", name, build.Dockerfile, build.Context)
+	} else if info, err := os.Stat(filepath.Join(context, dockerfile)); err != nil || !info.Mode().IsRegular() {
+		p.addf("agent %q: build dockerfile %q is not an existing file in the build context (%s)", name, build.Dockerfile, filepath.Join(context, dockerfile))
+	}
+	return build
+}
+
+// BuildContext is the directory of a build context, which the file names relative to its own directory.
+func BuildContext(dir, context string) string {
+	if filepath.IsAbs(context) {
+		return filepath.Clean(context)
+	}
+	return filepath.Join(dir, context)
 }
 
 // vaultBackends are the backends that exist.

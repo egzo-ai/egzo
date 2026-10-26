@@ -142,6 +142,7 @@ it covers and how the project it runs on is shared.
 | `project/test_project_operations.py` | `up --dry-run`, `rotate-ca`, `proxy log` and `rules`, the operator API under `/v1`, the project lock and `unlock` |
 | `project/test_project_labels.py` | the `ai.egzo.*` label contract |
 | `project/test_project_logs.py` | the engine's default logging; the control sidecar's JSON logs, status on standard output |
+| `project/test_project_build.py` | `build:` on an agent: `up` builds through the engine's build endpoint, by content, `.dockerignore`, base images, staleness, `down` |
 | `project/test_project_snapshot.py` | the resolved project kept on the control volume, read through `/v1` |
 | `system/test_system_check.py` | `egzo system check`: engine, isolation, log driver, git |
 | `agent/test_agent_spawn.py` | `agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
