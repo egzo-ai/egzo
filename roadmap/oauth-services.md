@@ -1,11 +1,10 @@
 # Roadmap: OAuth services, captured at sign-in and renewed by the proxy
 
-**Status.** Decided, not built: the specs will be the status. The mechanism is generic OAuth; its first user is a Codex harness
-signed in with a ChatGPT Plus or Pro account, built as part of this work. Needs:
-
-- the project secret key (built, [docs/project-file.md](../docs/project-file.md#the-secret-key)): the sign-ins are sealed at rest with it;
-- the mitigation of [a secret is injected into every request to its hosts](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md):
-  `chatgpt.com` is also ChatGPT's website, so the service is limited to `/backend-api/`.
+**Status.** The mechanism is built: `credential: { method: oauth }`, the built-in `chatgpt` service, `egzo proxy logout`
+([docs/sandboxing.md](../docs/sandboxing.md#oauth-services), specs in `specs/proxy/test_proxy_oauth.py`). Not built yet:
+the Codex harness (below), the hub's status feed for a sign-in that ended, and a real session to confirm it end to end.
+Decided since: the configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind
+`proxy.upstream`; sign-ins live in the proxy's private volume and end at `project down`, like the CA.
 
 ## The problem
 
@@ -39,10 +38,7 @@ client already asks, and nothing is configured beyond the service.
 
 ```yaml
 services:
-  chatgpt:
-    hosts: [chatgpt.com]
-    paths: [/backend-api/]        # the path mitigation of the known issue
-    oauth: { token_url: https://auth.openai.com/oauth/token }
+  chatgpt: { credential: { method: oauth } }   # built in: chatgpt.com under /backend-api/, token URL on auth.openai.com
 ```
 
 1. **Sign-in, in the agent.** The first Codex agent of the project starts without a sign-in and shows Codex's own first-run
@@ -77,8 +73,8 @@ The tokens are internal to the proxy and never leave it. egzo does not write to 
   the proxy mounts. A copy or backup of the volume is useless without the vault secret.
 - **Restart.** A restarted proxy opens nothing until the next `up` delivers the key, as for every secret today.
 - **Another key.** The sign-ins cannot be opened: the proxy discards them and the user signs in again.
-- The volume survives `project down`, like the instance branches. Removing a sign-in is explicit (`egzo service logout
-  <service>`, name to decide).
+- `project down` ends the sign-ins, with the rest of the private volume. Removing one otherwise is `egzo proxy logout
+  <service>`.
 - One sign-in per service per project, shared by every agent of the project. On a hub with several users that means one account
   for the project: the docs say so.
 - Two projects that share a sign-in log each other out; egzo does not prevent it, the docs say so.

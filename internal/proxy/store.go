@@ -7,11 +7,13 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -195,6 +197,9 @@ func (s *Store) Rotate(keys *seal.Keys, publish func(*CA) error) (*CA, ssh.Signe
 	if err != nil {
 		return nil, nil, fmt.Errorf("store a new ssh host key: %w", err)
 	}
+	if !keys.Same(s.keys) {
+		s.dropSignIns() // sealed with the old key: the project signs in again
+	}
 	s.keys, s.ca, s.hostKey, s.hostPub = keys, ca, hostKey, hostKey.PublicKey()
 	return ca, hostKey, nil
 }
@@ -246,6 +251,65 @@ func (s *Store) saveHostKey(keys *seal.Keys, private []byte, public ssh.PublicKe
 		return err
 	}
 	return writeAtomic(filepath.Join(s.dir, sshHostPublicFile), ssh.MarshalAuthorizedKey(public), 0o644)
+}
+
+// signInPrefix starts the file of a sign-in: signin-<hex of the service name>.sealed.
+const signInPrefix = "signin-"
+
+// SignIns opens the sealed sign-ins. One sealed with other keys (a store that moved to another key) is removed: it
+// cannot be opened, and the user signs in again.
+func (s *Store) SignIns() ([][]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keys == nil {
+		return nil, errLocked
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, err
+	}
+	var records [][]byte
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, signInPrefix) || !strings.HasSuffix(name, ".sealed") {
+			continue
+		}
+		sealed, err := os.ReadFile(filepath.Join(s.dir, name))
+		if err != nil {
+			return nil, err
+		}
+		data, err := s.keys.Open(seal.UseOAuth, sealed)
+		if err != nil {
+			os.Remove(filepath.Join(s.dir, name))
+			continue
+		}
+		records = append(records, data)
+	}
+	return records, nil
+}
+
+// SaveSignIn seals the sign-in of a service.
+func (s *Store) SaveSignIn(service string, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keys == nil {
+		return errLocked
+	}
+	sealed, err := s.keys.Seal(seal.UseOAuth, data)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Join(s.dir, signInPrefix+hex.EncodeToString([]byte(service))+".sealed"), sealed, 0o600)
+}
+
+// dropSignIns removes every sealed sign-in. It runs under s.mu.
+func (s *Store) dropSignIns() {
+	entries, _ := os.ReadDir(s.dir)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), signInPrefix) {
+			os.Remove(filepath.Join(s.dir, entry.Name()))
+		}
+	}
 }
 
 func parseCertificate(certPEM []byte) (*x509.Certificate, error) {

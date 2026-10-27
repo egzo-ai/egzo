@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,6 +87,7 @@ func newSpawnCommand(opts *options) *cobra.Command {
 				return err
 			}
 			warnIfTemplateMoved(cmd, s, spawned)
+			noteSignIns(ctx, cmd, s, spawned.Name)
 			// the new instance is a fact now: messages and attach find it
 			if observed, err := stack.Observe(ctx, s.engine, s.Resolved.Name); err == nil {
 				s.observed = observed
@@ -149,6 +152,21 @@ func warnIfTemplateMoved(cmd *cobra.Command, s *session, spawned stack.Spawned) 
 	if template, ok := current.Templates[spawned.Template]; !ok || template.Hash != spawned.TemplateHash {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: egzo.yaml has changed since `egzo project up`: %s was made from the published template, so it is stale already; "+
 			"run `egzo agent rm %s`, then `egzo project up`, then spawn it again\n", spawned.Name, spawned.Name)
+	}
+}
+
+// noteSignIns says which OAuth services of the project have no live sign-in: the client of a new instance shows its
+// sign-in screen, and the user signs in there.
+func noteSignIns(ctx context.Context, cmd *cobra.Command, s *session, name string) {
+	statuses, err := signInStatuses(ctx, s)
+	if err != nil {
+		return
+	}
+	for _, service := range slices.Sorted(maps.Keys(statuses)) {
+		if statuses[service].State != "live" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "note: the OAuth service %s has no sign-in: attach (`egzo agent attach %s`) and sign in where the client asks; "+
+				"the proxy keeps the sign-in for every agent of the project\n", service, name)
+		}
 	}
 }
 

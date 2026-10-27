@@ -51,12 +51,14 @@ func Run(cfg Config, audit io.Writer) error {
 		return fmt.Errorf("CA: %w", err)
 	}
 	server := NewServer(store.CA(), NewAudit(audit))
+	server.UseStore(store)
 	if err := publishStore(cfg, server, store, nil); err != nil {
 		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	go server.RenewSignIns(ctx)
 
 	listener := &http.Server{Addr: cfg.Listen, Handler: server, ReadHeaderTimeout: 10 * time.Second}
 	failed := make(chan error, 1)
@@ -161,7 +163,31 @@ func operatorHandler(server *Server, store *Store, cfg Config) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if err := server.signIns.load(); err != nil {
+			http.Error(w, "open the sign-ins: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]string{"ca": rotated.Fingerprint()})
+	})
+	mux.HandleFunc("GET /oauth", func(w http.ResponseWriter, r *http.Request) {
+		statuses := map[string]SignInStatus{}
+		for name := range server.oauthServices() {
+			statuses[name] = server.signIns.status(name)
+		}
+		json.NewEncoder(w).Encode(statuses)
+	})
+	mux.HandleFunc("POST /oauth/{service}/logout", func(w http.ResponseWriter, r *http.Request) {
+		service := r.PathValue("service")
+		oauth, ok := server.oauthServices()[service]
+		if !ok {
+			http.Error(w, "no OAuth service "+service+" in the loaded policy", http.StatusNotFound)
+			return
+		}
+		if !server.signIns.logout(r.Context(), service, oauth, server.transport().RoundTrip) {
+			http.Error(w, "service "+service+" has no sign-in", http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(server.BoundAgents())
@@ -210,12 +236,19 @@ func operatorHandler(server *Server, store *Store, cfg Config) http.Handler {
 		mu.Lock()
 		defer mu.Unlock()
 		// The store is opened before the policy is loaded: a proxy that cannot open its CA serves nothing new.
-		if _, err := store.Unlock(keys); errors.Is(err, ErrWrongSecretKey) {
+		changed, err := store.Unlock(keys)
+		if errors.Is(err, ErrWrongSecretKey) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		} else if err != nil {
 			http.Error(w, "open the proxy's private volume: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if changed {
+			if err := server.signIns.load(); err != nil {
+				http.Error(w, "open the sign-ins: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 		if err := publishStore(cfg, server, store, &policy); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

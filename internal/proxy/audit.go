@@ -140,6 +140,7 @@ const (
 	CodePlaceholder    Code = "placeholder"     // a placeholder could not be swapped
 	CodePath           Code = "path"            // a path under a service's paths that could mean another one
 	CodeOutsidePaths   Code = "outside-paths"   // why an allowed request went without the credential of its host's service
+	CodeSignIn         Code = "sign-in"         // a stand-in token of a sign-in the proxy cannot serve
 	CodeAborted        Code = "aborted"         // the client left before the handshake
 	CodeDial           Code = "dial"            // the upstream did not answer
 	CodeTLSHandshake   Code = "tls-handshake"   // the client's TLS handshake with the proxy failed

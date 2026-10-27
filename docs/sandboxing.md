@@ -38,6 +38,7 @@ egress:
 | `anthropic` | `api.anthropic.com` | `x-api-key: <secret>` |
 | `anthropic-oauth` | `api.anthropic.com` | `Authorization: Bearer <token>` (a Claude subscription token from `claude setup-token`) |
 | `opencode` | `opencode.ai` | `Authorization: Bearer <key>` (the API key of an OpenCode Go or Console workspace: a service account's) |
+| `chatgpt` | `chatgpt.com`, under `/backend-api/` | a ChatGPT sign-in: the stand-in bearer token becomes the real one (an [OAuth service](#oauth-services)) |
 | `github` | `github.com`, `api.github.com` | `Authorization: Basic base64(x-access-token:<secret>)` (git over HTTPS refuses a bearer token) |
 
 Binding a token to the wrong one of the two Anthropic services is refused at `egzo project up`. Claude Code also needs
@@ -123,6 +124,54 @@ a client that pins its certificate cannot accept. A host with `inject` or a `pla
 
 An exact service that injects still injects where a wildcard service also covers the host; the wildcard only adds the
 `inspect` audit.
+
+## OAuth services
+
+Some credentials are not a secret you keep but a sign-in whose tokens rotate: a ChatGPT Plus or Pro account for Codex is
+one. An OAuth service has no vault secret. The proxy captures the tokens when a client signs in through it, keeps them,
+and gives the client stand-ins:
+
+```yaml
+egress:
+  codex:
+    services:
+      chatgpt: { credential: { method: oauth } }      # built in: chatgpt.com, under /backend-api/ only
+```
+
+- **Sign in from an agent**, where the client asks: `egzo agent spawn` and `egzo project check` say when a service has no
+  sign-in. Use the client's device-code sign-in: a browser sign-in calls back to a port inside the container, which your
+  browser cannot reach.
+- **Stand-ins.** The client's code exchange goes to the provider; the proxy keeps the real access, refresh and id tokens
+  and answers the client with stand-ins. A JWT stand-in carries the real claims (clients read them) with a signature that
+  is no signature. A stand-in works only through the proxy: on the service's hosts and `paths` the proxy swaps it for the
+  real access token, websocket upgrades included; anywhere else it stays a stand-in. Any other token is left alone.
+- **Refreshes.** The client's refresh with a stand-in is answered by the proxy; a stand-in never reaches the provider.
+  The proxy renews the real tokens itself, five minutes before they expire and at least every eight days, saving the
+  rotated refresh token first. One proxy per project means one renewer, so agents never log each other out.
+- **One sign-in per service per project**, shared by every agent. On a hub with several users that is one account for
+  the project. Two projects signed in to one account log each other out.
+- **At rest** the tokens are sealed with the [project secret key](project-file.md#the-secret-key) in the proxy's private
+  volume. A restarted proxy opens them at the next `egzo project up`. With another key (after `egzo project rotate-ca`)
+  they cannot be opened, and the project signs in again; `egzo project down` ends them too.
+- **When it ends** (the client's logout, a revoked token, `egzo proxy logout chatgpt`), the proxy revokes the real token
+  when the service has a `revoke_url`, and a stand-in then gets a 401 that says to sign in again. A refresh the provider
+  refuses ends the sign-in the same way; `egzo project check` fails until someone signs in again.
+
+A service of your own takes the same credential, with its token URL. The token URL's host is reached through the service:
+the proxy answers the token and revoke URLs, and passes the rest of that host without any token.
+
+```yaml
+      my-idp:
+        hosts: [api.example.com]
+        paths: [/v1/]
+        credential:
+          method: oauth
+          token_url: https://auth.example.com/oauth/token
+          revoke_url: https://auth.example.com/oauth/revoke     # optional
+```
+
+Clients that pin certificates, or whose tokens are bound to a key the client holds (DPoP, mTLS), cannot be served this
+way.
 
 ## Secrets the agent has to type: placeholders
 
