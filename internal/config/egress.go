@@ -35,16 +35,19 @@ type egressResolver struct {
 	problems *problems
 	done     map[string]*ResolvedProfile
 	visiting map[string]bool
+	// secrets are the references the profiles make: each declares its secret.
+	secrets map[string]SecretRef
 }
 
 // resolveEgress resolves every profile, plus an empty default when none is defined: an
-// undefined default denies everything.
-func resolveEgress(file *File, p *problems) map[string]*ResolvedProfile {
+// undefined default denies everything. It also returns the secrets the profiles refer to, by reference.
+func resolveEgress(file *File, p *problems) (map[string]*ResolvedProfile, map[string]SecretRef) {
 	r := &egressResolver{
 		file:     file,
 		problems: p,
 		done:     map[string]*ResolvedProfile{},
 		visiting: map[string]bool{},
+		secrets:  map[string]SecretRef{},
 	}
 	names := []string{defaultProfile}
 	for name := range file.Egress {
@@ -56,7 +59,7 @@ func resolveEgress(file *File, p *problems) map[string]*ResolvedProfile {
 	for _, name := range names {
 		r.resolve(name, nil)
 	}
-	return r.done
+	return r.done, r.secrets
 }
 
 func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
@@ -221,8 +224,8 @@ func serviceKeys(profile *ResolvedProfile) []string {
 	return names
 }
 
-// checkSecret validates a <vault>/<secret> reference against the declared vaults. The reference is
-// split at the first '/': a vault name has none, a secret name can.
+// checkSecret validates a <vault>/<secret> reference against the declared vaults and, when it is valid,
+// declares the secret. The reference is split at the first '/': a vault name has none, a secret name can.
 func (r *egressResolver) checkSecret(profile, what, ref string) bool {
 	vaultName, secret, found := strings.Cut(ref, "/")
 	if !found || vaultName == "" || secret == "" {
@@ -231,14 +234,31 @@ func (r *egressResolver) checkSecret(profile, what, ref string) bool {
 	}
 	vault, ok := r.file.Vaults[vaultName]
 	if !ok {
-		r.problems.addf("egress profile %q: %s: secret reference %q names unknown vault %q", profile, what, ref, vaultName)
+		r.problems.addf("egress profile %q: %s: secret reference %q names unknown vault %q (%s)", profile, what, ref, vaultName, vaultList(r.file.Vaults))
 		return false
 	}
-	if !slices.Contains(vault.Secrets, secret) {
-		r.problems.addf("egress profile %q: %s: secret reference %q: vault %q does not list %q", profile, what, ref, vaultName, secret)
+	if !slices.Contains(vaultBackends, vault.Backend) {
+		return false // the vault's own problem is reported once, by checkVaults
+	}
+	if reason := secretNameProblem(vault.Backend, secret); reason != "" {
+		r.problems.addf("egress profile %q: %s: secret reference %q: the name %q %s", profile, what, ref, secret, reason)
 		return false
 	}
+	r.secrets[ref] = SecretRef{Vault: vaultName, Name: secret, Backend: vault.Backend}
 	return true
+}
+
+// vaultList names the declared vaults, for an error about a reference to another one.
+func vaultList(vaults map[string]Vault) string {
+	if len(vaults) == 0 {
+		return "no vault is declared under vaults:"
+	}
+	names := make([]string, 0, len(vaults))
+	for name := range vaults {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return "vaults: " + strings.Join(names, ", ")
 }
 
 // placeholderProblem says why name cannot be a placeholder variable, or returns "".

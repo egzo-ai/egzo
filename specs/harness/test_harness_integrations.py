@@ -57,7 +57,7 @@ def sandbox(shared_project, engine, egzo):
     quick = {"inject": {"human_quiet": "1s"}}
     p.up(
         spec(
-            vaults={"main": {"backend": "env", "secrets": ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]}},
+            vaults={"main": {"backend": "env"}},
             egress={"default": ANTHROPIC, "oauth": OAUTH},
             workspaces={"scratch": {}, "one": {}, "two": {}},
             agents={

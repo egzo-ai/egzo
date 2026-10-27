@@ -41,7 +41,7 @@ def sandbox(shared_project, engine, egzo, ssh_server):
     egress = profiles(ssh_server)
     shared_project.up(
         spec(
-            vaults={"main": {"backend": "env", "secrets": ["PROD_SSH_KEY", "OTHER_SSH_KEY"]}},
+            vaults={"main": {"backend": "env"}},
             egress=egress,
             agents={name: agent(harness="custom", image=image, egress=name, env={"FAKE_TUI": "cat", "HOME": HOME}) for name in egress},
         )
@@ -246,7 +246,7 @@ def test_up_refuses_a_key_it_cannot_use_and_never_prints_it(live_project, engine
     live_project.env["PROD_SSH_KEY"] = "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-really-a-key-material\n"
     egress = {"ops": {"ssh": {"prod": {"host": ssh_server.host, "port": ssh_server.port, "user": "ops", "key": "main/PROD_SSH_KEY", "host_key": ssh_server.fingerprint}}}}
     document = spec(
-        vaults={"main": {"backend": "env", "secrets": ["PROD_SSH_KEY"]}}, egress=egress,
+        vaults={"main": {"backend": "env"}}, egress=egress,
         agents={"ops": agent(harness="custom", image=engine.agent_image(), egress="ops")},
     )
     live_project.write(document)

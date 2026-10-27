@@ -234,8 +234,8 @@ def test_a_null_service_value_is_rejected(project):
     assert result.returncode != 0
 
 
-@pytest.mark.parametrize("reference", ["main/MISSING", "nope/ANTHROPIC_API_KEY", "not-a-reference"])
-def test_a_secret_reference_must_exist_in_a_vault(project, reference):
+@pytest.mark.parametrize("reference", ["main/NOT-A-NAME", "nope/ANTHROPIC_API_KEY", "not-a-reference"])
+def test_a_secret_reference_names_a_vault_and_a_name_its_backend_can_read(project, reference):
     result = project.config(spec(egress={"default": {"services": {"anthropic": reference}}}))
     assert result.returncode != 0
     assert reference.split("/")[-1] in result.stderr
@@ -377,7 +377,7 @@ def test_a_profile_that_reaches_the_provider_does_not_warn(project):
 
 def test_a_wildcard_service_is_an_allow_and_counts_for_reaching_the_provider(project):
     """A service that covers every host reaches the model API too, so there is nothing to warn about."""
-    result = project.config(spec(egress={"default": {"services": {"web": {"hosts": ["*"]}}}}, agents={"coder": agent()}))
+    result = project.config(spec(vaults={}, egress={"default": {"services": {"web": {"hosts": ["*"]}}}}, agents={"coder": agent()}))
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr.lower()
 

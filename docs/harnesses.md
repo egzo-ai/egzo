@@ -68,7 +68,7 @@ The image carries OpenCode 2 (`@opencode/cli`). Bind the key of an OpenCode Go (
 
 ```yaml
 vaults:
-  main: { backend: pass, secrets: [opencode/go-key] }
+  main: { backend: pass }
 
 egress:
   opencode:

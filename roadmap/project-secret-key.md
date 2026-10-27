@@ -1,7 +1,7 @@
 # Roadmap: a project secret key, for what egzo keeps at rest
 
-**Status.** Decided, not built: the specs will be the status. No backward compatibility. Needs
-[secrets-declared-by-use.md](secrets-declared-by-use.md). A prerequisite of [oauth-services.md](oauth-services.md).
+**Status.** Decided, not built: the specs will be the status. No backward compatibility. A prerequisite of
+[oauth-services.md](oauth-services.md).
 
 ## The problem
 

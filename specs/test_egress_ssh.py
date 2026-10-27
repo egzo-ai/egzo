@@ -12,7 +12,7 @@ FINGERPRINT = "SHA256:giDwc8qRcN2ytSupvU/QCL4YGA5l7fUGresaokyLYt4"
 PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMGFJIY0eOCEYAre+qhPAFyN2YPymAD03FxBn1v6yyZz"
 
 
-VAULTS = {"main": {"backend": "env", "secrets": ["PROD_SSH_KEY"]}}
+VAULTS = {"main": {"backend": "env"}}
 
 
 def ssh_spec(**sections):
@@ -88,8 +88,8 @@ def test_the_name_of_a_server_is_what_an_agent_types(project, name):
     assert "ssh" in result.stderr
 
 
-@pytest.mark.parametrize("key", ["main/MISSING", "nope/PROD_SSH_KEY", "not-a-reference"])
-def test_the_key_is_a_secret_reference_that_exists_in_a_vault(project, key):
+@pytest.mark.parametrize("key", ["main/NOT-A-NAME", "nope/PROD_SSH_KEY", "not-a-reference"])
+def test_the_key_is_a_secret_reference_to_a_declared_vault(project, key):
     result = project.config(ssh_spec(egress={"default": {"ssh": {"prod": server(key=key)}}}))
     assert result.returncode != 0
     assert key.split("/")[-1] in result.stderr

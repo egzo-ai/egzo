@@ -6,7 +6,7 @@ project: any number of agents may list it. There are two kinds. The short versio
 
 ```yaml
 vaults:
-  main: { backend: env, secrets: [GITHUB_TOKEN] }
+  main: { backend: env }
 egress:
   default: { services: { github: main/GITHUB_TOKEN } }
 workspaces:

@@ -34,7 +34,7 @@ func TestSecretStateForPass(t *testing.T) {
 func TestEnvWarningIsPrintedOncePerCommand(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "egzo.yaml")
-	body := "name: p\nvaults:\n  main:\n    backend: env\n    secrets: [TOKEN]\n"
+	body := "name: p\nvaults:\n  main:\n    backend: env\n"
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -25,11 +25,10 @@ type File struct {
 	Control    Control              `yaml:"control"`
 }
 
-// Vault is one secret store: a backend and the names of the secrets read from it. Nothing says where a
-// secret is; the backend knows.
+// Vault is one secret store: a backend. Its secrets are declared where they are used, by their reference
+// <vault>/<name>; nothing says where a secret is, the backend knows.
 type Vault struct {
-	Backend string   `yaml:"backend"`
-	Secrets []string `yaml:"secrets"`
+	Backend string `yaml:"backend"`
 }
 
 // Proxy is the infrastructure of the egress sidecar. Policy lives in Egress.

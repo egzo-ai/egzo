@@ -13,7 +13,6 @@ const vaultFixture = `
 vaults:
   main:
     backend: env
-    secrets: [KEY, OTHER]
 `
 
 func TestEgressBuiltinServices(t *testing.T) {
@@ -66,11 +65,10 @@ func TestEgressEmptyServiceEntryIsRejected(t *testing.T) {
 func TestEgressSecretReferences(t *testing.T) {
 	cases := []struct{ name, ref, want string }{
 		{"no slash", "KEY", "invalid secret reference"},
-		{"a secret with a slash the vault does not list", "main/KEY/x", `does not list "KEY/x"`},
+		{"an env secret name with a slash", "main/KEY/x", `the name "KEY/x" is not an environment variable name`},
 		{"empty vault", "/KEY", "invalid secret reference"},
 		{"empty secret", "main/", "invalid secret reference"},
 		{"unknown vault", "ghost/KEY", `unknown vault "ghost"`},
-		{"unknown secret", "main/NOPE", `does not list "NOPE"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -121,7 +119,7 @@ egress:
 		{"host with scheme", "{ hosts: ['https://example.com'] }", "invalid host"},
 		{"inject without header", "{ hosts: [a.com], inject: {}, secret: main/KEY }", "inject needs a header"},
 		{"secret without inject", "{ hosts: [a.com], secret: main/KEY }", "neither inject nor placeholder"},
-		{"bad secret", "{ hosts: [a.com], inject: { header: H }, secret: main/NOPE }", `does not list "NOPE"`},
+		{"bad secret", "{ hosts: [a.com], inject: { header: H }, secret: ghost/NOPE }", `unknown vault "ghost"`},
 		{"inject without any secret", "{ hosts: [a.com], inject: { header: H } }", "needs a secret"},
 	}
 	for _, c := range cases {

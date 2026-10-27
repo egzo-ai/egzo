@@ -38,7 +38,7 @@ func newProjectCheckCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Check egzo.yaml and the secrets it names",
-		Long: "Check the project: that egzo.yaml is valid, and that every secret of its vaults can be read (never printing a\n" +
+		Long: "Check the project: that egzo.yaml is valid, and that every secret it refers to can be read (never printing a\n" +
 			"value). Each line starts with ok, warn or fail; egzo exits non-zero when any check fails: an invalid file,\n" +
 			"a secret that is missing, empty or unreadable. What `egzo project up` would change is shown, and is not an\n" +
 			"error. --resolved prints the configuration with its defaults filled in and reads no secret.",
@@ -49,7 +49,7 @@ func newProjectCheckCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				printWarnings(p.Warnings)
+				printWarnings(append(p.Warnings, p.Resolved.UnusedVaults()...))
 				encoder := yaml.NewEncoder(cmd.OutOrStdout())
 				encoder.SetIndent(2)
 				defer encoder.Close()
@@ -88,7 +88,7 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 		return ExitError{Code: 1}
 	}
 	report("ok", "%s is valid (project %s, %d template(s))", filepath.Base(path), p.Resolved.Name, len(p.Resolved.Agents))
-	for _, warning := range p.Warnings {
+	for _, warning := range append(p.Warnings, p.Resolved.UnusedVaults()...) {
 		report("warn", "%s", strings.TrimPrefix(warning, "warning: "))
 	}
 	for _, ref := range sortedSecretRefs(p) {

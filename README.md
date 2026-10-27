@@ -74,7 +74,6 @@ A GitHub repo and two agents.
 vaults:
   main:
     backend: env
-    secrets: [ANTHROPIC_API_KEY, GITHUB_TOKEN]
 
 egress:
   default:                           # one profile for everyone; anything not allowed is denied
