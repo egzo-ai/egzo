@@ -314,11 +314,17 @@ func (r *egressResolver) checkProfile(name string, profile *ResolvedProfile) {
 	for i, a := range names {
 		for _, b := range names[i+1:] {
 			left, right := profile.Services[a], profile.Services[b]
-			if sameInjection(left, right) {
+			same := sameInjection(left, right)
+			if same && slices.Equal(left.Paths, right.Paths) {
 				continue
 			}
 			for _, host := range left.Hosts {
-				if slices.Contains(right.Hosts, host) {
+				switch {
+				case !slices.Contains(right.Hosts, host):
+				case same:
+					// One service decides where the credential of a host goes: two would leave the other's paths unused.
+					r.problems.addf("egress profile %q: services %q and %q put the same credential on host %q with different paths; list every prefix in one service", name, a, b, host)
+				default:
 					r.problems.addf("egress profile %q: services %q and %q both cover host %q with different injection", name, a, b, host)
 				}
 			}
