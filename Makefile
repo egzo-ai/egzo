@@ -15,7 +15,7 @@ image:
 
 images: image
 	docker build --build-arg EGZO_IMAGE=$(REGISTRY)/egzo:$(VERSION) -t $(REGISTRY)/egzo-harness-base:$(VERSION) harness/base
-	for harness in claude-code opencode; do \
+	for harness in claude-code opencode codex; do \
 		docker build --build-arg BASE_IMAGE=$(REGISTRY)/egzo-harness-base:$(VERSION) -t $(REGISTRY)/egzo-harness-$$harness:$(VERSION) harness/$$harness || exit 1; \
 	done
 

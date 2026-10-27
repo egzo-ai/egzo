@@ -396,6 +396,25 @@ func (s *signIns) logout(ctx context.Context, service string, oauth OAuth, send 
 	return s.revoke(ctx, service, oauth, record.StandInRefresh, send)
 }
 
+// StandIns are what a new client of a live sign-in is given: the current stand-ins, never a real token.
+type StandIns struct {
+	Access    string    `json:"access_token"`
+	Refresh   string    `json:"refresh_token"`
+	ID        string    `json:"id_token,omitempty"`
+	Refreshed time.Time `json:"refreshed"`
+}
+
+// standIns are the stand-ins of the live sign-in of service, for a harness that keeps its tokens in a file of its own.
+func (s *signIns) standIns(service string) (StandIns, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record := s.byName[service]
+	if !s.open || record == nil || record.Ended != "" {
+		return StandIns{}, false
+	}
+	return StandIns{Access: record.StandInAccess[len(record.StandInAccess)-1], Refresh: record.StandInRefresh, ID: record.StandInID, Refreshed: record.Refreshed}, true
+}
+
 // --- the token endpoint -------------------------------------------------------------------------------------------
 
 // tokenBody is the body of a request to a token or revoke endpoint, form or JSON, read once and kept to forward.

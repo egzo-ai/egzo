@@ -176,6 +176,14 @@ func operatorHandler(server *Server, store *Store, cfg Config) http.Handler {
 		}
 		json.NewEncoder(w).Encode(statuses)
 	})
+	mux.HandleFunc("GET /oauth/{service}/stand-ins", func(w http.ResponseWriter, r *http.Request) {
+		standIns, ok := server.signIns.standIns(r.PathValue("service"))
+		if !ok {
+			http.Error(w, "service "+r.PathValue("service")+" has no sign-in", http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(standIns)
+	})
 	mux.HandleFunc("POST /oauth/{service}/logout", func(w http.ResponseWriter, r *http.Request) {
 		service := r.PathValue("service")
 		oauth, ok := server.oauthServices()[service]

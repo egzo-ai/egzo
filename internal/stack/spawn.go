@@ -148,7 +148,9 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
 		env: env, identity: identity, worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
 		container: func(tokens map[string]string) (ContainerSpec, error) {
-			full, err := DesireInstance(view, dir, published.inputs(instances, tokens, nil), name, identity)
+			inputs := published.inputs(instances, tokens, nil)
+			inputs.SignIns = map[string]map[string]string{name: signInEnv(ctx, c, project, view, name)}
+			full, err := DesireInstance(view, dir, inputs, name, identity)
 			if err != nil {
 				return ContainerSpec{}, err
 			}

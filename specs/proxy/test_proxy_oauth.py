@@ -8,76 +8,25 @@ and keeps them sealed in its volume. The agent never holds a token that works wi
 A stub provider and API (fixtures/oauth_stub.py) run on the project's egress network under two names, with a certificate of a CA the
 project trusts upstream: what `proxy.upstream` is for. No account and no internet are needed."""
 
-import base64
 import json
-import subprocess
 import time
-from pathlib import Path
 
 import pytest
 
+from oauthkit import API, IDP, SERVICE, UPSTREAM, payload, start_stub, stop_stub
 from support import custom, spec
 
-IDP, API = "idp.oauth-spec.test", "api.oauth-spec.test"
-EXPIRES_IN = 200  # inside the proxy's renewal window from the start: it renews the chain on its own
-STUB_LOG = "/tmp/stub.log"
 OTHER_KEY = "another-spec-secret-key-" + "fedcba9876543210" * 3
-CREDENTIAL = {"method": "oauth", "token_url": f"https://{IDP}/oauth/token", "revoke_url": f"https://{IDP}/oauth/revoke"}
-
-
-def payload(token):
-    part = token.split(".")[1]
-    return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
-
-
-def make_certificates(directory):
-    """A CA the project trusts upstream (`proxy.upstream.ca`), and the stub's certificate for both names."""
-    def openssl(*args):
-        subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=directory)
-    openssl("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", "ca.key", "-days", "2",
-            "-subj", "/CN=oauth spec root", "-out", "stub-ca.pem")
-    openssl("req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", "stub.key", "-subj", f"/CN={IDP}", "-out", "stub.csr")
-    (directory / "san.ext").write_text(f"subjectAltName=DNS:{IDP},DNS:{API}\n")
-    openssl("x509", "-req", "-in", "stub.csr", "-CA", "stub-ca.pem", "-CAkey", "ca.key", "-CAcreateserial", "-days", "2", "-extfile", "san.ext", "-out", "stub.crt")
-
-
-class Stub:
-    def __init__(self, engine, container):
-        self.engine, self.container = engine, container
-
-    def requests(self):
-        log = self.engine.exec(self.container, "cat", STUB_LOG).stdout
-        return [json.loads(line) for line in log.splitlines() if line.strip()]
-
-    def grants(self, kind):
-        return [r for r in self.requests() if r["path"] == "/oauth/token" and (r["body"] or {}).get("grant_type") == kind]
-
-    def end_chain(self):
-        self.engine.exec(self.container, "touch", "/tmp/end-chain")
 
 
 @pytest.fixture
 def oauth_project(live_project, engine, agent_image):
-    if subprocess.run(["which", "openssl"], capture_output=True).returncode != 0:
-        pytest.fail("these specs make the stub's certificates with openssl, which is not on PATH", pytrace=False)
     p = live_project
-    make_certificates(p.root)
-    p.write(spec(
-        proxy={"upstream": {"ca": "./stub-ca.pem", "private_hosts": [IDP, API]}},
-        egress={"default": {"services": {"idp": {"hosts": [API], "paths": ["/backend-api/"], "credential": CREDENTIAL}}}},
-        agents={"coder": custom(agent_image)},
-    ))
+    start = start_stub(engine, p, agent_image)
+    p.write(spec(proxy=UPSTREAM, egress={"default": {"services": {"idp": SERVICE}}}, agents={"coder": custom(agent_image)}))
     p.ok("project up", timeout=300)
-    name = f"{p.name}-oauth-stub"
-    started = engine.run("run", "-d", "--name", name, "--network", f"{p.name}_egress", "--network-alias", IDP, "--network-alias", API,
-                         agent_image, "sleep", "infinity")
-    assert started.returncode == 0, started.stderr
-    for source in ("stub.crt", "stub.key"):
-        engine.put_file(name, p.root / source, f"/tmp/{source}")
-    engine.put_file(name, Path(__file__).parent.parent / "fixtures" / "oauth_stub.py", "/tmp/oauth_stub.py")
-    engine.exec(name, "python3", "/tmp/oauth_stub.py", "/tmp/stub.crt", "/tmp/stub.key", STUB_LOG, str(EXPIRES_IN), detach=True)
-    yield p, Stub(engine, name)
-    engine.run("rm", "-f", name)
+    yield p, start()
+    stop_stub(engine, p)
 
 
 def curl(engine, project, name, *args):

@@ -37,6 +37,12 @@ var builtinServices = map[string]ResolvedService{
 		Hosts:  []string{"github.com", "api.github.com"},
 		Inject: &Inject{Header: "Authorization", BasicUser: "x-access-token"},
 	},
+	// An OpenAI API key, sent as a bearer token (platform.openai.com/docs/api-reference/authentication). Codex reads it from
+	// its auth.json, where egzo writes the placeholder.
+	"openai": {
+		Hosts:  []string{"api.openai.com"},
+		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
+	},
 	// A ChatGPT Plus or Pro sign-in, as Codex makes it (openai/codex, login/src/auth/manager.rs and revoke.rs). chatgpt.com
 	// is also ChatGPT's website: Codex's calls go under /backend-api/ (the model, usage, apps), and nothing else gets the token.
 	"chatgpt": {
@@ -82,6 +88,7 @@ func builtinNames() []string {
 var harnesses = map[string][]string{
 	"claude-code": {"api.anthropic.com"},
 	"opencode":    {"models.opencode.ai"},
+	"codex":       nil, // chatgpt.com for a ChatGPT sign-in or api.openai.com for an API key: see codexReach
 	"pi":          nil,
 	"custom":      nil,
 }

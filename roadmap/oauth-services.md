@@ -1,12 +1,14 @@
 # Roadmap: OAuth services, captured at sign-in and renewed by the proxy
 
-**Status.** The mechanism is built: `credential: { method: oauth }`, the built-in `chatgpt` service, `egzo proxy logout`
-([docs/sandboxing.md](../docs/sandboxing.md#oauth-services), specs in `specs/proxy/test_proxy_oauth.py`). Not built yet:
-the Codex harness (below), the hub's status feed for a sign-in that ended, and a real session to confirm it end to end.
-Claude Code's subscription sign-in works through the same mechanism, tried end to end with a custom service
+**Status.** Built: `credential: { method: oauth }`, the built-in `chatgpt` service, `egzo proxy logout`
+([docs/sandboxing.md](../docs/sandboxing.md#oauth-services), `specs/proxy/test_proxy_oauth.py`), and the `codex` harness
+([docs/harnesses.md](../docs/harnesses.md#codex), `specs/harness/test_harness_codex.py`). Not built yet: the hub's status
+feed for a sign-in that ended, the online spec with a real account, and a real session to confirm it end to end (see Open
+questions). Claude Code's subscription sign-in works through the same mechanism, tried end to end with a custom service
 ([below](#claude-codes-sign-in)); a built-in service and harness support for it are not built. Decided since: the
-configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind
-`proxy.upstream`; sign-ins live in the proxy's private volume and end at `project down`, like the CA.
+configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind `proxy.upstream`;
+sign-ins live in the proxy's private volume and end at `project down`, like the CA; Codex gets its settings as `-c`
+overrides and runs egzo's hooks with `--dangerously-bypass-hook-trust`.
 
 ## The problem
 

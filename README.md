@@ -23,7 +23,7 @@ does the rest.
 
 ## Features
 
-- **Claude Code and OpenCode.** More harnesses planned.
+- **Claude Code, OpenCode and Codex.** More harnesses planned.
 - **[Real TUIs](docs/managing-projects.md).** The harness's own interface, in your terminal or in the web UI.
 - **[Templates and instances](docs/project-file.md).** Declare an agent once, spawn as many instances as you need, each with its
   own container, network and workspace.

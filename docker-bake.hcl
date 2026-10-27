@@ -6,7 +6,7 @@
 
 variable "VERSION" { default = "dev" }
 variable "REGISTRY" { default = "ghcr.io/egzo-ai" }
-variable "HARNESSES" { default = ["claude-code", "opencode"] }
+variable "HARNESSES" { default = ["claude-code", "opencode", "codex"] }
 # The architecture, for the cache: one cache per architecture, so the two runners do not overwrite each other's. Empty: no
 # registry cache (a local build).
 variable "CACHE_ARCH" { default = "" }

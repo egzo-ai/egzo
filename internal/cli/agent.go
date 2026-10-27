@@ -122,6 +122,7 @@ func runAgent(args []string) error {
 			ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
 			InstructionsFile: home + "/.egzo/instructions.md",
 			LookPath:         exec.LookPath,
+			Getenv:           os.Getenv,
 		}
 		if workspaces := os.Getenv("EGZO_WORKSPACES"); workspaces != "" {
 			options.Workspaces = strings.Split(workspaces, ":")

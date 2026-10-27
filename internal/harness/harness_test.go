@@ -53,8 +53,8 @@ func get(t *testing.T, value any, path ...string) any {
 	return value
 }
 
-func TestBothHarnessesAreRegisteredAndUnknownOnesAreNot(t *testing.T) {
-	if got := strings.Join(Names(), ","); got != "claude-code,opencode" {
+func TestTheHarnessesAreRegisteredAndUnknownOnesAreNot(t *testing.T) {
+	if got := strings.Join(Names(), ","); got != "claude-code,codex,opencode" {
 		t.Errorf("harnesses = %s", got)
 	}
 	if _, ok := For("custom"); ok {
@@ -107,10 +107,10 @@ func TestClaudeCodeOptOutOfBypassIsExplicitSoItUndoesAnEarlierRun(t *testing.T) 
 	if strings.Contains(strings.Join(plan.Command, " "), "permission-mode") {
 		t.Errorf("an opt-out must not pass the bypass flag: %q", plan.Command)
 	}
-	if env := (claudeCode{}).ContainerEnv(false, false); env["IS_SANDBOX"] != "" {
+	if env := (claudeCode{}).ContainerEnv(false, Providers{}); env["IS_SANDBOX"] != "" {
 		t.Errorf("env = %v", env)
 	}
-	if env := (claudeCode{}).ContainerEnv(true, false); env["IS_SANDBOX"] != "1" || !strings.HasPrefix(env["ANTHROPIC_API_KEY"], "sk-ant-") {
+	if env := (claudeCode{}).ContainerEnv(true, Providers{}); env["IS_SANDBOX"] != "1" || !strings.HasPrefix(env["ANTHROPIC_API_KEY"], "sk-ant-") {
 		t.Errorf("env = %v", env)
 	}
 }
@@ -304,7 +304,7 @@ func TestEveryIntegrationNamesWhatItsPromptLooksLike(t *testing.T) {
 }
 
 func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) {
-	env := claudeCode{}.ContainerEnv(true, true)
+	env := claudeCode{}.ContainerEnv(true, Providers{AnthropicBearer: true})
 	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], "sk-ant-oat01-") {
 		t.Errorf("env = %v", env)
 	}
@@ -314,7 +314,7 @@ func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) 
 	if env["IS_SANDBOX"] != "1" {
 		t.Error("bypass mode still needs IS_SANDBOX")
 	}
-	plain := claudeCode{}.ContainerEnv(true, false)
+	plain := claudeCode{}.ContainerEnv(true, Providers{})
 	if _, present := plain["CLAUDE_CODE_OAUTH_TOKEN"]; present || plain["ANTHROPIC_API_KEY"] == "" {
 		t.Errorf("an API key setup got %v", plain)
 	}
