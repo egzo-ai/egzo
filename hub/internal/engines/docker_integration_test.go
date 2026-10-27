@@ -87,7 +87,8 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), name)
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "egzo.yaml"), []byte("secret_key: v/EGZO_HUB_IT_SECRET_KEY\nvaults:\n  v: { backend: env }\nagents:\n  coder:\n    harness: custom\n    image: "+session+"\n    env:\n      FAKE_TUI: cat\n"), 0o644)
-	env := []string{"EGZO_IMAGE=" + sidecar, "NO_COLOR=1", "EGZO_PROJECT_NAME=", "EGZO_HUB_IT_SECRET_KEY=hub-integration-secret-key-0123456789abcdef"}
+	secretKey := "hub-integration-secret-key-0123456789abcdef"
+	env := []string{"EGZO_IMAGE=" + sidecar, "NO_COLOR=1", "EGZO_PROJECT_NAME=", "EGZO_HUB_IT_SECRET_KEY=" + secretKey}
 	egzo := func(args ...string) string { return sh(t, dir, env, bin, args...) }
 	egzo("project", "up")
 	t.Cleanup(func() { exec.Command(bin, "project", "down", "--force").Run(); cleanup(dir, env, bin) })
@@ -271,7 +272,7 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 		}
 	}
 	spec, err := eng.Spec(ctx, name)
-	if err != nil || !strings.Contains(string(spec), name) || strings.Contains(string(spec), "SECRET") {
+	if err != nil || !strings.Contains(string(spec), name) || strings.Contains(string(spec), secretKey) {
 		t.Errorf("spec = %q, %v", spec, err)
 	}
 	if logs, err := eng.Logs(ctx, name, "coder-1", 20); err != nil {
