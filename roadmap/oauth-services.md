@@ -98,43 +98,59 @@ that says to sign in again).
 
 ## The Codex harness
 
-A `codex` harness built on this: an image with a pinned Codex version, the `egzo` MCP server in `config.toml`, the status hooks,
-and the stand-in `auth.json` above. The model hosts are `chatgpt.com` (through the service) for a ChatGPT account, or
+A `codex` harness built on this: an image with a pinned Codex version, the `egzo` MCP server and `use_agent_identity = false` in
+`config.toml`, the status hooks, and the stand-in `auth.json` above. The model hosts are `chatgpt.com` (through the service) for a ChatGPT account, or
 `api.openai.com` with the `openai` service of [model-providers.md](model-providers.md) for an API key. `auth.openai.com` is
 reached only through the `oauth` service.
 
-## What was checked (2026-10-27, `openai/codex` `main`, from the source)
+## What was checked (2026-10-27, `openai/codex` at `c587d6e`, from the source)
 
-- The refresh is a standard OAuth refresh grant: `POST https://auth.openai.com/oauth/token`, JSON, public client id
-  `app_EMoamEEZ73f0CkXaXp7hrann`, no client secret (`login/src/auth/manager.rs`).
-- Proactive refresh: when the access token's `exp` is within 5 minutes, or else when `last_refresh` is older than 8 days. On a
-  401: reload `auth.json` from disk, then refresh.
-- The TUI's first-run screen offers ChatGPT sign-in, the one-time device code, and an API key (`tui/src/onboarding/auth.rs`).
-- The device-code flow polls `https://auth.openai.com/api/accounts/deviceauth/…`, then exchanges the code at the token URL
-  (`login/src/device_code_auth.rs`). The browser flow may also exchange the id token for an API key at the same URL
-  (`token-exchange` grant, `obtain_api_key` in `login/src/server.rs`); its response is captured like any other.
-- `auth.json` is written in place (truncate and write), and the refresh URL can be overridden with
-  `CODEX_REFRESH_TOKEN_URL_OVERRIDE`. Neither is needed by this design.
+Read from the source, not run against a real account.
 
-Nothing of this was run against a real account yet.
+- **Refresh.** A standard OAuth refresh grant: `POST https://auth.openai.com/oauth/token`, JSON, public client id
+  `app_EMoamEEZ73f0CkXaXp7hrann`, no client secret (`login/src/auth/manager.rs`). Proactive when the access token's `exp` is
+  within 5 minutes, or else when `last_refresh` is older than 8 days. On a 401: reload `auth.json`, then refresh.
+- **Sign-in.** The TUI's first-run screen offers ChatGPT sign-in, the one-time device code and an API key
+  (`tui/src/onboarding/auth.rs`). The device-code flow polls `auth.openai.com/api/accounts/deviceauth/…`, then exchanges the code
+  at the token URL (`login/src/device_code_auth.rs`), with no API-key exchange (only the browser flow does one).
+- **JWTs** are decoded without a signature check (`login/src/token_data.rs`), so stand-ins carrying the real claims work.
+- **Where the token goes:** only `chatgpt.com/backend-api/` (`/codex` for the model, `/wham` for usage and limits, `/ps/mcp` for
+  ChatGPT apps, a stable feature on by default). The path limit covers all of it.
+- **Websockets.** The default OpenAI provider uses the Responses API over a websocket. Auth is on the upgrade request only, never in
+  frames (`codex-api/src/endpoint/responses_websocket.rs`). The dialer honours `HTTPS_PROXY`, and every client honours
+  `SSL_CERT_FILE` (`http-client/src/custom_ca.rs`). egzo's proxy sets the injected header on the upgrade request (`ReverseProxy`,
+  HTTP/1.1 for upgrades). If the websocket fails, Codex falls back to HTTP for the session.
+- **Agent identity** (`use_agent_identity`, under development, off by default): Codex would register its own ed25519 key and sign
+  `AgentAssertion` headers, a credential held by the agent. The harness pins it off in `config.toml`, and the proxy never injects
+  on `auth.openai.com/api/accounts/`, so a registration fails and Codex falls back to ChatGPT auth.
+- **EMA** (enterprise-managed authorization of MCP servers) exchanges the refresh token with third-party authorization servers.
+  It runs only for MCP servers configured with an EMA registration; egzo writes the config and adds none. A token exchange with a
+  stand-in refresh token is refused.
+- **`login_owner_id`** is a local id generated at sign-in, never sent.
+- **Logout** (`codex logout`) sends the refresh token to `auth.openai.com/oauth/revoke` (`login/src/auth/revoke.rs`).
+
+### Proxy rules this adds
+
+- On `auth.openai.com`: `/api/accounts/deviceauth/*` passes without injection; `/oauth/token` and `/oauth/revoke` are answered
+  by the proxy; nothing else there is injected.
+- `/oauth/revoke` with a stand-in revokes the real token and discards the sign-in: a logout signs the project out.
+- A refresh the proxy cannot serve (a dead chain) is answered with OAuth's `invalid_grant`, which Codex treats as permanent and
+  asks for a new sign-in; that sign-in is captured.
 
 ## Open questions
 
-- **Websockets.** If Codex sends model requests over a websocket, the injection happens on the upgrade request; check that the
-  proxy handles it.
-- **Codex's newer account code** (`agent_identity`, `account_grant`, `login_owner_id` in `manager.rs`): whether any of it sends a
-  token elsewhere, or has a server check a JWT that a stand-in would fail. A captured session of a real sign-in answers both.
-- **Clients this cannot serve:** a client that pins its certificate, or tokens bound to a key the client holds (DPoP, mTLS). Codex
-  uses neither.
+- **A real session** to confirm the above end to end.
+- **Clients this cannot serve:** a client that pins its certificate, or tokens bound to a key the client holds (DPoP, mTLS).
 - **Claude's regular sign-in** (not `setup-token`) likely has the same shape and would be the second user. Not checked.
-- **Terms of use.** Requests still come from OpenAI's own client and only a header changes, as in OpenAI's documented CI flow; to
-  be read before it ships.
+- **Terms of use**, to be read before it ships.
 
 ## Specs
 
 - Engine specs with a stub token endpoint and a stub model backend, no account needed:
   - a sign-in through the proxy: the agent's `auth.json` holds stand-ins, the stub saw the real exchange;
   - a model request reaches the stub with the real token; a request with any other token is untouched;
+  - a websocket upgrade gets the real token like any request;
+  - `/oauth/revoke` with a stand-in signs the project out; a dead chain answers `invalid_grant`;
   - the client's refresh is answered by the proxy and never reaches the stub with a stand-in;
   - the proxy renews ahead of `exp`, saves the rotated refresh token, and keeps working after a proxy restart and `up`;
   - the volume holds no token in clear; with another secret key the proxy discards the sign-in and asks for a new one;
