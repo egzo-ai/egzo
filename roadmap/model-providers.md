@@ -183,6 +183,13 @@ The warning for an OpenCode agent whose profile cannot reach it says something f
 instead that OpenCode will use the model list built into its image, which lacks newer models. The docs keep recommending
 `models.opencode.ai` in an OpenCode profile, for a current list. (`docs/sandboxing.md` calls it the harness's provider host.)
 
+### 6. Codex
+
+No item of its own. A Codex harness is built with [oauth-services.md](oauth-services.md), whose first user it is: a ChatGPT
+Plus or Pro account through the `chatgpt` OAuth service, an OpenAI API key through the `openai` service above. Codex does not read
+`OPENAI_API_KEY` by itself: the harness writes the dummy into Codex's `auth.json` (`auth_mode: apikey`), and the proxy replaces it
+as for any client.
+
 ## Specs and docs
 
 Specs:

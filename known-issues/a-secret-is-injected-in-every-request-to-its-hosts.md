@@ -1,7 +1,8 @@
 # A secret is injected into every request to its hosts, whatever the path
 
-Status: **to fix** (written 2026-10-19). Mitigation not built; it comes before the built-in model providers of
-[roadmap/model-providers.md](../roadmap/model-providers.md).
+Status: **to fix** (written 2026-10-19, revised 2026-10-27). Mitigation not built; it comes before the built-in model providers
+of [roadmap/model-providers.md](../roadmap/model-providers.md) and the OAuth services of
+[roadmap/oauth-services.md](../roadmap/oauth-services.md).
 
 A service binds a secret to hosts, and the proxy applies it to every request an agent sends to one of them: egzo's rules
 are by host, and a service cannot be limited to a path or a method (`docs/sandboxing.md`). That is harmless when the host
@@ -17,8 +18,12 @@ secret to pages and endpoints that have nothing to do with the API it was given 
   goes with every request to it, a pull request page as well as `git push`.
 - **Your own services**, whenever the host serves more than its API.
 
-Planned in [roadmap/model-providers.md](../roadmap/model-providers.md): **`openrouter`** (`openrouter.ai`), whose API is under
-`/api/v1/` on the same host as the website. The other planned providers have hosts that serve only their API.
+Planned:
+
+- **`openrouter`** (`openrouter.ai`, [model-providers.md](../roadmap/model-providers.md)): the API is under `/api/v1/`, on the
+  same host as the website. The other planned providers have hosts that serve only their API.
+- **`chatgpt`** (`chatgpt.com`, [oauth-services.md](../roadmap/oauth-services.md)): Codex's model calls go to `/backend-api/`,
+  on the same host as ChatGPT itself.
 
 `anthropic` and `anthropic-oauth` (`api.anthropic.com`) are not affected: the host serves the API and nothing else.
 
