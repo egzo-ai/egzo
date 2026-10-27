@@ -535,6 +535,16 @@ egress:
   an **object** with `hosts` defines the service, an object **without** `hosts` binds a credential to a service that
   already resolves (inherited via `extend`, or built-in) and may name nothing else. A binding's method must be the
   service's: a sign-in for an OAuth service, a secret for the others. There is no null form.
+- **OAuth services** (`credential: { method: oauth, token_url, revoke_url }`; built in: `chatgpt`). The proxy
+  terminates TLS for the token URL's host: a code exchange goes to the provider and the tokens of its answer are kept
+  (sealed with the project secret key, `egzo/v1/oauth`, in the private volume) and replaced by stand-ins; a refresh
+  with a stand-in is answered by the proxy; a stand-in in any other grant is refused; a revoke with a stand-in revokes
+  the real refresh token and ends the sign-in. On the service's hosts and paths, `Authorization: Bearer <stand-in>`
+  becomes the real access token; any other token is untouched. Stand-ins are recognizable (an `egzo-` signature or
+  prefix), so a stale one gets a 401 "sign in again" instead of reaching the provider. The proxy renews ahead of
+  expiry (5 minutes, at least every 8 days, no more than every 30 seconds), saving the rotated refresh token first;
+  `invalid_grant` ends the sign-in. One sign-in per service per project; `project check` and `agent spawn` report it,
+  `egzo proxy logout` ends it, `project down` and a move to another secret key end it.
 - `proxy.upstream` is what the proxy trusts and may dial on the way out, project-wide: `ca`, PEM certificates added to
   the system roots for the TLS it makes upstream (read at `up`, sent with the policy), and `private_hosts`, exact names
   it may reach at a private address (never loopback or link-local). For a service inside a company network; the OAuth

@@ -138,7 +138,8 @@ def test_a_sign_in_in_an_agent_is_captured_and_the_agent_only_ever_holds_stand_i
     status, seen, _ = api_saw(engine, p, coder, stub, held["access_token"])
     assert status == 200 and seen.startswith("Bearer ") and seen != f"Bearer {held['access_token']}", "the API got the real token"
     real_access = seen.removeprefix("Bearer ")
-    assert payload(real_access) == payload(held["access_token"]), "a stand-in carries the real claims"
+    stable = ("sub", "https://api.openai.com/auth")  # exp and the like change when the proxy renews, which it may have done already
+    assert [payload(real_access)[k] for k in stable] == [payload(held["access_token"])[k] for k in stable], "a stand-in carries the real claims"
 
     assert api_saw(engine, p, coder, stub, "someone-elses-token")[1] == "Bearer someone-elses-token", "any other token is left alone"
     assert api_saw(engine, p, coder, stub, held["access_token"], "/other")[0] == 404
@@ -148,7 +149,7 @@ def test_a_sign_in_in_an_agent_is_captured_and_the_agent_only_ever_holds_stand_i
                           "-H", "Connection: Upgrade", "-H", "Upgrade: websocket", "-H", "Sec-WebSocket-Version: 13",
                           "-H", "Sec-WebSocket-Key: c3BlYy13ZWJzb2NrZXQta2V5", "-H", f"Authorization: Bearer {held['access_token']}",
                           f"https://{API}/backend-api/ws")
-    assert "101" in upgrade.stdout.splitlines()[0], upgrade.stdout + upgrade.stderr
+    assert "HTTP/1.1 101" in upgrade.stdout, upgrade.stdout + upgrade.stderr
     assert stub.requests()[-1]["authorization"].startswith("Bearer ") and stub.requests()[-1]["authorization"] != f"Bearer {held['access_token']}"
 
     # The proxy renews the real chain on its own and saves the rotated refresh token; the stand-ins keep working

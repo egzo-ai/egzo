@@ -14,14 +14,15 @@ because the agent can then send the secret to pages and endpoints that have noth
 
 - **`github`** (`github.com` and `api.github.com`). git over HTTPS needs `github.com`, which is also the website: the token
   goes with every request to it, a pull request page as well as `git push`.
-- **Your own services**, whenever the host serves more than its API.
+- **Your own services**, whenever the host serves more than its API, until you give them `paths`.
+
+Limited to their API's path already: **`chatgpt`** (`chatgpt.com`, the built-in OAuth service), under `/backend-api/`,
+where Codex's calls go.
 
 Planned:
 
 - **`openrouter`** (`openrouter.ai`, [model-providers.md](../roadmap/model-providers.md)): the API is under `/api/v1/`, on the
   same host as the website. The other planned providers have hosts that serve only their API.
-- **`chatgpt`** (`chatgpt.com`, [oauth-services.md](../roadmap/oauth-services.md)): Codex's model calls go to `/backend-api/`,
-  on the same host as ChatGPT itself.
 
 Limited to their API's paths already: **`opencode`** (`opencode.ai`, also the OpenCode website, its documentation and the
 Console), under `/inference/` and `/zen/` (the model calls, Zen and Go), `/console/api/v2/config` and

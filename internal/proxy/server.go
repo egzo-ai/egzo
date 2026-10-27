@@ -49,6 +49,8 @@ type Server struct {
 	Transport http.RoundTripper
 	Dial      func(ctx context.Context, network, address string) (net.Conn, error)
 	upstream  atomic.Pointer[upstream]
+	// signIns are the sign-ins of the OAuth services, kept in the store (see UseStore).
+	signIns *signIns
 
 	// MaxPerAgent and MaxTotal bound the connections one agent, and all of them, may hold open;
 	// IdleTimeout closes a connection that has moved no data for that long.
@@ -83,6 +85,7 @@ func NewServer(ca *CA, audit *Audit) *Server {
 	if err := s.setUpstream(Upstream{}); err != nil {
 		panic(err) // the public internet and the system roots: nothing to fail
 	}
+	s.UseStore(nil)
 	return s
 }
 
@@ -99,6 +102,12 @@ func (s *Server) handshakeTimeout() time.Duration {
 		return defaultHandshakeTimeout
 	}
 	return s.HandshakeTimeout
+}
+
+// UseStore keeps the sign-ins of the OAuth services in store; nil keeps none (a proxy that is not serving).
+func (s *Server) UseStore(store *Store) {
+	s.signIns = newSignIns(store)
+	s.signIns.refresh = s.refreshUpstream
 }
 
 // SetCA switches the CA that signs the certificates of intercepted hosts.
@@ -335,7 +344,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		client = &prefixedConn{Conn: client, pending: append([]byte(nil), pending...)}
 	}
 
-	if decision.Inject != nil || decision.Inspect || len(decision.Substitutions) > 0 {
+	if decision.Intercepted() {
 		s.intercept(client, c, decision)
 		return
 	}
@@ -477,7 +486,7 @@ func (s *Server) terminate(client net.Conn, c *conn, decision Decision, ech bool
 	case ech:
 		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeIntercept, Service: c.service,
 			Reason: because(CodeECH, "the client sent Encrypted Client Hello, which can hide the server it asks for, so TLS is terminated here instead of tunneled")})
-	case decision.Inject != nil || len(decision.Substitutions) > 0:
+	case decision.Inject != nil || len(decision.Substitutions) > 0 || len(decision.Endpoints) > 0:
 		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeInject, Service: c.service})
 	default:
 		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeInspect, Service: c.service})
@@ -514,7 +523,7 @@ func (s *Server) terminate(client net.Conn, c *conn, decision Decision, ech bool
 
 	listener := newConnListener(tlsConn)
 	server := &http.Server{
-		Handler:           s.interceptHandler(c, decision.Inject, newSwapper(decision.Substitutions), ech),
+		Handler:           s.interceptHandler(c, decision, newSwapper(decision.Substitutions), ech),
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       s.idleTimeout(),
 		ErrorLog:          log.New(io.Discard, "", 0),
@@ -522,8 +531,8 @@ func (s *Server) terminate(client net.Conn, c *conn, decision Decision, ech bool
 	server.Serve(listener)
 }
 
-func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, quiet bool) http.Handler {
-	host := c.host
+func (s *Server) interceptHandler(c *conn, decision Decision, swap *swapper, quiet bool) http.Handler {
+	host, inject := c.host, decision.Inject
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.URL.Scheme = "https"
@@ -570,6 +579,7 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 		if escaped := r.URL.EscapedPath(); escaped != (&url.URL{Path: r.URL.Path}).EscapedPath() {
 			record.RawPath = escaped
 		}
+		standIn := false // the request is under the paths of an OAuth service: a stand-in token it carries is swapped
 		if inject != nil {
 			covered, refuse := inject.Covers(r.URL.EscapedPath())
 			switch {
@@ -580,6 +590,8 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 				c.log(event)
 				http.Error(w, "egzo: "+reason, http.StatusBadRequest)
 				return
+			case covered && inject.OAuthService != "":
+				standIn = true
 			case covered:
 				record.inject, record.Injected = true, inject.Service
 			default:
@@ -588,6 +600,38 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 					text += "; the " + inject.Header + " header the agent sent went as it was"
 				}
 				record.Reason = because(CodeOutsidePaths, text)
+			}
+		}
+		for _, endpoint := range decision.Endpoints {
+			var status int
+			switch {
+			case r.Method != http.MethodPost:
+				continue
+			case endpoint.Token != "" && r.URL.EscapedPath() == endpoint.Token:
+				status = s.serveToken(w, r, endpoint.Service, endpoint.OAuth)
+			case endpoint.Revoke != "" && r.URL.EscapedPath() == endpoint.Revoke:
+				status = s.serveRevoke(w, r, endpoint.Service, endpoint.OAuth)
+			default:
+				continue
+			}
+			if !quiet {
+				c.log(Event{Kind: KindRequest, Decision: OutcomeAllow, Method: r.Method, Path: r.URL.Path, Status: status})
+			}
+			return
+		}
+		if standIn {
+			// A stand-in bearer token becomes the real one; any other token is the client's own.
+			if token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); bearer && isStandIn(token) {
+				real, err := s.signIns.access(r.Context(), inject.OAuthService, inject.OAuth, token)
+				if err != nil {
+					event := record.event(OutcomeDeny)
+					event.Reason = because(CodeSignIn, err.Error())
+					c.log(event)
+					signInError(w, inject.OAuthService, err)
+					return
+				}
+				r.Header.Set("Authorization", "Bearer "+real)
+				record.Injected = inject.Service
 			}
 		}
 		r = r.WithContext(context.WithValue(r.Context(), requestRecordKey{}, record))

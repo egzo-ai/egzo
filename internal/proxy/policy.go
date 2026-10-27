@@ -71,15 +71,29 @@ type Service struct {
 	// Placeholder is the text the agent types instead of the secret (not the name of the variable that
 	// holds it). The proxy swaps it for Secret on requests to Hosts. A placeholder service has no Header.
 	Placeholder string `json:"placeholder,omitempty"`
+	// OAuth makes the service's credential a sign-in: the proxy swaps the stand-in bearer token a client sends on
+	// Hosts (and Paths) for the real one, and answers at the token and revoke URLs. An OAuth service has no Header.
+	OAuth *OAuth `json:"oauth,omitempty"`
 }
 
 // Injection is a header the proxy sets on requests to an intercepted host: on every request, or with Paths only
-// on requests under one of them. Service names it in the audit.
+// on requests under one of them. Service names it in the audit. For an OAuth service it is the swap of a stand-in bearer
+// token (OAuthService).
 type Injection struct {
+	Service      string
+	Header       string
+	Value        string
+	Paths        []string
+	OAuthService string
+	OAuth        OAuth
+}
+
+// Endpoint is the token and revoke URLs of an OAuth service, on a host it intercepts: the proxy answers there.
+type Endpoint struct {
 	Service string
-	Header  string
-	Value   string
-	Paths   []string
+	OAuth   OAuth
+	Token   string // the path of the token URL on this host, or ""
+	Revoke  string // the path of the revoke URL on this host, or ""
 }
 
 // Covers says whether a request to escaped (the path as it goes on the wire) gets the header. Under one of the prefixes,
@@ -120,7 +134,35 @@ type Decision struct {
 	// Substitutions are the placeholders to swap on this host: it is intercepted, and its request
 	// bodies are bounded and scanned. A profile may have several, from several services.
 	Substitutions []Substitution
-	Reason        string
+	// Endpoints are the OAuth token and revoke URLs on this host: it is intercepted, and the proxy answers them.
+	Endpoints []Endpoint
+	Reason    string
+}
+
+// Intercepted reports whether the proxy terminates TLS for the host.
+func (d Decision) Intercepted() bool {
+	return d.Inject != nil || d.Inspect || len(d.Substitutions) > 0 || len(d.Endpoints) > 0
+}
+
+// endpointOn is the endpoint of an OAuth service on host, when its token or revoke URL is there. The host of the token
+// URL is reached through the service: nothing else needs to allow it, and nothing there gets a token.
+func endpointOn(service Service, host string) (Endpoint, bool) {
+	endpoint := Endpoint{Service: service.Name, OAuth: *service.OAuth}
+	for _, raw := range []string{service.OAuth.TokenURL, service.OAuth.RevokeURL} {
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || !strings.EqualFold(u.Hostname(), host) {
+			continue
+		}
+		if raw == service.OAuth.TokenURL {
+			endpoint.Token = u.EscapedPath()
+		} else {
+			endpoint.Revoke = u.EscapedPath()
+		}
+	}
+	return endpoint, endpoint.Token != "" || endpoint.Revoke != ""
 }
 
 // Decide applies an agent's profile to a host: a service covering the host wins (and may inject),
@@ -130,6 +172,14 @@ func (a *Profile) Decide(host string) Decision {
 	var decision Decision
 	named := false // the decision's service lists the host exactly
 	for _, service := range a.Services {
+		if service.OAuth != nil {
+			if endpoint, ok := endpointOn(service, host); ok {
+				if !decision.Allowed {
+					decision = Decision{Allowed: true, Service: service.Name}
+				}
+				decision.Endpoints = append(decision.Endpoints, endpoint)
+			}
+		}
 		covers, exact := false, false
 		for _, pattern := range service.Hosts {
 			pattern = strings.ToLower(pattern)
@@ -160,6 +210,9 @@ func (a *Profile) Decide(host string) Decision {
 				value = strings.ReplaceAll(service.Value, "{secret}", service.Secret)
 			}
 			decision.Inject = &Injection{Service: service.Name, Header: service.Header, Value: value, Paths: service.Paths}
+		}
+		if service.OAuth != nil && decision.Inject == nil {
+			decision.Inject = &Injection{Service: service.Name, Paths: service.Paths, OAuthService: service.Name, OAuth: *service.OAuth}
 		}
 		if service.Placeholder != "" {
 			decision.Substitutions = append(decision.Substitutions, Substitution{service.Name, service.Placeholder, service.Secret})

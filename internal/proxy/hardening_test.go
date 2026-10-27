@@ -796,6 +796,7 @@ func operatorFor(t *testing.T, cfg Config) (http.Handler, *Server, *CA) {
 		t.Fatal(err)
 	}
 	server := NewServer(store.CA(), NewAudit(io.Discard))
+	server.UseStore(store)
 	handler := operatorHandler(server, store, cfg)
 	if response := call(handler, "PUT", "/policy", keyed(`{"hash":"first","profiles":{}}`)); response.Code != http.StatusNoContent && !strings.Contains(cfg.PubDir, "blocker") {
 		t.Fatalf("first policy: %d %s", response.Code, response.Body)

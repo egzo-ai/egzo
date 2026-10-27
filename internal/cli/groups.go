@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -109,6 +111,7 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 			report("fail", "secret %s is %s", ref, state)
 		}
 	}
+	reportSignIns(cmd, opts, report)
 	if changes, ok := pendingChanges(cmd, opts); ok && changes > 0 {
 		report("warn", "the project is not up to date: %d change(s) pending, see `egzo project up --dry-run`", changes)
 	}
@@ -116,6 +119,32 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 		return ExitError{Code: 1}
 	}
 	return nil
+}
+
+// reportSignIns says, when the proxy runs, how the sign-in of each OAuth service is: none yet is a warning, an ended
+// one (revoked, refused by the provider) a failure.
+func reportSignIns(cmd *cobra.Command, opts *options, report func(level, format string, a ...any)) {
+	ctx, stop := commandContext(cmd)
+	defer stop()
+	s, err := openSessionQuietly(ctx, opts)
+	if err != nil {
+		return
+	}
+	defer s.close()
+	statuses, err := signInStatuses(ctx, s)
+	if err != nil {
+		return
+	}
+	for _, service := range slices.Sorted(maps.Keys(statuses)) {
+		switch status := statuses[service]; status.State {
+		case "live":
+			report("ok", "service %s is signed in", service)
+		case "ended":
+			report("fail", "the sign-in of service %s ended (%s): sign in again from an agent that uses it", service, status.Ended)
+		default:
+			report("warn", "service %s has no sign-in yet: sign in from an agent that uses it (`egzo agent attach`)", service)
+		}
+	}
 }
 
 // pendingChanges counts what `up` would change, when the engine can say. It is shown by `project check` and is never an error.

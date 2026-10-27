@@ -36,6 +36,9 @@ func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]stri
 			if service.Inject != nil {
 				service2.Header, service2.Value, service2.BasicUser = service.Inject.Header, service.Inject.Value, service.Inject.BasicUser
 			}
+			if service.OAuth() {
+				service2.OAuth = &proxy.OAuth{TokenURL: service.Credential.TokenURL, RevokeURL: service.Credential.RevokeURL}
+			}
 			if service.Placeholder != "" {
 				service2.Placeholder = placeholders[service.SecretRef()]
 				if service2.Placeholder == "" {
