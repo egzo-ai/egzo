@@ -24,17 +24,20 @@ import (
 // bindings (see BindingFor), which carry no secret.
 func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]string) proxy.Policy {
 	policy := proxy.Policy{Project: project.Name, SecretKey: secrets[project.SecretKey], Profiles: map[string]proxy.Profile{}}
+	if project.Proxy != nil && project.Proxy.Upstream != nil {
+		policy.Upstream = &proxy.Upstream{CA: secrets[upstreamCAKey], PrivateHosts: project.Proxy.Upstream.PrivateHosts}
+	}
 	for _, name := range usedProfiles(project) {
 		profile := project.Egress[name]
 		entry := proxy.Profile{Allow: append([]string{}, profile.Allow...)}
 		for _, serviceName := range sortedKeys(profile.Services) {
 			service := profile.Services[serviceName]
-			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Paths: service.Paths, Secret: secrets[service.Secret], Inspect: service.Inspect}
+			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Paths: service.Paths, Secret: secrets[service.SecretRef()], Inspect: service.Inspect}
 			if service.Inject != nil {
 				service2.Header, service2.Value, service2.BasicUser = service.Inject.Header, service.Inject.Value, service.Inject.BasicUser
 			}
 			if service.Placeholder != "" {
-				service2.Placeholder = placeholders[service.Secret]
+				service2.Placeholder = placeholders[service.SecretRef()]
 				if service2.Placeholder == "" {
 					service2.Placeholder = placeholderStandIn
 				}
@@ -74,14 +77,18 @@ func BindingFor(id, token, profile string) proxy.Binding {
 	return proxy.Binding{Instance: id, Token: token, Profile: profile, SSHKey: identity}
 }
 
-// ResolveSecrets reads the value of every secret an agent's profile injects. A secret that cannot
-// be read is an error: an agent must not start without the credentials its profile promises.
+// upstreamCAKey is where ResolveSecrets puts the upstream CA it reads with the secrets: not a secret, but read at the
+// same time, from the file. A secret reference always has a '/', this key none.
+const upstreamCAKey = "proxy.upstream.ca"
+
+// ResolveSecrets reads the value of every secret an agent's profile injects, the secret key, and the upstream CA. A
+// secret that cannot be read is an error: an agent must not start without the credentials its profile promises.
 func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, error) {
 	needed := map[string]bool{}
 	for _, agent := range project.Agents {
 		for _, service := range project.Egress[agent.Egress].Services {
-			if (service.Inject != nil || service.Placeholder != "") && service.Secret != "" {
-				needed[service.Secret] = true
+			if (service.Inject != nil || service.Placeholder != "") && service.SecretRef() != "" {
+				needed[service.SecretRef()] = true
 			}
 		}
 	}
@@ -128,6 +135,13 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 		}
 		values[ref] = value
 	}
+	if project.Proxy != nil && project.Proxy.Upstream != nil && project.Proxy.Upstream.CA != "" {
+		if data, err := config.ReadUpstreamCA(project.Proxy.Upstream.CA); err != nil {
+			problems = append(problems, fmt.Sprintf("proxy.upstream.ca: %v", err))
+		} else {
+			values[upstreamCAKey] = string(data)
+		}
+	}
 	problems = append(problems, checkCredentialKinds(project, values)...)
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(problems, "\n"))
@@ -157,19 +171,19 @@ func checkCredentialKinds(project *config.Resolved, values map[string]string) []
 	seen := map[string]bool{}
 	for _, agent := range project.Agents {
 		for name, service := range project.Egress[agent.Egress].Services {
-			if service.Inject == nil || service.Secret == "" || !contains(service.Hosts, "api.anthropic.com") || seen[name+service.Secret] {
+			if service.Inject == nil || service.SecretRef() == "" || !contains(service.Hosts, "api.anthropic.com") || seen[name+service.SecretRef()] {
 				continue
 			}
-			seen[name+service.Secret] = true
-			value := values[service.Secret]
+			seen[name+service.SecretRef()] = true
+			value := values[service.SecretRef()]
 			bearer := strings.EqualFold(service.Inject.Header, "Authorization")
 			switch {
 			case !bearer && strings.HasPrefix(value, "sk-ant-oat"):
 				problems = append(problems, fmt.Sprintf("secret %s is a Claude subscription (OAuth) token, but service %q sends it as %s, "+
-					"which api.anthropic.com only accepts for API keys: bind the secret to the anthropic-oauth service instead", service.Secret, name, service.Inject.Header))
+					"which api.anthropic.com only accepts for API keys: bind the secret to the anthropic-oauth service instead", service.SecretRef(), name, service.Inject.Header))
 			case bearer && strings.HasPrefix(value, "sk-ant-api"):
 				problems = append(problems, fmt.Sprintf("secret %s is an Anthropic API key, but service %q sends it as a bearer token, "+
-					"which api.anthropic.com only accepts for subscription tokens: bind the secret to the anthropic service instead", service.Secret, name))
+					"which api.anthropic.com only accepts for subscription tokens: bind the secret to the anthropic service instead", service.SecretRef(), name))
 			}
 		}
 	}

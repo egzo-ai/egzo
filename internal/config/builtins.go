@@ -37,6 +37,17 @@ var builtinServices = map[string]ResolvedService{
 		Hosts:  []string{"github.com", "api.github.com"},
 		Inject: &Inject{Header: "Authorization", BasicUser: "x-access-token"},
 	},
+	// A ChatGPT Plus or Pro sign-in, as Codex makes it (openai/codex, login/src/auth/manager.rs and revoke.rs). chatgpt.com
+	// is also ChatGPT's website: Codex's calls go under /backend-api/ (the model, usage, apps), and nothing else gets the token.
+	"chatgpt": {
+		Hosts: []string{"chatgpt.com"},
+		Paths: []string{"/backend-api/"},
+		Credential: &Credential{
+			Method:    MethodOAuth,
+			TokenURL:  "https://auth.openai.com/oauth/token",
+			RevokeURL: "https://auth.openai.com/oauth/revoke",
+		},
+	},
 }
 
 func builtinService(name string) (*ResolvedService, bool) {
@@ -50,6 +61,10 @@ func builtinService(name string) (*ResolvedService, bool) {
 	if service.Inject != nil {
 		inject := *service.Inject
 		copied.Inject = &inject
+	}
+	if service.Credential != nil {
+		credential := *service.Credential
+		copied.Credential = &credential
 	}
 	return &copied, true
 }

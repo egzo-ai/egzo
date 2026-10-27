@@ -4,8 +4,11 @@
 package config
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +18,8 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // Resolved is the fully resolved project: what `egzo project check --resolved` prints.
@@ -56,7 +61,8 @@ type SecretRef struct {
 
 // ResolvedProxy is what the file says about the proxy sidecar; nil when it says nothing.
 type ResolvedProxy struct {
-	Image string `yaml:"image"`
+	Image    string    `yaml:"image,omitempty"`
+	Upstream *Upstream `yaml:"upstream,omitempty"`
 }
 
 type ResolvedAgent struct {
@@ -167,8 +173,8 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 		Agents:     map[string]ResolvedAgent{},
 		Egress:     egress,
 	}
-	if file.Proxy.Image != "" {
-		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image}
+	if file.Proxy.Image != "" || file.Proxy.Upstream != nil {
+		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image, Upstream: resolveUpstream(file.Proxy.Upstream, dir, p)}
 	}
 	for vault, definition := range file.Vaults {
 		resolved.Vaults[vault] = ResolvedVault{Backend: definition.Backend, Secrets: []string{}}
@@ -380,6 +386,65 @@ func SecretKeyCommand(backend, name string) string {
 		return fmt.Sprintf("export %s=$(openssl rand -hex 32)", name)
 	}
 	return fmt.Sprintf("openssl rand -hex 32 | pass insert --multiline %s", name)
+}
+
+// resolveUpstream checks proxy.upstream: the CA is a file of certificates and nothing else (its path made absolute, its
+// content read again at `up`), a private host one exact host name.
+func resolveUpstream(upstream *Upstream, dir string, p *problems) *Upstream {
+	if upstream == nil {
+		return nil
+	}
+	resolved := &Upstream{}
+	if upstream.CA != "" {
+		path := upstream.CA
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		resolved.CA = path
+		if _, err := ReadUpstreamCA(path); err != nil {
+			p.addf("proxy.upstream.ca: %v", err)
+		}
+	}
+	for _, host := range upstream.PrivateHosts {
+		normalized := names.NormalizeHost(host)
+		if !names.Host(normalized) || net.ParseIP(normalized) != nil {
+			p.addf("proxy.upstream.private_hosts: %q is not one exact host name (no wildcard, address, port or scheme)", host)
+			continue
+		}
+		resolved.PrivateHosts = append(resolved.PrivateHosts, normalized)
+	}
+	return resolved
+}
+
+// ReadUpstreamCA reads a file of PEM certificates for the proxy to trust upstream. A private key in it, or anything that
+// is not a certificate, is an error: the file goes to the proxy whole.
+func ReadUpstreamCA(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s cannot be read: %w", path, err)
+	}
+	rest, count := data, 0
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if strings.Contains(block.Type, "PRIVATE KEY") {
+			return nil, fmt.Errorf("%s holds a private key: it must hold certificates only", path)
+		}
+		if block.Type != "CERTIFICATE" {
+			return nil, fmt.Errorf("%s holds a %s block: it must hold certificates only", path, block.Type)
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return nil, fmt.Errorf("%s holds a certificate that cannot be read: %w", path, err)
+		}
+		count++
+	}
+	if count == 0 || strings.TrimSpace(string(rest)) != "" {
+		return nil, fmt.Errorf("%s is not a file of PEM certificates", path)
+	}
+	return data, nil
 }
 
 // vaultBackends are the backends that exist.

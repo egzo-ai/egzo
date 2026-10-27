@@ -36,8 +36,8 @@ func inProject(t *testing.T, yaml string, stdin string, args ...string) (string,
 func vaultYAML() string {
 	return "secret_key: main/EGZO_TEST_SECRET_KEY\nvaults:\n  main:\n    backend: env\n" +
 		"egress:\n  default:\n    services:\n" +
-		"      set: { hosts: [set.example.com], inject: { header: X-Key }, secret: main/EGZO_TEST_SET_VARIABLE }\n" +
-		"      unset: { hosts: [unset.example.com], inject: { header: X-Key }, secret: main/EGZO_TEST_UNSET_VARIABLE }\n"
+		"      set: { hosts: [set.example.com], inject: { header: X-Key }, credential: main/EGZO_TEST_SET_VARIABLE }\n" +
+		"      unset: { hosts: [unset.example.com], inject: { header: X-Key }, credential: main/EGZO_TEST_UNSET_VARIABLE }\n"
 }
 
 func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testing.T) {
@@ -70,7 +70,7 @@ egress:
   default: {allow: [docs.example.org]}
   wide:
     extend: default
-    services: {svc: {hosts: [api.test], inject: {header: x-key}, secret: main/S}}
+    services: {svc: {hosts: [api.test], inject: {header: x-key}, credential: main/S}}
 agents:
   coder: {harness: custom, image: x}
   reviewer: {harness: custom, image: x, egress: wide}

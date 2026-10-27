@@ -210,11 +210,11 @@ vaults:
 egress:
   default:
     services:
-      b: { hosts: [b.example.com], inject: { header: X-Key }, secret: main/B }
-      a: { hosts: [a.example.com], inject: { header: X-Key }, secret: main/A }
+      b: { hosts: [b.example.com], inject: { header: X-Key }, credential: main/B }
+      a: { hosts: [a.example.com], inject: { header: X-Key }, credential: main/A }
   other:
     services:
-      again: { hosts: [c.example.com], inject: { header: X-Key }, secret: main/A }
+      again: { hosts: [c.example.com], inject: { header: X-Key }, credential: main/A }
 `)
 		if want := (ResolvedVault{Backend: "env", Secrets: []string{"A", "B"}}); !reflect.DeepEqual(resolved.Vaults["main"], want) {
 			t.Errorf("vault = %v, want %v", resolved.Vaults["main"], want)
@@ -257,7 +257,7 @@ egress:
 	}
 	for _, c := range nameCases {
 		t.Run(c.name, func(t *testing.T) {
-			yaml := "vaults:\n  v: { backend: " + c.backend + " }\negress:\n  default:\n    services:\n      s: { hosts: [s.example.com], inject: { header: X-Key }, secret: \"v/" + c.secret + "\" }\n"
+			yaml := "vaults:\n  v: { backend: " + c.backend + " }\negress:\n  default:\n    services:\n      s: { hosts: [s.example.com], inject: { header: X-Key }, credential: \"v/" + c.secret + "\" }\n"
 			wantProblems(t, t.TempDir(), yaml, c.want)
 		})
 	}
@@ -288,7 +288,7 @@ vaults:
 egress:
   default:
     services:
-      deploy: { hosts: [api.example.com], inject: { header: X-Key }, secret: main/company/project/test }
+      deploy: { hosts: [api.example.com], inject: { header: X-Key }, credential: main/company/project/test }
 `)
 	if want := (SecretRef{Vault: "main", Name: "company/project/test", Backend: "pass"}); resolved.Secrets["main/company/project/test"] != want {
 		t.Errorf("secrets = %v", resolved.Secrets)

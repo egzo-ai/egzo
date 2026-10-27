@@ -157,6 +157,9 @@ func (p Published) AsProject(file *config.Resolved) *config.Resolved {
 	view := p.View(instances)
 	if file != nil {
 		view.Secrets, view.SecretKey = file.Secrets, file.SecretKey
+		if file.Proxy != nil && file.Proxy.Upstream != nil {
+			view.Proxy = &config.ResolvedProxy{Upstream: file.Proxy.Upstream} // for the policy: the image is not the view's
+		}
 	}
 	return view
 }

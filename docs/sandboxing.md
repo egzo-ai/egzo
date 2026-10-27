@@ -23,9 +23,9 @@ egress:
 ```
 
 - `allow`: host names or `*.domain` globs the agent may reach with **no** credential.
-- `services`: hosts that get a secret applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`, `opencode`)
+- `services`: hosts that get a credential applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`, `opencode`)
   needs only the secret: `vault/SECRET` (for a secret named `company/project/token` in a `pass` vault `main`:
-  `main/company/project/token`).
+  `main/company/project/token`). That string is short for `{ credential: main/company/project/token }`.
 - The agent's reach is `allow` plus the hosts of its services. Without a `default` profile, an agent that names none
   can reach nothing.
 
@@ -45,7 +45,8 @@ Binding a token to the wrong one of the two Anthropic services is refused at `eg
 
 ## Your own services
 
-An object defines a service: hosts, and how to inject the secret.
+An object with `hosts` defines a service: its hosts, how the credential goes into a request, and the `credential`.
+An object without `hosts` binds a credential to a built-in or inherited service and names nothing else.
 
 ```yaml
 egress:
@@ -54,8 +55,12 @@ egress:
       deploy-api:
         hosts: [api.deploy.example.com]
         inject: { header: Authorization, value: "Bearer {secret}" }   # without value, the raw secret is the header
-        secret: main/DEPLOY_TOKEN
+        credential: main/DEPLOY_TOKEN
 ```
+
+A credential has a `method`. `secret` reads a secret from a vault at `egzo project up`: `credential: main/DEPLOY_TOKEN`
+is short for `credential: { method: secret, secret: main/DEPLOY_TOKEN }`. `oauth` is the tokens of a sign-in, which the
+proxy captures and renews (see [OAuth services](#oauth-services)).
 
 `inject` has three forms: the raw secret (no `value`), a `value` template around `{secret}`, or HTTP Basic authentication
 with `basic_user`, which sends `Basic base64(<user>:<secret>)`; use it for what builds the header from the secret itself,
@@ -65,7 +70,7 @@ such as git over HTTPS. `basic_user` and `value` cannot be combined. The built-i
       git-host:
         hosts: [git.example.com]
         inject: { header: Authorization, basic_user: x-access-token }
-        secret: main/GIT_TOKEN
+        credential: main/GIT_TOKEN
 ```
 
 A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.
@@ -79,7 +84,7 @@ them:
         hosts: [deploy.example.com]               # also the vendor's website
         paths: [/api/v1/]                         # the API: the token goes nowhere else
         inject: { header: Authorization, value: "Bearer {secret}" }
-        secret: main/DEPLOY_TOKEN
+        credential: main/DEPLOY_TOKEN
 ```
 
 - A prefix matches whole segments: `/api` covers `/api` and `/api/x`, not `/apix`; `/api/` covers `/api/x`. Other paths
@@ -134,7 +139,7 @@ egress:
     services:
       example-login:
         hosts: [app.example.com]
-        secret: main/sites/example/password
+        credential: main/sites/example/password
         placeholder: EXAMPLE_PASSWORD
 ```
 
@@ -163,7 +168,7 @@ egress:
     extend: default                 # one parent; allow lists are unioned
     services:
       github: main/GITHUB_TOKEN     # a string only sets the secret of an inherited or built-in service
-      deploy-api: { hosts: [api.deploy.example.com], secret: main/DEPLOY_TOKEN,
+      deploy-api: { hosts: [api.deploy.example.com], credential: main/DEPLOY_TOKEN,
                     inject: { header: X-Api-Key } }
 
 agents:
@@ -215,6 +220,24 @@ What happens: the agent signs in to the proxy with an identity egzo makes for th
 
 The harness images carry the ssh client. An image of your own needs `openssh-client`; run `egzo agent ssh-setup` at its start if its
 entrypoint is not `egzo agent run`. See [images](images.md).
+
+## A company network: `proxy.upstream`
+
+The proxy reaches public addresses only, and trusts the system's roots. A service inside a company network, behind a
+company CA, says so project-wide:
+
+```yaml
+proxy:
+  upstream:
+    ca: ./certs/internal-root.pem          # PEM certificates, added to the system roots for the TLS the proxy makes upstream
+    private_hosts: [idp.internal.example]  # exact names the proxy may reach at a private address
+```
+
+- `ca` is read at `egzo project up` and sent to the proxy with the policy. It holds certificates and nothing else; a
+  private key in it is an error.
+- A private host may resolve to a private address, never to loopback or a link-local address (a cloud metadata
+  endpoint). Reaching it still takes a profile that allows it.
+- Names only: no wildcard, address, port or scheme.
 
 ## Full internet
 

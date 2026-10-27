@@ -39,13 +39,13 @@ def fake_pass(tmp_path):
 
 def test_a_reference_declares_the_secret_and_the_resolved_file_lists_it_under_its_vault(project):
     resolved = project.resolved(spec(**uses("main/TOKEN", "main/OTHER")))
-    assert resolved["egress"]["default"]["services"]["svc0"]["secret"] == "main/TOKEN"
+    assert resolved["egress"]["default"]["services"]["svc0"]["credential"]["secret"] == "main/TOKEN"
     assert resolved["vaults"]["main"] == {"backend": "env", "secrets": ["OTHER", "TOKEN"]}
 
 
 def test_a_secret_referred_to_twice_is_listed_once(project):
     document = spec(**uses("main/TOKEN"))
-    document["egress"]["other"] = {"services": {"deploy": {"hosts": ["deploy.example.com"], "inject": {"header": "X-Key"}, "secret": "main/TOKEN"}}}
+    document["egress"]["other"] = {"services": {"deploy": {"hosts": ["deploy.example.com"], "inject": {"header": "X-Key"}, "credential": "main/TOKEN"}}}
     assert project.resolved(document)["vaults"]["main"]["secrets"] == ["TOKEN"]
 
 
@@ -100,7 +100,7 @@ def test_a_vault_nothing_refers_to_is_a_warning(project):
 
 def test_secret_names_in_a_pass_vault_can_be_hierarchical(project):
     resolved = project.resolved(spec(**uses("main/company/project/test", backend="pass")))
-    assert resolved["egress"]["default"]["services"]["svc0"]["secret"] == "main/company/project/test"
+    assert resolved["egress"]["default"]["services"]["svc0"]["credential"]["secret"] == "main/company/project/test"
     assert resolved["vaults"]["main"]["secrets"] == ["company/project/test"]
 
 

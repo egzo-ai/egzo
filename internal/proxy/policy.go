@@ -23,6 +23,7 @@ type Policy struct {
 	Project   string             `json:"project"`
 	SecretKey string             `json:"secret_key"`
 	Profiles  map[string]Profile `json:"profiles"`
+	Upstream  *Upstream          `json:"upstream,omitempty"`
 }
 
 // Profile is one egress profile: what an agent bound to it may reach, and what is injected on the way.

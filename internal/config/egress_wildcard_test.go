@@ -34,7 +34,7 @@ egress:
   child:
     extend: default
     services:
-      deploy-api: { hosts: ['*.example.com'], inject: { header: H }, secret: main/KEY }
+      deploy-api: { hosts: ['*.example.com'], inject: { header: H }, credential: main/KEY }
 `, `service "deploy-api"`, "exact", `"*.example.com"`)
 	})
 
@@ -43,11 +43,11 @@ egress:
 egress:
   default:
     services:
-      svc: { hosts: [a.com], inject: { header: H }, secret: main/KEY }
+      svc: { hosts: [a.com], inject: { header: H }, credential: main/KEY }
   child:
     extend: default
     services:
-      svc: { hosts: ['*'], inject: { header: H }, secret: main/KEY }
+      svc: { hosts: ['*'], inject: { header: H }, credential: main/KEY }
 `, `service "svc"`, "exact")
 	})
 
@@ -69,8 +69,8 @@ egress:
 egress:
   default:
     services:
-      a: { hosts: [x.com], inject: { header: A }, secret: main/KEY }
-      b: { hosts: [x.com], inject: { header: B }, secret: main/KEY }
+      a: { hosts: [x.com], inject: { header: A }, credential: main/KEY }
+      b: { hosts: [x.com], inject: { header: B }, credential: main/KEY }
 `, "both cover host")
 	})
 }

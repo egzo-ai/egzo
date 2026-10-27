@@ -26,8 +26,8 @@ def sandbox(shared_project, engine):
     shared_project.up(spec(
         vaults={"main": {"backend": "env"}},
         egress={
-            "default": {"allow": ["example.com", "docs.example.org"], "services": {"echo": {"hosts": ["example.net"], "inject": {"header": "X-Key"}, "secret": "main/DEPLOY_TOKEN"}}},
-            "wide": {"extend": "default", "services": {"svc": {"hosts": ["api.test"], "inject": {"header": "x-key"}, "secret": "main/API_SECRET"}}},
+            "default": {"allow": ["example.com", "docs.example.org"], "services": {"echo": {"hosts": ["example.net"], "inject": {"header": "X-Key"}, "credential": "main/DEPLOY_TOKEN"}}},
+            "wide": {"extend": "default", "services": {"svc": {"hosts": ["api.test"], "inject": {"header": "x-key"}, "credential": "main/API_SECRET"}}},
         },
         agents={"coder": custom(image), "reviewer": custom(image, egress="wide")},
     ))

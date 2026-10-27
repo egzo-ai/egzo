@@ -26,21 +26,21 @@ egress:
 	services := resolved.Egress["default"].Services
 
 	anthropic := services["anthropic"]
-	if !reflect.DeepEqual(anthropic.Hosts, []string{"api.anthropic.com"}) || anthropic.Secret != "main/KEY" {
+	if !reflect.DeepEqual(anthropic.Hosts, []string{"api.anthropic.com"}) || anthropic.SecretRef() != "main/KEY" {
 		t.Errorf("anthropic = %+v", anthropic)
 	}
 	if want := (&Inject{Header: "x-api-key"}); *anthropic.Inject != *want {
 		t.Errorf("anthropic inject = %+v", anthropic.Inject)
 	}
 	github := services["github"]
-	if *github.Inject != (Inject{Header: "Authorization", BasicUser: "x-access-token"}) || github.Secret != "main/OTHER" {
+	if *github.Inject != (Inject{Header: "Authorization", BasicUser: "x-access-token"}) || github.SecretRef() != "main/OTHER" {
 		t.Errorf("github = %+v", github)
 	}
 }
 
 func TestEgressBindingASecretDoesNotMutateTheBuiltin(t *testing.T) {
 	mustResolve(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      anthropic: main/KEY\n")
-	if builtinServices["anthropic"].Secret != "" {
+	if builtinServices["anthropic"].Credential != nil {
 		t.Error("the shared built-in service picked up a secret")
 	}
 	copied, _ := builtinService("anthropic")
@@ -55,7 +55,7 @@ func TestEgressUnknownService(t *testing.T) {
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      anthropc: main/KEY\n",
 		`unknown service "anthropc" (did you mean "anthropic"?)`)
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      kubernetes: main/KEY\n",
-		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, github, opencode)`)
+		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, chatgpt, github, opencode)`)
 }
 
 func TestEgressEmptyServiceEntryIsRejected(t *testing.T) {
@@ -86,15 +86,15 @@ egress:
       internal:
         hosts: [api.internal.example]
         inject: { header: X-Token, value: "tok {secret}" }
-        secret: main/KEY
+        credential: main/KEY
         inspect: true
 `)
 		got := resolved.Egress["default"].Services["internal"]
 		want := &ResolvedService{
-			Hosts:   []string{"api.internal.example"},
-			Inject:  &Inject{Header: "X-Token", Value: "tok {secret}"},
-			Secret:  "main/KEY",
-			Inspect: true,
+			Hosts:      []string{"api.internal.example"},
+			Inject:     &Inject{Header: "X-Token", Value: "tok {secret}"},
+			Credential: &Credential{Method: MethodSecret, Secret: "main/KEY"},
+			Inspect:    true,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("service = %+v, want %+v", got, want)
@@ -113,13 +113,13 @@ egress:
 		{"no hosts", "{ inspect: true }", "needs hosts"},
 		{"mid-host wildcard", "{ hosts: ['a.*.example.com'] }", "invalid host"},
 		{"wildcard without a domain", "{ hosts: ['*..'] }", "invalid host"},
-		{"wildcard host with inject", "{ hosts: ['*.example.com'], inject: { header: H }, secret: main/KEY }", `a secret binds to exact hosts, "*.example.com" is a wildcard`},
-		{"star host with inject", "{ hosts: [a.com, '*'], inject: { header: H }, secret: main/KEY }", `"*" is a wildcard`},
-		{"wildcard host with placeholder", "{ hosts: ['*.Example.COM.'], placeholder: PW, secret: main/KEY }", `"*.example.com" is a wildcard`},
+		{"wildcard host with inject", "{ hosts: ['*.example.com'], inject: { header: H }, credential: main/KEY }", `a secret binds to exact hosts, "*.example.com" is a wildcard`},
+		{"star host with inject", "{ hosts: [a.com, '*'], inject: { header: H }, credential: main/KEY }", `"*" is a wildcard`},
+		{"wildcard host with placeholder", "{ hosts: ['*.Example.COM.'], placeholder: PW, credential: main/KEY }", `"*.example.com" is a wildcard`},
 		{"host with scheme", "{ hosts: ['https://example.com'] }", "invalid host"},
-		{"inject without header", "{ hosts: [a.com], inject: {}, secret: main/KEY }", "inject needs a header"},
-		{"secret without inject", "{ hosts: [a.com], secret: main/KEY }", "neither inject nor placeholder"},
-		{"bad secret", "{ hosts: [a.com], inject: { header: H }, secret: ghost/NOPE }", `unknown vault "ghost"`},
+		{"inject without header", "{ hosts: [a.com], inject: {}, credential: main/KEY }", "inject needs a header"},
+		{"secret without inject", "{ hosts: [a.com], credential: main/KEY }", "neither inject nor placeholder"},
+		{"bad secret", "{ hosts: [a.com], inject: { header: H }, credential: ghost/NOPE }", `unknown vault "ghost"`},
 		{"inject without any secret", "{ hosts: [a.com], inject: { header: H } }", "needs a secret"},
 	}
 	for _, c := range cases {
@@ -158,16 +158,16 @@ egress:
 	if want := []string{"pypi.org", "npmjs.org"}; !reflect.DeepEqual(child.Allow, want) {
 		t.Errorf("child allow = %v, want %v", child.Allow, want)
 	}
-	if child.Services["anthropic"].Secret != "main/KEY" || child.Services["github"].Secret != "main/OTHER" {
+	if child.Services["anthropic"].SecretRef() != "main/KEY" || child.Services["github"].SecretRef() != "main/OTHER" {
 		t.Errorf("child services = %+v", child.Services)
 	}
 	if _, leaked := resolved.Egress["base"].Services["github"]; leaked {
 		t.Error("the child's service leaked into its parent")
 	}
-	if resolved.Egress["rebind"].Services["anthropic"].Secret != "main/OTHER" {
+	if resolved.Egress["rebind"].Services["anthropic"].SecretRef() != "main/OTHER" {
 		t.Error("a child could not rebind an inherited service's secret")
 	}
-	if resolved.Egress["base"].Services["anthropic"].Secret != "main/KEY" {
+	if resolved.Egress["base"].Services["anthropic"].SecretRef() != "main/KEY" {
 		t.Error("rebinding in a child changed the parent")
 	}
 }
@@ -199,8 +199,8 @@ func TestEgressConflictingInjectionOnOneHost(t *testing.T) {
 egress:
   default:
     services:
-      one: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
-      two: { hosts: [api.example.com], inject: { header: B }, secret: main/KEY }
+      one: { hosts: [api.example.com], inject: { header: A }, credential: main/KEY }
+      two: { hosts: [api.example.com], inject: { header: B }, credential: main/KEY }
 `, `both cover host "api.example.com" with different injection`)
 
 	// The same injection on the same host is not a conflict.
@@ -208,8 +208,8 @@ egress:
 egress:
   default:
     services:
-      one: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
-      two: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
+      one: { hosts: [api.example.com], inject: { header: A }, credential: main/KEY }
+      two: { hosts: [api.example.com], inject: { header: A }, credential: main/KEY }
 `)
 
 	// With different paths it is: only one service would decide where the credential goes.
@@ -225,8 +225,8 @@ egress:
 egress:
   default:
     services:
-      one: { hosts: [a.example.com], inject: { header: A }, secret: main/KEY }
-      two: { hosts: [b.example.com], inject: { header: B }, secret: main/OTHER }
+      one: { hosts: [a.example.com], inject: { header: A }, credential: main/KEY }
+      two: { hosts: [b.example.com], inject: { header: B }, credential: main/OTHER }
 `)
 }
 
@@ -239,9 +239,9 @@ func TestSameInjection(t *testing.T) {
 	}{
 		{"both plain", &ResolvedService{}, &ResolvedService{}, true},
 		{"one plain", &ResolvedService{}, &ResolvedService{Inject: h("A")}, false},
-		{"same header and secret", &ResolvedService{Inject: h("A"), Secret: "v/s"}, &ResolvedService{Inject: h("A"), Secret: "v/s"}, true},
+		{"same header and secret", &ResolvedService{Inject: h("A"), Credential: &Credential{Method: MethodSecret, Secret: "v/s"}}, &ResolvedService{Inject: h("A"), Credential: &Credential{Method: MethodSecret, Secret: "v/s"}}, true},
 		{"different header", &ResolvedService{Inject: h("A")}, &ResolvedService{Inject: h("B")}, false},
-		{"different secret", &ResolvedService{Inject: h("A"), Secret: "v/1"}, &ResolvedService{Inject: h("A"), Secret: "v/2"}, false},
+		{"different secret", &ResolvedService{Inject: h("A"), Credential: &Credential{Method: MethodSecret, Secret: "v/1"}}, &ResolvedService{Inject: h("A"), Credential: &Credential{Method: MethodSecret, Secret: "v/2"}}, false},
 	}
 	for _, c := range cases {
 		if got := sameInjection(c.a, c.b); got != c.want {
@@ -269,7 +269,7 @@ func TestProfileReaches(t *testing.T) {
 }
 
 func TestBuiltinsAreSortedAndComplete(t *testing.T) {
-	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "github", "opencode"}; !reflect.DeepEqual(got, want) {
+	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "chatgpt", "github", "opencode"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("builtinNames = %v, want %v", got, want)
 	}
 	if got, want := HarnessNames(), []string{"claude-code", "custom", "opencode", "pi"}; !reflect.DeepEqual(got, want) {
@@ -288,12 +288,12 @@ func TestTheAnthropicOAuthServiceIsBuiltInAndSendsABearerToken(t *testing.T) {
 }
 
 func TestPlaceholderServices(t *testing.T) {
-	const login = `hosts: [app.example.com], secret: main/KEY, placeholder: SITE_PASSWORD`
+	const login = `hosts: [app.example.com], credential: main/KEY, placeholder: SITE_PASSWORD`
 
 	t.Run("a placeholder service resolves and prints the variable", func(t *testing.T) {
 		resolved, _ := mustResolve(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      login: { "+login+" }\n")
 		service := resolved.Egress["default"].Services["login"]
-		if service.Placeholder != "SITE_PASSWORD" || service.Secret != "main/KEY" || service.Inject != nil {
+		if service.Placeholder != "SITE_PASSWORD" || service.SecretRef() != "main/KEY" || service.Inject != nil {
 			t.Errorf("service = %+v", service)
 		}
 	})
@@ -305,7 +305,7 @@ egress:
   child: { extend: base, services: { login: main/OTHER } }
 `)
 		service := resolved.Egress["child"].Services["login"]
-		if service.Placeholder != "SITE_PASSWORD" || service.Secret != "main/OTHER" {
+		if service.Placeholder != "SITE_PASSWORD" || service.SecretRef() != "main/OTHER" {
 			t.Errorf("service = %+v", service)
 		}
 	})
@@ -313,12 +313,12 @@ egress:
 	cases := []struct{ name, service, want string }{
 		{"no secret", "{ hosts: [a.com], placeholder: SITE_PASSWORD }", `"login" has a placeholder but no secret`},
 		{"inject and placeholder", "{ " + login + ", inject: { header: X } }", "both inject and placeholder"},
-		{"secret with neither", "{ hosts: [a.com], secret: main/KEY }", `service "login" has a secret but neither inject nor placeholder`},
-		{"dash in the name", "{ hosts: [a.com], secret: main/KEY, placeholder: MY-PASSWORD }", `"MY-PASSWORD"`},
-		{"leading digit", "{ hosts: [a.com], secret: main/KEY, placeholder: 1PASSWORD }", `"1PASSWORD"`},
-		{"set by egzo", "{ hosts: [a.com], secret: main/KEY, placeholder: HTTPS_PROXY }", `"HTTPS_PROXY"`},
-		{"egzo prefix", "{ hosts: [a.com], secret: main/KEY, placeholder: EGZO_TOKEN }", `"EGZO_TOKEN"`},
-		{"home", "{ hosts: [a.com], secret: main/KEY, placeholder: HOME }", `"HOME"`},
+		{"secret with neither", "{ hosts: [a.com], credential: main/KEY }", `service "login" has a secret but neither inject nor placeholder`},
+		{"dash in the name", "{ hosts: [a.com], credential: main/KEY, placeholder: MY-PASSWORD }", `"MY-PASSWORD"`},
+		{"leading digit", "{ hosts: [a.com], credential: main/KEY, placeholder: 1PASSWORD }", `"1PASSWORD"`},
+		{"set by egzo", "{ hosts: [a.com], credential: main/KEY, placeholder: HTTPS_PROXY }", `"HTTPS_PROXY"`},
+		{"egzo prefix", "{ hosts: [a.com], credential: main/KEY, placeholder: EGZO_TOKEN }", `"EGZO_TOKEN"`},
+		{"home", "{ hosts: [a.com], credential: main/KEY, placeholder: HOME }", `"HOME"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -332,7 +332,7 @@ egress:
   default:
     services:
       login: { `+login+` }
-      other: { hosts: [b.example.com], secret: main/OTHER, placeholder: SITE_PASSWORD }
+      other: { hosts: [b.example.com], credential: main/OTHER, placeholder: SITE_PASSWORD }
 `, "SITE_PASSWORD")
 	})
 

@@ -5,6 +5,8 @@ package config
 
 import (
 	"fmt"
+	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -20,13 +22,26 @@ type ResolvedProfile struct {
 }
 
 type ResolvedService struct {
-	Hosts  []string `yaml:"hosts"`
-	Paths  []string `yaml:"paths,omitempty"`
-	Inject *Inject  `yaml:"inject,omitempty"`
-	Secret string   `yaml:"secret,omitempty"`
+	Hosts      []string    `yaml:"hosts"`
+	Paths      []string    `yaml:"paths,omitempty"`
+	Inject     *Inject     `yaml:"inject,omitempty"`
+	Credential *Credential `yaml:"credential,omitempty"`
 	// Placeholder is the variable the agents of the profile get, holding a stand-in the proxy swaps for the secret.
 	Placeholder string `yaml:"placeholder,omitempty"`
 	Inspect     bool   `yaml:"inspect,omitempty"`
+}
+
+// SecretRef is the <vault>/<secret> of a service whose credential is a secret, or "".
+func (s *ResolvedService) SecretRef() string {
+	if s.Credential == nil || s.Credential.Method != MethodSecret {
+		return ""
+	}
+	return s.Credential.Secret
+}
+
+// OAuth reports whether the service's credential is a sign-in.
+func (s *ResolvedService) OAuth() bool {
+	return s.Credential != nil && s.Credential.Method == MethodOAuth
 }
 
 const defaultProfile = "default"
@@ -126,35 +141,120 @@ func (r *egressResolver) resolve(name string, chain []string) *ResolvedProfile {
 }
 
 func (r *egressResolver) applyService(profile string, current *ResolvedProfile, name string, entry ServiceEntry) {
-	if entry.Def == nil {
-		existing := current.Services[name]
-		if existing == nil {
-			builtin, ok := builtinService(name)
-			if !ok {
-				known := append(builtinNames(), serviceKeys(current)...)
-				if close := suggest(name, known); close != "" {
-					r.problems.addf("egress profile %q: unknown service %q (did you mean %q?)", profile, name, close)
-				} else {
-					r.problems.addf("egress profile %q: unknown service %q (built-in services: %s)", profile, name, strings.Join(builtinNames(), ", "))
-				}
-				return
-			}
-			current.Services[name] = builtin
-			existing = builtin
-		}
-		if existing.Inject == nil && existing.Placeholder == "" {
-			r.problems.addf("egress profile %q: service %q has neither inject nor placeholder, so a secret cannot be bound to it", profile, name)
-			return
-		}
-		if r.checkSecret(profile, fmt.Sprintf("service %q", name), entry.Ref) {
-			existing.Secret = entry.Ref
-		}
+	if entry.Def == nil || entry.Def.Hosts == nil {
+		r.bindService(profile, current, name, entry)
 		return
 	}
+	r.defineService(profile, current, name, *entry.Def)
+}
 
-	def := *entry.Def
-	def.Hosts = make([]string, len(entry.Def.Hosts))
-	for i, host := range entry.Def.Hosts {
+// bindService binds a credential to a service that already resolves, built in or inherited: a string (a secret
+// reference) or an object without hosts, which names only the credential.
+func (r *egressResolver) bindService(profile string, current *ResolvedProfile, name string, entry ServiceEntry) {
+	credential := &Credential{Method: MethodSecret, Secret: entry.Ref, short: true}
+	if entry.Def != nil {
+		def := *entry.Def
+		def.Credential = nil
+		if entry.Def.Credential == nil || !reflect.DeepEqual(def, ServiceDef{}) {
+			r.problems.addf("egress profile %q: service %q: an object without hosts binds a credential and names nothing else (credential: ...); a definition needs hosts", profile, name)
+			return
+		}
+		copied := *entry.Def.Credential
+		credential = &copied
+	}
+	existing := current.Services[name]
+	if existing == nil {
+		builtin, ok := builtinService(name)
+		if !ok {
+			known := append(builtinNames(), serviceKeys(current)...)
+			if close := suggest(name, known); close != "" {
+				r.problems.addf("egress profile %q: unknown service %q (did you mean %q?)", profile, name, close)
+			} else {
+				r.problems.addf("egress profile %q: unknown service %q (built-in services: %s)", profile, name, strings.Join(builtinNames(), ", "))
+			}
+			return
+		}
+		current.Services[name] = builtin
+		existing = builtin
+	}
+	if !r.checkCredential(profile, name, credential) {
+		return
+	}
+	switch {
+	case existing.OAuth() && credential.Method != MethodOAuth:
+		r.problems.addf("egress profile %q: service %q signs in with OAuth: bind it as %s: { credential: { method: oauth } }", profile, name, name)
+	case existing.OAuth():
+		if credential.TokenURL != "" || credential.RevokeURL != "" {
+			r.problems.addf("egress profile %q: service %q: a binding cannot change the token_url or revoke_url of the service; define it with hosts instead", profile, name)
+		}
+	case credential.Method == MethodOAuth:
+		r.problems.addf("egress profile %q: service %q takes a secret: it cannot be bound to a sign-in (method oauth)", profile, name)
+	case existing.Inject == nil && existing.Placeholder == "":
+		r.problems.addf("egress profile %q: service %q has neither inject nor placeholder, so a secret cannot be bound to it", profile, name)
+	default:
+		existing.Credential = credential
+	}
+}
+
+// checkCredential validates a credential, fills in its method and declares its secret.
+func (r *egressResolver) checkCredential(profile, name string, credential *Credential) bool {
+	short := credential.short
+	credential.short = false // a resolved credential is the same however it was written
+	if credential.Method == "" && credential.Secret != "" {
+		credential.Method = MethodSecret
+	}
+	switch credential.Method {
+	case MethodSecret:
+		if credential.TokenURL != "" || credential.RevokeURL != "" {
+			r.problems.addf("egress profile %q: service %q: token_url and revoke_url belong to an oauth credential", profile, name)
+			return false
+		}
+		if credential.Secret == "" && !short {
+			r.problems.addf("egress profile %q: service %q: a secret credential needs its secret: <vault>/<secret>", profile, name)
+			return false
+		}
+		return r.checkSecret(profile, fmt.Sprintf("service %q", name), credential.Secret)
+	case MethodOAuth:
+		valid := true
+		if credential.Secret != "" {
+			r.problems.addf("egress profile %q: service %q: an oauth credential reads no secret from a vault: the proxy captures the tokens at sign-in", profile, name)
+			valid = false
+		}
+		for key, value := range map[string]string{"token_url": credential.TokenURL, "revoke_url": credential.RevokeURL} {
+			if value != "" {
+				if reason := endpointProblem(value); reason != "" {
+					r.problems.addf("egress profile %q: service %q: %s %q %s", profile, name, key, value, reason)
+					valid = false
+				}
+			}
+		}
+		return valid
+	}
+	r.problems.addf("egress profile %q: service %q: unknown credential method %q (methods: %s, %s)", profile, name, credential.Method, MethodSecret, MethodOAuth)
+	return false
+}
+
+// endpointProblem says why raw cannot be an OAuth endpoint, or returns "": an https URL on port 443 of an exact host,
+// which the proxy intercepts.
+func endpointProblem(raw string) string {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Scheme != "https" || u.Opaque != "":
+		return "is not an https URL"
+	case u.User != nil || u.RawQuery != "" || u.Fragment != "":
+		return "has credentials, a query or a fragment"
+	case u.Port() != "" && u.Port() != "443":
+		return "is not on port 443, the only port the proxy reaches"
+	case !names.Host(names.NormalizeHost(u.Hostname())):
+		return "does not name one exact host"
+	}
+	return ""
+}
+
+func (r *egressResolver) defineService(profile string, current *ResolvedProfile, name string, def ServiceDef) {
+	original := def
+	def.Hosts = make([]string, len(original.Hosts))
+	for i, host := range original.Hosts {
 		def.Hosts[i] = names.NormalizeHost(host)
 	}
 	valid := true
@@ -168,9 +268,27 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 			valid = false
 		}
 	}
+	oauth := def.Credential != nil && def.Credential.Method == MethodOAuth
+	if def.Credential != nil {
+		credential := *def.Credential
+		def.Credential = &credential
+		if !r.checkCredential(profile, name, def.Credential) {
+			valid = false
+		}
+	}
+	if oauth {
+		if def.Inject != nil || def.Placeholder != "" {
+			r.problems.addf("egress profile %q: service %q: an oauth service has no inject and no placeholder: the proxy swaps the stand-in bearer token the client sends for the real one", profile, name)
+			valid = false
+		}
+		if def.Credential.TokenURL == "" {
+			r.problems.addf("egress profile %q: service %q: an oauth credential needs its token_url, where the client exchanges its code and refreshes", profile, name)
+			valid = false
+		}
+	}
 	// A secret binds to exact hosts: "*.example.com" would hand it to every subdomain, including
 	// ones somebody else controls. A wildcard service without a secret is an allow entry.
-	if def.Inject != nil || def.Placeholder != "" {
+	if def.Inject != nil || def.Placeholder != "" || oauth {
 		for _, host := range def.Hosts {
 			if strings.HasPrefix(host, "*") {
 				r.problems.addf("egress profile %q: service %q: a secret binds to exact hosts, %q is a wildcard", profile, name, host)
@@ -190,17 +308,17 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 	case def.Inject != nil && def.Placeholder != "":
 		r.problems.addf("egress profile %q: service %q has both inject and placeholder; a service has one or the other", profile, name)
 		valid = false
-	case def.Placeholder != "" && def.Secret == "":
+	case def.Placeholder != "" && def.Credential == nil:
 		r.problems.addf("egress profile %q: service %q has a placeholder but no secret to stand for", profile, name)
 		valid = false
-	case def.Inject == nil && def.Placeholder == "" && def.Secret != "":
+	case def.Inject == nil && def.Placeholder == "" && def.Credential != nil && !oauth:
 		r.problems.addf("egress profile %q: service %q has a secret but neither inject nor placeholder, so nothing would use it", profile, name)
 		valid = false
 	}
 	if def.Paths != nil {
 		switch {
-		case def.Inject == nil:
-			r.problems.addf("egress profile %q: service %q: paths limit where inject sets its header, and the service has no inject", profile, name)
+		case def.Inject == nil && !oauth:
+			r.problems.addf("egress profile %q: service %q: paths limit where inject sets its header or an oauth credential its token, and the service has neither", profile, name)
 			valid = false
 		case len(def.Paths) == 0:
 			r.problems.addf("egress profile %q: service %q: paths is empty, so nothing would be injected; leave it out to inject on every path", profile, name)
@@ -219,13 +337,10 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 			valid = false
 		}
 	}
-	if def.Secret != "" && !r.checkSecret(profile, fmt.Sprintf("service %q", name), def.Secret) {
-		valid = false
-	}
 	if !valid {
 		return
 	}
-	resolved := &ResolvedService{Hosts: slices.Clone(def.Hosts), Paths: slices.Clone(def.Paths), Secret: def.Secret, Placeholder: def.Placeholder, Inspect: def.Inspect}
+	resolved := &ResolvedService{Hosts: slices.Clone(def.Hosts), Paths: slices.Clone(def.Paths), Credential: def.Credential, Placeholder: def.Placeholder, Inspect: def.Inspect}
 	if def.Inject != nil {
 		inject := *def.Inject
 		resolved.Inject = &inject
@@ -303,7 +418,7 @@ func (r *egressResolver) checkProfile(name string, profile *ResolvedProfile) {
 	sort.Strings(names)
 	for _, service := range names {
 		resolved := profile.Services[service]
-		if (resolved.Inject != nil || resolved.Placeholder != "") && resolved.Secret == "" {
+		if (resolved.Inject != nil || resolved.Placeholder != "") && resolved.SecretRef() == "" {
 			r.problems.addf("egress profile %q: service %q needs a secret; bind one as %s: <vault>/<secret>", name, service, service)
 		}
 	}
@@ -341,7 +456,7 @@ func (r *egressResolver) checkProfile(name string, profile *ResolvedProfile) {
 }
 
 func sameInjection(a, b *ResolvedService) bool {
-	if a.Secret != b.Secret {
+	if a.SecretRef() != b.SecretRef() {
 		return false
 	}
 	switch {

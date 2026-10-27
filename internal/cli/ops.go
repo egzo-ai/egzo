@@ -254,10 +254,10 @@ func newProxyRulesCommand(opts *options) *cobra.Command {
 					definition := profile.Services[service]
 					access := "allowed"
 					if definition.Inject != nil {
-						access = fmt.Sprintf("credential injected as %s (service %s, secret %s)", definition.Inject.Header, service, definition.Secret)
+						access = fmt.Sprintf("credential injected as %s (service %s, secret %s)", definition.Inject.Header, service, definition.SecretRef())
 					}
 					if definition.Placeholder != "" {
-						access = fmt.Sprintf("placeholder $%s swapped for the secret (service %s, secret %s)", definition.Placeholder, service, definition.Secret)
+						access = fmt.Sprintf("placeholder $%s swapped for the secret (service %s, secret %s)", definition.Placeholder, service, definition.SecretRef())
 					}
 					for _, host := range definition.Hosts {
 						fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", name, profileName, host, access)
