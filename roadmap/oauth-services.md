@@ -17,7 +17,9 @@ as Claude's `claude setup-token`. It does not cover a sign-in whose tokens rotat
 - **A refresh token works once.** After a refresh the old one is refused (`refresh_token_reused`). Every copy of `auth.json`
   competes, and the first to refresh logs the others out. OpenAI's CI guidance says one file per runner, never shared by
   concurrent jobs.
-- **A vault cannot hold it.** The first refresh makes the stored copy useless, and egzo only reads vaults.
+- **A vault cannot hold it.** The first refresh makes the stored copy useless, and egzo only reads vaults. The user does not
+  need the token in the vault anyway: what matters is that it is encrypted at rest and that Codex keeps working without
+  signing in again.
 
 How others do it, with the sign-in inside the agent:
 
@@ -38,7 +40,7 @@ services:
   chatgpt:
     hosts: [chatgpt.com]
     paths: [/backend-api/]        # the path mitigation of the known issue
-    oauth: { token_url: https://auth.openai.com/oauth/token }
+    oauth: { token_url: https://auth.openai.com/oauth/token, store_key: main/egzo-store-key }
 ```
 
 1. **Sign-in, in the agent.** The first Codex agent of the project starts without a sign-in and shows Codex's own first-run
@@ -67,14 +69,32 @@ proxy.
 
 ### Where the tokens are kept
 
-- An engine volume per project, mounted by the proxy only (for example `<project>-credentials`, labelled like the other volumes).
-  It works the same from the CLI and the hub, and nothing is on the host.
-- It survives `project down`, like the instance branches. Removing a sign-in is explicit (`egzo service logout <service>`, name to
-  decide).
+The tokens are internal to the proxy and never leave it. egzo does not write to the user's vault.
+
+- **A store key from the vault.** An `oauth` service names a secret that is the key of the proxy's token store: 32 random bytes
+  the user generates once (`openssl rand -hex 32`) and keeps in the vault, like the hub's `EGZO_SECRET_KEY`. It reaches the proxy
+  with the policy (exec stdin at `up`) and lives in its memory only.
+- **Sealed at rest.** The proxy keeps the tokens in an engine volume only it mounts (for example `<project>-credentials`),
+  sealed with AEAD (XChaCha20-Poly1305) under a key derived with HKDF from the store key and the project, so one vault secret
+  can serve several projects without sharing a key. A copy or backup of the volume is useless without the vault secret.
+- **Restart.** A restarted proxy opens nothing until the next `up` delivers the key, as for every secret today.
+- **Lost or changed key.** The store cannot be opened: the proxy discards it and the user signs in again. That is the only cost.
+  Re-sealing under a new key (`up` given the old and the new) is later.
+- The volume survives `project down`, like the instance branches. Removing a sign-in is explicit (`egzo service logout
+  <service>`, name to decide).
 - One sign-in per service per project, shared by every agent of the project. On a hub with several users that means one account
   for the project: the docs say so.
-- Encryption at rest, with a key from the user's vault, is optional and later: anyone with engine access can read the volume
-  anyway; it protects backups and disk copies.
+- Two projects that share a store volume or a sign-in log each other out; egzo does not prevent it, the docs say so.
+
+```yaml
+services:
+  chatgpt:
+    hosts: [chatgpt.com]
+    paths: [/backend-api/]
+    oauth:
+      token_url: https://auth.openai.com/oauth/token
+      store_key: main/egzo-store-key
+```
 
 ### Agents after the first
 
@@ -129,7 +149,8 @@ Nothing of this was run against a real account yet.
   - a sign-in through the proxy: the agent's `auth.json` holds stand-ins, the stub saw the real exchange;
   - a model request reaches the stub with the real token; a request with any other token is untouched;
   - the client's refresh is answered by the proxy and never reaches the stub with a stand-in;
-  - the proxy renews ahead of `exp`, saves the rotated refresh token, and keeps working after a proxy restart;
+  - the proxy renews ahead of `exp`, saves the rotated refresh token, and keeps working after a proxy restart and `up`;
+  - the store volume holds no token in clear; with another store key the proxy discards it and asks for a sign-in;
   - two agents of the project, one sign-in;
   - a revoked refresh token is reported by `project check` and in the agent's error;
   - a stand-in sent to a host outside the service stays a stand-in.
