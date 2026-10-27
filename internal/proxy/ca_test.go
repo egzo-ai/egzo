@@ -13,30 +13,8 @@ import (
 	"time"
 )
 
-func TestCAPersistsAcrossLoads(t *testing.T) {
-	dir := t.TempDir()
-	first, err := LoadOrCreateCA(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := LoadOrCreateCA(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Fingerprint() != second.Fingerprint() {
-		t.Error("the CA changed between loads: agents would have to be restarted to trust it again")
-	}
-	info, err := os.Stat(filepath.Join(dir, "ca.key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("CA key mode = %v, want 0600", info.Mode().Perm())
-	}
-}
-
 func TestPublishNeverWritesTheKey(t *testing.T) {
-	ca, err := LoadOrCreateCA(t.TempDir())
+	ca, err := NewCA()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,14 +39,14 @@ func TestPublishNeverWritesTheKey(t *testing.T) {
 }
 
 func TestPublishWorksWithoutASystemBundle(t *testing.T) {
-	ca, _ := LoadOrCreateCA(t.TempDir())
+	ca, _ := NewCA()
 	if err := ca.Publish(t.TempDir(), "/nonexistent/ca-certificates.crt"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestLeafCertificatesVerifyAgainstTheCA(t *testing.T) {
-	ca, _ := LoadOrCreateCA(t.TempDir())
+	ca, _ := NewCA()
 	minter := NewMinter(ca)
 	certificate, err := minter.Certificate("api.example.com")
 	if err != nil {
@@ -88,7 +66,7 @@ func TestLeafCertificatesVerifyAgainstTheCA(t *testing.T) {
 }
 
 func TestLeafCertificatesAreCachedAndRenewed(t *testing.T) {
-	ca, _ := LoadOrCreateCA(t.TempDir())
+	ca, _ := NewCA()
 	minter := NewMinter(ca)
 	first, _ := minter.Certificate("a.example.com")
 	again, _ := minter.Certificate("a.example.com")
@@ -196,33 +174,14 @@ func TestBindingsNeedALoadedProfileAndFollowItsChanges(t *testing.T) {
 	}
 }
 
-func TestRotateCAIssuesANewCAAndOverwritesTheFiles(t *testing.T) {
-	dir := t.TempDir()
-	first, err := LoadOrCreateCA(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rotated, err := RotateCA(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rotated.Fingerprint() == first.Fingerprint() {
-		t.Fatal("the CA did not change")
-	}
-	again, err := LoadOrCreateCA(dir)
-	if err != nil || again.Fingerprint() != rotated.Fingerprint() {
-		t.Errorf("the rotated CA was not what got stored: %v", err)
-	}
-}
-
 func TestTheMinterSignsWithTheNewCAAfterARotationAndForgetsTheOldLeaves(t *testing.T) {
-	old, _ := LoadOrCreateCA(t.TempDir())
+	old, _ := NewCA()
 	minter := NewMinter(old)
 	before, err := minter.Certificate("example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rotated, _ := RotateCA(t.TempDir())
+	rotated, _ := NewCA()
 	minter.SetCA(rotated)
 	after, err := minter.Certificate("example.test")
 	if err != nil {

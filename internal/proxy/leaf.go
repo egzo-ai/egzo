@@ -10,12 +10,16 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"net"
 	"sync"
 	"time"
 )
 
 const leafValidity = 24 * time.Hour
+
+// errLockedCA is a CA whose key is sealed and not opened yet: the proxy waits for `egzo project up` to bring the secret key.
+var errLockedCA = errors.New("the CA's key is sealed and the proxy has not been given the secret key: run `egzo project up`")
 
 // Minter signs short-lived certificates for the hosts the proxy intercepts and caches them in memory.
 type Minter struct {
@@ -67,6 +71,9 @@ func (m *Minter) remember(host string, certificate *tls.Certificate) {
 func (m *Minter) SetCA(ca *CA) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if ca == m.ca {
+		return // the certificates it minted stay good
+	}
 	m.ca = ca
 	m.cache = map[string]*tls.Certificate{}
 	m.order = nil
@@ -78,6 +85,9 @@ func (m *Minter) Certificate(host string) (*tls.Certificate, error) {
 	defer m.mu.Unlock()
 	if cached, ok := m.cache[host]; ok && cached.Leaf.NotAfter.After(m.now().Add(time.Hour)) {
 		return cached, nil
+	}
+	if m.ca == nil || m.ca.Key == nil {
+		return nil, errLockedCA
 	}
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

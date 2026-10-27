@@ -108,19 +108,21 @@ func TestResolveSecrets(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("EGZO_TEST_KEY", "from-env")
 	t.Setenv("EGZO_TEST_EMPTY", "")
+	t.Setenv("EGZO_TEST_SECRET_KEY", strings.Repeat("k", 32))
 
 	project := func(names ...string) *config.Resolved {
 		services := map[string]*config.ResolvedService{}
-		secrets := map[string]config.SecretRef{}
+		secrets := map[string]config.SecretRef{"v/EGZO_TEST_SECRET_KEY": {Vault: "v", Name: "EGZO_TEST_SECRET_KEY", Backend: "env"}}
 		for _, name := range names {
 			ref := "v/" + name
 			services[ref] = &config.ResolvedService{Inject: &config.Inject{Header: "H"}, Secret: ref}
 			secrets[ref] = config.SecretRef{Vault: "v", Name: name, Backend: "env"}
 		}
 		return &config.Resolved{
-			Secrets: secrets,
-			Agents:  map[string]config.ResolvedAgent{"a": {Egress: "default"}},
-			Egress:  map[string]*config.ResolvedProfile{"default": {Services: services}},
+			SecretKey: "v/EGZO_TEST_SECRET_KEY",
+			Secrets:   secrets,
+			Agents:    map[string]config.ResolvedAgent{"a": {Egress: "default"}},
+			Egress:    map[string]*config.ResolvedProfile{"default": {Services: services}},
 		}
 	}
 
@@ -129,7 +131,7 @@ func TestResolveSecrets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := map[string]string{"v/EGZO_TEST_KEY": "from-env"}; !reflect.DeepEqual(got, want) {
+		if want := map[string]string{"v/EGZO_TEST_KEY": "from-env", "v/EGZO_TEST_SECRET_KEY": strings.Repeat("k", 32)}; !reflect.DeepEqual(got, want) {
 			t.Errorf("secrets = %v, want %v", got, want)
 		}
 	})
@@ -259,13 +261,18 @@ func sshProject(vaultName string) *config.Resolved {
 	project := policyProject()
 	project.Agents = map[string]config.ResolvedAgent{"coder": {Egress: "default"}}
 	project.Egress = map[string]*config.ResolvedProfile{"default": {SSH: map[string]*config.ResolvedSSH{"prod": {Host: "h", Port: 22, User: "u", Key: "main/" + vaultName, HostKey: "SHA256:x"}}}}
-	project.Secrets = map[string]config.SecretRef{"main/" + vaultName: {Vault: "main", Name: vaultName, Backend: "env"}}
+	project.Secrets = map[string]config.SecretRef{
+		"main/" + vaultName:    {Vault: "main", Name: vaultName, Backend: "env"},
+		"main/SPEC_SECRET_KEY": {Vault: "main", Name: "SPEC_SECRET_KEY", Backend: "env"},
+	}
+	project.SecretKey = "main/SPEC_SECRET_KEY"
 	return project
 }
 
 func TestResolveSecretsReadsAnSSHKeyWithAllItsLines(t *testing.T) {
 	_, pem := newTestKey(t)
 	t.Setenv("SPEC_SSH_KEY", pem)
+	t.Setenv("SPEC_SECRET_KEY", strings.Repeat("k", 32))
 	values, err := ResolveSecrets(sshProject("SPEC_SSH_KEY"), t.TempDir())
 	if err != nil {
 		t.Fatal(err)

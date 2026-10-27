@@ -71,6 +71,8 @@ A GitHub repo and two agents.
 
 ```yaml
 # egzo.yaml
+secret_key: main/EGZO_PROJECT_SECRET_KEY   # seals what egzo keeps at rest: `openssl rand -hex 32`
+
 vaults:
   main:
     backend: env

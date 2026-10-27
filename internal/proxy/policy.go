@@ -18,8 +18,11 @@ import (
 type Policy struct {
 	// Hash identifies the policy, secret values included, so the CLI can tell whether the proxy
 	// already has it without ever reading a secret back.
-	Hash     string             `json:"hash"`
-	Profiles map[string]Profile `json:"profiles"`
+	Hash string `json:"hash"`
+	// Project and SecretKey derive the keys that seal what the proxy keeps at rest (see package seal).
+	Project   string             `json:"project"`
+	SecretKey string             `json:"secret_key"`
+	Profiles  map[string]Profile `json:"profiles"`
 }
 
 // Profile is one egress profile: what an agent bound to it may reach, and what is injected on the way.

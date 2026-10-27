@@ -49,6 +49,9 @@ func newProjectCheckCommand(opts *options) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if missing := p.Resolved.MissingSecretKey(); missing != "" {
+					return errors.New(missing)
+				}
 				printWarnings(append(p.Warnings, p.Resolved.UnusedVaults()...))
 				encoder := yaml.NewEncoder(cmd.OutOrStdout())
 				encoder.SetIndent(2)
@@ -87,12 +90,16 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 		}
 		return ExitError{Code: 1}
 	}
+	if missing := p.Resolved.MissingSecretKey(); missing != "" {
+		report("fail", "%s: %s", filepath.Base(path), missing)
+		return ExitError{Code: 1}
+	}
 	report("ok", "%s is valid (project %s, %d template(s))", filepath.Base(path), p.Resolved.Name, len(p.Resolved.Agents))
 	for _, warning := range append(p.Warnings, p.Resolved.UnusedVaults()...) {
 		report("warn", "%s", strings.TrimPrefix(warning, "warning: "))
 	}
 	for _, ref := range sortedSecretRefs(p) {
-		state, err := secretState(p.Resolved.Secrets[ref], p.Dir)
+		state, err := secretState(p.Resolved.Secrets[ref], p.Dir, ref == p.Resolved.SecretKey)
 		if err != nil {
 			return err // pass itself cannot be run: no answer about any secret means anything
 		}

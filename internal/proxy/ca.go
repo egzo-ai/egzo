@@ -23,7 +23,7 @@ import (
 )
 
 // CA is the project's certificate authority. Its private key lives only in the proxy's private
-// volume: agents get the certificate, never the key.
+// volume, sealed (see Store): agents get the certificate, never the key.
 type CA struct {
 	Cert    *x509.Certificate
 	Key     *ecdsa.PrivateKey
@@ -31,41 +31,6 @@ type CA struct {
 }
 
 const caValidity = 5 * 365 * 24 * time.Hour
-
-// LoadOrCreateCA reads the CA from dir, creating it on first use. It persists across proxy
-// recreation: regenerating it would force every agent to restart to pick up the new trust. A CA that is
-// there but cannot be used (half present, unreadable, corrupt, a key that is not the certificate's) is an
-// error and never replaced: replacing it silently would change what every agent trusts.
-func LoadOrCreateCA(dir string) (*CA, error) {
-	keyPath, certPath := filepath.Join(dir, "ca.key"), filepath.Join(dir, "ca.crt")
-	keyPEM, keyErr := os.ReadFile(keyPath)
-	certPEM, certErr := os.ReadFile(certPath)
-	switch {
-	case keyErr == nil && certErr == nil:
-		return parseCA(keyPEM, certPEM)
-	case errors.Is(keyErr, os.ErrNotExist) && errors.Is(certErr, os.ErrNotExist):
-		ca, err := NewCA()
-		if err != nil {
-			return nil, err
-		}
-		return ca, ca.Save(dir)
-	case keyErr != nil && !errors.Is(keyErr, os.ErrNotExist):
-		return nil, keyErr
-	case certErr != nil && !errors.Is(certErr, os.ErrNotExist):
-		return nil, certErr
-	}
-	return nil, fmt.Errorf("the CA in %s is incomplete (ca.key: %v, ca.crt: %v): restore the missing file, or remove both to start a new CA", dir, keyErr == nil, certErr == nil)
-}
-
-// RotateCA replaces the CA in dir with a new one. Everything signed by the old one stops being
-// trusted by agents once they have the new certificate, which is why agents are restarted after.
-func RotateCA(dir string) (*CA, error) {
-	ca, err := NewCA()
-	if err != nil {
-		return nil, err
-	}
-	return ca, ca.Save(dir)
-}
 
 // NewCA makes a CA in memory.
 func NewCA() (*CA, error) {
@@ -99,23 +64,6 @@ func NewCA() (*CA, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	return parseCA(keyPEM, certPEM)
-}
-
-// Save stores the CA in dir. Each file is written to a temporary name and renamed, so a crash leaves
-// the old file or the new one, never half of one.
-func (ca *CA) Save(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	keyDER, err := x509.MarshalECPrivateKey(ca.Key)
-	if err != nil {
-		return err
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	if err := writeAtomic(filepath.Join(dir, "ca.key"), keyPEM, 0o600); err != nil {
-		return err
-	}
-	return writeAtomic(filepath.Join(dir, "ca.crt"), ca.CertPEM, 0o644)
 }
 
 func parseCA(keyPEM, certPEM []byte) (*CA, error) {

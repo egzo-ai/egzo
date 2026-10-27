@@ -23,7 +23,7 @@ import (
 // environment variable or file visible to `inspect`. Which agent uses which profile is a matter of
 // bindings (see BindingFor), which carry no secret.
 func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]string) proxy.Policy {
-	policy := proxy.Policy{Profiles: map[string]proxy.Profile{}}
+	policy := proxy.Policy{Project: project.Name, SecretKey: secrets[project.SecretKey], Profiles: map[string]proxy.Profile{}}
 	for _, name := range usedProfiles(project) {
 		profile := project.Egress[name]
 		entry := proxy.Profile{Allow: append([]string{}, profile.Allow...)}
@@ -93,6 +93,16 @@ func ResolveSecrets(project *config.Resolved, dir string) (map[string]string, er
 	}
 	values := map[string]string{}
 	var problems []string
+	if missing := project.MissingSecretKey(); missing != "" {
+		problems = append(problems, missing)
+	} else {
+		value, err := ReadSecretKey(project.Secrets[project.SecretKey], dir)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("secret %s (the secret key): %v", project.SecretKey, err))
+		} else {
+			values[project.SecretKey] = value
+		}
+	}
 	for _, ref := range sortedKeys(keys) {
 		value, err := ReadSecretText(project.Secrets[ref], dir)
 		if err != nil {

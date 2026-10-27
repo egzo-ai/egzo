@@ -20,6 +20,9 @@ import (
 	"github.com/egzo-ai/egzo/internal/config"
 )
 
+// keyed is what every project file needs: a secret key, in a vault. Nothing reads it unless a test checks secrets.
+const keyed = "secret_key: v/egzo/key\nvaults:\n  v: { backend: pass }\n"
+
 func TestExitError(t *testing.T) {
 	err := ExitError{Code: 3}
 	if got := err.Error(); got != "command exited with code 3" {
@@ -93,7 +96,7 @@ func writeProject(t *testing.T, yaml string) string {
 
 func TestLoadProject(t *testing.T) {
 	t.Run("name precedence follows the flag, the environment, the file", func(t *testing.T) {
-		dir := writeProject(t, "name: from-file\n")
+		dir := writeProject(t, "name: from-file\n"+keyed)
 		for _, c := range []struct{ flag, env, want string }{
 			{"", "", "from-file"},
 			{"", "from-env", "from-env"},
@@ -118,7 +121,7 @@ func TestLoadProject(t *testing.T) {
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, config.FileName), nil, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(keyed), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		t.Chdir(dir)
@@ -133,7 +136,7 @@ func TestLoadProject(t *testing.T) {
 	})
 
 	t.Run("surfaces warnings", func(t *testing.T) {
-		writeProject(t, "name: x\nagents:\n  a: { harness: claude-code }\n")
+		writeProject(t, "name: x\nagents:\n  a: { harness: claude-code }\n"+keyed)
 		p, err := loadProject(&options{})
 		if err != nil {
 			t.Fatal(err)
@@ -170,7 +173,7 @@ func mustEvalSymlinks(t *testing.T, path string) string {
 
 func TestTheSameProjectThroughASymlinkIsTheSameProject(t *testing.T) {
 	real := t.TempDir()
-	if err := os.WriteFile(filepath.Join(real, "egzo.yaml"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(real, "egzo.yaml"), []byte(keyed), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(t.TempDir(), "link")

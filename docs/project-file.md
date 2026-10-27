@@ -1,8 +1,9 @@
 # The project file
 
 A project is one `egzo.yaml`. Everything is denied unless the file declares it, so the file reads as a list of what
-agents may use. It has five parts: **vaults** (where secrets come from), **egress** (what agents may reach),
-**workspaces** (what they work on), **agents** (the templates) and, optionally, **proxy**/**name**.
+agents may use. It has six parts: **secret_key** (what egzo seals its own secrets with), **vaults** (where secrets come
+from), **egress** (what agents may reach), **workspaces** (what they work on), **agents** (the templates) and,
+optionally, **proxy**/**name**.
 
 `egzo project check --resolved` prints the file validated and fully resolved: the quickest way to see what a short
 file expands to. The project name defaults to the directory name (`name:`, `-p` or `EGZO_PROJECT_NAME` override it);
@@ -12,6 +13,8 @@ digit, like every name in the file.
 ## The smallest useful file
 
 ```yaml
+secret_key: main/EGZO_PROJECT_SECRET_KEY
+
 vaults:
   main:
     backend: env
@@ -33,6 +36,35 @@ agents:
 ```
 
 `egzo project up`, then `egzo agent spawn claude --attach` ([managing projects](managing-projects.md)). With one workspace, its directory is the agent's working directory (for a git workspace, the agent's own worktree).
+
+## The secret key
+
+egzo keeps secrets of its own: the private key of the project CA, which every agent trusts, and the ssh identity of the
+proxy. They live in a volume only the proxy mounts, sealed with a key derived from the project's **secret key**, which
+you keep in a vault like any secret. A copy or a backup of the volume is useless without it.
+
+```yaml
+secret_key: main/egzo/shop-key
+
+vaults:
+  main: { backend: pass }
+```
+
+```console
+$ openssl rand -hex 32 | pass insert --multiline egzo/shop-key
+```
+
+- **Required.** A file without it is refused, and the error gives the command above for the file's own vault. `egzo
+  project init` writes the line and prints the command.
+- **At least 32 bytes**, opaque: egzo does not parse it. `egzo project check` reads it like the other secrets.
+- **One per project, or shared**: the keys egzo uses are derived from it and the project's name, so one secret can serve
+  several projects without them sharing a key.
+- It reaches the proxy with the egress policy, at `egzo project up` and `egzo restart proxy`, and lives in its memory only:
+  a proxy restarted any other way opens nothing until the next `up`.
+- **Keep it.** egzo cannot tell a wrong key from a right one until it opens what was sealed: with another key, `egzo
+  project up` stops and says so. Give the old key back, or run `egzo project rotate-ca`, which makes a new CA sealed with
+  the key the file names now and restarts the agents.
+- A project made before the secret key keeps its CA: the first `up` with a key seals it.
 
 ## Vaults and secrets
 

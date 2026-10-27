@@ -23,12 +23,19 @@ func sortedSecretRefs(p *project) []string {
 
 // secretState is what `project check` says about a secret, with the reason when it cannot be used. The error is
 // only for a failure that makes every answer meaningless: `pass` itself cannot be run.
-func secretState(ref config.SecretRef, dir string) (string, error) {
-	_, err := stack.ReadSecret(ref, dir)
+func secretState(ref config.SecretRef, dir string, secretKey bool) (string, error) {
+	read := stack.ReadSecret
+	if secretKey {
+		read = stack.ReadSecretKey
+	}
+	_, err := read(ref, dir)
 	var passErr *stack.PassError
+	var short *stack.ShortSecretKeyError
 	switch {
 	case err == nil:
 		return "set", nil
+	case errors.As(err, &short):
+		return short.Error(), nil
 	case errors.Is(err, stack.ErrPassNotFound):
 		return "", err
 	case errors.Is(err, stack.ErrEmptySecret):

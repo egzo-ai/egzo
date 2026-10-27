@@ -56,7 +56,7 @@ type rig struct {
 func newRig(t *testing.T, upstreamHandler http.HandlerFunc) *rig {
 	t.Helper()
 	r := &rig{t: t, audit: &syncBuffer{}}
-	ca, err := LoadOrCreateCA(t.TempDir())
+	ca, err := NewCA()
 	if err != nil {
 		t.Fatal(err)
 	}

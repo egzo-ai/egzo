@@ -34,7 +34,7 @@ func inProject(t *testing.T, yaml string, stdin string, args ...string) (string,
 }
 
 func vaultYAML() string {
-	return "vaults:\n  main:\n    backend: env\n" +
+	return "secret_key: main/EGZO_TEST_SECRET_KEY\nvaults:\n  main:\n    backend: env\n" +
 		"egress:\n  default:\n    services:\n" +
 		"      set: { hosts: [set.example.com], inject: { header: X-Key }, secret: main/EGZO_TEST_SET_VARIABLE }\n" +
 		"      unset: { hosts: [unset.example.com], inject: { header: X-Key }, secret: main/EGZO_TEST_UNSET_VARIABLE }\n"
@@ -43,6 +43,7 @@ func vaultYAML() string {
 func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testing.T) {
 	t.Setenv("EGZO_TEST_SET_VARIABLE", "value")
 	t.Setenv("EGZO_TEST_UNSET_VARIABLE", "")
+	t.Setenv("EGZO_TEST_SECRET_KEY", strings.Repeat("k", 32))
 	out, _, err := inProject(t, vaultYAML(), "", "project", "check")
 	if code, ok := IsExitError(err); !ok || code != 1 {
 		t.Fatalf("err = %v, want exit code 1 for a secret that is empty", err)
@@ -63,6 +64,7 @@ func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testi
 
 func TestProxyRulesListWhatEachAgentMayReachWithoutSecrets(t *testing.T) {
 	yaml := `
+secret_key: main/KEY
 vaults: {main: {backend: env}}
 egress:
   default: {allow: [docs.example.org]}

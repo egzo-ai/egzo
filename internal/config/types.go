@@ -17,6 +17,7 @@ import (
 type File struct {
 	Version    int                  `yaml:"version"`
 	Name       *string              `yaml:"name"`
+	SecretKey  string               `yaml:"secret_key"`
 	Vaults     map[string]Vault     `yaml:"vaults"`
 	Proxy      Proxy                `yaml:"proxy"`
 	Egress     map[string]Profile   `yaml:"egress"`

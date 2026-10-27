@@ -105,7 +105,7 @@ func TestTheDefaultDialerRefusesNamesThatResolveToPrivateAddresses(t *testing.T)
 
 func mustCA(t *testing.T) *CA {
 	t.Helper()
-	ca, err := LoadOrCreateCA(t.TempDir())
+	ca, err := NewCA()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -777,62 +777,30 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // --- R-14: the CA on disk -------------------------------------------------------------------------------
 
-func TestAKeyThatDoesNotMatchTheCertificateIsRefused(t *testing.T) {
-	a, b := t.TempDir(), t.TempDir()
-	LoadOrCreateCA(a)
-	LoadOrCreateCA(b)
-	key, _ := os.ReadFile(filepath.Join(b, "ca.key"))
-	os.WriteFile(filepath.Join(a, "ca.key"), key, 0o600)
-	if _, err := LoadOrCreateCA(a); err == nil || !strings.Contains(err.Error(), "match") {
-		t.Fatalf("a mismatched pair was loaded: %v", err)
+// testKey is a secret key, as the policies and rotations of the operator tests carry it (keyed adds it to a body).
+const testKey = "operator-test-secret-key-0123456789abcdef"
+
+func keyed(body string) string {
+	key := `{"project":"p","secret_key":"` + testKey + `"`
+	if body == "{}" {
+		return key + "}"
 	}
+	return strings.Replace(body, "{", key+",", 1)
 }
 
-func TestAnUnreadableOrHalfPresentCAIsNeverReplacedSilently(t *testing.T) {
-	for _, remove := range []string{"ca.crt", "ca.key"} {
-		dir := t.TempDir()
-		first, _ := LoadOrCreateCA(dir)
-		os.Remove(filepath.Join(dir, remove))
-		if again, err := LoadOrCreateCA(dir); err == nil {
-			t.Errorf("without %s a new CA (%s) replaced %s", remove, again.Fingerprint()[:8], first.Fingerprint()[:8])
-		}
-	}
-	dir := t.TempDir()
-	LoadOrCreateCA(dir)
-	os.WriteFile(filepath.Join(dir, "ca.crt"), []byte("truncated"), 0o644)
-	if _, err := LoadOrCreateCA(dir); err == nil {
-		t.Error("a corrupt certificate was replaced silently")
-	}
-}
-
-func TestTheCAFilesAreWrittenAtomically(t *testing.T) {
-	dir := t.TempDir()
-	LoadOrCreateCA(dir)
-	RotateCA(dir)
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".tmp") {
-			t.Errorf("left %s behind", e.Name())
-		}
-	}
-	info, _ := os.Stat(filepath.Join(dir, "ca.key"))
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("key mode = %v", info.Mode().Perm())
-	}
-}
-
+// operatorFor is the operator API of a proxy whose store has been opened by a first policy, and the CA it opened.
 func operatorFor(t *testing.T, cfg Config) (http.Handler, *Server, *CA) {
 	t.Helper()
-	ca, err := LoadOrCreateCA(cfg.CADir)
+	store, err := OpenStore(cfg.CADir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(ca, NewAudit(io.Discard))
-	hostKey, err := LoadOrCreateSSHHostKey(cfg.CADir)
-	if err != nil {
-		t.Fatal(err)
+	server := NewServer(store.CA(), NewAudit(io.Discard))
+	handler := operatorHandler(server, store, cfg)
+	if response := call(handler, "PUT", "/policy", keyed(`{"hash":"first","profiles":{}}`)); response.Code != http.StatusNoContent && !strings.Contains(cfg.PubDir, "blocker") {
+		t.Fatalf("first policy: %d %s", response.Code, response.Body)
 	}
-	return operatorHandler(server, ca, cfg, hostKey), server, ca
+	return handler, server, store.CA()
 }
 
 func call(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -848,11 +816,11 @@ func TestRotatingTheCAKeepsEverythingConsistentWhenPublishingFails(t *testing.T)
 	cfg := Config{CADir: filepath.Join(dir, "private"), PubDir: filepath.Join(blocker, "pub"), SystemBundle: "/nonexistent"}
 	handler, server, ca := operatorFor(t, cfg)
 	before := ca.Fingerprint()
-	if response := call(handler, "POST", "/ca/rotate", ""); response.Code != http.StatusInternalServerError {
+	if response := call(handler, "POST", "/ca/rotate", keyed(`{}`)); response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", response.Code)
 	}
-	onDisk, err := LoadOrCreateCA(cfg.CADir)
-	if err != nil || onDisk.Fingerprint() != before {
+	onDisk, err := OpenStore(cfg.CADir)
+	if err != nil || onDisk.CA().Fingerprint() != before {
 		t.Errorf("the CA on disk changed although publishing failed: %v", err)
 	}
 	if fingerprint := server.minter.ca.Fingerprint(); fingerprint != before {
@@ -870,7 +838,7 @@ func TestRotatingTheCAPublishesAndSwitches(t *testing.T) {
 	cfg := Config{CADir: filepath.Join(dir, "private"), PubDir: filepath.Join(dir, "pub"), SystemBundle: "/nonexistent"}
 	handler, server, ca := operatorFor(t, cfg)
 	var reply map[string]string
-	response := call(handler, "POST", "/ca/rotate", "")
+	response := call(handler, "POST", "/ca/rotate", keyed(`{}`))
 	json.Unmarshal(response.Body.Bytes(), &reply)
 	if response.Code != 200 || reply["ca"] == ca.Fingerprint() {
 		t.Fatalf("rotate: %d %v", response.Code, reply)
@@ -885,7 +853,9 @@ func TestThePolicyEndpointRejectsBadAndOversizedBodies(t *testing.T) {
 	handler, server, _ := operatorFor(t, Config{CADir: t.TempDir(), PubDir: t.TempDir(), SystemBundle: "/nonexistent"})
 	for name, body := range map[string]string{
 		"not json":     "{",
-		"no hash":      `{"profiles":{}}`,
+		"no hash":      keyed(`{"profiles":{}}`),
+		"no key":       `{"hash":"x","project":"p","profiles":{}}`,
+		"a short key":  `{"hash":"x","project":"p","secret_key":"short","profiles":{}}`,
 		"oversized":    `{"hash":"x","profiles":{"a":{"allow":["` + strings.Repeat("a", 9<<20) + `"]}}}`,
 		"wrong shapes": `{"hash":"x","profiles":[]}`,
 	} {
@@ -893,10 +863,10 @@ func TestThePolicyEndpointRejectsBadAndOversizedBodies(t *testing.T) {
 			t.Errorf("%s: status = %d", name, response.Code)
 		}
 	}
-	if server.PolicyHash() != "" {
+	if server.PolicyHash() != "first" {
 		t.Error("a rejected policy was loaded")
 	}
-	if response := call(handler, "PUT", "/policy", `{"hash":"abc","profiles":{}}`); response.Code != http.StatusNoContent {
+	if response := call(handler, "PUT", "/policy", keyed(`{"hash":"abc","profiles":{}}`)); response.Code != http.StatusNoContent {
 		t.Fatalf("status = %d", response.Code)
 	}
 	var reported map[string]string
@@ -912,7 +882,7 @@ func TestTheOperatorBindsAndUnbindsAgentsByName(t *testing.T) {
 	if response := call(handler, "PUT", "/agents/coder", bind); response.Code != http.StatusConflict {
 		t.Errorf("binding before a policy was loaded: status = %d", response.Code)
 	}
-	if response := call(handler, "PUT", "/policy", `{"hash":"h","profiles":{"p":{"allow":["example.com"]}}}`); response.Code != http.StatusNoContent {
+	if response := call(handler, "PUT", "/policy", keyed(`{"hash":"h","profiles":{"p":{"allow":["example.com"]}}}`)); response.Code != http.StatusNoContent {
 		t.Fatalf("policy: status = %d", response.Code)
 	}
 	for name, c := range map[string]struct{ path, body string }{
@@ -939,7 +909,7 @@ func TestTheOperatorBindsAndUnbindsAgentsByName(t *testing.T) {
 		t.Errorf("listed = %v", listed)
 	}
 	// Loading the policy again keeps the binding.
-	call(handler, "PUT", "/policy", `{"hash":"h2","profiles":{"p":{"allow":["other.example"]}}}`)
+	call(handler, "PUT", "/policy", keyed(`{"hash":"h2","profiles":{"p":{"allow":["other.example"]}}}`))
 	if len(server.BoundAgents()) != 1 {
 		t.Errorf("a new policy dropped the bindings: %v", server.BoundAgents())
 	}

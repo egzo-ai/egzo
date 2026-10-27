@@ -153,7 +153,8 @@ func newRotateCACommand(opts *options) *cobra.Command {
 		Short: "Issue a new project CA and restart the agents so they trust it",
 		Long: "The proxy holds the project's CA key and intercepts only the hosts that get a credential injected.\n" +
 			"rotate makes a new CA, publishes its certificate to the agents, and restarts them, because most\n" +
-			"programs read their trust store only when they start.",
+			"programs read their trust store only when they start. The new CA's key is sealed with the secret key\n" +
+			"the file names now: after the secret key changed, it is how the project moves to the new one.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)
@@ -170,7 +171,16 @@ func newRotateCACommand(opts *options) *cobra.Command {
 			if proxy.State != "running" {
 				return fmt.Errorf("the proxy is %s: run `egzo project up` first", proxy.State)
 			}
-			result, err := s.engine.Exec(ctx, proxy.ID, []string{"/egzo", "proxy", "request", "POST", "/ca/rotate"}, nil)
+			// The new CA is sealed with the file's secret key: a rotation is also how a project moves to another key.
+			key, err := stack.ReadSecretKey(s.Resolved.Secrets[s.Resolved.SecretKey], s.Dir)
+			if err != nil {
+				return fmt.Errorf("secret %s (the secret key): %w", s.Resolved.SecretKey, err)
+			}
+			body, err := json.Marshal(map[string]string{"project": s.Resolved.Name, "secret_key": key})
+			if err != nil {
+				return err
+			}
+			result, err := s.engine.Exec(ctx, proxy.ID, []string{"/egzo", "proxy", "request", "POST", "/ca/rotate"}, bytes.NewReader(body))
 			if err != nil {
 				return err
 			}

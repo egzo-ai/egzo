@@ -66,8 +66,10 @@ can see it.
 ## The proxy and TLS
 
 For hosts with an injected credential, the proxy terminates TLS with a CA that egzo generates per project (ECDSA
-P-256). The CA private key lives in a volume mounted only into the proxy; agents receive just the certificate, as part
-of their CA bundle. All other allowed hosts are plain tunnels where the proxy sees only the host name, which it checks
+P-256). The CA private key lives in a volume mounted only into the proxy, encrypted with a key derived from the
+project's [secret key](project-file.md#the-secret-key) (XChaCha20-Poly1305), like the proxy's ssh host key: a copy or a
+backup of the volume is useless without the vault secret. The proxy is given the secret key with the policy and keeps it
+in memory only. Agents receive just the certificate, as part of their CA bundle. All other allowed hosts are plain tunnels where the proxy sees only the host name, which it checks
 against the TLS server name. A client that sends Encrypted Client Hello (every browser does) is not tunneled, because the
 extension can hide the real server name and the proxy cannot tell a harmless one from one that does: the proxy terminates
 TLS for it with the project CA instead, checks the site's real certificate itself, and refuses any request for another

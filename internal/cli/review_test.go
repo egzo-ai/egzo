@@ -50,11 +50,11 @@ func TestAnAnswerIsPrintedWithoutControlSequences(t *testing.T) {
 
 func TestSecretStatesSayWhyASecretIsNotUsable(t *testing.T) {
 	t.Setenv("EGZO_REVIEW_SET", "v")
-	if got, _ := secretState(config.SecretRef{Vault: "main", Name: "EGZO_REVIEW_SET", Backend: "env"}, t.TempDir()); got != "set" {
+	if got, _ := secretState(config.SecretRef{Vault: "main", Name: "EGZO_REVIEW_SET", Backend: "env"}, t.TempDir(), false); got != "set" {
 		t.Errorf("set: %q", got)
 	}
 	t.Setenv("EGZO_REVIEW_UNSET", "")
-	if got, _ := secretState(config.SecretRef{Vault: "main", Name: "EGZO_REVIEW_UNSET", Backend: "env"}, t.TempDir()); got != "missing" {
+	if got, _ := secretState(config.SecretRef{Vault: "main", Name: "EGZO_REVIEW_UNSET", Backend: "env"}, t.TempDir(), false); got != "missing" {
 		t.Errorf("env: %q", got)
 	}
 }
