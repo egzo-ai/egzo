@@ -7,6 +7,7 @@ session holder (`egzo agent run`), so what you see on `egzo agent attach` is the
 |---|---|---|
 | `claude-code` | Claude Code (`claude`) | built, with hooks and MCP |
 | `opencode` | OpenCode (`opencode`) | built, with hooks (a plugin) and MCP |
+| `codex` | Codex (`codex`) | built, with hooks and MCP; a ChatGPT sign-in or an OpenAI API key |
 | `custom` | any image | runs as given; no integration (see [images](images.md)) |
 | `pi` | pi | accepted as a name, no image or integration yet |
 
@@ -17,7 +18,7 @@ session holder (`egzo agent run`), so what you see on `egzo agent attach` is the
 - **No first-run friction.** Onboarding, theme and workspace-trust dialogs are pre-answered, so a fresh instance
   starts at a prompt.
 - **Credentials stay out.** The harness gets a placeholder credential; the proxy injects the real one.
-- **Status and messages.** Each harness reports (Claude Code through hooks, OpenCode through a plugin) when the agent is working or idle, and an `egzo` MCP server gives it the tools
+- **Status and messages.** Each harness reports (Claude Code and Codex through hooks, OpenCode through a plugin) when the agent is working or idle, and an `egzo` MCP server gives it the tools
   to answer requests, ask a person, and message another agent. Messages ([messaging](messaging.md)) are announced by a short line typed into
   the terminal; the agent fetches the content with a tool.
 - **A browser.** Chromium and the Playwright MCP server are in the image and registered with the harness ([browsing](browser.md)).
@@ -97,6 +98,39 @@ The Console has no page that shows a key to copy. A key is a *service account* o
 You can also get a feel for it first with OpenCode itself, in a test agent: `egzo exec <agent> -- opencode auth login opencode`
 offers *OpenCode Console account* (a browser login) and *API key (service account)*. The browser login stores a session in
 the agent's home, which egzo cannot inject; use the key.
+
+## Codex
+
+The image carries Codex (`@openai/codex`). It works with a ChatGPT Plus or Pro account or with an OpenAI API key.
+
+```yaml
+egress:
+  codex:
+    services:
+      chatgpt: { credential: { method: oauth } }   # a ChatGPT sign-in: chatgpt.com, under /backend-api/ only
+  codex-key:
+    services:
+      openai: main/openai/api-key                 # or an API key for api.openai.com
+
+agents:
+  codex: { harness: codex, egress: codex, workspaces: [repo] }
+```
+
+- **A ChatGPT account** is an [OAuth service](sandboxing.md#oauth-services): no vault secret. The first Codex agent shows
+  Codex's own sign-in screen: attach (`egzo agent attach codex-1`) and pick *Sign in with Device Code*, the option that
+  works from a container. The proxy keeps the sign-in for every agent of the project, renews it, and gives each new
+  Codex agent an `auth.json` of stand-ins, so it starts signed in. Codex never holds a token that works without the proxy.
+- **An API key** goes to the built-in `openai` service; the agent's `auth.json` holds a placeholder.
+- **Settings.** egzo starts Codex with its settings on the command line (`-c`): no approval prompts (`permissions:
+  default` restores them), Codex's own sandbox off (the container is the sandbox), the workspaces trusted, the `egzo` MCP
+  server, the state hooks, egzo's instructions as `developer_instructions`, no update check, and
+  `features.use_agent_identity=false` (an identity Codex registers and signs with would be a credential the agent holds).
+  Your `~/.codex/config.toml` in the agent's home is left alone.
+- **Hooks.** Codex runs a hook only once a person has reviewed it, unless it is started with
+  `--dangerously-bypass-hook-trust`. egzo starts it so, for the hooks it gives on the command line; hooks you add yourself
+  run under the same flag.
+- `model:` is passed as `-c model=...`; effort is Codex's `model_reasoning_effort`, which `env` cannot set: put it in the
+  agent's `~/.codex/config.toml`.
 
 ## Trying two side by side
 

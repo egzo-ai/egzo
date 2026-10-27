@@ -111,6 +111,21 @@ def test_the_anthropic_service_is_built_in(project):
     assert service["credential"]["secret"] == "main/ANTHROPIC_API_KEY"
 
 
+def test_the_openai_service_is_built_in(project):
+    """An OpenAI API key is a bearer token for api.openai.com: what Codex and OpenCode use with an API key."""
+    resolved = project.resolved(spec(egress={"default": {"services": {"openai": "main/DEPLOY_TOKEN"}}}))
+    service = profile(resolved, "default")["services"]["openai"]
+    assert service["hosts"] == ["api.openai.com"]
+    assert service["inject"] == {"header": "Authorization", "value": "Bearer {secret}"}
+
+
+@pytest.mark.parametrize("services, warns", [({}, True), ({"openai": "main/DEPLOY_TOKEN"}, False), ({"chatgpt": {"credential": {"method": "oauth"}}}, False)])
+def test_codex_needs_chatgpt_or_the_openai_api(project, services, warns):
+    result = project.config(spec(egress={"default": {"services": services}}, agents={"coder": agent(harness="codex")}))
+    assert result.returncode == 0, result.stderr
+    assert ("cannot reach chatgpt.com or api.openai.com" in result.stderr) == warns, result.stderr
+
+
 def test_the_github_service_is_built_in(project):
     resolved = project.resolved(spec(egress={"default": {"services": {"github": "main/GITHUB_TOKEN"}}}))
     service = profile(resolved, "default")["services"]["github"]

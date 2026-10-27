@@ -17,6 +17,7 @@ cutoff=$(( $(date +%s) - COOLDOWN_DAYS * 86400 ))
 PINS='
 CLAUDE_CODE_VERSION|harness/claude-code/Dockerfile|npm:@anthropic-ai/claude-code|Claude Code
 OPENCODE_VERSION|harness/opencode/Dockerfile|npm:@opencode/cli|OpenCode
+CODEX_VERSION|harness/codex/Dockerfile|npm:@openai/codex|Codex
 PLAYWRIGHT_MCP_VERSION|harness/base/Dockerfile|npm:@playwright/mcp|Playwright MCP (and its Chromium)
 NODE_VERSION|harness/base/Dockerfile|node|Node
 GO_VERSION|Dockerfile hub/Dockerfile|go|Go

@@ -163,6 +163,11 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 					continue
 				}
 				ready = true
+				if cfg.IdleSignal == "state" {
+					// A harness that reports its first state only at its first prompt (Codex's SessionStart) is idle once its
+					// TUI takes input; one that already said so is left alone.
+					api.Do(ctx, "POST", "/v1/activity", map[string]string{"state": "idle", "if": "starting"})
+				}
 			case h.Wrote() && time.Since(h.LastOutput()) >= cfg.Settle:
 				ready = true
 			default:

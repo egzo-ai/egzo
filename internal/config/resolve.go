@@ -257,6 +257,11 @@ func resolveAgent(
 					name, host, profileName, agent.Harness))
 			}
 		}
+		if agent.Harness == "codex" && !profile.reaches("chatgpt.com") && !profile.reaches("api.openai.com") {
+			warnings = append(warnings, fmt.Sprintf(
+				"warning: agent %q cannot reach chatgpt.com or api.openai.com with egress profile %q: codex needs one, the chatgpt service for a ChatGPT sign-in or the openai service for an API key",
+				name, profileName))
+		}
 	}
 
 	if profile != nil {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -125,6 +126,9 @@ type Inputs struct {
 	Instances []string
 	// Placeholders maps each instance to the variables it gets and their placeholder texts (not secrets).
 	Placeholders map[string]map[string]string
+	// SignIns maps each instance to the variables that carry the stand-ins of its sign-ins (not secrets: they only work
+	// through the proxy), for the harness to write where its client keeps its tokens.
+	SignIns map[string]map[string]string
 }
 
 // The sidecars' tmpfs mounts carry no uid or gid but an explicit mode 1777, which the sidecar's user can write, because Podman refuses the uid option ("unknown mount option uid=...") on rootless hosts. The sidecar user is the only one in the container.
@@ -366,7 +370,8 @@ func agentContainer(
 		env["EGZO_MODEL"] = agent.Model
 	}
 	if integration, ok := harness.For(agent.Harness); ok {
-		for key, value := range integration.ContainerEnv(agent.Permissions != "default", bearerProvider(project, agent)) {
+		providers := harness.Providers{AnthropicBearer: bearerProvider(project, agent), OpenAIKey: openAIKey(project, agent)}
+		for key, value := range integration.ContainerEnv(agent.Permissions != "default", providers) {
 			env[key] = value
 		}
 	}
@@ -374,6 +379,9 @@ func agentContainer(
 		env[key] = value
 	}
 	for key, value := range in.Placeholders[name] {
+		env[key] = value
+	}
+	for key, value := range in.SignIns[name] {
 		env[key] = value
 	}
 	if prompt := in.Prompts[name]; prompt != "" {
@@ -473,6 +481,20 @@ func hash(spec any) string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// openAIKey reports whether an agent's profile injects an API key into api.openai.com.
+func openAIKey(project *config.Resolved, agent config.ResolvedAgent) bool {
+	profile := project.Egress[agent.Egress]
+	if profile == nil {
+		return false
+	}
+	for _, service := range profile.Services {
+		if service.Inject != nil && slices.Contains(service.Hosts, "api.openai.com") {
+			return true
+		}
+	}
+	return false
 }
 
 // bearerProvider reports whether an agent's profile injects the Anthropic credential as a bearer

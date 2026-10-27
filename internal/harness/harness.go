@@ -38,6 +38,15 @@ type Options struct {
 	// LookPath finds a program on the PATH (exec.LookPath in the container). The integrations register the
 	// browser's MCP server only when `playwright-mcp` is there; nil means nothing is.
 	LookPath func(file string) (string, error)
+	// Getenv reads the container's environment (os.Getenv); nil reads nothing.
+	Getenv func(key string) string
+}
+
+func (o Options) env(key string) string {
+	if o.Getenv == nil {
+		return ""
+	}
+	return o.Getenv(key)
 }
 
 // browserCommand is what a harness runs for the browser's MCP server: the role of the egzo binary that
@@ -164,6 +173,15 @@ type File struct {
 	Replace [][]string
 }
 
+// Providers is what an agent's egress profile gives its harness, as far as the harness's own setup depends on it.
+type Providers struct {
+	// AnthropicBearer: the Anthropic credential is injected as `Authorization: Bearer` (a subscription token), not as an
+	// API key header.
+	AnthropicBearer bool
+	// OpenAIKey: the `openai` service injects an API key for api.openai.com.
+	OpenAIKey bool
+}
+
 // Integration is one harness.
 type Integration interface {
 	Name() string
@@ -172,10 +190,9 @@ type Integration interface {
 	// ReadyMarkers are texts the TUI draws once it takes input: nothing is typed before one shows.
 	ReadyMarkers() []string
 	// ContainerEnv is what the agent container carries in its definition (so it shows in
-	// `inspect`): placeholders for credentials the proxy replaces, never a real secret. bearer says
-	// the provider credential is injected as `Authorization: Bearer` (a subscription token) and not
-	// as an API key header.
-	ContainerEnv(bypass, bearer bool) map[string]string
+	// `inspect`): placeholders for credentials the proxy replaces, never a real secret. providers says
+	// what the agent's egress profile gives it.
+	ContainerEnv(bypass bool, providers Providers) map[string]string
 	Plan(options Options, args []string) (Plan, error)
 }
 
