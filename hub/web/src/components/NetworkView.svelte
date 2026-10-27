@@ -4,6 +4,7 @@
   import { copyText } from "../lib/clipboard";
   import { ago, clock, stamp } from "../lib/format";
   import { poll } from "../lib/live";
+  import Icon from "./Icon.svelte";
   import { bytes, connections, duration, explain, sharedParents } from "../lib/network";
   import type { Denial, Network } from "../lib/types";
 
@@ -48,6 +49,8 @@
     );
   });
   const agents = $derived([...new Set((data?.events ?? []).map((e) => e.agent).filter((a): a is string => !!a))].sort());
+
+  const times = (n: number) => `${n} request${n === 1 ? "" : "s"}`;
 
   const decisionKind = (d: string) => ({ allow: "done", deny: "error", error: "warn", challenge: "neutral" })[d] ?? "neutral";
 
@@ -138,7 +141,7 @@
               <td title={stamp(c.time)}>{clock(c.time)}</td>
               {#if !agent}<td>{#if c.agent}{c.agent}{:else if c.claimedAgent}<span class="muted" title="the name the client sent; its credentials were wrong">{c.claimedAgent}?</span>{:else}<span class="muted" title="no credentials">–</span>{/if}</td>{/if}
               <td><span class="name">{c.host}</span>{#if c.server} <span class="badge">ssh {c.server}</span>{/if}</td>
-              <td class="wrap">{c.protocol}{#if c.mode} · {c.mode}{/if}{#if c.requests} · {c.requests} request{c.requests === 1 ? "" : "s"}{/if}{#if c.commands.length} · {c.commands.length} command{c.commands.length === 1 ? "" : "s"}{/if}</td>
+              <td class="wrap">{c.protocol}{#if c.mode}{" "}· {c.mode}{/if}{#if c.requests}{" "}· {c.requests} request{c.requests === 1 ? "" : "s"}{/if}{#if c.commands.length}{" "}· {c.commands.length} command{c.commands.length === 1 ? "" : "s"}{/if}{#each [...c.injected] as [service, n]}<span class="pill cred" data-s="secret" data-testid="injected" title="the proxy set the credential of service {service} on {n} of {times(c.requests)}"><Icon name="key" size="sm" />{service}</span>{/each}{#each [...c.substituted] as [service, n]}<span class="pill cred" data-s="secret" data-testid="substituted" title="the proxy swapped the placeholder of service {service} for its secret in {n} of {times(c.requests)}"><Icon name="swap" size="sm" />{service}</span>{/each}{#if c.withoutCredential}<span class="pill cred" data-s="nokey" data-testid="without-credential" title="{times(c.withoutCredential)} outside the paths of service {c.service} went without its credential">{c.withoutCredential} without credential</span>{/if}</td>
               <td class="wrap">{#if c.decision}<span class="pill" data-s={decisionKind(c.decision)}>{c.decision}</span>{/if}{#if c.reason && c.decision !== "allow"} <span class="muted">{c.reason.text}</span>{/if}</td>
               <td>{#if c.durationMs !== null}{bytes(c.bytesUp)} ↑ {bytes(c.bytesDown)} ↓ · {duration(c.durationMs)}{:else}<span class="muted">open</span>{/if}</td>
             </tr>
@@ -151,7 +154,7 @@
                   </p>
                   <ol class="steps">
                     {#each c.steps as s}
-                      <li><span class="muted">{clock(s.time)}</span> <b>{s.event}</b>{#if s.decision} {s.decision}{/if}{#if s.mode} ({s.mode}){/if}{#if s.method} {s.method} {s.path}{/if}{#if s.status} → {s.status}{/if}{#if s.command} <code>{s.command}</code>{/if}{#if s.reason} <span class="muted">[{s.reason.code}] {s.reason.text}</span>{/if}</li>
+                      <li data-testid="step"><span class="muted">{clock(s.time)}</span> <b>{s.event}</b>{#if s.decision}{" "}{s.decision}{/if}{#if s.mode}{" "}({s.mode}){/if}{#if s.service && s.event === "connect"}{" "}<span class="muted">service</span> {s.service}{/if}{#if s.method}{" "}{s.method} {s.path}{/if}{#if s.rawPath}{" "}<span class="muted">sent as</span> <code>{s.rawPath}</code>{/if}{#if s.status}{" "}→ {s.status}{/if}{#if s.injected}<span class="pill cred" data-s="secret" title="the proxy set the credential of service {s.injected}"><Icon name="key" size="sm" />{s.injected}</span>{/if}{#each s.substituted ?? [] as service}<span class="pill cred" data-s="secret" title="the proxy swapped the placeholder of service {service} for its secret"><Icon name="swap" size="sm" />{service}</span>{/each}{#if s.command}{" "}<code>{s.command}</code>{/if}{#if s.reason}{" "}<span class="muted">[{s.reason.code}] {s.reason.text}</span>{/if}</li>
                     {/each}
                   </ol>
                 </td>
@@ -180,5 +183,9 @@
   .snippet pre { margin: 0; padding: var(--space-2); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-1); overflow-x: auto; }
   .from { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
   .steps { margin: 0; padding-left: var(--space-4); font-size: var(--text-sm); }
+  .cred { margin-left: 4px; gap: 4px; }
+  .cred::before { content: none; display: none; }
+  .pill[data-s="secret"] { --c: var(--status-running); --c-soft: var(--status-running-soft); }
+  .pill[data-s="nokey"] { border-style: dashed; }
   section.panel { margin-bottom: var(--space-4); }
 </style>

@@ -591,3 +591,23 @@ def test_the_network_tab_is_in_the_sidebar_and_says_where_a_connection_came_from
     expect(denial).to_contain_text("coder-1? (unauthenticated)")
     denial.get_by_role("button", name="How to fix").click()
     expect(page.get_by_test_id("denial-from")).to_have_text("Latest from 10.89.3.2, curl/8.11.1, claimed to be coder-1, not proved.")
+
+
+def test_the_network_tab_shows_which_requests_carried_a_credential_and_why_the_others_did_not(single_hub, page):
+    outside = "not under the paths of service \"opencode\", so sent without its credential"
+    single_hub.world("audit", engine="local", project="web", agent="coder-1", host="opencode.ai", decision="allow", mode="inject", service="opencode",
+                     requests=[{"path": "/zen/v1/chat", "injected": "opencode"}, {"path": "/inference/v1", "injected": "opencode"},
+                               {"path": "/docs", "code": "outside-paths", "text": outside}])
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + "/e/local/p/web/network")
+
+    row = page.get_by_test_id("connections").locator('tr[data-host="opencode.ai"]')
+    expect(row.get_by_test_id("injected")).to_have_text("opencode")
+    expect(row.get_by_test_id("injected")).to_have_attribute("title", "the proxy set the credential of service opencode on 2 of 3 requests")
+    expect(row.get_by_test_id("without-credential")).to_have_text("1 without credential")
+    row.click()
+    steps = page.get_by_test_id("step")
+    expect(steps.nth(0)).to_contain_text("service opencode")
+    expect(steps.nth(1)).to_contain_text("GET /zen/v1/chat")
+    expect(steps.nth(1)).to_contain_text("opencode")
+    expect(steps.nth(3)).to_contain_text("[outside-paths] " + outside)

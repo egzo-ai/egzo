@@ -47,7 +47,11 @@ One JSON object per line, on the proxy's standard output, as before:
 | `client` | the address the connection came from |
 | `user_agent` | what the client says it is: the `User-Agent` of the CONNECT, an ssh client's identification string. A hint, never proof |
 | `host`, `server` | the host; for ssh, `server` is the server's name in the profile |
-| `method`, `path`, `status` | on a `request` (never the query string) |
+| `service` | on an allowed https `connect`: the service of the profile that covers the host |
+| `method`, `path`, `status` | on a `request` (never the query string); `path` is decoded, as the agent wrote it, before a placeholder is swapped |
+| `raw_path` | on a `request`: the path as it went on the wire, when its escapes make it differ from `path` (`%2F`) |
+| `injected` | on a `request`: the service whose credential the proxy set on it; none when it set none |
+| `substituted` | on a `request`: the services whose placeholder the proxy swapped for the secret |
 | `command` | on an ssh `exec` |
 | `reason` | `{code, text}`: `code` from the closed list below, for tools; `text` for people, which may change |
 | `bytes_up`, `bytes_down`, `duration_ms` | on a `close` |
@@ -86,7 +90,8 @@ The reason codes:
 | `host-header` | deny | a request's `Host` header is malformed |
 | `host-mismatch` | deny | a request names another host than its connection |
 | `placeholder` | deny | a placeholder could not be swapped (a compressed or too large body, a secret that cannot go in a header) |
-| `path` | deny | a request under a service's `paths` whose path has a dot segment or a backslash, which the server could read as another path |
+| `path` | deny | a request under a service's `paths` whose path the server could read as another one: a dot segment, a backslash, a needless or double escape, an escaped control character or byte outside ASCII |
+| `outside-paths` | allow | why a request to an injecting service's host went without its credential: outside the service's `paths` (the text says when the agent sent the header itself) |
 | `aborted` | error | the client left before the handshake (clients open connections ahead of time); for ssh, before it tried to sign in |
 | `dial` | error | the upstream did not answer (for ssh too, a cloud metadata address included) |
 | `tls-handshake` | error | the client's TLS handshake with the proxy failed: it does not trust the project CA |

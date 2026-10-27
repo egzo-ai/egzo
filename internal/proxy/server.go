@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -290,6 +291,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	decision := agentPolicy.Decide(host)
+	c.service = decision.Service
 	if !decision.Allowed {
 		c.decide(KindConnect, OutcomeDeny, because(CodeNotInProfile, decision.Reason))
 		http.Error(w, "egzo: "+host+" is not allowed by this agent's egress profile", http.StatusForbidden)
@@ -390,7 +392,7 @@ func (s *Server) tunnel(client net.Conn, c *conn) {
 		c.decide(KindConnect, OutcomeError, because(CodeDial, "write: "+err.Error()))
 		return
 	}
-	c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeTunnel})
+	c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeTunnel, Service: c.service})
 
 	var wg sync.WaitGroup
 	var up, down int64
@@ -468,12 +470,12 @@ func (s *Server) terminate(client net.Conn, c *conn, decision Decision, ech bool
 	defer func() { c.closed(counted.read.Load(), counted.written.Load(), started, nil) }()
 	switch {
 	case ech:
-		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeIntercept,
+		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeIntercept, Service: c.service,
 			Reason: because(CodeECH, "the client sent Encrypted Client Hello, which can hide the server it asks for, so TLS is terminated here instead of tunneled")})
 	case decision.Inject != nil || len(decision.Substitutions) > 0:
-		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeInject})
+		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeInject, Service: c.service})
 	default:
-		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeInspect})
+		c.log(Event{Kind: KindConnect, Decision: OutcomeAllow, Mode: ModeInspect, Service: c.service})
 	}
 	// The idle timeout applies from the first byte, but the handshake has a hard limit of its own that a
 	// trickle of bytes cannot extend.
@@ -523,22 +525,24 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 			r.Out.URL.Host = host
 			r.Out.Host = host
 			r.Out.Header.Del("Proxy-Authorization")
-			if inject != nil {
-				if covered, _ := inject.Covers(loggedPath(r.In)); covered {
-					r.Out.Header.Set(inject.Header, inject.Value)
-				}
+			if recordOf(r.In).inject {
+				r.Out.Header.Set(inject.Header, inject.Value)
 			}
 		},
 		Transport:     s.Transport,
 		FlushInterval: -1, // stream responses, such as model output, as they arrive
 		ModifyResponse: func(response *http.Response) error {
 			if !quiet {
-				c.log(Event{Kind: KindRequest, Decision: OutcomeAllow, Method: response.Request.Method, Path: loggedPath(response.Request), Status: response.StatusCode})
+				event := recordOf(response.Request).event(OutcomeAllow)
+				event.Status = response.StatusCode
+				c.log(event)
 			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			c.log(Event{Kind: KindRequest, Decision: OutcomeError, Method: r.Method, Path: loggedPath(r), Reason: because(CodeUpstream, err.Error())})
+			event := recordOf(r).event(OutcomeError)
+			event.Reason = because(CodeUpstream, err.Error())
+			c.log(event)
 			http.Error(w, "egzo: upstream error", http.StatusBadGateway)
 		},
 	}
@@ -555,36 +559,76 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
+		// What the audit says of the request is taken before anything is swapped: the path the agent wrote, never one with
+		// a secret in it.
+		record := &requestRecord{Method: r.Method, Path: r.URL.Path}
+		if escaped := r.URL.EscapedPath(); escaped != (&url.URL{Path: r.URL.Path}).EscapedPath() {
+			record.RawPath = escaped
+		}
 		if inject != nil {
-			if _, refuse := inject.Covers(r.URL.Path); refuse {
-				reason := "the path has a '.' or '..' segment or a backslash under a path the credential is limited to, so the server may read it as another path"
-				c.log(Event{Kind: KindRequest, Decision: OutcomeDeny, Method: r.Method, Path: r.URL.Path, Reason: because(CodePath, reason)})
+			covered, refuse := inject.Covers(r.URL.EscapedPath())
+			switch {
+			case refuse != "":
+				reason := "the path " + refuse + ", under the paths the credential of service " + quoteName(inject.Service) + " is limited to: the server may read it as another path"
+				event := record.event(OutcomeDeny)
+				event.Reason = because(CodePath, reason)
+				c.log(event)
 				http.Error(w, "egzo: "+reason, http.StatusBadRequest)
 				return
+			case covered:
+				record.inject, record.Injected = true, inject.Service
+			default:
+				text := "not under the paths of service " + quoteName(inject.Service) + ", so sent without its credential"
+				if r.Header.Get(inject.Header) != "" {
+					text += "; the " + inject.Header + " header the agent sent went as it was"
+				}
+				record.Reason = because(CodeOutsidePaths, text)
 			}
 		}
+		r = r.WithContext(context.WithValue(r.Context(), requestRecordKey{}, record))
 		if swap != nil {
-			// The path as the agent wrote it: the one that is logged, never the one with a secret in it.
-			path := r.URL.Path
-			r = r.WithContext(context.WithValue(r.Context(), agentPathKey{}, path))
-			if status, reason := swap.apply(r); status != 0 {
-				c.log(Event{Kind: KindRequest, Decision: OutcomeDeny, Method: r.Method, Path: path, Reason: because(CodePlaceholder, reason)})
+			swapped, status, reason := swap.apply(r)
+			if status != 0 {
+				event := record.event(OutcomeDeny)
+				event.Reason = because(CodePlaceholder, reason)
+				c.log(event)
 				http.Error(w, "egzo: "+reason, status)
 				return
 			}
+			record.Substituted = swapped
 		}
 		proxy.ServeHTTP(w, r)
 	})
 }
 
-type agentPathKey struct{}
+// requestRecord is what the audit says of a request inside a terminated connection, from what the agent sent and what the
+// proxy did to it.
+type requestRecord struct {
+	Method, Path, RawPath string
+	inject                bool // the proxy sets the credential's header
+	Injected              string
+	Substituted           []string
+	Reason                *Reason
+}
 
-// loggedPath is the path to record for r: the one the agent sent, before any placeholder was swapped.
-func loggedPath(r *http.Request) string {
-	if path, ok := r.Context().Value(agentPathKey{}).(string); ok {
-		return path
+type requestRecordKey struct{}
+
+// recordOf is the record of r, made when r came in.
+func recordOf(r *http.Request) *requestRecord {
+	if record, ok := r.Context().Value(requestRecordKey{}).(*requestRecord); ok {
+		return record
 	}
-	return r.URL.Path
+	return &requestRecord{Method: r.Method, Path: r.URL.Path}
+}
+
+// event is the request event of the record with decision. A request that is refused went nowhere: nothing was injected.
+func (record *requestRecord) event(decision Outcome) Event {
+	event := Event{Kind: KindRequest, Decision: decision, Method: record.Method, Path: record.Path, RawPath: record.RawPath,
+		Injected: record.Injected, Substituted: record.Substituted, Reason: record.Reason}
+	if decision == OutcomeDeny {
+		event.Injected, event.Substituted, event.Reason = "", nil, nil
+	}
+	return event
 }
 
 // connListener serves exactly one connection with http.Server, then reports closed once that

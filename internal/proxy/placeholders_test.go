@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -401,7 +402,7 @@ func TestDecideCollectsPlaceholdersFromEveryServiceOfTheHost(t *testing.T) {
 	}}
 	decision := profile.Decide("example.com")
 	if !decision.Allowed || decision.Service != "a" || decision.Inject != nil || len(decision.Substitutions) != 2 ||
-		decision.Substitutions[0] != (Substitution{phA, "1"}) || decision.Substitutions[1] != (Substitution{phB, "2"}) {
+		decision.Substitutions[0] != (Substitution{"a", phA, "1"}) || decision.Substitutions[1] != (Substitution{"b", phB, "2"}) {
 		t.Errorf("decision = %+v", decision)
 	}
 	if got := profile.Decide("x.example.com"); len(got.Substitutions) != 1 || got.Substitutions[0].Secret != "2" {
@@ -508,4 +509,21 @@ func auditReasons(r *rig) []string {
 		}
 	}
 	return reasons
+}
+
+func TestTheAuditNamesTheServicesWhosePlaceholderWasSwappedAndOnlyThose(t *testing.T) {
+	other := Service{Name: "other", Hosts: []string{"example.com"}, Placeholder: phB, Secret: "2"}
+	r, _ := swapRig(t, ph("1"), other)
+	body(t, do(t, r, "POST", "https://example.com/a", "application/json", strings.NewReader(`{"p":"`+phA+`"}`), "X-Key", phB))
+	body(t, do(t, r, "GET", "https://example.com/b?k="+phA, "", nil))
+	body(t, do(t, r, "GET", "https://example.com/c", "", nil))
+	got := map[string][]string{}
+	for _, event := range auditEvents(t, r.audit.String()) {
+		if event.Kind == KindRequest {
+			got[event.Path] = event.Substituted
+		}
+	}
+	if !slices.Equal(got["/a"], []string{"site", "other"}) || !slices.Equal(got["/b"], []string{"site"}) || got["/c"] != nil {
+		t.Errorf("substituted = %v", got)
+	}
 }

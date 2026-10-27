@@ -443,28 +443,32 @@ type reasonJSON struct {
 
 // networkEventJSON is one event of a proxy's audit trail (roadmap/proxy-audit.md), in the web's spelling.
 type networkEventJSON struct {
-	Time       time.Time   `json:"time"`
-	Conn       string      `json:"conn"`
-	Protocol   string      `json:"protocol"`
-	Event      string      `json:"event"`
-	Decision   string      `json:"decision,omitempty"`
-	Mode       string      `json:"mode,omitempty"`
-	Agent      string      `json:"agent,omitempty"`
-	Instance   string      `json:"instance,omitempty"`
-	Profile    string      `json:"profile,omitempty"`
-	Claimed    string      `json:"claimedAgent,omitempty"`
-	Client     string      `json:"client,omitempty"`
-	UserAgent  string      `json:"userAgent,omitempty"`
-	Host       string      `json:"host,omitempty"`
-	Server     string      `json:"server,omitempty"`
-	Method     string      `json:"method,omitempty"`
-	Path       string      `json:"path,omitempty"`
-	Status     int         `json:"status,omitempty"`
-	Command    string      `json:"command,omitempty"`
-	Reason     *reasonJSON `json:"reason,omitempty"`
-	BytesUp    int64       `json:"bytesUp,omitempty"`
-	BytesDown  int64       `json:"bytesDown,omitempty"`
-	DurationMs int64       `json:"durationMs,omitempty"`
+	Time        time.Time   `json:"time"`
+	Conn        string      `json:"conn"`
+	Protocol    string      `json:"protocol"`
+	Event       string      `json:"event"`
+	Decision    string      `json:"decision,omitempty"`
+	Mode        string      `json:"mode,omitempty"`
+	Agent       string      `json:"agent,omitempty"`
+	Instance    string      `json:"instance,omitempty"`
+	Profile     string      `json:"profile,omitempty"`
+	Claimed     string      `json:"claimedAgent,omitempty"`
+	Client      string      `json:"client,omitempty"`
+	UserAgent   string      `json:"userAgent,omitempty"`
+	Host        string      `json:"host,omitempty"`
+	Service     string      `json:"service,omitempty"`
+	Server      string      `json:"server,omitempty"`
+	Method      string      `json:"method,omitempty"`
+	Path        string      `json:"path,omitempty"`
+	RawPath     string      `json:"rawPath,omitempty"`
+	Status      int         `json:"status,omitempty"`
+	Injected    string      `json:"injected,omitempty"`
+	Substituted []string    `json:"substituted,omitempty"`
+	Command     string      `json:"command,omitempty"`
+	Reason      *reasonJSON `json:"reason,omitempty"`
+	BytesUp     int64       `json:"bytesUp,omitempty"`
+	BytesDown   int64       `json:"bytesDown,omitempty"`
+	DurationMs  int64       `json:"durationMs,omitempty"`
 }
 
 type denialJSON struct {
@@ -512,8 +516,8 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User
 		e := view.Events[i]
 		row := networkEventJSON{Time: e.Time, Conn: e.Conn, Protocol: string(e.Protocol), Event: string(e.Kind), Decision: string(e.Decision),
 			Mode: string(e.Mode), Agent: e.Agent, Instance: e.Instance, Profile: e.Profile, Claimed: e.ClaimedAgent, Client: e.Client,
-			UserAgent: e.UserAgent, Host: e.Host, Server: e.Server, Method: e.Method,
-			Path: e.Path, Status: e.Status, Command: e.Command, BytesUp: e.BytesUp, BytesDown: e.BytesDown, DurationMs: e.DurationMs}
+			UserAgent: e.UserAgent, Host: e.Host, Service: e.Service, Server: e.Server, Method: e.Method,
+			Path: e.Path, RawPath: e.RawPath, Status: e.Status, Injected: e.Injected, Substituted: e.Substituted, Command: e.Command, BytesUp: e.BytesUp, BytesDown: e.BytesDown, DurationMs: e.DurationMs}
 		if e.Reason != nil {
 			row.Reason = &reasonJSON{Code: string(e.Reason.Code), Text: e.Reason.Text}
 		}

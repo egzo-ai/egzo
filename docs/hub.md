@@ -88,7 +88,9 @@ sidebar) says what the proxy refused, why, and how to fix it. An agent that was 
   domain were refused, it says which wildcard covers them. A group is marked **fixed** once the same agent gets through to the
   host, and opens again at the next refusal.
 - **Connections** are the latest the hub heard, one row per connection: the host, how it was handled (tunnel, inject, inspect,
-  intercept), its requests, the decision and the traffic. A row opens on its steps, with the address it came from and what the
+  intercept), its requests, the decision and the traffic. A green pill names each service whose credential went with its
+  requests (a key: injected; arrows: a placeholder swapped), and a dashed one counts the requests that went without it,
+  outside the service's `paths`. The steps show the same for each request, with why. A row opens on its steps, with the address it came from and what the
   client says it is (`curl/8.11.1`, Chrome's user agent, an ssh client's version). The agent is shown only when the proxy
   credentials proved it; a connection with wrong ones shows the name it claimed, marked with `?`. Filters keep the refused ones,
   a host or an agent.

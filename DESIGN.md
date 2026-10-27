@@ -503,8 +503,9 @@ egress:
   with neither is a pure allowlist and cannot have a secret. Optional `inspect: true` audits request paths.
   Optional `paths` (path prefixes, matched by whole segments) limits an `inject` to the requests under them, for a
   host that is also a website or a console; the other paths stay reachable without the header. A prefix is a plain
-  path, and a request under one whose path has a dot segment or a backslash is refused, since the server could
-  resolve it outside the prefix. There is no method scope; a key for it is rejected like any other unknown key.
+  path, and a request under one whose path the server could resolve outside it (a dot segment, a backslash, a needless
+  or double escape, an escaped control character or byte outside ASCII) is refused. The audit names on each request the
+  service whose credential went with it (`injected`), or says why none did (`outside-paths`). There is no method scope; a key for it is rejected like any other unknown key.
 - **Service hosts are exact, or a wildcard without a secret.** `hosts` take what `allow` takes (`host`, `*.domain`,
   `*`, folded like any name). A service with `inject` or a `placeholder` may only name exact hosts: a wildcard
   would hand the secret to every subdomain, including attacker-controlled ones, so `egzo project check --resolved` refuses it (a secret

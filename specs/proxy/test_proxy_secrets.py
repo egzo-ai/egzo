@@ -76,13 +76,48 @@ def test_a_service_limited_to_paths_injects_only_under_them_and_refuses_a_path_t
     assert sent("/anything/apix") is None, "a prefix matches whole segments"
     assert sent("/anything/console", "-H", "X-Egzo-Secret: the-agents-own") == "the-agents-own", "a header the agent sends outside the paths is its own"
     assert sent("/anything/api/v1", "-H", "X-Egzo-Secret: forged") == SECRET
+    # what APIs send: an escaped slash in a name (GitLab's group%2Fproject), a space, a colon (Google's :generateContent)
+    for legitimate in ("/anything/api/projects/group%2Fproject", "/anything/api/files/my%20file.md", "/anything/api/models/m:generateContent"):
+        assert sent(legitimate) == SECRET, legitimate
 
-    for climbing in ("/anything/api/../console", "/anything/api/%2e%2e/console", "/anything/api/%2E%2E%2Fconsole", "/anything/api/..%5cconsole", "/anything/api/..\\console"):
-        refused = probe.curl(name, "--path-as-is", "-o", "/dev/null", "-w", "%{http_code}", f"https://httpbin.org{climbing}")
-        assert refused.stdout == "400", f"{climbing}: {refused.stdout} {refused.stderr}"
-    denied = [e for e in probe.requests_to("httpbin.org", agent=name) if e["decision"] == "deny"]
-    assert len(denied) == 5 and {e["reason"]["code"] for e in denied} == {"path"}, denied
+    climbing = (
+        "/anything/api/../console", "/anything/api/%2e%2e/console", "/anything/api/%2E%2E%2Fconsole", "/anything/api/..%5cconsole",
+        "/anything/api/..\\console", "/anything/api/..;/console", "/anything/api/..%20/console",
+        # what no API sends either: a character that needs no escape escaped, an escape escaped, a byte outside ASCII
+        "/anything/%61pi/v1", "/anything/api/%252e%252e/console", "/anything/api/%EF%BC%8E%EF%BC%8E/console", "/anything/api/x%00",
+    )
+    for path in climbing:
+        refused = probe.curl(name, "--path-as-is", "-o", "/dev/null", "-w", "%{http_code}", f"https://httpbin.org{path}")
+        assert refused.stdout == "400", f"{path}: {refused.stdout} {refused.stderr}"
+    requests = probe.requests_to("httpbin.org", agent=name)
+    denied = [e for e in requests if e["decision"] == "deny"]
+    assert len(denied) == len(climbing) and {e["reason"]["code"] for e in denied} == {"path"}, denied
+    assert not any("injected" in e for e in denied)
     nothing_of_it_is_recorded(sandbox, engine, probe, SECRET, name)
+
+
+def test_the_audit_says_of_each_request_whether_the_credential_went_with_it_and_why_not(sandbox, probe):
+    """The connection names the service; each request names the service whose credential the proxy set, or says why it set none."""
+    name = sandbox.spawn("paths")
+    for path in ("/anything/api/v1", "/anything/console", "/anything/api/projects/group%2Fproject"):
+        assert probe.curl(name, "--path-as-is", f"https://httpbin.org{path}").returncode == 0
+    probe.curl(name, "-H", "X-Egzo-Secret: the-agents-own", "https://httpbin.org/anything/home")
+
+    events = probe.audit(agent=name, host="httpbin.org")
+    connects = [e for e in events if e["event"] == "connect"]
+    assert connects and all(e["mode"] == "inject" and e["service"] == "echo" for e in connects), connects
+    allowed = {e["path"]: e for e in events if e["event"] == "request" and e["decision"] == "allow"}
+    assert allowed["/anything/api/v1"]["injected"] == "echo" and "reason" not in allowed["/anything/api/v1"]
+    outside = allowed["/anything/console"]
+    assert "injected" not in outside and outside["reason"]["code"] == "outside-paths" and "echo" in outside["reason"]["text"]
+    assert "X-Egzo-Secret" in allowed["/anything/home"]["reason"]["text"], "the header the agent sent itself is told apart"
+    escaped = allowed["/anything/api/projects/group/project"]
+    assert escaped["injected"] == "echo" and escaped["raw_path"] == "/anything/api/projects/group%2Fproject", "what went on the wire"
+
+    unlimited = sandbox.spawn("echo")
+    probe.curl(unlimited, "https://httpbin.org/headers")
+    request = next(e for e in probe.requests_to("httpbin.org", agent=unlimited))
+    assert request["injected"] == "echo" and "reason" not in request
 
 
 def test_spawn_needs_no_secret_because_the_profiles_were_loaded_by_up(sandbox, probe):
@@ -108,6 +143,10 @@ def test_the_agent_types_a_placeholder_and_the_proxy_swaps_it_for_the_secret_whe
     assert json.loads(body.stdout)["json"] == {"password": SITE_SECRET}
     query = probe.shell(name, '"https://httpbin.org/get?password=$SITE_PASSWORD"')
     assert json.loads(query.stdout)["args"] == {"password": SITE_SECRET}
+    probe.curl(name, "https://httpbin.org/anything/nothing-typed")
+    swapped = {e["path"]: e.get("substituted") for e in probe.requests_to("httpbin.org", agent=name)}
+    assert swapped["/headers"] == swapped["/post"] == swapped["/get"] == ["login"], "the audit names the service whose placeholder was swapped"
+    assert swapped["/anything/nothing-typed"] is None and not any("injected" in e for e in probe.requests_to("httpbin.org", agent=name))
 
     require_reachable("httpbingo.org")
     elsewhere = probe.shell(name, '-H "X-Site-Key: $SITE_PASSWORD" https://httpbingo.org/headers')

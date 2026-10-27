@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -42,13 +43,21 @@ type Event struct {
 	UserAgent string `json:"user_agent,omitempty"`
 
 	Host string `json:"host,omitempty"`
+	// Service is the service of the profile that covers the host, on an allowed https connect.
+	Service string `json:"service,omitempty"`
 	// Server is an ssh server's name in the profile.
 	Server string `json:"server,omitempty"`
 
-	// On a request: never the query string.
-	Method string `json:"method,omitempty"`
-	Path   string `json:"path,omitempty"`
-	Status int    `json:"status,omitempty"`
+	// On a request: never the query string. Path is decoded, as the agent wrote it (before a placeholder is swapped);
+	// RawPath is the same path as it went on the wire, when its escapes make it differ (%2F is a '/' in Path).
+	Method  string `json:"method,omitempty"`
+	Path    string `json:"path,omitempty"`
+	RawPath string `json:"raw_path,omitempty"`
+	Status  int    `json:"status,omitempty"`
+	// Injected is the service whose credential the proxy set on the request; none when it set none. Substituted are the
+	// services whose placeholder it swapped for their secret.
+	Injected    string   `json:"injected,omitempty"`
+	Substituted []string `json:"substituted,omitempty"`
 	// Command is what an agent asked an ssh server to run.
 	Command string `json:"command,omitempty"`
 
@@ -130,6 +139,7 @@ const (
 	CodeHostMismatch   Code = "host-mismatch"   // a request names another host than its connection
 	CodePlaceholder    Code = "placeholder"     // a placeholder could not be swapped
 	CodePath           Code = "path"            // a path under a service's paths that could mean another one
+	CodeOutsidePaths   Code = "outside-paths"   // why an allowed request went without the credential of its host's service
 	CodeAborted        Code = "aborted"         // the client left before the handshake
 	CodeDial           Code = "dial"            // the upstream did not answer
 	CodeTLSHandshake   Code = "tls-handshake"   // the client's TLS handshake with the proxy failed
@@ -168,6 +178,18 @@ func clip(text string) string {
 
 // clipped reports whether text is what clip leaves: text of at most MaxField bytes and an ellipsis.
 func clipped(text string) bool { return len(text) <= MaxField+len(ellipsis) && utf8.ValidString(text) }
+
+// maxSubstituted bounds the services a reader takes in one request's substituted: one per service of a profile.
+const maxSubstituted = 64
+
+func allClipped(texts []string) bool {
+	for _, text := range texts {
+		if !clipped(text) {
+			return false
+		}
+	}
+	return true
+}
 
 // connID is the form of a connection's id (newConnID).
 var connID = regexp.MustCompile(`^[0-9a-f]{16}$`)
@@ -209,6 +231,10 @@ func (e Event) Check() error {
 		{"server", e.Server, optional(e.Server, names.SSHServer)},
 		{"method", e.Method, clipped(e.Method)},
 		{"path", e.Path, clipped(e.Path)},
+		{"raw_path", e.RawPath, clipped(e.RawPath)},
+		{"service", e.Service, clipped(e.Service)},
+		{"injected", e.Injected, clipped(e.Injected)},
+		{"substituted", strings.Join(e.Substituted, ","), len(e.Substituted) <= maxSubstituted && allClipped(e.Substituted)},
 		{"command", e.Command, clipped(e.Command)},
 		{"reason", code, reason},
 		{"counts", fmt.Sprint(e.Status, e.BytesUp, e.BytesDown, e.DurationMs), e.Status >= 0 && e.BytesUp >= 0 && e.BytesDown >= 0 && e.DurationMs >= 0},
@@ -234,6 +260,7 @@ func (a *Audit) Log(event Event) {
 	}
 	event.Time = time.Now().UTC()
 	event.Agent, event.ClaimedAgent, event.Host, event.Path = clip(event.Agent), clip(event.ClaimedAgent), clip(event.Host), clip(event.Path)
+	event.RawPath = clip(event.RawPath)
 	event.UserAgent = clip(event.UserAgent)
 	event.Server, event.Command = clip(event.Server), clip(event.Command)
 	if event.Reason != nil {
@@ -261,6 +288,7 @@ type conn struct {
 	instance  string
 	profile   string
 	host      string
+	service   string // the service of the profile that covers host, once decided
 	server    string
 }
 

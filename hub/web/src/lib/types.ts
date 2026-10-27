@@ -209,10 +209,17 @@ export interface NetworkEvent {
   /** What the client says it is: a hint, never proof. */
   userAgent?: string;
   host?: string;
+  /** The service of the profile that covers the host, on an allowed connect. */
+  service?: string;
   server?: string;
   method?: string;
+  /** Decoded, as the agent wrote it; rawPath is how it went on the wire, when its escapes make it differ. */
   path?: string;
+  rawPath?: string;
   status?: number;
+  /** On a request: the service whose credential the proxy set, and those whose placeholder it swapped for the secret. */
+  injected?: string;
+  substituted?: string[];
   command?: string;
   reason?: NetworkReason;
   bytesUp?: number;

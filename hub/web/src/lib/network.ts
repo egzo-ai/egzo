@@ -46,6 +46,8 @@ export function explain(d: Pick<Denial, "code" | "host" | "profile" | "protocol"
     case "host-header":
     case "host-mismatch":
       return { title: "request for another host", why: d.text || "A request named another host than its connection.", fix: "Allow that host too: each host is checked on its own." };
+    case "path":
+      return { title: "path refused", why: d.text || "A request under the paths a credential is limited to had a path the server could read as another one.", fix: "Send the path as the API expects it: no '.' or '..' segment, no escape of a character that needs none (%2E), nothing escaped twice, nothing outside ASCII." };
     case "placeholder":
       return { title: "placeholder not swapped", why: d.text || "A placeholder could not be swapped in the request.", fix: "Send the request uncompressed and under 1 MiB, so the proxy can swap the placeholder." };
     case "dial":
@@ -102,8 +104,15 @@ export interface Connection {
   server: string;
   decision: "allow" | "deny" | "error" | "challenge" | "";
   mode: string;
+  /** The service of the profile that covers the host. */
+  service: string;
   reason?: NetworkReason;
   requests: number;
+  /** How many requests carried each service's credential (injected), or had its placeholder swapped (substituted). */
+  injected: Map<string, number>;
+  substituted: Map<string, number>;
+  /** The requests that went without the credential, outside the paths it is limited to. */
+  withoutCredential: number;
   bytesUp: number;
   bytesDown: number;
   durationMs: number | null;
@@ -121,7 +130,8 @@ export function connections(events: NetworkEvent[]): Connection[] {
     let c = byConn.get(e.conn);
     if (!c) {
       c = { conn: e.conn, time: e.time, protocol: e.protocol, agent: e.agent ?? "", claimedAgent: "", client: e.client ?? "", userAgent: e.userAgent ?? "",
-        host: e.host ?? "", server: e.server ?? "", decision: "", mode: "", requests: 0, bytesUp: 0, bytesDown: 0, durationMs: null, commands: [], steps: [] };
+        host: e.host ?? "", server: e.server ?? "", decision: "", mode: "", service: "", requests: 0,
+        injected: new Map(), substituted: new Map(), withoutCredential: 0, bytesUp: 0, bytesDown: 0, durationMs: null, commands: [], steps: [] };
       byConn.set(e.conn, c);
     }
     c.steps.push(e);
@@ -133,7 +143,11 @@ export function connections(events: NetworkEvent[]): Connection[] {
     if (e.host) c.host = e.host;
     if (e.server) c.server = e.server;
     if (e.mode) c.mode = e.mode;
+    if (e.service) c.service = e.service;
     if (e.event === "request") c.requests++;
+    if (e.injected) c.injected.set(e.injected, (c.injected.get(e.injected) ?? 0) + 1);
+    for (const s of e.substituted ?? []) c.substituted.set(s, (c.substituted.get(s) ?? 0) + 1);
+    if (e.reason?.code === "outside-paths") c.withoutCredential++;
     if (e.command) c.commands.push(e.command);
     if (e.event === "close") [c.bytesUp, c.bytesDown, c.durationMs] = [e.bytesUp ?? 0, e.bytesDown ?? 0, e.durationMs ?? 0];
     const d = e.decision;
