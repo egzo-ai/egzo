@@ -129,6 +129,7 @@ const (
 	CodeHostHeader     Code = "host-header"     // a request's Host header is malformed
 	CodeHostMismatch   Code = "host-mismatch"   // a request names another host than its connection
 	CodePlaceholder    Code = "placeholder"     // a placeholder could not be swapped
+	CodePath           Code = "path"            // a path under a service's paths that could mean another one
 	CodeAborted        Code = "aborted"         // the client left before the handshake
 	CodeDial           Code = "dial"            // the upstream did not answer
 	CodeTLSHandshake   Code = "tls-handshake"   // the client's TLS handshake with the proxy failed

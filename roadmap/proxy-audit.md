@@ -86,6 +86,7 @@ The reason codes:
 | `host-header` | deny | a request's `Host` header is malformed |
 | `host-mismatch` | deny | a request names another host than its connection |
 | `placeholder` | deny | a placeholder could not be swapped (a compressed or too large body, a secret that cannot go in a header) |
+| `path` | deny | a request under a service's `paths` whose path has a dot segment or a backslash, which the server could read as another path |
 | `aborted` | error | the client left before the handshake (clients open connections ahead of time); for ssh, before it tried to sign in |
 | `dial` | error | the upstream did not answer (for ssh too, a cloud metadata address included) |
 | `tls-handshake` | error | the client's TLS handshake with the proxy failed: it does not trust the project CA |

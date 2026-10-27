@@ -338,8 +338,8 @@ agents:
 `, "SITE_PASSWORD")
 	})
 
-	t.Run("rules are by host only", func(t *testing.T) {
-		for _, key := range []string{"path", "paths", "method", "methods"} {
+	t.Run("there is no rule by method, and no singular path", func(t *testing.T) {
+		for _, key := range []string{"path", "method", "methods"} {
 			if _, err := Parse([]byte("egress:\n  default:\n    services:\n      login: { " + login + ", " + key + ": [x] }\n")); err == nil || !strings.Contains(err.Error(), key) {
 				t.Errorf("%s: err = %v", key, err)
 			}

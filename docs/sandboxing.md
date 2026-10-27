@@ -69,8 +69,31 @@ such as git over HTTPS. `basic_user` and `value` cannot be combined. The built-i
 ```
 
 A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.
-Rules are by host: a service cannot be limited to a path or a method, so the secret goes with every request to its hosts, including a
-website on the same name (`github.com`, `opencode.ai`): see [the known issue](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md).
+
+Without more, `inject` sets the header on every request to the service's hosts, including a website or a console on the
+same name. When the API lives under a path, say so with `paths`, and the header goes only with the requests under one of
+them:
+
+```yaml
+      deploy-api:
+        hosts: [deploy.example.com]               # also the vendor's website
+        paths: [/api/v1/]                         # the API: the token goes nowhere else
+        inject: { header: Authorization, value: "Bearer {secret}" }
+        secret: main/DEPLOY_TOKEN
+```
+
+- A prefix matches whole segments: `/api` covers `/api` and `/api/x`, not `/apix`; `/api/` covers `/api/x`. Other paths
+  of the host stay reachable, without the header (a header the agent sends there itself is left alone).
+- A prefix is a plain absolute path: no `.` or `..` segment, `%`, `?`, `#` or `\`.
+- The proxy refuses (400, audit code `path`) a request under a prefix whose path has a `.` or `..` segment (decoded, also
+  before a `;`) or a backslash: the server could read it as a path outside the prefix.
+- `paths` limits an injected header only. A placeholder goes where the agent types it.
+- A path rule is not an authorization rule: an endpoint under the prefix can still do more than the agent needs. Give the
+  credential the least privilege it can work with. There is no rule by method.
+
+The built-in services inject on every path of their hosts. `github.com` is also GitHub's website, and git over HTTPS sends
+its requests under `/<owner>/<repo>.git/`, so a prefix there would be a list of repositories: see [the known
+issue](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md).
 
 Service `hosts` take the patterns `allow` takes (`host`, `*.domain`, `*`), **but only for a service without a secret**: a
 secret binds to exact hosts, because a wildcard would hand it to every subdomain, including ones somebody else controls.
@@ -240,7 +263,7 @@ Each event is one step of one connection:
 |---|---|---|
 | `https` | `connect` | the decision about a CONNECT. Allowed, its `mode` says how: `tunnel` (the proxy sees the host name, never the traffic), `inject` (a service injects a credential or swaps a placeholder), `inspect` (`inspect: true`), or `intercept` (the client sent Encrypted Client Hello, [browsing](browser.md)). Denied: not in the profile, not port 443, a private address, a TLS server name that differs from the host, wrong proxy credentials, too many connections. An error: the host did not answer, or the client left |
 | `https` | `handshake` | the client's TLS handshake with the proxy failed on a terminated host: it does not trust the project CA |
-| `https` | `request` | one request to a terminated host: method, path (never the query) and status; or a request refused (another host, a placeholder that cannot be swapped) or failed upstream |
+| `https` | `request` | one request to a terminated host: method, path (never the query) and status; or a request refused (another host, a placeholder that cannot be swapped, a path that could climb out of a service's `paths`) or failed upstream |
 | both | `close` | the end of an allowed connection, with `bytes_up`, `bytes_down` and `duration_ms` |
 | `ssh` | `connect` | an agent's ssh connection to a server of its profile (`server` is its name, `host` the real one), or a refused one (an identity or server that is not the agent's, too many connections; `server` is then the one asked for), or an error when the client left before it signed in |
 | `ssh` | `upstream` | the server did not answer, refused the key, presented another host key than the pinned one, or would not open a session |

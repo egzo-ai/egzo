@@ -23,7 +23,7 @@ PLACEHOLDER = re.compile(r"egzo-ph-[0-9a-f]{32}")
 @pytest.fixture(scope="module")
 def sandbox(shared_project, engine):
     shared_project.env.update({"DEPLOY_TOKEN": SECRET, "SITE_SECRET": SITE_SECRET})
-    shared_project.up(document(engine.agent_image(), "echo", "basic", "login", "plain"))
+    shared_project.up(document(engine.agent_image(), "echo", "paths", "basic", "login", "plain"))
     return shared_project
 
 
@@ -59,6 +59,30 @@ def test_the_proxy_injects_the_credential_the_agent_never_sees_it_and_what_the_a
     sent = json.loads(probe.curl(basic, "https://httpbin.org/headers").stdout)["headers"]["Authorization"]
     assert sent == "Basic " + base64.b64encode(f"x-access-token:{SECRET}".encode()).decode()
     assert SECRET not in engine.exec(probe.container(basic).name, "env").stdout
+
+
+def test_a_service_limited_to_paths_injects_only_under_them_and_refuses_a_path_that_could_climb_out(sandbox, engine, probe):
+    """httpbin.org/anything/<path> echoes any path: the website and the API on one host, the API under /anything/api/."""
+    name = sandbox.spawn("paths")
+
+    def sent(path, *extra):
+        echoed = probe.curl(name, "--path-as-is", *extra, f"https://httpbin.org{path}")
+        assert echoed.returncode == 0, echoed.stderr
+        return json.loads(echoed.stdout)["headers"].get("X-Egzo-Secret")
+
+    assert sent("/anything/api/v1/models") == SECRET
+    assert sent("/anything/api/") == SECRET
+    assert sent("/anything/console/config") is None, "the host is allowed, the secret stays home"
+    assert sent("/anything/apix") is None, "a prefix matches whole segments"
+    assert sent("/anything/console", "-H", "X-Egzo-Secret: the-agents-own") == "the-agents-own", "a header the agent sends outside the paths is its own"
+    assert sent("/anything/api/v1", "-H", "X-Egzo-Secret: forged") == SECRET
+
+    for climbing in ("/anything/api/../console", "/anything/api/%2e%2e/console", "/anything/api/%2E%2E%2Fconsole", "/anything/api/..%5cconsole", "/anything/api/..\\console"):
+        refused = probe.curl(name, "--path-as-is", "-o", "/dev/null", "-w", "%{http_code}", f"https://httpbin.org{climbing}")
+        assert refused.stdout == "400", f"{climbing}: {refused.stdout} {refused.stderr}"
+    denied = [e for e in probe.requests_to("httpbin.org", agent=name) if e["decision"] == "deny"]
+    assert len(denied) == 5 and {e["reason"]["code"] for e in denied} == {"path"}, denied
+    nothing_of_it_is_recorded(sandbox, engine, probe, SECRET, name)
 
 
 def test_spawn_needs_no_secret_because_the_profiles_were_loaded_by_up(sandbox, probe):

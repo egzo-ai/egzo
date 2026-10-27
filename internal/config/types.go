@@ -81,6 +81,9 @@ type ServiceDef struct {
 	Hosts  []string `yaml:"hosts"`
 	Inject *Inject  `yaml:"inject,omitempty"`
 	Secret string   `yaml:"secret,omitempty"`
+	// Paths limits the injection to requests whose path starts with one of these prefixes (whole segments).
+	// Nil injects on every path.
+	Paths []string `yaml:"paths,omitempty"`
 	// Placeholder is the environment variable that holds the stand-in for the secret in the agent.
 	Placeholder string `yaml:"placeholder,omitempty"`
 	Inspect     bool   `yaml:"inspect,omitempty"`
