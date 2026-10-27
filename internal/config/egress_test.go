@@ -354,4 +354,7 @@ func TestTheOpenCodeServiceIsBuiltInAndSendsABearerTokenToOpenCodeAi(t *testing.
 	if !ok || len(service.Hosts) != 1 || service.Hosts[0] != "opencode.ai" || service.Inject.Header != "Authorization" || service.Inject.Value != "Bearer {secret}" {
 		t.Errorf("service = %+v, ok = %v", service, ok)
 	}
+	if want := []string{"/inference/", "/zen/", "/console/api/v2/config", "/console/api/websearch"}; !reflect.DeepEqual(service.Paths, want) {
+		t.Errorf("paths = %v, want %v", service.Paths, want)
+	}
 }
