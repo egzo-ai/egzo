@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/egzo-ai/egzo/internal/config"
+	"github.com/egzo-ai/egzo/internal/seal"
 )
 
 // ErrEmptySecret is wrapped by the error for a secret that holds nothing.
@@ -30,6 +31,25 @@ func ReadSecret(ref config.SecretRef, dir string) (string, error) {
 // read whole instead of by its first line (the other lines are notes for any other secret).
 func ReadSecretText(ref config.SecretRef, dir string) (string, error) {
 	return readSecret(ref, dir, true)
+}
+
+// ShortSecretKeyError is a project secret key that is too short to be one. It never holds the value.
+type ShortSecretKeyError struct{ Bytes int }
+
+func (e *ShortSecretKeyError) Error() string {
+	return fmt.Sprintf("too short: %d bytes, a secret key is at least %d bytes (make one with `openssl rand -hex 32`)", e.Bytes, seal.MinKeyBytes)
+}
+
+// ReadSecretKey reads the project's secret key: a secret like any other, at least seal.MinKeyBytes long.
+func ReadSecretKey(ref config.SecretRef, dir string) (string, error) {
+	value, err := ReadSecret(ref, dir)
+	if err != nil {
+		return "", err
+	}
+	if len(value) < seal.MinKeyBytes {
+		return "", &ShortSecretKeyError{Bytes: len(value)}
+	}
+	return value, nil
 }
 
 func readSecret(ref config.SecretRef, dir string, whole bool) (string, error) {

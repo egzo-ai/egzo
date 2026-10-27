@@ -147,14 +147,17 @@ func (p Published) View(instances map[string]string) *config.Resolved {
 
 // AsProject is the project as the published templates describe it, each template an agent under its own
 // name: what restarting the proxy builds its policy from, so a file edited since `up` changes nothing.
-// secrets are the file's, since the templates hold references and never where a secret lives.
-func (p Published) AsProject(secrets map[string]config.SecretRef) *config.Resolved {
+// The secrets and the secret key are the file's (nil for none), since the templates hold references and never where a
+// secret lives.
+func (p Published) AsProject(file *config.Resolved) *config.Resolved {
 	instances := map[string]string{}
 	for name := range p.Templates {
 		instances[name] = name
 	}
 	view := p.View(instances)
-	view.Secrets = secrets
+	if file != nil {
+		view.Secrets, view.SecretKey = file.Secrets, file.SecretKey
+	}
 	return view
 }
 

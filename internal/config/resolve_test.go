@@ -11,14 +11,48 @@ import (
 	"testing"
 )
 
-// resolve parses and resolves a project file in dir, the way the CLI does.
+// resolve parses and resolves a project file in dir, the way the CLI does. A file that names no secret key gets
+// one, in a vault of its own, so a test is about what it says.
 func resolve(t *testing.T, dir, yaml string) (*Resolved, []string, error) {
 	t.Helper()
 	file, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
+	if file.SecretKey == "" {
+		if file.Vaults == nil {
+			file.Vaults = map[string]Vault{}
+		}
+		file.Vaults["testkey"] = Vault{Backend: "env"}
+		file.SecretKey = "testkey/KEY"
+	}
 	return Resolve(file, "proj", dir)
+}
+
+func TestTheSecretKeyIsRequiredAndTheErrorSaysHowToMakeOneInTheFilesVault(t *testing.T) {
+	cases := map[string]string{
+		"vaults:\n  a: { backend: env }\n  b: { backend: pass }\n": "openssl rand -hex 32 | pass insert --multiline egzo/proj-key\n  secret_key: b/egzo/proj-key",
+		"vaults:\n  a: { backend: env }\n":                         "export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)\n  secret_key: a/EGZO_PROJECT_SECRET_KEY",
+		"{}\n":                                                     "main: { backend: pass }",
+	}
+	for yaml, want := range cases {
+		file, err := Parse([]byte(yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, _, err := Resolve(file, "proj", t.TempDir())
+		if err != nil {
+			t.Fatalf("a file without a secret key resolves, for the commands that do not need it: %v", err)
+		}
+		if missing := resolved.MissingSecretKey(); !strings.Contains(missing, "secret_key is required") || !strings.Contains(missing, want) {
+			t.Errorf("%q: %q, want %q", yaml, missing, want)
+		}
+	}
+	resolved, _ := mustResolve(t, t.TempDir(), "secret_key: v/egzo/k\nvaults:\n  v: { backend: pass }\n")
+	if resolved.SecretKey != "v/egzo/k" || resolved.Secrets["v/egzo/k"] != (SecretRef{Vault: "v", Name: "egzo/k", Backend: "pass"}) {
+		t.Errorf("secret key %q, secrets %v", resolved.SecretKey, resolved.Secrets)
+	}
+	wantProblems(t, t.TempDir(), "secret_key: ghost/k\n", `secret_key: secret reference "ghost/k" names unknown vault "ghost"`)
 }
 
 func mustResolve(t *testing.T, dir, yaml string) (*Resolved, []string) {
@@ -185,7 +219,7 @@ egress:
 		if want := (ResolvedVault{Backend: "env", Secrets: []string{"A", "B"}}); !reflect.DeepEqual(resolved.Vaults["main"], want) {
 			t.Errorf("vault = %v, want %v", resolved.Vaults["main"], want)
 		}
-		if want := (SecretRef{Vault: "main", Name: "A", Backend: "env"}); resolved.Secrets["main/A"] != want || len(resolved.Secrets) != 2 {
+		if want := (SecretRef{Vault: "main", Name: "A", Backend: "env"}); resolved.Secrets["main/A"] != want || len(resolved.Secrets) != 3 {
 			t.Errorf("secrets = %v", resolved.Secrets)
 		}
 		if want := []string{`warning: vault "spare": nothing refers to a secret in it`}; !reflect.DeepEqual(resolved.UnusedVaults(), want) {
@@ -230,7 +264,7 @@ egress:
 
 	t.Run("a reference to an unknown vault names the vaults that exist", func(t *testing.T) {
 		wantProblems(t, t.TempDir(), "vaults:\n  a: { backend: env }\n  b: { backend: env }\negress:\n  default:\n    services:\n      anthropic: ghost/K\n",
-			`names unknown vault "ghost" (vaults: a, b)`)
+			`names unknown vault "ghost" (vaults: a, b, testkey)`)
 	})
 }
 

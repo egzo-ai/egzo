@@ -783,21 +783,6 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-func TestSSHHostKeyIsKept(t *testing.T) {
-	dir := t.TempDir()
-	first, err := LoadOrCreateSSHHostKey(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := LoadOrCreateSSHHostKey(dir)
-	if err != nil || !bytes.Equal(first.PublicKey().Marshal(), again.PublicKey().Marshal()) {
-		t.Fatalf("the host key changed: %v", err)
-	}
-	if info, _ := os.Stat(dir + "/" + sshHostKeyFile); info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode %v", info.Mode().Perm())
-	}
-}
-
 func TestSSHClientFilesNameEveryServerAndTrustOnlyTheProxy(t *testing.T) {
 	dir := t.TempDir()
 	hostKey, _ := newKey(t)

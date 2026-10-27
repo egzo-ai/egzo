@@ -309,7 +309,7 @@ func ReloadPolicy(ctx context.Context, c *engine.Client, project *config.Resolve
 	published, err := ReadPublished(ctx, c, project.Name)
 	source, notPublished := project, errors.Is(err, ErrNotPublished)
 	if err == nil {
-		source = published.AsProject(project.Secrets)
+		source = published.AsProject(project)
 	} else if !notPublished {
 		return err
 	}

@@ -244,25 +244,33 @@ func serviceKeys(profile *ResolvedProfile) []string {
 // checkSecret validates a <vault>/<secret> reference against the declared vaults and, when it is valid,
 // declares the secret. The reference is split at the first '/': a vault name has none, a secret name can.
 func (r *egressResolver) checkSecret(profile, what, ref string) bool {
+	problem, ok := declareSecret(r.file, r.secrets, ref)
+	if problem != "" {
+		r.problems.addf("egress profile %q: %s: %s", profile, what, problem)
+	}
+	return ok
+}
+
+// declareSecret validates a <vault>/<secret> reference against the declared vaults and, when it is valid, adds it
+// to secrets. The problem is "" when there is nothing to report: a vault whose own problem checkVaults reports
+// is not valid either.
+func declareSecret(file *File, secrets map[string]SecretRef, ref string) (problem string, ok bool) {
 	vaultName, secret, found := strings.Cut(ref, "/")
 	if !found || vaultName == "" || secret == "" {
-		r.problems.addf("egress profile %q: %s: invalid secret reference %q (want <vault>/<secret>)", profile, what, ref)
-		return false
+		return fmt.Sprintf("invalid secret reference %q (want <vault>/<secret>)", ref), false
 	}
-	vault, ok := r.file.Vaults[vaultName]
-	if !ok {
-		r.problems.addf("egress profile %q: %s: secret reference %q names unknown vault %q (%s)", profile, what, ref, vaultName, vaultList(r.file.Vaults))
-		return false
+	vault, known := file.Vaults[vaultName]
+	if !known {
+		return fmt.Sprintf("secret reference %q names unknown vault %q (%s)", ref, vaultName, vaultList(file.Vaults)), false
 	}
 	if !slices.Contains(vaultBackends, vault.Backend) {
-		return false // the vault's own problem is reported once, by checkVaults
+		return "", false
 	}
 	if reason := secretNameProblem(vault.Backend, secret); reason != "" {
-		r.problems.addf("egress profile %q: %s: secret reference %q: the name %q %s", profile, what, ref, secret, reason)
-		return false
+		return fmt.Sprintf("secret reference %q: the name %q %s", ref, secret, reason), false
 	}
-	r.secrets[ref] = SecretRef{Vault: vaultName, Name: secret, Backend: vault.Backend}
-	return true
+	secrets[ref] = SecretRef{Vault: vaultName, Name: secret, Backend: vault.Backend}
+	return "", true
 }
 
 // vaultList names the declared vaults, for an error about a reference to another one.

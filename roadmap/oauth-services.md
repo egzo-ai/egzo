@@ -3,7 +3,7 @@
 **Status.** Decided, not built: the specs will be the status. The mechanism is generic OAuth; its first user is a Codex harness
 signed in with a ChatGPT Plus or Pro account, built as part of this work. Needs:
 
-- [project-secret-key.md](project-secret-key.md): the sign-ins are sealed at rest with the project's secret key;
+- the project secret key (built, [docs/project-file.md](../docs/project-file.md#the-secret-key)): the sign-ins are sealed at rest with it;
 - the mitigation of [a secret is injected into every request to its hosts](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md):
   `chatgpt.com` is also ChatGPT's website, so the service is limited to `/backend-api/`.
 
@@ -73,7 +73,7 @@ proxy.
 
 The tokens are internal to the proxy and never leave it. egzo does not write to the user's vault.
 
-- **Sealed at rest** with the [project secret key](project-secret-key.md) (its `egzo/v1/oauth` key), in an engine volume only
+- **Sealed at rest** with the [project secret key](../docs/project-file.md#the-secret-key) (its `egzo/v1/oauth` key), in an engine volume only
   the proxy mounts. A copy or backup of the volume is useless without the vault secret.
 - **Restart.** A restarted proxy opens nothing until the next `up` delivers the key, as for every secret today.
 - **Another key.** The sign-ins cannot be opened: the proxy discards them and the user signs in again.

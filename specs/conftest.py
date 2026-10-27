@@ -31,6 +31,7 @@ import pytest
 import yaml
 
 import clitree
+from support import SECRET_KEY_VALUE, SECRET_KEY_VARIABLE
 
 pytest_plugins = ["pytester", "spec_status"]
 
@@ -77,7 +78,7 @@ class Project:
     def __init__(self, root, egzo, env=None):
         self.root = root
         self.egzo = egzo
-        self.env = dict(env or {})
+        self.env = {SECRET_KEY_VARIABLE: SECRET_KEY_VALUE, **(env or {})}
         self.root.mkdir(parents=True)
 
     @property

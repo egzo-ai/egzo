@@ -86,8 +86,8 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 	name := fmt.Sprintf("hubit%d", time.Now().UnixNano()%1_000_000)
 	dir := filepath.Join(t.TempDir(), name)
 	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "egzo.yaml"), []byte("agents:\n  coder:\n    harness: custom\n    image: "+session+"\n    env:\n      FAKE_TUI: cat\n"), 0o644)
-	env := []string{"EGZO_IMAGE=" + sidecar, "NO_COLOR=1", "EGZO_PROJECT_NAME="}
+	os.WriteFile(filepath.Join(dir, "egzo.yaml"), []byte("secret_key: v/EGZO_HUB_IT_SECRET_KEY\nvaults:\n  v: { backend: env }\nagents:\n  coder:\n    harness: custom\n    image: "+session+"\n    env:\n      FAKE_TUI: cat\n"), 0o644)
+	env := []string{"EGZO_IMAGE=" + sidecar, "NO_COLOR=1", "EGZO_PROJECT_NAME=", "EGZO_HUB_IT_SECRET_KEY=hub-integration-secret-key-0123456789abcdef"}
 	egzo := func(args ...string) string { return sh(t, dir, env, bin, args...) }
 	egzo("project", "up")
 	t.Cleanup(func() { exec.Command(bin, "project", "down", "--force").Run(); cleanup(dir, env, bin) })

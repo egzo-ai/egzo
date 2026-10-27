@@ -9,13 +9,24 @@ import stat
 
 VAULT = {"main": {"backend": "env"}}
 
+# Every project names a secret key. A spec's file reads it from the environment variable below, through a vault of its own (`key`),
+# so a spec that replaces `vaults` keeps it; every project of the specs has the variable set (conftest.Project).
+SECRET_KEY_VARIABLE = "EGZO_SPEC_SECRET_KEY"
+SECRET_KEY_VALUE = "spec-secret-key-" + "0123456789abcdef" * 3
+SECRET_KEY = {"secret_key": f"key/{SECRET_KEY_VARIABLE}", "vault": {"key": {"backend": "env"}}}
+
 GIT_WORKSPACE = {"repo": {"git": {"url": "https://github.com/acme/shop.git"}}}
 
 
 def spec(**sections):
-    """An egzo.yaml as a dict, with the shared vault unless overridden."""
-    document = {"vaults": copy.deepcopy(VAULT)}
+    """An egzo.yaml as a dict, with the shared vault unless overridden, and the spec secret key unless `secret_key` is given
+    (None leaves it out)."""
+    document = {"secret_key": SECRET_KEY["secret_key"], "vaults": copy.deepcopy(VAULT)}
     document.update(sections)
+    if document["secret_key"] is None:
+        del document["secret_key"]
+    elif document["secret_key"] == SECRET_KEY["secret_key"]:
+        document["vaults"] = {**(document.get("vaults") or {}), **copy.deepcopy(SECRET_KEY["vault"])}
     return document
 
 

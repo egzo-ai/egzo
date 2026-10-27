@@ -21,12 +21,12 @@ func TestSecretStateForPass(t *testing.T) {
 	t.Setenv("PATH", dir)
 	ref := func(n string) config.SecretRef { return config.SecretRef{Vault: "main", Name: n, Backend: "pass"} }
 	for name, want := range map[string]string{"ok": "set", "empty": "empty", "gone": "missing (Error: gone is not in the password store.)"} {
-		if got, err := secretState(ref(name), ""); err != nil || got != want {
+		if got, err := secretState(ref(name), "", false); err != nil || got != want {
 			t.Errorf("%s: %q, %v", name, got, err)
 		}
 	}
 	t.Setenv("PATH", t.TempDir())
-	if _, err := secretState(ref("ok"), ""); err == nil || !strings.Contains(err.Error(), "pass") {
+	if _, err := secretState(ref("ok"), "", false); err == nil || !strings.Contains(err.Error(), "pass") {
 		t.Errorf("not on PATH: %v", err)
 	}
 }
@@ -34,7 +34,7 @@ func TestSecretStateForPass(t *testing.T) {
 func TestEnvWarningIsPrintedOncePerCommand(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "egzo.yaml")
-	body := "name: p\nvaults:\n  main:\n    backend: env\n"
+	body := "name: p\nsecret_key: main/TOKEN\nvaults:\n  main:\n    backend: env\n"
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

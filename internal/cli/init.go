@@ -55,6 +55,8 @@ func initProject(dir, harness string, cmd *cobra.Command) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "created %s\n", config.FileName)
+	fmt.Fprintf(cmd.OutOrStdout(), "make the project's secret key, and keep it: another key cannot open what egzo sealed with it\n  %s\n",
+		config.SecretKeyCommand("env", scaffoldSecretKey))
 
 	template := strings.ReplaceAll(harness, "-code", "")
 	fmt.Fprintf(cmd.OutOrStdout(), "next: edit the workspace url, check it with `egzo project check --resolved`, then `egzo project up` and `egzo agent spawn %s --attach`\n", template)
@@ -68,14 +70,20 @@ var scaffoldHosts = map[string]string{
 	"opencode":    "models.opencode.ai",
 }
 
+// scaffoldSecretKey is the variable the scaffold reads the project's secret key from.
+const scaffoldSecretKey = "EGZO_PROJECT_SECRET_KEY"
+
 func scaffold(harness, repoURL string) string {
 	var b strings.Builder
-	if hosts, known := scaffoldHosts[harness]; known {
-		fmt.Fprintf(&b, `vaults:
+	fmt.Fprintf(&b, `secret_key: main/%s     # seals what egzo keeps at rest
+
+vaults:
   main:
     backend: env
 
-egress:
+`, scaffoldSecretKey)
+	if hosts, known := scaffoldHosts[harness]; known {
+		fmt.Fprintf(&b, `egress:
   default:                      # everything not allowed here is denied
     allow: [%s]
     services:
@@ -83,7 +91,7 @@ egress:
 
 `, hosts)
 	} else {
-		b.WriteString("# TODO: add vaults and an egress profile that lets the agent reach its provider\n\n")
+		b.WriteString("# TODO: add an egress profile that lets the agent reach its provider\n\n")
 	}
 	image := ""
 	if harness == "custom" {

@@ -135,7 +135,7 @@ def test_the_env_backend_warns_that_it_is_not_recommended(project):
 
 
 def test_a_project_without_an_env_vault_gets_no_such_warning(project, fake_pass):
-    result = project.config(spec(**uses("main/token", backend="pass")), env=fake_pass.env)
+    result = project.config(spec(**uses("main/token", backend="pass"), secret_key="main/egzo/key"), env=fake_pass.env)
     assert result.returncode == 0, result.stderr
     assert ENV_WARNING not in result.stderr
 

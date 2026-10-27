@@ -14,6 +14,11 @@ with `ps`, `logs`, `exec`, `start`, `stop`, `restart`, `events` and `proxy` at t
 - An instance is named by you (`issue-412`) or by egzo (`coder-1`). A template can be spawned as often as you like;
   each instance has its own container, network, home volume and, for each git workspace it lists, its own worktree volume.
 
+Every project names a **secret key**, kept in a vault, that seals what egzo keeps at rest ([the project
+file](project-file.md#the-secret-key)). Make it once, before the first `up`, and keep it: `openssl rand -hex 32 | pass
+insert --multiline egzo/<project>-key`. With another key `up` stops; `egzo project rotate-ca` moves the project to the key
+the file names now.
+
 ## The daily loop
 
 ```console

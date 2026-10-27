@@ -20,8 +20,10 @@ import (
 // Resolved is the fully resolved project: what `egzo project check --resolved` prints.
 type Resolved struct {
 	// Secrets maps "vault/name" to where that secret is read from. It is never printed.
-	Secrets    map[string]SecretRef         `yaml:"-"`
-	Name       string                       `yaml:"name"`
+	Secrets map[string]SecretRef `yaml:"-"`
+	Name    string               `yaml:"name"`
+	// SecretKey is the reference of the project's secret key, which seals what egzo keeps at rest.
+	SecretKey  string                       `yaml:"secret_key"`
 	Vaults     map[string]ResolvedVault     `yaml:"vaults,omitempty"`
 	Workspaces map[string]ResolvedWorkspace `yaml:"workspaces"`
 	Agents     map[string]ResolvedAgent     `yaml:"agents"`
@@ -155,8 +157,10 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	checkNames(file, p)
 
 	egress, secrets := resolveEgress(file, p)
+	checkSecretKey(file, secrets, p)
 	resolved := &Resolved{
 		Name:       name,
+		SecretKey:  file.SecretKey,
 		Secrets:    secrets,
 		Vaults:     map[string]ResolvedVault{},
 		Workspaces: resolveWorkspaces(file, p),
@@ -332,6 +336,50 @@ func BuildContext(dir, context string) string {
 		return filepath.Clean(context)
 	}
 	return filepath.Join(dir, context)
+}
+
+// checkSecretKey declares the project's secret key, when the file names one. That it names one is checked where the
+// key is needed (MissingSecretKey): a command that only reads what `up` published, such as spawn, works without it.
+func checkSecretKey(file *File, secrets map[string]SecretRef, p *problems) {
+	if file.SecretKey != "" {
+		if problem, _ := declareSecret(file, secrets, file.SecretKey); problem != "" {
+			p.addf("secret_key: %s", problem)
+		}
+	}
+}
+
+// MissingSecretKey is the error of a file that names no secret key, with the command that makes one in the file's own
+// vault; "" when it names one. `project check` and everything that reads the key (`up`, `restart proxy`, `rotate-ca`)
+// refuse such a file.
+func (r *Resolved) MissingSecretKey() string {
+	if r.SecretKey != "" {
+		return ""
+	}
+	return "secret_key is required: the secret that seals what egzo keeps at rest (the CA's private key, sign-ins). " + secretKeyHelp(r.Vaults, r.Name)
+}
+
+// secretKeyHelp says how to make a secret key in one of vaults, a pass vault if there is one.
+func secretKeyHelp(vaults map[string]ResolvedVault, project string) string {
+	names := slices.Sorted(maps.Keys(vaults))
+	for _, name := range names {
+		if vaults[name].Backend == "pass" {
+			return fmt.Sprintf("Make one and name it:\n  openssl rand -hex 32 | pass insert --multiline egzo/%s-key\n  secret_key: %s/egzo/%s-key", project, name, project)
+		}
+	}
+	for _, name := range names {
+		if vaults[name].Backend == "env" {
+			return fmt.Sprintf("Make one, keep it (another key cannot open what the first sealed) and name it:\n  export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)\n  secret_key: %s/EGZO_PROJECT_SECRET_KEY", name)
+		}
+	}
+	return fmt.Sprintf("Declare a vault and name a key in it:\n  vaults:\n    main: { backend: pass }\n  secret_key: main/egzo/%s-key\nthen make the key:\n  openssl rand -hex 32 | pass insert --multiline egzo/%s-key", project, project)
+}
+
+// SecretKeyCommand is the command that makes the secret key ref names, for `project init` to print.
+func SecretKeyCommand(backend, name string) string {
+	if backend == "env" {
+		return fmt.Sprintf("export %s=$(openssl rand -hex 32)", name)
+	}
+	return fmt.Sprintf("openssl rand -hex 32 | pass insert --multiline %s", name)
 }
 
 // vaultBackends are the backends that exist.

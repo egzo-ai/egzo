@@ -78,3 +78,12 @@ def test_init_never_copies_credentials_from_the_origin_url(project):
 def test_init_for_the_custom_harness_scaffolds_a_file_egzo_accepts(project):
     assert project.sh("project init --harness custom").returncode == 0
     assert project.sh("project check --resolved").returncode == 0
+
+
+def test_init_names_a_secret_key_and_prints_the_command_that_makes_it(project):
+    result = project.sh("project init")
+    assert result.returncode == 0, result.stderr
+    document = yaml.safe_load((project.root / "egzo.yaml").read_text())
+    vault, _, name = document["secret_key"].partition("/")
+    assert vault in document["vaults"] and name
+    assert "openssl rand -hex 32" in result.stdout and name in result.stdout

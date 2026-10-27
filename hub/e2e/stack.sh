@@ -39,8 +39,8 @@ SESSION=egzo-hub-stack-session:$(sha256sum "$BIN" specs/fixtures/fake-tui.sh | s
 docker build -q -t "$SESSION" "$WORK/session" >/dev/null
 
 mkdir "$WORK/$NAME"
-printf 'agents:\n  coder:\n    harness: custom\n    image: %s\n    env:\n      FAKE_TUI: cat\n' "$SESSION" > "$WORK/$NAME/egzo.yaml"
-(cd "$WORK/$NAME" && EGZO_IMAGE=$SIDECAR "$BIN" project up >/dev/null)
+printf 'secret_key: v/EGZO_STACK_SECRET_KEY\nvaults:\n  v: { backend: env }\nagents:\n  coder:\n    harness: custom\n    image: %s\n    env:\n      FAKE_TUI: cat\n' "$SESSION" > "$WORK/$NAME/egzo.yaml"
+(cd "$WORK/$NAME" && EGZO_STACK_SECRET_KEY=hub-stack-secret-key-0123456789abcdef EGZO_IMAGE=$SIDECAR "$BIN" project up >/dev/null)
 
 $COMPOSE up -d --wait --wait-timeout 90 >/dev/null
 
