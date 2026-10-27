@@ -91,6 +91,8 @@ them:
   ASCII. `%2F` and `%20` pass: APIs use them in names (`group%2Fproject`, a file name with a space).
 - The audit says of every request whether the credential went with it (`injected`), and why not (`outside-paths`), below.
 - `paths` limits an injected header only. A placeholder goes where the agent types it.
+- One service decides where a host's credential goes: two services that put the same credential on one host with
+  different `paths` are refused. List every prefix in one service.
 - A path rule is not an authorization rule: an endpoint under the prefix can still do more than the agent needs. Give the
   credential the least privilege it can work with. There is no rule by method.
 

@@ -213,6 +213,15 @@ egress:
       one: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
       two: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
 `)
+
+	// With different paths it is: only one service would decide where the credential goes.
+	wantProblems(t, t.TempDir(), vaultFixture+`
+egress:
+  default:
+    services:
+      one: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY, paths: [/api/] }
+      two: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
+`, `services "one" and "two" put the same credential on host "api.example.com" with different paths`)
 	// Nor are different hosts.
 	mustResolve(t, t.TempDir(), vaultFixture+`
 egress:

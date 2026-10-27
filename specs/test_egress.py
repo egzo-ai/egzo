@@ -182,6 +182,16 @@ def test_paths_limit_an_injected_header_and_nothing_else(project, service):
     assert "paths" in result.stderr and "inject" in result.stderr
 
 
+@pytest.mark.parametrize("paths", [["/admin/"], None], ids=["other-paths", "every-path"])
+def test_two_services_cannot_put_one_credential_on_one_host_with_different_paths(project, paths):
+    """Only one service decides where a host's credential goes: its prefixes belong in that one service."""
+    other = deploy_api(secret="main/DEPLOY_TOKEN", **({"paths": paths} if paths else {}))
+    services = {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN", paths=["/api/v1/"]), "deploy-admin": other}
+    result = project.config(spec(egress={"default": {"services": services}}))
+    assert result.returncode != 0
+    assert "deploy-api" in result.stderr and "deploy-admin" in result.stderr and "paths" in result.stderr
+
+
 def test_an_object_defines_a_custom_service(project):
     resolved = project.resolved(
         spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}}})
