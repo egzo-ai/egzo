@@ -524,7 +524,9 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 			r.Out.Host = host
 			r.Out.Header.Del("Proxy-Authorization")
 			if inject != nil {
-				r.Out.Header.Set(inject.Header, inject.Value)
+				if covered, _ := inject.Covers(loggedPath(r.In)); covered {
+					r.Out.Header.Set(inject.Header, inject.Value)
+				}
 			}
 		},
 		Transport:     s.Transport,
@@ -552,6 +554,14 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 			c.log(Event{Kind: KindRequest, Decision: OutcomeDeny, Method: r.Method, Reason: because(CodeHostMismatch, "request host "+quoteName(requested)+" differs from the approved tunnel host")})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
+		}
+		if inject != nil {
+			if _, refuse := inject.Covers(r.URL.Path); refuse {
+				reason := "the path has a '.' or '..' segment or a backslash under a path the credential is limited to, so the server may read it as another path"
+				c.log(Event{Kind: KindRequest, Decision: OutcomeDeny, Method: r.Method, Path: r.URL.Path, Reason: because(CodePath, reason)})
+				http.Error(w, "egzo: "+reason, http.StatusBadRequest)
+				return
+			}
 		}
 		if swap != nil {
 			// The path as the agent wrote it: the one that is logged, never the one with a secret in it.

@@ -446,8 +446,9 @@ templates are declared and published by `up`.
 Both keep the value out of the agent: it lives in the proxy and is applied to requests for the hosts of a
 service of the agent's profile, and only those.
 
-- **`inject`**: the proxy sets a header on every request to the service's hosts, replacing whatever the
-  agent sent. The agent does nothing and never sees anything (API keys, bearer tokens).
+- **`inject`**: the proxy sets a header on every request to the service's hosts (or, with `paths`, on the
+  requests under one of those path prefixes), replacing whatever the agent sent. The agent does nothing and never
+  sees anything (API keys, bearer tokens).
 - **`placeholder`**: for a secret the agent has to put somewhere itself, such as a password it types into a
   login form or a token it writes into a request body. The agent gets an environment variable holding a
   placeholder, uses it as if it were the secret, and the proxy replaces the placeholder with the secret in
@@ -504,8 +505,10 @@ egress:
   one way to use the secret: `inject` (`header`, then `value` containing `{secret}`, or `basic_user` for HTTP Basic
   authentication with the secret as the password; with neither the raw secret is the header value) or `placeholder` (an environment variable name, see Placeholders). A service
   with neither is a pure allowlist and cannot have a secret. Optional `inspect: true` audits request paths.
-  Rules are by host only: a service has no path or method scope, and keys for them are rejected like any
-  other unknown key. They can be added if a real use-case turns up.
+  Optional `paths` (path prefixes, matched by whole segments) limits an `inject` to the requests under them, for a
+  host that is also a website or a console; the other paths stay reachable without the header. A prefix is a plain
+  path, and a request under one whose path has a dot segment or a backslash is refused, since the server could
+  resolve it outside the prefix. There is no method scope; a key for it is rejected like any other unknown key.
 - **Service hosts are exact, or a wildcard without a secret.** `hosts` take what `allow` takes (`host`, `*.domain`,
   `*`, folded like any name). A service with `inject` or a `placeholder` may only name exact hosts: a wildcard
   would hand the secret to every subdomain, including attacker-controlled ones, so `egzo project check --resolved` refuses it (a secret

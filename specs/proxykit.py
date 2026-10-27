@@ -20,6 +20,7 @@ PROFILES = {
     "open": {"allow": ["*"]},
     "none": {},
     "echo": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "secret": "main/DEPLOY_TOKEN"}}},
+    "paths": {"services": {"echo": {"hosts": ["httpbin.org"], "paths": ["/anything/api/"], "inject": {"header": "X-Egzo-Secret"}, "secret": "main/DEPLOY_TOKEN"}}},
     "basic": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "Authorization", "basic_user": "x-access-token"}, "secret": "main/DEPLOY_TOKEN"}}},
     "login": {"allow": ["httpbingo.org"], "services": {"login": {"hosts": ["httpbin.org"], "secret": "main/SITE_SECRET", "placeholder": "SITE_PASSWORD"}}},
     "plain": {"allow": ["httpbin.org"]},

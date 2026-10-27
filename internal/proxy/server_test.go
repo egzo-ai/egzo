@@ -219,6 +219,59 @@ func TestInjectsWithAValueTemplate(t *testing.T) {
 	}
 }
 
+func TestInjectsOnlyUnderTheServicePathsAndRefusesAPathThatCouldClimbOut(t *testing.T) {
+	r := newRig(t, nil)
+	limited := anthropic
+	limited.Paths = []string{"/v1/"}
+	r.setPolicy("coder", "tok", nil, limited)
+	client := r.client("coder", "tok", r.ca.Cert)
+
+	for path, want := range map[string]string{"/v1/messages": "REAL-SECRET", "/console": "", "/v1x": ""} {
+		body(t, mustGet(t, client, "https://example.com"+path))
+		if got := r.lastHeader().Get("x-api-key"); got != want {
+			t.Errorf("%s: upstream saw x-api-key = %q, want %q", path, got, want)
+		}
+	}
+	seen := r.requests()
+	response := mustGet(t, client, "https://example.com/v1/../console")
+	body(t, response)
+	if response.StatusCode != http.StatusBadRequest || r.requests() != seen {
+		t.Errorf("status = %d, upstream requests %d -> %d: a climbing path must be refused", response.StatusCode, seen, r.requests())
+	}
+	if !strings.Contains(r.audit.String(), `"code":"path"`) {
+		t.Errorf("audit lacks the refusal:\n%s", r.audit.String())
+	}
+}
+
+func TestAnInjectionCoversWholeSegmentsAndRefusesAmbiguousPathsUnderItsPrefixes(t *testing.T) {
+	inject := Injection{Paths: []string{"/api/", "/upload"}}
+	cases := []struct {
+		path            string
+		covered, refuse bool
+	}{
+		{"/api/v1", true, false},
+		{"/api/", true, false},
+		{"/api", false, false},
+		{"/upload", true, false},
+		{"/upload/x", true, false},
+		{"/uploads", false, false},
+		{"/console", false, false},
+		{"/api/../console", false, true},
+		{"/api/./v1", false, true},
+		{"/api/..;/console", false, true},
+		{"/api/..\\console", false, true},
+		{"/other/../api/x", false, false},
+	}
+	for _, c := range cases {
+		if covered, refuse := inject.Covers(c.path); covered != c.covered || refuse != c.refuse {
+			t.Errorf("%s: covered %v refuse %v, want %v %v", c.path, covered, refuse, c.covered, c.refuse)
+		}
+	}
+	if covered, refuse := (&Injection{}).Covers("/x/../y"); !covered || refuse {
+		t.Error("an injection without paths covers every path")
+	}
+}
+
 func TestSpeaksHTTP1ToTheAgentWhateverTheUpstreamSpeaks(t *testing.T) {
 	r := newRig(t, nil)
 	r.setPolicy("coder", "tok", nil, anthropic)

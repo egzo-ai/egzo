@@ -29,7 +29,7 @@ func BuildPolicy(project *config.Resolved, secrets, placeholders map[string]stri
 		entry := proxy.Profile{Allow: append([]string{}, profile.Allow...)}
 		for _, serviceName := range sortedKeys(profile.Services) {
 			service := profile.Services[serviceName]
-			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Secret: secrets[service.Secret], Inspect: service.Inspect}
+			service2 := proxy.Service{Name: serviceName, Hosts: service.Hosts, Paths: service.Paths, Secret: secrets[service.Secret], Inspect: service.Inspect}
 			if service.Inject != nil {
 				service2.Header, service2.Value, service2.BasicUser = service.Inject.Header, service.Inject.Value, service.Inject.BasicUser
 			}

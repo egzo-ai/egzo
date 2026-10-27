@@ -3,7 +3,10 @@
 
 package config
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 // builtinServices ship with egzo as data. A profile can bind a secret to one by name, or replace
 // it entirely with its own definition of the same name.
@@ -39,6 +42,7 @@ func builtinService(name string) (*ResolvedService, bool) {
 	}
 	copied := service
 	copied.Hosts = append([]string(nil), service.Hosts...)
+	copied.Paths = slices.Clone(service.Paths)
 	if service.Inject != nil {
 		inject := *service.Inject
 		copied.Inject = &inject

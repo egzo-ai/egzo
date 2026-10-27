@@ -139,6 +139,47 @@ def test_basic_authentication_and_a_value_template_are_exclusive(project):
     assert "basic_user" in result.stderr and "value" in result.stderr
 
 
+# --- a service can be limited to the paths of its API ---------------------------------------------------------
+
+
+def test_a_service_can_be_limited_to_path_prefixes(project):
+    """A host that is also a website or a console gets the secret only on the paths of its API."""
+    resolved = project.resolved(
+        spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN", paths=["/api/v1/", "/upload"])}}})
+    )
+    assert profile(resolved, "default")["services"]["deploy-api"]["paths"] == ["/api/v1/", "/upload"]
+
+
+def test_a_service_without_paths_injects_on_every_path(project):
+    resolved = project.resolved(spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}}}))
+    assert "paths" not in profile(resolved, "default")["services"]["deploy-api"]
+
+
+@pytest.mark.parametrize("prefix", ["api/v1/", "", "/api/../admin/", "/api/./v1", "/api?x=1", "/api#top", "/api/%2e%2e/", "/api\\v1", "/api v1", "https://example.com/api/"])
+def test_a_path_prefix_is_a_plain_absolute_path(project, prefix):
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN", paths=[prefix])}}}))
+    assert result.returncode != 0
+    assert "deploy-api" in result.stderr and "path" in result.stderr
+
+
+def test_paths_cannot_be_empty(project):
+    """No paths at all would inject nowhere: leave the key out to inject on every path."""
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN", paths=[])}}}))
+    assert result.returncode != 0
+    assert "paths" in result.stderr
+
+
+@pytest.mark.parametrize("service", [
+    {"hosts": ["app.example.com"], "paths": ["/api/"]},
+    {"hosts": ["app.example.com"], "secret": "main/DEPLOY_TOKEN", "placeholder": "APP_PASSWORD", "paths": ["/login"]},
+], ids=["no-secret", "placeholder"])
+def test_paths_limit_an_injected_header_and_nothing_else(project, service):
+    """A placeholder goes where the agent types it, and a service with nothing to inject has nothing to limit."""
+    result = project.config(spec(egress={"default": {"services": {"app": service}}}))
+    assert result.returncode != 0
+    assert "paths" in result.stderr and "inject" in result.stderr
+
+
 def test_an_object_defines_a_custom_service(project):
     resolved = project.resolved(
         spec(egress={"default": {"services": {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN")}}})
@@ -490,11 +531,12 @@ def test_a_string_can_bind_another_secret_to_an_inherited_placeholder_service(pr
     assert service["secret"] == "main/GITHUB_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
 
 
-# --- rules are by host only -------------------------------------------------------------------------------------
+# --- no rule by method ------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key", ["path", "paths", "method", "methods"])
-def test_a_service_cannot_be_limited_to_a_path_or_a_method(project, key):
+@pytest.mark.parametrize("key", ["path", "method", "methods"])
+def test_a_service_cannot_be_limited_to_a_method(project, key):
+    """Only `paths`, and only for an injected header (above)."""
     result = project.config(spec(egress={"default": {"services": {"login": login(**{key: ["/login"]})}}}))
     assert result.returncode != 0
     assert key in result.stderr

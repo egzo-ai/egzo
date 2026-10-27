@@ -53,8 +53,10 @@ type Binding struct {
 
 // Service is a set of hosts and, when the service injects a credential, how.
 type Service struct {
-	Name   string   `json:"name"`
-	Hosts  []string `json:"hosts"`
+	Name  string   `json:"name"`
+	Hosts []string `json:"hosts"`
+	// Paths, when set, limits the injection to requests whose path lies under one of these prefixes.
+	Paths  []string `json:"paths,omitempty"`
 	Header string   `json:"header,omitempty"`
 	Value  string   `json:"value,omitempty"` // contains {secret}; empty means the raw secret
 	// BasicUser, when set, makes the header HTTP Basic authentication: the user, and Secret as the password.
@@ -66,10 +68,29 @@ type Service struct {
 	Placeholder string `json:"placeholder,omitempty"`
 }
 
-// Injection is a header the proxy sets on requests to an intercepted host.
+// Injection is a header the proxy sets on requests to an intercepted host: on every request, or with Paths only
+// on requests under one of them.
 type Injection struct {
 	Header string
 	Value  string
+	Paths  []string
+}
+
+// Covers says whether a request to path gets the header. A path that may mean another one to the server (see
+// config.AmbiguousPath) under one of the prefixes is refused: the caller answers it with an error.
+func (i *Injection) Covers(path string) (inject, refuse bool) {
+	if i.Paths == nil {
+		return true, false
+	}
+	for _, prefix := range i.Paths {
+		if config.PathUnder(prefix, path) {
+			if config.AmbiguousPath(path) {
+				return false, true
+			}
+			return true, false
+		}
+	}
+	return false, false
 }
 
 // Substitution is a placeholder the proxy replaces with a secret value on requests to an intercepted host.
@@ -126,7 +147,7 @@ func (a *Profile) Decide(host string) Decision {
 			case service.Value != "":
 				value = strings.ReplaceAll(service.Value, "{secret}", service.Secret)
 			}
-			decision.Inject = &Injection{Header: service.Header, Value: value}
+			decision.Inject = &Injection{Header: service.Header, Value: value, Paths: service.Paths}
 		}
 		if service.Placeholder != "" {
 			decision.Substitutions = append(decision.Substitutions, Substitution{service.Placeholder, service.Secret})

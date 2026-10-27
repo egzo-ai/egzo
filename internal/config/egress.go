@@ -21,6 +21,7 @@ type ResolvedProfile struct {
 
 type ResolvedService struct {
 	Hosts  []string `yaml:"hosts"`
+	Paths  []string `yaml:"paths,omitempty"`
 	Inject *Inject  `yaml:"inject,omitempty"`
 	Secret string   `yaml:"secret,omitempty"`
 	// Placeholder is the variable the agents of the profile get, holding a stand-in the proxy swaps for the secret.
@@ -193,6 +194,22 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 		r.problems.addf("egress profile %q: service %q has a secret but neither inject nor placeholder, so nothing would use it", profile, name)
 		valid = false
 	}
+	if def.Paths != nil {
+		switch {
+		case def.Inject == nil:
+			r.problems.addf("egress profile %q: service %q: paths limit where inject sets its header, and the service has no inject", profile, name)
+			valid = false
+		case len(def.Paths) == 0:
+			r.problems.addf("egress profile %q: service %q: paths is empty, so nothing would be injected; leave it out to inject on every path", profile, name)
+			valid = false
+		}
+		for _, prefix := range def.Paths {
+			if reason := PathPrefixProblem(prefix); reason != "" {
+				r.problems.addf("egress profile %q: service %q: path %q %s", profile, name, prefix, reason)
+				valid = false
+			}
+		}
+	}
 	if def.Placeholder != "" {
 		if reason := placeholderProblem(def.Placeholder); reason != "" {
 			r.problems.addf("egress profile %q: service %q: placeholder %q %s", profile, name, def.Placeholder, reason)
@@ -205,7 +222,7 @@ func (r *egressResolver) applyService(profile string, current *ResolvedProfile, 
 	if !valid {
 		return
 	}
-	resolved := &ResolvedService{Hosts: slices.Clone(def.Hosts), Secret: def.Secret, Placeholder: def.Placeholder, Inspect: def.Inspect}
+	resolved := &ResolvedService{Hosts: slices.Clone(def.Hosts), Paths: slices.Clone(def.Paths), Secret: def.Secret, Placeholder: def.Placeholder, Inspect: def.Inspect}
 	if def.Inject != nil {
 		inject := *def.Inject
 		resolved.Inject = &inject
