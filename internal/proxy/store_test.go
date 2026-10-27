@@ -96,32 +96,24 @@ func TestAStoreIsMadeSealedAndOpensAgainWithTheSameKeyOnly(t *testing.T) {
 	}
 }
 
-func TestAClearStoreFromBeforeTheSecretKeyKeepsItsKeysAndIsSealedByTheFirstKey(t *testing.T) {
-	dir := t.TempDir()
+func TestAClearStoreFromBeforeTheSecretKeyIsRefused(t *testing.T) {
 	ca, _ := NewCA()
 	keyDER, _ := x509.MarshalECPrivateKey(ca.Key)
-	os.WriteFile(filepath.Join(dir, caKeyFile), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600)
-	os.WriteFile(filepath.Join(dir, caCertFile), ca.CertPEM, 0o644)
 	_, private, _ := ed25519.GenerateKey(rand.Reader)
 	block, _ := ssh.MarshalPrivateKey(private, "egzo proxy")
-	os.WriteFile(filepath.Join(dir, sshHostKeyFile), pem.EncodeToMemory(block), 0o600)
-	signer, _ := ssh.NewSignerFromKey(private)
-
-	store := openStore(t, dir)
-	if store.CA() == nil || store.CA().Key == nil {
-		t.Fatal("a clear CA is usable before the key, as it was")
-	}
-	if _, err := store.Unlock(sealKeysFor(t, "one")); err != nil {
-		t.Fatal(err)
-	}
-	nothingInClear(t, dir)
-	reopened := openStore(t, dir)
-	reopened.Unlock(sealKeysFor(t, "one"))
-	if reopened.CA().Fingerprint() != ca.Fingerprint() {
-		t.Error("the CA changed: every agent would have to learn a new one")
-	}
-	if got, _ := reopened.SSHHostKey(); got == nil || !bytes.Equal(got.PublicKey().Marshal(), signer.PublicKey().Marshal()) {
-		t.Error("the ssh host key changed")
+	for name, data := range map[string][]byte{
+		caKeyFile:      pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		sshHostKeyFile: pem.EncodeToMemory(block),
+	} {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, caCertFile), ca.CertPEM, 0o644)
+		os.WriteFile(filepath.Join(dir, name), data, 0o600)
+		if _, err := OpenStore(dir); !errors.Is(err, ErrClearStore) || !strings.Contains(err.Error(), "egzo project down") {
+			t.Errorf("a volume with %s in clear: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was touched: %v", name, err)
+		}
 	}
 }
 
@@ -151,16 +143,6 @@ func TestAnIncompleteOrMismatchedCAIsNeverReplacedSilently(t *testing.T) {
 	os.Remove(filepath.Join(dir, caSealedFile))
 	if _, err := OpenStore(dir); err == nil {
 		t.Error("a certificate without its key was accepted")
-	}
-
-	dir = t.TempDir()
-	a, _ := NewCA()
-	b, _ := NewCA()
-	keyDER, _ := x509.MarshalECPrivateKey(b.Key)
-	os.WriteFile(filepath.Join(dir, caKeyFile), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600)
-	os.WriteFile(filepath.Join(dir, caCertFile), a.CertPEM, 0o644)
-	if _, err := OpenStore(dir); err == nil || !strings.Contains(err.Error(), "match") {
-		t.Errorf("a key that is not the certificate's: %v", err)
 	}
 
 	dir = t.TempDir()

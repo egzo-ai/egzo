@@ -21,7 +21,7 @@ import (
 
 // The files of the private volume. The private halves are sealed with keys derived from the project's secret key; the
 // public halves are in clear, so that a restarted proxy can publish them before it is given the key. ca.key and the
-// clear ssh host key are what a proxy kept before the secret key: the first key given seals them and removes them.
+// clear ssh host key are what a proxy kept before the secret key: a volume that holds one is refused.
 const (
 	sshHostKeyFile     = "ssh_host_ed25519_key"
 	caCertFile         = "ca.crt"
@@ -32,11 +32,16 @@ const (
 	wrongSecretKeyHelp = "give the secret key it was sealed with back, or run `egzo project rotate-ca` for a new CA (the agents restart)"
 )
 
+// ErrClearStore says the private volume is from an egzo before the secret key, which kept the private keys in clear.
+// Before 1.0 egzo does not read what an older one made: the project is made again.
+var ErrClearStore = errors.New("the proxy's volume holds a CA key in clear, made by an egzo from before the secret key, which this one does not read: " +
+	"run `egzo project down`, then `egzo project up` (a new CA; the workspaces are kept)")
+
 // ErrWrongSecretKey says the private volume was sealed with another secret key (or for another project).
 var ErrWrongSecretKey = errors.New("the CA in the proxy's volume was sealed with another secret key: " + wrongSecretKeyHelp)
 
 // Store is what the proxy keeps in its private volume: the CA and the ssh host key. Until a policy brings the secret key,
-// only their public halves are known (and, for a volume from before the secret key, the clear private ones).
+// only their public halves are known.
 type Store struct {
 	dir string
 
@@ -47,13 +52,19 @@ type Store struct {
 	hostPub ssh.PublicKey
 }
 
-// OpenStore reads what can be read of dir without the secret key.
+// OpenStore reads what can be read of dir without the secret key. A volume from before the secret key is ErrClearStore.
 func OpenStore(dir string) (*Store, error) {
 	s := &Store{dir: dir}
+	for _, name := range []string{caKeyFile, sshHostKeyFile} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return nil, ErrClearStore
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
 	certPEM, certErr := os.ReadFile(filepath.Join(dir, caCertFile))
-	keyPEM, keyErr := os.ReadFile(filepath.Join(dir, caKeyFile))
 	_, sealedErr := os.Stat(filepath.Join(dir, caSealedFile))
-	for _, err := range []error{certErr, keyErr, sealedErr} {
+	for _, err := range []error{certErr, sealedErr} {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
@@ -65,27 +76,13 @@ func OpenStore(dir string) (*Store, error) {
 			return nil, err
 		}
 		s.ca = &CA{Cert: cert, CertPEM: certPEM}
-	case certErr == nil && keyErr == nil:
-		ca, err := parseCA(keyPEM, certPEM)
-		if err != nil {
-			return nil, err
-		}
-		s.ca = ca
-	case certErr != nil && keyErr != nil && sealedErr != nil:
+	case certErr != nil && sealedErr != nil:
 	default:
-		return nil, fmt.Errorf("the CA in %s is incomplete (%s: %v, %s or %s: %v): restore the missing file, or run `egzo project rotate-ca`",
-			dir, caCertFile, certErr == nil, caSealedFile, caKeyFile, sealedErr == nil || keyErr == nil)
+		return nil, fmt.Errorf("the CA in %s is incomplete (%s: %v, %s: %v): restore the missing file, or run `egzo project rotate-ca`",
+			dir, caCertFile, certErr == nil, caSealedFile, sealedErr == nil)
 	}
 
-	if data, err := os.ReadFile(filepath.Join(dir, sshHostKeyFile)); err == nil {
-		signer, err := ssh.ParsePrivateKey(data)
-		if err != nil {
-			return nil, fmt.Errorf("ssh host key: %w", err)
-		}
-		s.hostKey, s.hostPub = signer, signer.PublicKey()
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	} else if line, err := os.ReadFile(filepath.Join(dir, sshHostPublicFile)); err == nil {
+	if line, err := os.ReadFile(filepath.Join(dir, sshHostPublicFile)); err == nil {
 		public, _, _, _, err := ssh.ParseAuthorizedKey(line)
 		if err != nil {
 			return nil, fmt.Errorf("ssh host public key: %w", err)
@@ -111,8 +108,7 @@ func (s *Store) SSHHostKey() (ssh.Signer, ssh.PublicKey) {
 	return s.hostKey, s.hostPub
 }
 
-// Unlock opens the store with keys: it opens what is sealed, seals what a proxy from before the secret key kept in clear,
-// and makes what is not there yet. It reports whether the CA or the ssh host key changed, so the caller hands them to the
+// Unlock opens the store with keys: it opens what is sealed and makes what is not there yet. It reports whether the CA or the ssh host key changed, so the caller hands them to the
 // server and publishes them. A store sealed with other keys is ErrWrongSecretKey, and nothing changes.
 func (s *Store) Unlock(keys *seal.Keys) (changed bool, err error) {
 	s.mu.Lock()
@@ -129,12 +125,6 @@ func (s *Store) Unlock(keys *seal.Keys) (changed bool, err error) {
 		return false, err
 	}
 	s.keys, s.ca, s.hostKey, s.hostPub = keys, ca, hostKey, hostKey.PublicKey()
-	// The clear files go once both are sealed: a crash before leaves them, and the next key seals them again.
-	for _, name := range []string{caKeyFile, sshHostKeyFile} {
-		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return true, err
-		}
-	}
 	return true, nil
 }
 
@@ -152,8 +142,6 @@ func (s *Store) unlockCA(keys *seal.Keys) (*CA, error) {
 		return parseCA(keyPEM, s.ca.CertPEM)
 	case !errors.Is(err, os.ErrNotExist):
 		return nil, err
-	case s.ca != nil && s.ca.Key != nil:
-		return s.ca, s.saveCA(keys, s.ca) // a CA from before the secret key: the same CA, now sealed
 	}
 	ca, err := NewCA()
 	if err != nil {
@@ -176,12 +164,6 @@ func (s *Store) unlockHostKey(keys *seal.Keys) (ssh.Signer, error) {
 		return ssh.ParsePrivateKey(data)
 	case !errors.Is(err, os.ErrNotExist):
 		return nil, err
-	case s.hostKey != nil:
-		data, err := os.ReadFile(filepath.Join(s.dir, sshHostKeyFile))
-		if err != nil {
-			return nil, err
-		}
-		return s.hostKey, s.saveHostKey(keys, data, s.hostKey.PublicKey())
 	}
 	return s.newHostKey(keys)
 }
@@ -212,9 +194,6 @@ func (s *Store) Rotate(keys *seal.Keys, publish func(*CA) error) (*CA, ssh.Signe
 	hostKey, err := s.newHostKey(keys)
 	if err != nil {
 		return nil, nil, fmt.Errorf("store a new ssh host key: %w", err)
-	}
-	for _, name := range []string{caKeyFile, sshHostKeyFile} {
-		os.Remove(filepath.Join(s.dir, name))
 	}
 	s.keys, s.ca, s.hostKey, s.hostPub = keys, ca, hostKey, hostKey.PublicKey()
 	return ca, hostKey, nil

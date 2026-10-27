@@ -418,8 +418,8 @@ templates are declared and published by `up`.
   is told apart from corrupt data. The key is at least 32 bytes, opaque, and travels with the policy through exec
   stdin; the proxy keeps it in memory only. The public halves (the CA certificate, the ssh host public key) are kept
   in clear so a restarted proxy publishes them before it has the key. Another key stops `up` (the CA cannot be
-  opened); `rotate-ca` makes a new CA sealed with the file's key. A volume from before the key keeps its CA and is
-  sealed by the first `up`. Rejected: a key per service, a key on a vault, a naming convention, a key pair (the proxy
+  opened); `rotate-ca` makes a new CA sealed with the file's key. A volume from before the key (a CA key in clear) stops
+  the proxy: before 1.0 there is no migration, `down` and `up` make the project again. Rejected: a key per service, a key on a vault, a naming convention, a key pair (the proxy
   must read its own data back), a random key in the volume, envelope encryption (only helps rotation).
 - **Two backends exist: `env` and `pass`.** Any other name, whatever it is, is the same validation error
   (`unknown backend "x"`, naming the two that exist). The schema, the errors, the docs and the specs mention
