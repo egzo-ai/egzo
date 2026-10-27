@@ -94,10 +94,12 @@ def test_the_anthropic_oauth_service_is_built_in(project):
 
 
 def test_the_opencode_service_is_built_in(project):
-    """The key of an OpenCode Go or Console workspace (a service account's) is a bearer token for opencode.ai, where the model calls go."""
+    """The key of an OpenCode Go or Console workspace (a service account's) is a bearer token for opencode.ai, which is also the
+    website: it goes only to the paths OpenCode sends it to, the model calls and the workspace's config and web search."""
     profile_ = {"allow": ["models.opencode.ai"], "services": {"opencode": "main/ANTHROPIC_API_KEY"}}
     service = profile(project.resolved(spec(egress={"default": profile_})), "default")["services"]["opencode"]
     assert service["hosts"] == ["opencode.ai"]
+    assert service["paths"] == ["/inference/", "/zen/", "/console/api/v2/config", "/console/api/websearch"]
     assert service["inject"] == {"header": "Authorization", "value": "Bearer {secret}"}
     assert service["secret"] == "main/ANTHROPIC_API_KEY"
 

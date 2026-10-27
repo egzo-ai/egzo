@@ -91,7 +91,8 @@ them:
 - A path rule is not an authorization rule: an endpoint under the prefix can still do more than the agent needs. Give the
   credential the least privilege it can work with. There is no rule by method.
 
-The built-in services inject on every path of their hosts. `github.com` is also GitHub's website, and git over HTTPS sends
+The built-in `opencode` service injects only on the paths OpenCode sends its key to ([harnesses.md](harnesses.md#opencode)).
+`github` injects on every path of its hosts: `github.com` is also GitHub's website, and git over HTTPS sends
 its requests under `/<owner>/<repo>.git/`, so a prefix there would be a list of repositories: see [the known
 issue](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md).
 
