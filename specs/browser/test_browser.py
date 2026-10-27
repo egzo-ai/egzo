@@ -61,7 +61,7 @@ def sandbox(shared_project, engine, egzo):
             egress={
                 "example": {**MODEL_API, "allow": [*MODEL_API["allow"], "example.com"]},
                 "wild": {**MODEL_API, "services": {**MODEL_API["services"], "browse": {"hosts": ["*"], "inspect": True}}},
-                "login": {**MODEL_API, "services": {**MODEL_API["services"], "login": {"hosts": ["httpbin.org"], "secret": "main/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD"}}},
+                "login": {**MODEL_API, "services": {**MODEL_API["services"], "login": {"hosts": ["httpbin.org"], "credential": "main/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD"}}},
             },
             agents=agents,
         ),

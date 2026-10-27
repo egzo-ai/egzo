@@ -34,7 +34,16 @@ type Vault struct {
 
 // Proxy is the infrastructure of the egress sidecar. Policy lives in Egress.
 type Proxy struct {
-	Image string `yaml:"image,omitempty"`
+	Image    string    `yaml:"image,omitempty"`
+	Upstream *Upstream `yaml:"upstream,omitempty"`
+}
+
+// Upstream is what the proxy trusts and may dial on the way out, for services inside a company network: CA, a file of
+// PEM certificates added to the system roots for the TLS the proxy makes upstream, and PrivateHosts, the exact host
+// names it may reach at a private address. Reaching one still takes a profile that allows it.
+type Upstream struct {
+	CA           string   `yaml:"ca,omitempty"`
+	PrivateHosts []string `yaml:"private_hosts,omitempty"`
 }
 
 // Control is the control sidecar's section. It has no settings yet; the key is accepted so a file can
@@ -71,23 +80,54 @@ func (p *SSHPort) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// ServiceEntry is either a secret reference for a service that already resolves (Ref), or
-// a service definition (Def).
+// ServiceEntry is either a secret reference for a service that already resolves (Ref), or an object (Def): with
+// hosts, a definition; without, a binding of a credential to a service that already resolves.
 type ServiceEntry struct {
 	Ref string
 	Def *ServiceDef
 }
 
 type ServiceDef struct {
-	Hosts  []string `yaml:"hosts"`
-	Inject *Inject  `yaml:"inject,omitempty"`
-	Secret string   `yaml:"secret,omitempty"`
+	Hosts      []string    `yaml:"hosts"`
+	Inject     *Inject     `yaml:"inject,omitempty"`
+	Credential *Credential `yaml:"credential,omitempty"`
 	// Paths limits the injection to requests whose path starts with one of these prefixes (whole segments).
 	// Nil injects on every path.
 	Paths []string `yaml:"paths,omitempty"`
 	// Placeholder is the environment variable that holds the stand-in for the secret in the agent.
 	Placeholder string `yaml:"placeholder,omitempty"`
 	Inspect     bool   `yaml:"inspect,omitempty"`
+}
+
+// The methods of a credential: how the proxy gets what it puts into requests.
+const (
+	MethodSecret = "secret" // a secret read from a vault at `up`
+	MethodOAuth  = "oauth"  // the tokens of a sign-in, captured at the token URL and renewed by the proxy
+)
+
+// Credential is how a service gets what the proxy puts into its requests. A string is short for a secret reference.
+type Credential struct {
+	Method string `yaml:"method,omitempty"`
+	// Secret is the <vault>/<secret> of a secret credential.
+	Secret string `yaml:"secret,omitempty"`
+	// TokenURL is where an OAuth client exchanges a code and refreshes its tokens; RevokeURL where it revokes them.
+	TokenURL  string `yaml:"token_url,omitempty"`
+	RevokeURL string `yaml:"revoke_url,omitempty"`
+	// short is a credential written as a bare string: an empty one is an invalid reference, not a missing secret.
+	short bool
+}
+
+// UnmarshalYAML accepts a secret reference or a mapping.
+func (c *Credential) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
+		*c = Credential{Method: MethodSecret, Secret: node.Value, short: true}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: a credential is a secret reference like vault/SECRET, or an object with a method", node.Line)
+	}
+	type plain Credential
+	return node.Decode((*plain)(c))
 }
 
 // Inject says how a service's secret is put into a request header. With neither Value nor BasicUser the

@@ -144,7 +144,7 @@ egress:
   default:
     allow: [Platform.Claude.COM., "*.PyPI.org"]
     services:
-      mine: { hosts: [API.Example.com.], inject: { header: x-key }, secret: main/K }
+      mine: { hosts: [API.Example.com.], inject: { header: x-key }, credential: main/K }
 vaults:
   main: { backend: env }
 agents:

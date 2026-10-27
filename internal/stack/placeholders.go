@@ -24,8 +24,8 @@ func PlaceholderRefs(project *config.Resolved) []string {
 	seen := map[string]bool{}
 	for _, name := range usedProfiles(project) {
 		for _, service := range project.Egress[name].Services {
-			if service.Placeholder != "" && service.Secret != "" {
-				seen[service.Secret] = true
+			if service.Placeholder != "" && service.SecretRef() != "" {
+				seen[service.SecretRef()] = true
 			}
 		}
 	}
@@ -94,10 +94,10 @@ func templatePlaceholders(profile *config.ResolvedProfile, placeholders map[stri
 	}
 	out := map[string]string{}
 	for _, service := range profile.Services {
-		if service.Placeholder == "" || service.Secret == "" {
+		if service.Placeholder == "" || service.SecretRef() == "" {
 			continue
 		}
-		text := placeholders[service.Secret]
+		text := placeholders[service.SecretRef()]
 		if text == "" {
 			text = placeholderStandIn
 		}

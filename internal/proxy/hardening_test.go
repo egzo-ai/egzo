@@ -93,7 +93,7 @@ func TestTheDefaultDialerRefusesNamesThatResolveToPrivateAddresses(t *testing.T)
 	}
 	defer listener.Close()
 	server := NewServer(mustCA(t), NewAudit(io.Discard))
-	conn, err := server.Dial(context.Background(), "tcp", listener.Addr().String())
+	conn, err := server.dial(context.Background(), "tcp", listener.Addr().String())
 	if err == nil {
 		conn.Close()
 		t.Fatal("the proxy's own dialer connected to a loopback address")

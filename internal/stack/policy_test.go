@@ -30,7 +30,7 @@ func policyProject() *config.Resolved {
 			"default": {
 				Allow: []string{"pypi.org"},
 				Services: map[string]*config.ResolvedService{
-					"anthropic": {Hosts: []string{"api.anthropic.com"}, Inject: &config.Inject{Header: "x-api-key"}, Secret: "main/KEY"},
+					"anthropic": {Hosts: []string{"api.anthropic.com"}, Inject: &config.Inject{Header: "x-api-key"}, Credential: secretCredential("main/KEY")},
 					"plain":     {Hosts: []string{"docs.example"}, Inspect: true},
 				},
 			},
@@ -115,7 +115,7 @@ func TestResolveSecrets(t *testing.T) {
 		secrets := map[string]config.SecretRef{"v/EGZO_TEST_SECRET_KEY": {Vault: "v", Name: "EGZO_TEST_SECRET_KEY", Backend: "env"}}
 		for _, name := range names {
 			ref := "v/" + name
-			services[ref] = &config.ResolvedService{Inject: &config.Inject{Header: "H"}, Secret: ref}
+			services[ref] = &config.ResolvedService{Inject: &config.Inject{Header: "H"}, Credential: secretCredential(ref)}
 			secrets[ref] = config.SecretRef{Vault: "v", Name: name, Backend: "env"}
 		}
 		return &config.Resolved{
@@ -169,7 +169,7 @@ func placeholderProject() *config.Resolved {
 		Agents: map[string]config.ResolvedAgent{"coder": {Egress: "default"}},
 		Egress: map[string]*config.ResolvedProfile{
 			"default": {Services: map[string]*config.ResolvedService{
-				"tokens": {Hosts: []string{"api.example"}, Secret: "main/TOK", Placeholder: "API_TOKEN"},
+				"tokens": {Hosts: []string{"api.example"}, Credential: secretCredential("main/TOK"), Placeholder: "API_TOKEN"},
 			}},
 		},
 	}
@@ -318,4 +318,8 @@ func newTestKey(t *testing.T) (ssh.Signer, string) {
 	}
 	signer, _ := ssh.NewSignerFromKey(private)
 	return signer, string(pem.EncodeToMemory(block))
+}
+
+func secretCredential(ref string) *config.Credential {
+	return &config.Credential{Method: config.MethodSecret, Secret: ref}
 }

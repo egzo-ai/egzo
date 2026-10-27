@@ -162,10 +162,10 @@ egress:                        # named profiles; an agent links to one (omitted 
       deploy-api:              # an object defines a custom service
         hosts: [api.deploy.example.com]
         inject: { header: Authorization, value: "Bearer {secret}" }
-        secret: main/deploy/token
+        credential: main/deploy/token
       example-login:           # a secret the agent types: it gets a placeholder (see Placeholders)
         hosts: [app.example.com]
-        secret: main/sites/example/password
+        credential: main/sites/example/password
         placeholder: EXAMPLE_PASSWORD
 
 workspaces:                    # project-scoped; referenced by name from agents
@@ -475,7 +475,7 @@ egress:
     services:
       example-login:
         hosts: [app.example.com]
-        secret: main/sites/example/password
+        credential: main/sites/example/password
         placeholder: EXAMPLE_PASSWORD
 ```
 
@@ -511,8 +511,8 @@ egress:
   `services` (map).
 - `allow: ["*"]` is how full internet access is granted; it is still proxied and audited, and
   credentials are still injected only for hosts of services in the profile.
-- A **service** defines *how* to talk to something: `hosts` (required), optional `secret`, and at most
-  one way to use the secret: `inject` (`header`, then `value` containing `{secret}`, or `basic_user` for HTTP Basic
+- A **service** defines *how* to talk to something: `hosts` (required), an optional `credential`, and at most
+  one way to use a secret credential: `inject` (`header`, then `value` containing `{secret}`, or `basic_user` for HTTP Basic
   authentication with the secret as the password; with neither the raw secret is the header value) or `placeholder` (an environment variable name, see Placeholders). A service
   with neither is a pure allowlist and cannot have a secret. Optional `inspect: true` audits request paths.
   Optional `paths` (path prefixes, matched by whole segments) limits an `inject` to the requests under them, for a
@@ -528,9 +528,17 @@ egress:
   hosts it covers. It can sit next to an exact injecting service on a covered host: the exact one injects, `inspect`
   still applies. `*.domain` does not cover `domain`. There is no key that weakens TLS verification or the Encrypted
   Client Hello rule, and unknown keys stay errors.
-- `services` entries have two forms: a **string** `<vault>/<secret>` gives the secret for a service
-  that already resolves (inherited via `extend`, or built-in); an **object** defines the service
-  (hosts, optional inject, optional secret). There is no null form.
+- A **credential** has a `method`: `secret` (`{ method: secret, secret: <vault>/<secret> }`, read from a vault at
+  `up`; a string is short for it) or `oauth` (`{ method: oauth, token_url, revoke_url }`: the tokens of a sign-in,
+  captured and renewed by the proxy, see OAuth services). `secret:` on a service is gone (no backward compatibility).
+- `services` entries have two forms: a **string** `<vault>/<secret>` is short for `{ credential: <vault>/<secret> }`;
+  an **object** with `hosts` defines the service, an object **without** `hosts` binds a credential to a service that
+  already resolves (inherited via `extend`, or built-in) and may name nothing else. A binding's method must be the
+  service's: a sign-in for an OAuth service, a secret for the others. There is no null form.
+- `proxy.upstream` is what the proxy trusts and may dial on the way out, project-wide: `ca`, PEM certificates added to
+  the system roots for the TLS it makes upstream (read at `up`, sent with the policy), and `private_hosts`, exact names
+  it may reach at a private address (never loopback or link-local). For a service inside a company network; the OAuth
+  specs put their stub provider behind it.
 - Name resolution for a service: the profile's own definition, then the `extend` chain, then the
   built-ins. Binding a service that has `inject` or `placeholder` with no secret is a validation error, and
   so is a secret on a service that has neither.

@@ -32,7 +32,7 @@ def spec(**sections):
 
 def uses(*refs, backend="env"):
     """The vault and egress sections of a file that refers to the secrets `refs` (`main/NAME`): a service per secret, which declares it."""
-    services = {f"svc{i}": {"hosts": [f"svc{i}.example.com"], "inject": {"header": "X-Key"}, "secret": ref} for i, ref in enumerate(refs)}
+    services = {f"svc{i}": {"hosts": [f"svc{i}.example.com"], "inject": {"header": "X-Key"}, "credential": ref} for i, ref in enumerate(refs)}
     return {"vaults": {"main": {"backend": backend}}, "egress": {"default": {"services": services}}}
 
 

@@ -84,7 +84,7 @@ egress:
       custom:
         hosts: [api.example.com]
         inject: { header: X-Key }
-        secret: main/KEY
+        credential: main/KEY
         inspect: true
 `))
 	if err != nil {
@@ -98,7 +98,7 @@ egress:
 	if got.Ref != "" || got.Def == nil {
 		t.Fatalf("custom = %+v, want a definition", got)
 	}
-	if got.Def.Hosts[0] != "api.example.com" || got.Def.Inject.Header != "X-Key" || got.Def.Secret != "main/KEY" || !got.Def.Inspect {
+	if got.Def.Hosts[0] != "api.example.com" || got.Def.Inject.Header != "X-Key" || got.Def.Credential.Secret != "main/KEY" || !got.Def.Inspect {
 		t.Errorf("custom definition = %+v", got.Def)
 	}
 }

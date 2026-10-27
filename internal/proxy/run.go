@@ -221,7 +221,10 @@ func operatorHandler(server *Server, store *Store, cfg Config) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		server.SetPolicy(&policy)
+		if err := server.SetPolicy(&policy); err != nil {
+			http.Error(w, "invalid policy: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 		loaded = &policy
 		w.WriteHeader(http.StatusNoContent)
 	})

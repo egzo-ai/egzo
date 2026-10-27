@@ -44,10 +44,11 @@ type Server struct {
 	agents   atomic.Pointer[map[string]Binding]
 	agentsMu sync.Mutex
 
-	// Transport reaches the real upstream for intercepted hosts. Tests replace it.
+	// Transport and Dial, when set, reach the upstream of intercepted and tunnelled hosts instead of what the policy's
+	// upstream says. Tests set them.
 	Transport http.RoundTripper
-	// Dial reaches the real upstream for tunnelled hosts. Tests replace it.
-	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+	Dial      func(ctx context.Context, network, address string) (net.Conn, error)
+	upstream  atomic.Pointer[upstream]
 
 	// MaxPerAgent and MaxTotal bound the connections one agent, and all of them, may hold open;
 	// IdleTimeout closes a connection that has moved no data for that long.
@@ -71,24 +72,18 @@ type Server struct {
 }
 
 func NewServer(ca *CA, audit *Audit) *Server {
-	dialer := &net.Dialer{Timeout: dialTimeout, Control: publicOnly}
-	return &Server{
+	s := &Server{
 		MaxPerAgent:      defaultMaxPerAgent,
 		MaxTotal:         defaultMaxTotal,
 		IdleTimeout:      defaultIdleTimeout,
 		HandshakeTimeout: defaultHandshakeTimeout,
 		minter:           NewMinter(ca),
 		audit:            audit,
-		Transport: &http.Transport{
-			ForceAttemptHTTP2:     true,
-			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   defaultHandshakeTimeout,
-			ResponseHeaderTimeout: 5 * time.Minute,
-			MaxIdleConnsPerHost:   4,
-			IdleConnTimeout:       90 * time.Second,
-		},
-		Dial: dialer.DialContext,
 	}
+	if err := s.setUpstream(Upstream{}); err != nil {
+		panic(err) // the public internet and the system roots: nothing to fail
+	}
+	return s
 }
 
 // idleTimeout and handshakeTimeout are the configured values, or the default for one left at zero.
@@ -109,9 +104,19 @@ func (s *Server) handshakeTimeout() time.Duration {
 // SetCA switches the CA that signs the certificates of intercepted hosts.
 func (s *Server) SetCA(ca *CA) { s.minter.SetCA(ca) }
 
-// SetPolicy atomically replaces the profiles. Until one is set, everything is denied. The agents bound
-// to profiles stay bound: a changed profile takes effect for them at once.
-func (s *Server) SetPolicy(policy *Policy) { s.policy.Store(policy) }
+// SetPolicy atomically replaces the profiles, and the upstream they are reached through. Until one is set, everything
+// is denied. The agents bound to profiles stay bound: a changed profile takes effect for them at once.
+func (s *Server) SetPolicy(policy *Policy) error {
+	var config Upstream
+	if policy.Upstream != nil {
+		config = *policy.Upstream
+	}
+	if err := s.setUpstream(config); err != nil {
+		return err
+	}
+	s.policy.Store(policy)
+	return nil
+}
 
 // BindAgent lets an agent use a profile of the loaded policy, under a token. The policy comes first:
 // a binding to a profile nobody loaded would silently deny everything.
@@ -382,7 +387,7 @@ func (s *Server) tunnel(client net.Conn, c *conn) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
-	upstream, err := s.Dial(ctx, "tcp", net.JoinHostPort(c.host, allowedPort))
+	upstream, err := s.dial(ctx, "tcp", net.JoinHostPort(c.host, allowedPort))
 	if err != nil {
 		c.decide(KindConnect, OutcomeError, because(CodeDial, "dial: "+err.Error()))
 		return
@@ -529,7 +534,7 @@ func (s *Server) interceptHandler(c *conn, inject *Injection, swap *swapper, qui
 				r.Out.Header.Set(inject.Header, inject.Value)
 			}
 		},
-		Transport:     s.Transport,
+		Transport:     s.transport(),
 		FlushInterval: -1, // stream responses, such as model output, as they arrive
 		ModifyResponse: func(response *http.Response) error {
 			if !quiet {
