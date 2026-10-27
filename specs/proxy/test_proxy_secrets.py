@@ -147,7 +147,7 @@ def test_a_rotated_secret_reaches_the_proxy_without_recreating_anything_and_the_
     p.retire()
     fake_pass = FakePass(tmp_path / "pass", **{"deploy/token": "first-line-secret-0123456789\nurl: https://example.com\n"})
     passed = spec(
-        vaults={"main": {"backend": "pass", "secrets": ["deploy/token"]}},
+        vaults={"main": {"backend": "pass"}},
         egress={"default": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "secret": "main/deploy/token"}}}},
         agents={"coder": custom(agent_image)},
     )

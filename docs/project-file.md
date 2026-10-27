@@ -15,7 +15,6 @@ digit, like every name in the file.
 vaults:
   main:
     backend: env
-    secrets: [ANTHROPIC_API_KEY]
 
 egress:
   default:
@@ -37,8 +36,10 @@ agents:
 
 ## Vaults and secrets
 
-A vault is one secret store: a `backend` and the names of the secrets to read from it. The CLI reads them on your
-machine at `egzo project up` time. There are two backends.
+A vault is one secret store: a name and a `backend`. A secret is declared where it is used, by its reference
+`<vault>/<name>` (a service's secret, an ssh server's key): nothing lists it a second time. The CLI reads the
+secrets on your machine at `egzo project up` time. `egzo project check --resolved` lists, under each vault, every
+secret the file refers to; a vault nothing refers to is a warning. There are two backends.
 
 ### pass
 
@@ -50,13 +51,16 @@ are the entry names, slashes included:
 vaults:
   main:
     backend: pass
-    secrets:
-      - anthropic/api-key
-      - company/project/deploy-token
+
+egress:
+  default:
+    services:
+      anthropic: main/anthropic/api-key          # the entry anthropic/api-key
+      github: main/company/project/deploy-token  # the entry company/project/deploy-token
 ```
 
-A secret is referred to as `<vault>/<name>`: `main/anthropic/api-key`, `main/company/project/deploy-token`. The
-project file cannot configure pass. To use another store, set `PASSWORD_STORE_DIR` (or `GNUPGHOME`, ...) in your shell,
+The reference splits at the first `/`: the vault is `main`, the rest is the entry name. The project file cannot
+configure pass. To use another store, set `PASSWORD_STORE_DIR` (or `GNUPGHOME`, ...) in your shell,
 as you would for pass itself. egzo only reads secrets: create and change them with `pass insert` (or whatever manages
 your store).
 
@@ -70,10 +74,14 @@ variable, and it tends to end up in shell history and dotfiles. It is fine for a
 vaults:
   main:
     backend: env
-    secrets: [ANTHROPIC_API_KEY, GITHUB_TOKEN]
+
+egress:
+  default:
+    services:
+      anthropic: main/ANTHROPIC_API_KEY   # the variable ANTHROPIC_API_KEY
 ```
 
-`egzo project check` shows which are set (never the values). Secrets reach the proxy only ([security
+`egzo project check` shows, for every secret the file refers to, whether it is set (never the value). Secrets reach the proxy only ([security
 model](security.md)). They are never in an agent's environment, in labels or in `docker inspect`.
 
 ## Egress profiles

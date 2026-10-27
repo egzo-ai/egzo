@@ -99,7 +99,6 @@ password of a login form in a browser. Give the service a `placeholder` instead 
 vaults:
   main:
     backend: pass
-    secrets: [sites/example/password]
 
 egress:
   default:
@@ -154,7 +153,7 @@ stays in the proxy, like any other secret:
 
 ```yaml
 vaults:
-  main: { backend: pass, secrets: [servers/prod-ssh-key] }
+  main: { backend: pass }
 
 egress:
   ops:

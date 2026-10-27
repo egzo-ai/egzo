@@ -7,7 +7,7 @@ import copy
 import os
 import stat
 
-VAULT = {"main": {"backend": "env", "secrets": ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "DEPLOY_TOKEN"]}}
+VAULT = {"main": {"backend": "env"}}
 
 GIT_WORKSPACE = {"repo": {"git": {"url": "https://github.com/acme/shop.git"}}}
 
@@ -17,6 +17,12 @@ def spec(**sections):
     document = {"vaults": copy.deepcopy(VAULT)}
     document.update(sections)
     return document
+
+
+def uses(*refs, backend="env"):
+    """The vault and egress sections of a file that refers to the secrets `refs` (`main/NAME`): a service per secret, which declares it."""
+    services = {f"svc{i}": {"hosts": [f"svc{i}.example.com"], "inject": {"header": "X-Key"}, "secret": ref} for i, ref in enumerate(refs)}
+    return {"vaults": {"main": {"backend": backend}}, "egress": {"default": {"services": services}}}
 
 
 def agent(**fields):

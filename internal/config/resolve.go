@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,14 +22,32 @@ type Resolved struct {
 	// Secrets maps "vault/name" to where that secret is read from. It is never printed.
 	Secrets    map[string]SecretRef         `yaml:"-"`
 	Name       string                       `yaml:"name"`
-	Vaults     map[string][]string          `yaml:"vaults,omitempty"`
+	Vaults     map[string]ResolvedVault     `yaml:"vaults,omitempty"`
 	Workspaces map[string]ResolvedWorkspace `yaml:"workspaces"`
 	Agents     map[string]ResolvedAgent     `yaml:"agents"`
 	Egress     map[string]*ResolvedProfile  `yaml:"egress"`
 	Proxy      *ResolvedProxy               `yaml:"proxy,omitempty"`
 }
 
-// SecretRef is one secret of a vault: the vault it is listed in, its name there and that vault's backend.
+// UnusedVaults are the warnings `project check` gives about the vaults nothing refers to. They are not warnings
+// of Resolve: every command would print them, and only the check is about the file.
+func (r *Resolved) UnusedVaults() []string {
+	var warnings []string
+	for _, vault := range slices.Sorted(maps.Keys(r.Vaults)) {
+		if len(r.Vaults[vault].Secrets) == 0 {
+			warnings = append(warnings, fmt.Sprintf("warning: vault %q: nothing refers to a secret in it", vault))
+		}
+	}
+	return warnings
+}
+
+// ResolvedVault is a vault and the names of the secrets the file refers to in it, sorted.
+type ResolvedVault struct {
+	Backend string   `yaml:"backend"`
+	Secrets []string `yaml:"secrets"`
+}
+
+// SecretRef is one secret of a vault: the vault a reference names, its name there and that vault's backend.
 type SecretRef struct {
 	Vault, Name, Backend string
 }
@@ -135,24 +154,25 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	checkVaults(file.Vaults, p)
 	checkNames(file, p)
 
+	egress, secrets := resolveEgress(file, p)
 	resolved := &Resolved{
 		Name:       name,
-		Vaults:     map[string][]string{},
+		Secrets:    secrets,
+		Vaults:     map[string]ResolvedVault{},
 		Workspaces: resolveWorkspaces(file, p),
 		Agents:     map[string]ResolvedAgent{},
-		Egress:     resolveEgress(file, p),
+		Egress:     egress,
 	}
 	if file.Proxy.Image != "" {
 		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image}
 	}
-	resolved.Secrets = map[string]SecretRef{}
 	for vault, definition := range file.Vaults {
-		names := slices.Clone(definition.Secrets)
-		for _, secret := range names {
-			resolved.Secrets[vault+"/"+secret] = SecretRef{Vault: vault, Name: secret, Backend: definition.Backend}
-		}
-		sort.Strings(names)
-		resolved.Vaults[vault] = names
+		resolved.Vaults[vault] = ResolvedVault{Backend: definition.Backend, Secrets: []string{}}
+	}
+	for _, secret := range secrets {
+		vault := resolved.Vaults[secret.Vault]
+		vault.Secrets = append(vault.Secrets, secret.Name)
+		resolved.Vaults[secret.Vault] = vault
 	}
 
 	refs := agentRefs(file, p)
@@ -163,6 +183,9 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	sort.Strings(agentNames)
 
 	var warnings []string
+	for _, vault := range resolved.Vaults {
+		sort.Strings(vault.Secrets)
+	}
 	for _, agentName := range agentNames {
 		agent := file.Agents[agentName]
 		resolvedAgent, agentWarnings := resolveAgent(file, agentName, agent, dir, resolved, refs, p)
@@ -332,16 +355,6 @@ func checkVaults(vaults map[string]Vault, p *problems) {
 		case !slices.Contains(vaultBackends, vault.Backend):
 			p.addf("vault %q: unknown backend %q (backends: %s)", name, vault.Backend, strings.Join(vaultBackends, ", "))
 			continue
-		}
-		seen := map[string]bool{}
-		for _, secret := range vault.Secrets {
-			if seen[secret] {
-				p.addf("vault %q: secret %q is listed twice", name, secret)
-			}
-			seen[secret] = true
-			if reason := secretNameProblem(vault.Backend, secret); reason != "" {
-				p.addf("vault %q: secret name %q %s", name, secret, reason)
-			}
 		}
 	}
 }

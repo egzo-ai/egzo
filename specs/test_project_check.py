@@ -8,14 +8,11 @@ import re
 
 import pytest
 
-from support import agent, spec
-
-def secret_vault(*names):
-    return {"main": {"backend": "env", "secrets": list(names)}}
+from support import agent, spec, uses
 
 
 def test_check_of_a_valid_project_prints_ok_lines_and_exits_zero(project):
-    project.write(spec(vaults=secret_vault("TOKEN")))
+    project.write(spec(**uses("main/TOKEN")))
     result = project.sh("project check", env={"TOKEN": "a-secret"})
     assert result.returncode == 0, result.stdout + result.stderr
     lines = [line for line in result.stdout.splitlines() if line.strip()]
@@ -33,7 +30,7 @@ def test_check_exits_one_on_an_invalid_file_and_says_why(project):
 
 @pytest.mark.parametrize("value, word", [(None, "missing"), ("", "missing")])
 def test_check_exits_one_when_an_environment_secret_is_missing_or_empty(project, value, word):
-    project.write(spec(vaults=secret_vault("TOKEN")))
+    project.write(spec(**uses("main/TOKEN")))
     result = project.sh("project check", env={} if value is None else {"TOKEN": value})
     assert result.returncode == 1, result.stdout
     line = next(line for line in result.stdout.splitlines() if "main/TOKEN" in line)
@@ -41,18 +38,18 @@ def test_check_exits_one_when_an_environment_secret_is_missing_or_empty(project,
 
 
 def test_check_never_prints_a_secret_value(project):
-    project.write(spec(vaults=secret_vault("TOKEN")))
+    project.write(spec(**uses("main/TOKEN")))
     result = project.sh("project check", env={"TOKEN": "hunter2-the-value"})
     assert "hunter2-the-value" not in result.stdout + result.stderr
 
 
 def test_check_with_a_pass_entry_that_does_not_exist_exits_one(project):
-    project.write(spec(vaults={"main": {"backend": "pass", "secrets": ["no/such/entry"]}}))
+    project.write(spec(**uses("main/no/such/entry", backend="pass")))
     assert project.sh("project check").returncode == 1
 
 
 def test_check_resolved_prints_the_configuration_and_does_not_read_secrets(project):
-    project.write(spec(vaults=secret_vault("TOKEN"), workspaces={"foo": {}}))
+    project.write(spec(**uses("main/TOKEN"), workspaces={"foo": {}}))
     result = project.sh("project check --resolved", env={})
     assert result.returncode == 0, result.stderr
     assert "path" not in result.yaml()["workspaces"]["foo"]

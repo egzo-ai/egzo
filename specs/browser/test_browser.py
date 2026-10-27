@@ -57,7 +57,7 @@ def sandbox(shared_project, engine, egzo):
     agents["login"] = agent(harness="claude-code", image=images["claude-code"], egress="login")
     p.up(
         spec(
-            vaults={"main": {"backend": "env", "secrets": ["ANTHROPIC_API_KEY", "DEPLOY_TOKEN"]}},
+            vaults={"main": {"backend": "env"}},
             egress={
                 "example": {**MODEL_API, "allow": [*MODEL_API["allow"], "example.com"]},
                 "wild": {**MODEL_API, "services": {**MODEL_API["services"], "browse": {"hosts": ["*"], "inspect": True}}},

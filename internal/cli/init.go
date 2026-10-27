@@ -74,8 +74,6 @@ func scaffold(harness, repoURL string) string {
 		fmt.Fprintf(&b, `vaults:
   main:
     backend: env
-    secrets:
-      - ANTHROPIC_API_KEY
 
 egress:
   default:                      # everything not allowed here is denied

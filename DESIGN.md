@@ -61,7 +61,6 @@ Level 1 example:
 vaults:
   main:
     backend: env
-    secrets: [ANTHROPIC_API_KEY]
 egress:
   default:                    # the profile agents get when they name none
     allow: [platform.claude.com]
@@ -142,12 +141,7 @@ name: myproj
 
 vaults:
   main:
-    backend: pass              # env | pass (see Secrets and vaults)
-    secrets:                   # names in that store; pass names are hierarchical
-      - anthropic/api-key
-      - github/token
-      - deploy/token
-      - sites/example/password
+    backend: pass              # env | pass (see Secrets and vaults); a reference main/<name> declares a secret
 
 proxy:                         # infrastructure of the egress sidecar
   image: ghcr.io/egzo-ai/egzo  # optional override; default is the all-in-one egzo image (`egzo proxy`)
@@ -405,12 +399,14 @@ templates are declared and published by `up`.
 
 ## Secrets and vaults (decided)
 
-- A **vault** is one secret store: a name, a `backend`, and `secrets`, a list of the names to read from that
-  store. There is no per-secret source (no `from:`): the backend knows where its secrets live, so a vault is
-  the only concept and nothing in a secret entry repeats the backend. A secret is referred to as
-  `<vault>/<secret>`, split at the first `/`: vault names cannot contain `/`, secret names can when the
-  backend has hierarchical names (`main/company/project/test` is the secret `company/project/test` of
-  `main`).
+- A **vault** is one secret store: a name and a `backend`. There is no per-secret source (no `from:`): the
+  backend knows where its secrets live. A secret is **declared where it is used**, by its reference
+  `<vault>/<secret>` (a service's secret, an ssh server's key); a vault does not list its secrets, which would
+  only repeat the references. The reference is split at the first `/`: vault names cannot contain `/`, secret
+  names can when the backend has hierarchical names (`main/company/project/test` is the secret
+  `company/project/test` of `main`). A reference to an unknown vault is an error naming the vaults that exist;
+  a vault nothing refers to is a warning. `egzo project check --resolved` lists every referenced secret under
+  its vault, so what egzo reads is still in one view.
 - **Two backends exist: `env` and `pass`.** Any other name, whatever it is, is the same validation error
   (`unknown backend "x"`, naming the two that exist). The schema, the errors, the docs and the specs mention
   nothing that does not exist: no removed or planned backends, no reserved names. A backend is added when it

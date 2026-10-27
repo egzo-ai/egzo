@@ -24,7 +24,6 @@ const sshFixture = `
 vaults:
   main:
     backend: env
-    secrets: [KEY]
 `
 
 const goodFingerprint = "SHA256:giDwc8qRcN2ytSupvU/QCL4YGA5l7fUGresaokyLYt4"
@@ -88,7 +87,7 @@ func TestSSHInvalidFields(t *testing.T) {
 		"host: 'a:22'":             "host",
 		"user: '-oProxyCommand=x'": "user",
 		"user: 'a b'":              "user",
-		"key: main/MISSING":        "MISSING",
+		"key: main/1BAD":           "1BAD",
 		"key: nope/KEY":            "nope",
 		"key: bare":                "bare",
 		"password: x":              "password",

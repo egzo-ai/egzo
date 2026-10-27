@@ -146,7 +146,7 @@ egress:
     services:
       mine: { hosts: [API.Example.com.], inject: { header: x-key }, secret: main/K }
 vaults:
-  main: { backend: env, secrets: [K] }
+  main: { backend: env }
 agents:
   a: { harness: claude-code }
 `)
@@ -163,7 +163,7 @@ agents:
 func TestASecretCannotBeBoundToAServiceThatInjectsNothing(t *testing.T) {
 	wantProblems(t, t.TempDir(), `
 vaults:
-  main: { backend: env, secrets: [K] }
+  main: { backend: env }
 egress:
   base: { services: { plain: { hosts: [example.com] } } }
   child: { extend: base, services: { plain: main/K } }
@@ -174,7 +174,7 @@ func TestUsersIsAnUnknownKeyButAFineName(t *testing.T) {
 	for _, ok := range []string{
 		"workspaces:\n  users: {}\n",
 		"agents:\n  a: { harness: custom, image: x, env: { users: '4' } }\n",
-		"vaults:\n  users: { backend: env, secrets: [U] }\n",
+		"vaults:\n  users: { backend: env }\n",
 	} {
 		if _, err := Parse([]byte(ok)); err != nil {
 			t.Errorf("%q: %v", ok, err)
@@ -213,7 +213,7 @@ func TestSettingsThatDoNothingAreRejected(t *testing.T) {
 
 func TestOpenCodeWithASubscriptionTokenIsWarnedAbout(t *testing.T) {
 	yaml := func(service, harness string) string {
-		return "vaults:\n  main: { backend: env, secrets: [K] }\negress:\n  default:\n    allow: [models.opencode.ai]\n    services:\n      " + service + ": main/K\nagents:\n  a: { harness: " + harness + " }\n"
+		return "vaults:\n  main: { backend: env }\negress:\n  default:\n    allow: [models.opencode.ai]\n    services:\n      " + service + ": main/K\nagents:\n  a: { harness: " + harness + " }\n"
 	}
 	_, warnings := mustResolve(t, t.TempDir(), yaml("anthropic-oauth", "opencode"))
 	found := false

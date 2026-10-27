@@ -34,7 +34,7 @@ def document(image, *profiles):
     """A project with one template per named profile (`echo` uses the profile `echo`), and the two secrets from the environment."""
     chosen = profiles or tuple(PROFILES)
     return spec(
-        vaults={"main": {"backend": "env", "secrets": ["DEPLOY_TOKEN", "SITE_SECRET"]}},
+        vaults={"main": {"backend": "env"}},
         egress={name: PROFILES[name] for name in chosen},
         agents={name: custom(image, egress=name) for name in chosen},
     )

@@ -34,7 +34,10 @@ func inProject(t *testing.T, yaml string, stdin string, args ...string) (string,
 }
 
 func vaultYAML() string {
-	return "vaults:\n  main:\n    backend: env\n    secrets: [EGZO_TEST_SET_VARIABLE, EGZO_TEST_UNSET_VARIABLE]\n"
+	return "vaults:\n  main:\n    backend: env\n" +
+		"egress:\n  default:\n    services:\n" +
+		"      set: { hosts: [set.example.com], inject: { header: X-Key }, secret: main/EGZO_TEST_SET_VARIABLE }\n" +
+		"      unset: { hosts: [unset.example.com], inject: { header: X-Key }, secret: main/EGZO_TEST_UNSET_VARIABLE }\n"
 }
 
 func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testing.T) {
@@ -60,7 +63,7 @@ func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testi
 
 func TestProxyRulesListWhatEachAgentMayReachWithoutSecrets(t *testing.T) {
 	yaml := `
-vaults: {main: {backend: env, secrets: [S]}}
+vaults: {main: {backend: env}}
 egress:
   default: {allow: [docs.example.org]}
   wide:
