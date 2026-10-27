@@ -49,8 +49,8 @@ Give the credential the least privilege it can work with. egzo cannot narrow it,
 ## The mitigation
 
 A service takes a list of path prefixes (`paths: [/inference/]`), and the proxy injects only into requests under one of
-them, by whole segments. A request under a prefix whose path has a dot segment or a backslash is refused, because the
-server could resolve it outside the prefix. What is left:
+them, by whole segments. A request under a prefix whose path the server could resolve outside it (a dot segment, a
+backslash, an escape no API needs) is refused. The audit log says of each request whether the secret went with it. What is left:
 
 - **`opencode`.** The paths are the ones OpenCode 2 sends its key to (anomalyco/opencode,
   `packages/core/src/plugin/provider/opencode.ts`): the model calls under `/inference/` (and `/zen/`, where they went before

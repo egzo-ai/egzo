@@ -83,6 +83,10 @@ func TestCheckRefusesWhatTheProxyNeverWrites(t *testing.T) {
 		"host":          func(e *Event) { e.Host = strings.Repeat("x", 300) },
 		"server":        func(e *Event) { e.Server = "root" },
 		"path":          func(e *Event) { e.Path = strings.Repeat("/", MaxField+4) },
+		"raw_path":      func(e *Event) { e.RawPath = strings.Repeat("/", MaxField+4) },
+		"service":       func(e *Event) { e.Service = strings.Repeat("s", MaxField+4) },
+		"injected":      func(e *Event) { e.Injected = "\xff" },
+		"substituted":   func(e *Event) { e.Substituted = make([]string, maxSubstituted+1) },
 		"reason":        func(e *Event) { e.Reason = because("Not A Code", "") },
 		"counts":        func(e *Event) { e.BytesUp = -1 },
 	} {

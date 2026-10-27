@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,8 +30,9 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	r.fakes["local"].AddAudit("web",
 		event(1, engines.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeDeny, Host: "registry.npmjs.org",
 			Reason: &proxy.Reason{Code: proxy.CodeNotInProfile, Text: "not allowed by the agent's egress profile"}}),
-		event(2, engines.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeAllow, Mode: proxy.ModeInspect, Host: "example.com"}),
-		event(3, engines.AuditEvent{Kind: proxy.KindRequest, Decision: proxy.OutcomeAllow, Host: "example.com", Method: "GET", Path: "/", Status: 200}),
+		event(2, engines.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeAllow, Mode: proxy.ModeInject, Host: "example.com", Service: "api"}),
+		event(3, engines.AuditEvent{Kind: proxy.KindRequest, Decision: proxy.OutcomeAllow, Host: "example.com", Method: "GET", Path: "/a/b", RawPath: "/a%2Fb",
+			Status: 200, Injected: "api", Substituted: []string{"login"}}),
 	)
 	b := r.browser()
 	b.signIn("admin")
@@ -56,8 +58,11 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 		t.Errorf("denial = %v", d)
 	}
 	events := list(page, "events")
-	if events[0]["event"] != "request" || events[0]["path"] != "/" || events[0]["status"] != float64(200) || events[2]["decision"] != "deny" {
+	if events[0]["event"] != "request" || events[0]["path"] != "/a/b" || events[0]["status"] != float64(200) || events[2]["decision"] != "deny" {
 		t.Errorf("events, newest first = %v", events)
+	}
+	if e := events[0]; e["injected"] != "api" || e["rawPath"] != "/a%2Fb" || fmt.Sprint(e["substituted"]) != "[login]" || events[1]["service"] != "api" {
+		t.Errorf("what the proxy did with the credentials = %v, %v", e, events[1])
 	}
 	if reason := events[2]["reason"].(map[string]any); reason["code"] != "not-in-profile" {
 		t.Errorf("reason = %v", reason)

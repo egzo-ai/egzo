@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -226,7 +227,7 @@ func TestInjectsOnlyUnderTheServicePathsAndRefusesAPathThatCouldClimbOut(t *test
 	r.setPolicy("coder", "tok", nil, limited)
 	client := r.client("coder", "tok", r.ca.Cert)
 
-	for path, want := range map[string]string{"/v1/messages": "REAL-SECRET", "/console": "", "/v1x": ""} {
+	for path, want := range map[string]string{"/v1/messages": "REAL-SECRET", "/console": "", "/v1x": "", "/v1/files/a%2Fb": "REAL-SECRET"} {
 		body(t, mustGet(t, client, "https://example.com"+path))
 		if got := r.lastHeader().Get("x-api-key"); got != want {
 			t.Errorf("%s: upstream saw x-api-key = %q, want %q", path, got, want)
@@ -238,36 +239,97 @@ func TestInjectsOnlyUnderTheServicePathsAndRefusesAPathThatCouldClimbOut(t *test
 	if response.StatusCode != http.StatusBadRequest || r.requests() != seen {
 		t.Errorf("status = %d, upstream requests %d -> %d: a climbing path must be refused", response.StatusCode, seen, r.requests())
 	}
-	if !strings.Contains(r.audit.String(), `"code":"path"`) {
-		t.Errorf("audit lacks the refusal:\n%s", r.audit.String())
+
+	requests := map[string]Event{}
+	for _, event := range auditEvents(t, r.audit.String()) {
+		if event.Kind == KindConnect && (event.Mode != ModeInject || event.Service != "anthropic") {
+			t.Errorf("connect = %+v, want mode inject and service anthropic", event)
+		}
+		if event.Kind == KindRequest {
+			requests[event.Path] = event
+		}
 	}
+	if got := requests["/v1/messages"]; got.Injected != "anthropic" || got.Reason != nil || got.RawPath != "" {
+		t.Errorf("injected request = %+v", got)
+	}
+	if got := requests["/console"]; got.Injected != "" || got.Reason == nil || got.Reason.Code != CodeOutsidePaths || !strings.Contains(got.Reason.Text, `"anthropic"`) {
+		t.Errorf("request outside the paths = %+v", got)
+	}
+	if got := requests["/v1/files/a/b"]; got.Injected != "anthropic" || got.RawPath != "/v1/files/a%2Fb" {
+		t.Errorf("request with an escaped slash = %+v", got)
+	}
+	if got := requests["/v1/../console"]; got.Decision != OutcomeDeny || got.Injected != "" || got.Reason == nil || got.Reason.Code != CodePath {
+		t.Errorf("refused request = %+v", got)
+	}
+}
+
+// auditEvents reads the audit log, each event as the proxy writes it.
+func auditEvents(t *testing.T, log string) []Event {
+	t.Helper()
+	var events []Event
+	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
+		var event Event
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("%v: %s", err, line)
+		}
+		if err := event.Check(); err != nil {
+			t.Errorf("%v: %s", err, line)
+		}
+		events = append(events, event)
+	}
+	return events
 }
 
 func TestAnInjectionCoversWholeSegmentsAndRefusesAmbiguousPathsUnderItsPrefixes(t *testing.T) {
 	inject := Injection{Paths: []string{"/api/", "/upload"}}
 	cases := []struct {
-		path            string
-		covered, refuse bool
+		escaped string
+		covered bool
+		refuse  string // a part of the reason, or "" when not refused
 	}{
-		{"/api/v1", true, false},
-		{"/api/", true, false},
-		{"/api", false, false},
-		{"/upload", true, false},
-		{"/upload/x", true, false},
-		{"/uploads", false, false},
-		{"/console", false, false},
-		{"/api/../console", false, true},
-		{"/api/./v1", false, true},
-		{"/api/..;/console", false, true},
-		{"/api/..\\console", false, true},
-		{"/other/../api/x", false, false},
+		{"/api/v1", true, ""},
+		{"/api/", true, ""},
+		{"/api", false, ""},
+		{"/upload", true, ""},
+		{"/upload/x", true, ""},
+		{"/uploads", false, ""},
+		{"/console", false, ""},
+		{"/other/../api/x", false, ""},
+		{"/console/%2e%2e/x", false, ""}, // nothing is injected there, whatever the server makes of it
+
+		// what APIs send
+		{"/api/projects/group%2Fproject", true, ""},
+		{"/api/contents/my%20file.md", true, ""},
+		{"/api/v1/models/gemini:generateContent", true, ""},
+		{"/api/v1/users/a@b.example;v=2", true, ""},
+		{"/api/v1.2/x", true, ""},
+		{"/api/x..y", true, ""},
+
+		// what they never send
+		{"/api/../console", false, "segment"},
+		{"/api/./v1", false, "segment"},
+		{"/api/...", false, "segment"},
+		{"/api/..;/console", false, "segment"},
+		{"/api/..%20/console", false, "segment"},
+		{"/api/%2e%2e/console", false, "needs no encoding"},
+		{"/api/%2E%2E%2Fconsole", false, "needs no encoding"},
+		{"/%61pi/x", false, "needs no encoding"},
+		{"/api/%252e%252e/console", false, "twice"},
+		{"/api/..%5cconsole", false, "backslash"},
+		{"/api/..\\console", false, "does not carry"},
+		{"/api/..%00/console", false, "control"},
+		{"/api/%EF%BC%8E%EF%BC%8E/console", false, "outside ASCII"},
+		{"/api/x%", false, "not an escape"},
+		{"/api/x%zz", false, "not an escape"},
+		{"/api/{x}", false, "does not carry"},
 	}
 	for _, c := range cases {
-		if covered, refuse := inject.Covers(c.path); covered != c.covered || refuse != c.refuse {
-			t.Errorf("%s: covered %v refuse %v, want %v %v", c.path, covered, refuse, c.covered, c.refuse)
+		covered, refuse := inject.Covers(c.escaped)
+		if covered != c.covered || (c.refuse == "") != (refuse == "") || !strings.Contains(refuse, c.refuse) {
+			t.Errorf("%s: covered %v refuse %q, want %v %q", c.escaped, covered, refuse, c.covered, c.refuse)
 		}
 	}
-	if covered, refuse := (&Injection{}).Covers("/x/../y"); !covered || refuse {
+	if covered, refuse := (&Injection{}).Covers("/x/../y"); !covered || refuse != "" {
 		t.Error("an injection without paths covers every path")
 	}
 }

@@ -5,6 +5,7 @@ package proxy
 
 import (
 	"encoding/base64"
+	"net/url"
 	"strings"
 
 	"github.com/egzo-ai/egzo/internal/config"
@@ -69,32 +70,39 @@ type Service struct {
 }
 
 // Injection is a header the proxy sets on requests to an intercepted host: on every request, or with Paths only
-// on requests under one of them.
+// on requests under one of them. Service names it in the audit.
 type Injection struct {
-	Header string
-	Value  string
-	Paths  []string
+	Service string
+	Header  string
+	Value   string
+	Paths   []string
 }
 
-// Covers says whether a request to path gets the header. A path that may mean another one to the server (see
-// config.AmbiguousPath) under one of the prefixes is refused: the caller answers it with an error.
-func (i *Injection) Covers(path string) (inject, refuse bool) {
+// Covers says whether a request to escaped (the path as it goes on the wire) gets the header. Under one of the prefixes,
+// a path that may mean another one to the server (config.PathProblem) is refused, with the reason: the caller answers
+// it with an error.
+func (i *Injection) Covers(escaped string) (inject bool, refuse string) {
 	if i.Paths == nil {
-		return true, false
+		return true, ""
+	}
+	path, err := url.PathUnescape(escaped)
+	if err != nil {
+		return false, config.PathProblem(escaped) // a '%' that is not an escape
 	}
 	for _, prefix := range i.Paths {
 		if config.PathUnder(prefix, path) {
-			if config.AmbiguousPath(path) {
-				return false, true
+			if reason := config.PathProblem(escaped); reason != "" {
+				return false, reason
 			}
-			return true, false
+			return true, ""
 		}
 	}
-	return false, false
+	return false, ""
 }
 
 // Substitution is a placeholder the proxy replaces with a secret value on requests to an intercepted host.
 type Substitution struct {
+	Service     string // names it in the audit
 	Placeholder string
 	Secret      string
 }
@@ -147,10 +155,10 @@ func (a *Profile) Decide(host string) Decision {
 			case service.Value != "":
 				value = strings.ReplaceAll(service.Value, "{secret}", service.Secret)
 			}
-			decision.Inject = &Injection{Header: service.Header, Value: value, Paths: service.Paths}
+			decision.Inject = &Injection{Service: service.Name, Header: service.Header, Value: value, Paths: service.Paths}
 		}
 		if service.Placeholder != "" {
-			decision.Substitutions = append(decision.Substitutions, Substitution{service.Placeholder, service.Secret})
+			decision.Substitutions = append(decision.Substitutions, Substitution{service.Name, service.Placeholder, service.Secret})
 		}
 	}
 	if decision.Allowed {

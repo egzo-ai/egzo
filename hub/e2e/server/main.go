@@ -152,6 +152,17 @@ type command struct {
 	Decision string `json:"decision"`
 	Code     string `json:"code"`
 	Mode     string `json:"mode"`
+	Service  string `json:"service"`
+	// the requests of the connection, after its connect
+	Requests []auditRequest `json:"requests"`
+}
+
+// auditRequest is a request inside a terminated connection: whose credential went with it, or why none did.
+type auditRequest struct {
+	Path     string `json:"path"`
+	Injected string `json:"injected"`
+	Code     string `json:"code"`
+	Text     string `json:"text"`
 }
 
 func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
@@ -208,14 +219,25 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			}
 			event := engines.AuditEvent{Conn: connID(), Protocol: proxy.HTTPS, Kind: proxy.KindConnect, Decision: proxy.Outcome(c.Decision),
 				Mode: proxy.Mode(c.Mode), Agent: a.Name, Instance: a.ID, Profile: "default", ClaimedAgent: a.Name, Client: "10.89.3.2",
-				UserAgent: "curl/8.11.1", Host: c.Host}
+				UserAgent: "curl/8.11.1", Host: c.Host, Service: c.Service}
 			if c.Code == string(proxy.CodeCredentials) { // only claimed: nothing proved who it was
 				event.Agent, event.Instance, event.Profile = "", "", ""
 			}
 			if c.Code != "" {
 				event.Reason = &proxy.Reason{Code: proxy.Code(c.Code), Text: orDefault(c.Text, c.Code)}
 			}
-			e.AddAudit(c.Project, event)
+			event.Time = time.Now().UTC()
+			events := []engines.AuditEvent{event}
+			for i, q := range c.Requests {
+				request := event
+				request.Time, request.Kind, request.Decision, request.Mode, request.Service = event.Time.Add(time.Duration(i+1)*time.Millisecond), proxy.KindRequest, proxy.OutcomeAllow, "", ""
+				request.Method, request.Path, request.Status, request.Injected, request.Reason = "GET", q.Path, 200, q.Injected, nil
+				if q.Code != "" {
+					request.Reason = &proxy.Reason{Code: proxy.Code(q.Code), Text: q.Text}
+				}
+				events = append(events, request)
+			}
+			e.AddAudit(c.Project, events...)
 		case "add-project":
 			// state "silent": its control sidecar logs no status, as an old one does
 			e.SetFeedSilent(c.Project, c.State == "silent")

@@ -12,7 +12,7 @@ describe("the network view", () => {
 
   it("explains every reason code of the proxy, and falls back on the text for one it does not know", () => {
     const codes = ["no-policy", "credentials", "port", "not-in-profile", "private-address", "limit", "client-hello", "sni-mismatch", "host-header",
-      "host-mismatch", "placeholder", "dial", "tls-handshake", "upstream", "identity", "channel", "forwarding", "request", "host-key", "key", "auth", "session"];
+      "host-mismatch", "placeholder", "path", "dial", "tls-handshake", "upstream", "identity", "channel", "forwarding", "request", "host-key", "key", "auth", "session"];
     for (const code of codes) {
       const e = explain({ code, host: "h.example", profile: "p", protocol: "https", text: "t" });
       expect(e.fix, code).not.toBe("");
@@ -24,6 +24,22 @@ describe("the network view", () => {
   it("finds the parent domains several denied hosts share", () => {
     const shared = sharedParents(["a.cdn.example.com", "b.cdn.example.com", "b.cdn.example.com", "example.org", "10.0.0.1", "x.other.net"]);
     expect([...shared]).toEqual([["cdn.example.com", ["a.cdn.example.com", "b.cdn.example.com"]]]);
+  });
+
+  it("counts, for a connection, the requests that carried each service's credential and those that went without it", () => {
+    const base = { conn: "k", protocol: "https" as const, agent: "coder-1", host: "opencode.ai" };
+    const [row] = connections([
+      { ...base, time: "2026-10-27T10:00:04Z", event: "request", decision: "allow", path: "/", status: 200, reason: { code: "outside-paths", text: "not under the paths" } },
+      { ...base, time: "2026-10-27T10:00:03Z", event: "request", decision: "allow", path: "/zen/v1", status: 200, injected: "opencode", substituted: ["login"] },
+      { ...base, time: "2026-10-27T10:00:02Z", event: "request", decision: "allow", path: "/inference/v1", status: 200, injected: "opencode" },
+      { ...base, time: "2026-10-27T10:00:01Z", event: "connect", decision: "allow", mode: "inject", service: "opencode" },
+    ]);
+    expect(row.service).toBe("opencode");
+    expect(row.requests).toBe(3);
+    expect([...row.injected]).toEqual([["opencode", 2]]);
+    expect([...row.substituted]).toEqual([["login", 1]]);
+    expect(row.withoutCredential).toBe(1);
+    expect(row.decision).toBe("allow");
   });
 
   it("makes one row of a connection's events, with its worst decision, its requests and what its close says", () => {

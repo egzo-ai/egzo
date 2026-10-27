@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -24,6 +25,7 @@ type swapper struct {
 	raw, query, path, form, json *strings.Replacer
 	secrets                      []string
 	placeholders                 []string
+	services                     []string // of each placeholder, for the audit
 }
 
 func newSwapper(subs []Substitution) *swapper {
@@ -34,6 +36,7 @@ func newSwapper(subs []Substitution) *swapper {
 	var raw, query, path, form, jsonPairs []string
 	for _, sub := range subs {
 		s.placeholders = append(s.placeholders, sub.Placeholder)
+		s.services = append(s.services, sub.Service)
 		s.secrets = append(s.secrets, sub.Secret)
 		raw = append(raw, sub.Placeholder, sub.Secret)
 		query = append(query, sub.Placeholder, url.QueryEscape(sub.Secret))
@@ -82,9 +85,28 @@ func (s *swapper) mentions(text string) bool {
 	return false
 }
 
-// apply swaps the placeholders in r, in place. When the request must be refused it returns the status
-// and a reason that is safe to log and to show: never a value, a body or a query string.
-func (s *swapper) apply(r *http.Request) (status int, reason string) {
+// note marks in found the placeholders text mentions.
+func (s *swapper) note(text string, found []bool) {
+	for i, placeholder := range s.placeholders {
+		found[i] = found[i] || strings.Contains(text, placeholder)
+	}
+}
+
+// apply swaps the placeholders in r, in place, and returns the services whose placeholder it swapped. When the request
+// must be refused it returns the status and a reason that is safe to log and to show: never a value, a body or a query
+// string.
+func (s *swapper) apply(r *http.Request) (swapped []string, status int, reason string) {
+	found := make([]bool, len(s.placeholders))
+	defer func() {
+		if status != 0 {
+			return
+		}
+		for i, ok := range found {
+			if ok && !slices.Contains(swapped, s.services[i]) {
+				swapped = append(swapped, s.services[i])
+			}
+		}
+	}()
 	// Every refusal is decided on the original request, before anything is swapped, and its reason is a fixed
 	// sentence: nothing in it comes from the request, so a refusal can never carry a secret back to the agent.
 	var data []byte
@@ -95,29 +117,29 @@ func (s *swapper) apply(r *http.Request) (status int, reason string) {
 		for _, encoding := range r.Header.Values("Content-Encoding") {
 			for _, token := range strings.Split(encoding, ",") {
 				if token = strings.TrimSpace(token); token != "" && !strings.EqualFold(token, "identity") {
-					return http.StatusUnsupportedMediaType, "request body is compressed (Content-Encoding) and cannot be scanned for placeholders"
+					return nil, http.StatusUnsupportedMediaType, "request body is compressed (Content-Encoding) and cannot be scanned for placeholders"
 				}
 			}
 		}
 		const tooLarge = "request body over 1 MiB cannot be scanned for placeholders"
 		if r.ContentLength > maxScannedBody {
-			return http.StatusRequestEntityTooLarge, tooLarge
+			return nil, http.StatusRequestEntityTooLarge, tooLarge
 		}
 		var err error
 		data, err = io.ReadAll(io.LimitReader(r.Body, maxScannedBody+1))
 		r.Body.Close()
 		if len(data) > maxScannedBody {
-			return http.StatusRequestEntityTooLarge, tooLarge
+			return nil, http.StatusRequestEntityTooLarge, tooLarge
 		}
 		if err != nil {
-			return http.StatusBadRequest, "could not read the request body"
+			return nil, http.StatusBadRequest, "could not read the request body"
 		}
 	}
 	// A value that cannot travel in a header is refused before anything is swapped.
 	for _, values := range r.Header {
 		for _, value := range values {
 			if s.mentions(value) && strings.ContainsAny(s.raw.Replace(value), "\r\n") {
-				return http.StatusInternalServerError, "a secret value contains a line break and cannot be sent in a header"
+				return nil, http.StatusInternalServerError, "a secret value contains a line break and cannot be sent in a header"
 			}
 		}
 	}
@@ -125,24 +147,28 @@ func (s *swapper) apply(r *http.Request) (status int, reason string) {
 	for _, values := range r.Header {
 		for i, value := range values {
 			if s.mentions(value) {
+				s.note(value, found)
 				values[i] = s.raw.Replace(value)
 			}
 		}
 	}
 	if escaped := r.URL.EscapedPath(); s.mentions(escaped) {
+		s.note(escaped, found)
 		swapped := s.path.Replace(escaped)
 		if path, err := url.PathUnescape(swapped); err == nil {
 			r.URL.Path, r.URL.RawPath = path, swapped
 		}
 	}
 	if s.mentions(r.URL.RawQuery) {
+		s.note(r.URL.RawQuery, found)
 		r.URL.RawQuery = s.query.Replace(r.URL.RawQuery)
 	}
 	if !scanBody {
-		return 0, ""
+		return nil, 0, ""
 	}
 
 	if s.mentions(string(data)) {
+		s.note(string(data), found)
 		replacer := s.raw
 		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		switch {
@@ -163,5 +189,5 @@ func (s *swapper) apply(r *http.Request) (status int, reason string) {
 		r.Body = io.NopCloser(bytes.NewReader(data))
 		r.Header.Set("Content-Length", strconv.Itoa(len(data)))
 	}
-	return 0, ""
+	return nil, 0, ""
 }
