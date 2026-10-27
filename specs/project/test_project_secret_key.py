@@ -3,7 +3,7 @@
 
 """The project's secret key at rest: the CA's private key in the proxy's volume is sealed with it, a restarted proxy opens it again with
 the key `up` delivers, another key stops `up` with the two ways on, `rotate-ca` moves the project to a new key, and a project made before
-the key keeps its CA. The file's side (`secret_key` is required, at least 32 bytes) is in `test_secret_key.py`."""
+the key stops `up` until it is made again. The file's side (`secret_key` is required, at least 32 bytes) is in `test_secret_key.py`."""
 
 import shutil
 import subprocess
@@ -72,8 +72,8 @@ def test_the_ca_key_is_sealed_another_key_stops_up_and_rotate_ca_moves_the_proje
     assert p.sh("project up", timeout=300).returncode != 0, "the old key no longer opens the CA"
 
 
-def test_a_project_made_before_the_secret_key_keeps_its_ca_and_the_key_is_sealed_at_the_next_up(live_project, engine, agent_image, internet, tmp_path):
-    """Before the secret key, the proxy kept `ca.key` and `ca.crt` in clear in its volume."""
+def test_a_project_made_before_the_secret_key_stops_up_and_down_then_up_makes_it_again(live_project, engine, agent_image, internet, tmp_path):
+    """Before the secret key, the proxy kept `ca.key` and `ca.crt` in clear in its volume. Before 1.0 egzo reads nothing an older one made."""
     if shutil.which("openssl") is None:
         pytest.fail("this spec makes an old-style CA with openssl, which is not on PATH", pytrace=False)
     p = live_project
@@ -94,9 +94,14 @@ def test_a_project_made_before_the_secret_key_keeps_its_ca_and_the_key_is_sealed
                           "sh", "-c", 'owner=$(stat -c %u:%g /v/ca.crt) && rm -f /v/* && cp /old/ca.key /old/ca.crt /v/ && chown "$owner" /v/ca.key /v/ca.crt && chmod 600 /v/ca.key')
     assert replaced.returncode == 0, replaced.stderr
 
+    refused = p.sh("project up", timeout=300)
+    assert refused.returncode != 0
+    assert "before the secret key" in refused.stderr and "egzo project down" in refused.stderr, refused.stderr
+    assert "PRIVATE KEY" in volume_files(engine, p, agent_image), "the old volume is left as it was"
+
+    p.ok("project down", timeout=300)
     p.ok("project up", timeout=300)
     name = p.spawn("coder")
-    assert ca_of(engine, p, name).strip() == (old / "ca.crt").read_text().strip(), "same CA: no agent has to learn a new one"
+    assert ca_of(engine, p, name).strip() != (old / "ca.crt").read_text().strip(), "a new CA"
     assert reaches_example(engine, p, name)
-    at_rest = volume_files(engine, p, agent_image)
-    assert "PRIVATE KEY" not in at_rest, "the first up with a key sealed the CA key and removed the clear one"
+    assert "PRIVATE KEY" not in volume_files(engine, p, agent_image)

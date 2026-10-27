@@ -64,7 +64,8 @@ $ openssl rand -hex 32 | pass insert --multiline egzo/shop-key
 - **Keep it.** egzo cannot tell a wrong key from a right one until it opens what was sealed: with another key, `egzo
   project up` stops and says so. Give the old key back, or run `egzo project rotate-ca`, which makes a new CA sealed with
   the key the file names now and restarts the agents.
-- A project made before the secret key keeps its CA: the first `up` with a key seals it.
+- A project made by an egzo from before the secret key is refused by `up`: run `egzo project down`, then `egzo project up`, for a
+  new CA (the workspaces are kept).
 
 ## Vaults and secrets
 
