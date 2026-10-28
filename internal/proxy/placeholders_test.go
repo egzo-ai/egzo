@@ -297,8 +297,8 @@ func TestCompressedBodyIsRefusedWhetherOrNotItHoldsAPlaceholder(t *testing.T) {
 		r, _ := swapRig(t, ph("secret"))
 		response := do(t, r, "POST", "https://example.com/", "text/plain", strings.NewReader("nothing here"), "Content-Encoding", encoding)
 		text := body(t, response)
-		if response.StatusCode != http.StatusUnsupportedMediaType || !strings.Contains(text, "compressed") {
-			t.Errorf("%s: status %d, %q", encoding, response.StatusCode, text)
+		if response.StatusCode != http.StatusUnsupportedMediaType || !strings.Contains(text, "compressed") || response.Header.Get("Accept-Encoding") != "identity" {
+			t.Errorf("%s: status %d, %q, Accept-Encoding %q (RFC 9110 names the codings accepted)", encoding, response.StatusCode, text, response.Header.Get("Accept-Encoding"))
 		}
 		if r.requests() != 0 {
 			t.Error("forwarded")

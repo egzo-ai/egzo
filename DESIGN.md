@@ -494,7 +494,7 @@ egress:
   body or a query string, JSON-escaped in a JSON body, as is elsewhere. `Content-Length` is recomputed.
 - Bodies are scanned when they are uncompressed and at most 1 MiB. **A request to a placeholder host with a
   body that cannot be scanned (compressed, or over 1 MiB) is refused**, never forwarded half-handled: the proxy
-  answers `413` (too large) or `415` (compressed) with a message that names the reason, and logs the request as
+  answers `413` (too large) or `415` (compressed, with `Accept-Encoding: identity`, RFC 9110 15.5.16) with a message that names the reason, and logs the request as
   denied (code `placeholder`) with the same reason. The rule depends only on the request, so a given request always succeeds or always
   fails, and the failure says why. The reason is a fixed sentence: nothing taken from the request is ever put
   in it, since the agent controls the request (it could otherwise put its own placeholder there). Hosts of a placeholder service are meant for logins and API calls, not
