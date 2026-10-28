@@ -99,9 +99,10 @@ your store).
 
 ### env
 
-**`env`** reads the environment variable of the same name from your shell. It works, and egzo warns each time
-(`Using ENV var based secret backend is not recommended.`): any process of yours can read an environment
-variable, and it tends to end up in shell history and dotfiles. It is fine for a quick try.
+**`env`** reads the environment variable of the same name from your shell or, as Docker Compose does, from the
+`.env` file next to `egzo.yaml`. It works, and egzo warns each time (`Using ENV var based secret backend is not
+recommended.`): any process of yours can read an environment variable or a file in clear, and they tend to end up in
+shell history, dotfiles and backups. It is fine for a quick try.
 
 ```yaml
 vaults:
@@ -114,7 +115,18 @@ egress:
       anthropic: main/ANTHROPIC_API_KEY   # the variable ANTHROPIC_API_KEY
 ```
 
-`egzo project check` shows, for every secret the file refers to, whether it is set (never the value). Secrets reach the proxy only ([security
+`.env` follows Compose's rules:
+- **The shell wins.** A variable of your environment is used even when `.env` has it too, and one set to nothing hides
+  the file's (`project check` says so).
+- **Compose's syntax**, read with Compose's own parser: `KEY=value`, `export KEY=value`, `#` comments, single quotes
+  taken literally, double quotes with escapes, and `${VAR}` filled from your environment, then from the lines above.
+- **Only the project's.** The `.env` in the directory of `egzo.yaml`, wherever you run egzo from. No file is no
+  variable. A file that cannot be parsed fails the secret it was needed for, with its line, never a value.
+
+egzo never copies `.env` anywhere: it is not in a workspace unless you put it there. Keep it out of git.
+
+`egzo project check` shows, for every secret the file refers to, whether it is set (never the value), and says
+when it came from `.env`. Secrets reach the proxy only ([security
 model](security.md)). They are never in an agent's environment, in labels or in `docker inspect`.
 
 ## Egress profiles

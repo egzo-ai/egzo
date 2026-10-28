@@ -105,9 +105,12 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 		if err != nil {
 			return err // pass itself cannot be run: no answer about any secret means anything
 		}
-		if state == "set" {
+		switch {
+		case state == "set" && stack.FromDotenv(p.Resolved.Secrets[ref], p.Dir):
+			report("ok", "secret %s is set (from %s)", ref, stack.DotenvFile)
+		case state == "set":
 			report("ok", "secret %s is set", ref)
-		} else {
+		default:
 			report("fail", "secret %s is %s", ref, state)
 		}
 	}
