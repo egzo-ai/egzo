@@ -47,10 +47,9 @@ does not give you.
 ## A first run
 
 ```console
-$ egzo project init --harness claude-code     # scaffolds egzo.yaml
-$ export ANTHROPIC_API_KEY=...
+$ egzo project init --harness claude-code     # scaffolds egzo.yaml, and the project's secret key in .env
 $ egzo project up
-$ egzo agent spawn claude --attach          # the real Claude Code, in a sandbox
+$ egzo agent spawn claude --attach          # the real Claude Code, in a sandbox: sign in with /login
 ```
 
 Detach with `Ctrl-]`; `egzo agent attach <name>` comes back. `egzo project init` fills the repository URL from your git `origin`;

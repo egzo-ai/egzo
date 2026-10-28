@@ -164,18 +164,17 @@ func TestInitRejectsAnUnknownHarnessBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestInitInAGitRepositoryUsesTheOriginAndLeavesGitignoreAlone(t *testing.T) {
+func TestInitInAGitRepositoryUsesTheOriginAndHasGitIgnoreDotenv(t *testing.T) {
 	dir := t.TempDir()
 	gitInit(t, dir, "git@github.com:acme/app.git")
-	out, err := runInit(t, dir, "claude-code")
-	if err != nil {
+	if _, err := runInit(t, dir, "claude-code"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, ".gitignore") {
-		t.Errorf("output = %q: egzo keeps nothing in the directory, so nothing is ignored", out)
+	if ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore")); err != nil || string(ignore) != ".env\n" {
+		t.Errorf(".gitignore = %q, %v", ignore, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err == nil {
-		t.Error("a .gitignore was made")
+	if info, err := os.Stat(filepath.Join(dir, ".env")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf(".env: %v, %v", info, err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, config.FileName))
 	if err != nil {
