@@ -23,8 +23,8 @@ egress:
 ```
 
 - `allow`: host names or `*.domain` globs the agent may reach with **no** credential.
-- `services`: hosts that get a credential applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`, `opencode`)
-  needs only the secret: `vault/SECRET` (for a secret named `company/project/token` in a `pass` vault `main`:
+- `services`: hosts that get a credential applied. A built-in service (`anthropic`, `github`, `anthropic-oauth`, `opencode`,
+  `openai`) needs only the secret: `vault/SECRET` (for a secret named `company/project/token` in a `pass` vault `main`:
   `main/company/project/token`). That string is short for `{ credential: main/company/project/token }`.
 - The agent's reach is `allow` plus the hosts of its services. Without a `default` profile, an agent that names none
   can reach nothing.
@@ -37,12 +37,14 @@ egress:
 |---|---|---|
 | `anthropic` | `api.anthropic.com` | `x-api-key: <secret>` |
 | `anthropic-oauth` | `api.anthropic.com` | `Authorization: Bearer <token>` (a Claude subscription token from `claude setup-token`) |
+| `claude` | `api.anthropic.com` | a Claude subscription signed in from Claude Code: the stand-in bearer token becomes the real one (an [OAuth service](#oauth-services)) |
 | `opencode` | `opencode.ai` | `Authorization: Bearer <key>` (the API key of an OpenCode Go or Console workspace: a service account's) |
 | `chatgpt` | `chatgpt.com`, under `/backend-api/` | a ChatGPT sign-in: the stand-in bearer token becomes the real one (an [OAuth service](#oauth-services)) |
 | `github` | `github.com`, `api.github.com` | `Authorization: Basic base64(x-access-token:<secret>)` (git over HTTPS refuses a bearer token) |
 
-Binding a token to the wrong one of the two Anthropic services is refused at `egzo project up`. Claude Code also needs
-`platform.claude.com` in `allow`; it needs no credential.
+Binding a token to the wrong one of the two Anthropic token services is refused at `egzo project up`, and so is a profile with
+two of `anthropic`, `anthropic-oauth` and `claude`: [Claude Code](harnesses.md#claude-code) compares the three. With
+`anthropic` or `anthropic-oauth`, Claude Code also needs `platform.claude.com` in `allow`; it needs no credential.
 
 ## Your own services
 
@@ -127,8 +129,8 @@ An exact service that injects still injects where a wildcard service also covers
 
 ## OAuth services
 
-Some credentials are not a secret you keep but a sign-in whose tokens rotate: a ChatGPT Plus or Pro account for Codex is
-one. An OAuth service has no vault secret. The proxy captures the tokens when a client signs in through it, keeps them,
+Some credentials are not a secret you keep but a sign-in whose tokens rotate: a ChatGPT Plus or Pro account for Codex, or
+a Claude subscription for Claude Code. An OAuth service has no vault secret. The proxy captures the tokens when a client signs in through it, keeps them,
 and gives the client stand-ins:
 
 ```yaml
@@ -136,11 +138,16 @@ egress:
   codex:
     services:
       chatgpt: { credential: { method: oauth } }      # built in: chatgpt.com, under /backend-api/ only
+  claude:
+    services:
+      claude: { credential: { method: oauth } }       # built in: api.anthropic.com
 ```
 
 - **Sign in from an agent**, where the client asks: `egzo agent spawn` and `egzo project check` say when a service has no
-  sign-in. Use the client's device-code sign-in: a browser sign-in calls back to a port inside the container, which your
-  browser cannot reach.
+  sign-in. Use a sign-in that ends in the terminal: Codex's device code, or Claude Code's `/login`, which shows a code to
+  paste back. A browser sign-in that calls back to a port inside the container cannot work: your browser cannot reach it.
+- **Agents after the first** start signed in with the stand-ins of the project's sign-in, which they get when they are
+  spawned: Codex an `auth.json`, Claude Code a refresh token that `claude auth login` signs in with before its TUI starts.
 - **Stand-ins.** The client's code exchange goes to the provider; the proxy keeps the real access, refresh and id tokens
   and answers the client with stand-ins. A JWT stand-in carries the real claims (clients read them) with a signature that
   is no signature. A stand-in works only through the proxy: on the service's hosts and `paths` the proxy swaps it for the

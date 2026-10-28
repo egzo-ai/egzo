@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // Options is what an integration needs to know about the agent it prepares.
@@ -157,6 +158,9 @@ type Plan struct {
 	InterruptKey string
 	// Dirs are directories to create.
 	Dirs []string
+	// Setup are commands run once the files are written, in order, before the harness starts. Each is best effort: one
+	// that fails is reported, and the harness starts anyway.
+	Setup [][]string
 }
 
 // File is a file the integration writes.
@@ -180,6 +184,26 @@ type Providers struct {
 	AnthropicBearer bool
 	// OpenAIKey: the `openai` service injects an API key for api.openai.com.
 	OpenAIKey bool
+	// AnthropicSignIn: an OAuth service covers api.anthropic.com (the `claude` sign-in), so the client signs in and keeps
+	// stand-ins itself: no API key or token placeholder, which would win over the sign-in.
+	AnthropicSignIn bool
+}
+
+// SignIn is what a new agent is given of the project's live sign-in to an OAuth service: its stand-ins, which work only
+// through the proxy, never a real token.
+type SignIn struct {
+	Access, Refresh, ID string
+	Scope               string // as the provider granted it
+	Refreshed           time.Time
+}
+
+// SignsIn is an integration whose client keeps the tokens of a sign-in itself. A new agent of a project with a live
+// sign-in to the service for SignInHost starts signed in with its stand-ins; without one, the client asks to sign in.
+type SignsIn interface {
+	// SignInHost is the host whose OAuth service the client signs in to; "" takes the profile's OAuth service, whichever.
+	SignInHost() string
+	// SignInEnv is the environment that carries the sign-in into the agent, nil when it cannot.
+	SignInEnv(SignIn) map[string]string
 }
 
 // Integration is one harness.

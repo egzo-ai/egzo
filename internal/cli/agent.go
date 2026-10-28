@@ -143,6 +143,7 @@ func runAgent(args []string) error {
 		for key, value := range plan.Env {
 			environment = append(environment, key+"="+value)
 		}
+		runSetup(plan.Setup, environment)
 	}
 	if len(command) == 0 {
 		return fmt.Errorf("no program to run: pass one after --, or set EGZO_HARNESS to a harness with a default")
@@ -278,5 +279,22 @@ func postState(ctx context.Context, api *agentclient.Client, payload []byte) err
 		case <-time.After(delay):
 		}
 		delay = min(delay*2, time.Second)
+	}
+}
+
+// setupTimeout bounds each setup command of a harness: one that hangs must not keep the harness from starting.
+const setupTimeout = 2 * time.Minute
+
+// runSetup runs a harness's setup commands in order, with its environment, before it starts. Best effort, like the
+// browser: a failure is reported in the container's log, and the harness starts anyway (Claude Code then asks to sign in).
+func runSetup(commands [][]string, environment []string) {
+	for _, command := range commands {
+		ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
+		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+		cmd.Env, cmd.Stdout, cmd.Stderr = environment, os.Stderr, os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "egzo: %s: %v\n", strings.Join(command, " "), err)
+		}
+		cancel()
 	}
 }

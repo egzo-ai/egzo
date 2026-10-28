@@ -6,8 +6,8 @@ package stack
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
-	"time"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -15,21 +15,27 @@ import (
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
-// signInEnv is what a new instance is given of the sign-ins of its profile's OAuth services, for a harness that keeps
-// its tokens in a file of its own: Codex's auth.json, made of the stand-ins of the project's sign-in. Nothing when the
-// harness has no such file, the profile no OAuth service, or the proxy no live sign-in: the client then asks to sign in.
+// signInEnv is what a new instance is given of the sign-in its harness uses, when the harness's client keeps one itself
+// (harness.SignsIn): Codex's auth.json, or the refresh token Claude Code signs in with, made of the stand-ins of the
+// project's sign-in. Nothing when the profile has no OAuth service for the harness's host or the proxy no live sign-in:
+// the client then asks to sign in.
 func signInEnv(ctx context.Context, c *engine.Client, project string, view *config.Resolved, name string) map[string]string {
 	agent, ok := view.Agents[name] // the view of a spawn has the instance under its own name
-	if !ok || agent.Harness != "codex" {
+	if !ok {
 		return nil
 	}
+	integration, ok := harness.For(agent.Harness)
+	if !ok {
+		return nil
+	}
+	signsIn, ok := integration.(harness.SignsIn)
 	profile := view.Egress[agent.Egress]
-	if profile == nil {
+	if !ok || profile == nil {
 		return nil
 	}
 	var services []string
 	for name, service := range profile.Services {
-		if service.OAuth() {
+		if host := signsIn.SignInHost(); service.OAuth() && (host == "" || slices.Contains(service.Hosts, host)) {
 			services = append(services, name)
 		}
 	}
@@ -43,8 +49,8 @@ func signInEnv(ctx context.Context, c *engine.Client, project string, view *conf
 		if json.Unmarshal(result.Stdout, &standIns) != nil || standIns.Access == "" {
 			continue
 		}
-		auth := harness.CodexAuth(standIns.Access, standIns.Refresh, standIns.ID, standIns.Refreshed.UTC().Format(time.RFC3339))
-		return map[string]string{harness.EnvCodexAuth: auth}
+		return signsIn.SignInEnv(harness.SignIn{Access: standIns.Access, Refresh: standIns.Refresh, ID: standIns.ID, Scope: standIns.Scope,
+			Refreshed: standIns.Refreshed})
 	}
 	return nil
 }

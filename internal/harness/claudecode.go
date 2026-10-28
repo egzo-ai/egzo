@@ -5,6 +5,7 @@ package harness
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,11 +29,46 @@ func (claudeCode) ReadyMarkers() []string { return []string{"for shortcuts", "sh
 // claudeOAuthToken is the placeholder for a subscription token; like claudeKey it is replaced by the proxy.
 const claudeOAuthToken = "sk-ant-oat01-egzo-placeholder-0000000000000000000000000000000000000000"
 
+// The variables `claude auth login` signs in with: the stand-in refresh token of the project's sign-in, and its scope.
+// The proxy answers the refresh itself, with the current stand-ins, so the same stand-in works for every agent.
+const (
+	EnvClaudeRefreshToken = "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
+	EnvClaudeScopes       = "CLAUDE_CODE_OAUTH_SCOPES"
+)
+
+func (claudeCode) SignInHost() string { return "api.anthropic.com" }
+
+// SignInEnv carries the sign-in for `claude auth login`, which `egzo agent run` runs when Claude Code has none (Plan).
+// Claude Code refuses a refresh token without its scope.
+func (claudeCode) SignInEnv(s SignIn) map[string]string {
+	if s.Refresh == "" || s.Scope == "" {
+		return nil
+	}
+	return map[string]string{EnvClaudeRefreshToken: s.Refresh, EnvClaudeScopes: s.Scope}
+}
+
+// claudeSignedIn reports whether Claude Code keeps a sign-in in home (a Claude subscription's tokens).
+func claudeSignedIn(home string) bool {
+	data, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
+	if err != nil {
+		return false
+	}
+	var stored struct {
+		ClaudeAiOauth struct {
+			RefreshToken string `json:"refreshToken"`
+		} `json:"claudeAiOauth"`
+	}
+	return json.Unmarshal(data, &stored) == nil && stored.ClaudeAiOauth.RefreshToken != ""
+}
+
 func (claudeCode) ContainerEnv(bypass bool, providers Providers) map[string]string {
 	// A subscription token comes in CLAUDE_CODE_OAUTH_TOKEN and makes Claude Code send it as a bearer
 	// token; an ANTHROPIC_API_KEY next to it would win and be sent as x-api-key.
 	env := map[string]string{"ANTHROPIC_API_KEY": claudeKey}
-	if providers.AnthropicBearer {
+	switch {
+	case providers.AnthropicSignIn:
+		env = map[string]string{}
+	case providers.AnthropicBearer:
 		env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": claudeOAuthToken}
 	}
 	if bypass {
@@ -147,8 +183,15 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	}
 	command = append(command, "--append-system-prompt", string(instructions))
 
+	// A new agent of a project with a sign-in signs in before its TUI starts, once: the TUI never reads the refresh token.
+	var setup [][]string
+	if o.env(EnvClaudeRefreshToken) != "" && !claudeSignedIn(home) {
+		setup = append(setup, []string{command[0], "auth", "login"})
+	}
+
 	encode := func(value any) []byte { out, _ := json.MarshalIndent(value, "", "  "); return out }
 	return Plan{
+		Setup: setup,
 		Files: map[string]File{
 			statePath: {Content: encode(state), Mode: 0o600, Merge: true, Replace: replace},
 			filepath.Join(home, ".claude", "settings.json"): {Content: encode(settings), Mode: 0o644, Merge: true},

@@ -60,14 +60,23 @@ func initProject(dir, harness string, cmd *cobra.Command) error {
 
 	template := strings.ReplaceAll(harness, "-code", "")
 	fmt.Fprintf(cmd.OutOrStdout(), "next: edit the workspace url, check it with `egzo project check --resolved`, then `egzo project up` and `egzo agent spawn %s --attach`\n", template)
+	if harness == "claude-code" {
+		fmt.Fprintln(cmd.OutOrStdout(), "then sign in with your Claude subscription where Claude Code asks (/login): the proxy keeps the sign-in, and every agent after the first starts signed in")
+	}
 	return nil
 }
 
-// scaffoldHosts are the hosts without a credential that each integrated harness needs, as the
-// scaffold's allow list.
-var scaffoldHosts = map[string]string{
-	"claude-code": "platform.claude.com",
-	"opencode":    "models.opencode.ai",
+// scaffoldEgress is the default profile the scaffold gives each integrated harness: the hosts it needs without a
+// credential, and its provider. Claude Code signs in with a Claude subscription (the `claude` service, no vault secret);
+// OpenCode cannot, and takes an API key.
+var scaffoldEgress = map[string]string{
+	"claude-code": `    services:
+      claude: { credential: { method: oauth } }   # a Claude subscription: sign in from Claude Code (/login)
+`,
+	"opencode": `    allow: [models.opencode.ai]
+    services:
+      anthropic: main/ANTHROPIC_API_KEY
+`,
 }
 
 // scaffoldSecretKey is the variable the scaffold reads the project's secret key from.
@@ -82,14 +91,11 @@ vaults:
     backend: env
 
 `, scaffoldSecretKey)
-	if hosts, known := scaffoldHosts[harness]; known {
+	if profile, known := scaffoldEgress[harness]; known {
 		fmt.Fprintf(&b, `egress:
   default:                      # everything not allowed here is denied
-    allow: [%s]
-    services:
-      anthropic: main/ANTHROPIC_API_KEY
-
-`, hosts)
+%s
+`, profile)
 	} else {
 		b.WriteString("# TODO: add an egress profile that lets the agent reach its provider\n\n")
 	}

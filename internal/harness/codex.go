@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 type codex struct{}
@@ -32,6 +33,14 @@ const codexKey = "sk-proj-egzo-placeholder-0000000000000000000000000000000000000
 // EnvCodexAuth carries the auth.json of a ChatGPT sign-in into a new agent: the stand-ins of the project's sign-in,
 // which work only through the proxy. Spawn sets it when the project has one.
 const EnvCodexAuth = "EGZO_CODEX_AUTH"
+
+// SignInHost is any: Codex signs in wherever its profile's OAuth service is (the built-in `chatgpt`, or one of the user's).
+func (codex) SignInHost() string { return "" }
+
+// SignInEnv carries Codex's auth.json, which `egzo agent run` writes when there is none (Plan).
+func (codex) SignInEnv(s SignIn) map[string]string {
+	return map[string]string{EnvCodexAuth: CodexAuth(s.Access, s.Refresh, s.ID, s.Refreshed.UTC().Format(time.RFC3339))}
+}
 
 func (codex) ContainerEnv(_ bool, providers Providers) map[string]string {
 	if providers.OpenAIKey {

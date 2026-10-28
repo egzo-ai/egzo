@@ -111,6 +111,15 @@ def test_the_anthropic_service_is_built_in(project):
     assert service["credential"]["secret"] == "main/ANTHROPIC_API_KEY"
 
 
+def test_the_claude_service_is_built_in_as_a_sign_in(project):
+    """A Claude subscription, signed in from Claude Code's own /login: the proxy keeps the sign-in, no vault holds a secret.
+    Claude Code has no revoke URL: its logout forgets the tokens locally."""
+    resolved = project.resolved(spec(egress={"default": {"services": {"claude": {"credential": {"method": "oauth"}}}}}))
+    service = profile(resolved, "default")["services"]["claude"]
+    assert service["hosts"] == ["api.anthropic.com"] and "paths" not in service
+    assert service["credential"] == {"method": "oauth", "token_url": "https://platform.claude.com/v1/oauth/token"}
+
+
 def test_the_openai_service_is_built_in(project):
     """An OpenAI API key is a bearer token for api.openai.com: what Codex and OpenCode use with an API key."""
     resolved = project.resolved(spec(egress={"default": {"services": {"openai": "main/DEPLOY_TOKEN"}}}))
