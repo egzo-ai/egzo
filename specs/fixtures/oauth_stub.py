@@ -86,7 +86,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(101)
                 self.send_header("Upgrade", "websocket")
                 self.send_header("Connection", "Upgrade")
-                self.send_header("X-Seen-Authorization", self.headers.get("Authorization") or "")
                 self.end_headers()
                 self.close_connection = True
                 return
@@ -112,6 +111,7 @@ class Handler(BaseHTTPRequestHandler):
 
 server = ThreadingHTTPServer(("0.0.0.0", 443), Handler)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain(CERT, KEY)
 server.socket = context.wrap_socket(server.socket, server_side=True)
 open(LOG, "a").close()
