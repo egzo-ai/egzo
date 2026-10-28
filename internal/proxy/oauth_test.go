@@ -271,6 +271,29 @@ func TestACompressedAnswerIsReadAndOneThatCannotBeReadNeverReachesTheClient(t *t
 	}
 }
 
+func TestACompressedTokenRequestIsRefusedWith415AndTheCodingsAccepted(t *testing.T) {
+	sent := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { sent++ }))
+	defer backend.Close()
+	server := NewServer(mustCA(t), NewAudit(io.Discard))
+	server.Transport = rewriteTo(backend.URL)
+	server.signIns = openSignIns(t, t.TempDir(), &provider{answer: func(url.Values) (int, string) { return 500, "" }})
+	oauth := OAuth{TokenURL: "https://idp.example/oauth/token", RevokeURL: "https://idp.example/oauth/revoke"}
+	for _, serve := range []func(http.ResponseWriter, *http.Request, string, OAuth) int{server.serveToken, server.serveRevoke} {
+		// The proxy cannot see a stand-in in a body it cannot read, so it does not pass the body on either.
+		r := httptest.NewRequest("POST", oauth.TokenURL, strings.NewReader("\x1f\x8b compressed "+standIn("rt")))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Content-Encoding", "gzip")
+		w := httptest.NewRecorder()
+		if status := serve(w, r, "idp", oauth); status != http.StatusUnsupportedMediaType || w.Code != status || w.Header().Get("Accept-Encoding") != "identity" {
+			t.Errorf("status %d %d, Accept-Encoding %q: %s", status, w.Code, w.Header().Get("Accept-Encoding"), w.Body.String())
+		}
+	}
+	if sent != 0 {
+		t.Errorf("%d compressed request(s) went to the provider", sent)
+	}
+}
+
 // rewriteTo sends every request to base, whatever its URL says.
 func rewriteTo(base string) http.RoundTripper {
 	target, _ := url.Parse(base)

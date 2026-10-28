@@ -114,12 +114,8 @@ func (s *swapper) apply(r *http.Request) (swapped []string, status int, reason s
 	if scanBody {
 		// The rule depends on the request alone, never on whether it holds a placeholder: a body the proxy
 		// cannot read must not slip a placeholder through, and must not depend on its content.
-		for _, encoding := range r.Header.Values("Content-Encoding") {
-			for _, token := range strings.Split(encoding, ",") {
-				if token = strings.TrimSpace(token); token != "" && !strings.EqualFold(token, "identity") {
-					return nil, http.StatusUnsupportedMediaType, "request body is compressed (Content-Encoding) and cannot be scanned for placeholders"
-				}
-			}
+		if contentCoded(r) {
+			return nil, http.StatusUnsupportedMediaType, "request body is compressed (Content-Encoding) and cannot be scanned for placeholders"
 		}
 		const tooLarge = "request body over 1 MiB cannot be scanned for placeholders"
 		if r.ContentLength > maxScannedBody {
@@ -190,4 +186,23 @@ func (s *swapper) apply(r *http.Request) (swapped []string, status int, reason s
 		r.Header.Set("Content-Length", strconv.Itoa(len(data)))
 	}
 	return nil, 0, ""
+}
+
+// contentCoded reports whether a request body has a content coding other than identity: compressed, so the proxy
+// cannot read it. The proxy answers 415 with acceptIdentityOnly, as RFC 9110 says.
+func contentCoded(r *http.Request) bool {
+	for _, encoding := range r.Header.Values("Content-Encoding") {
+		for _, token := range strings.Split(encoding, ",") {
+			if token = strings.TrimSpace(token); token != "" && !strings.EqualFold(token, "identity") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// acceptIdentityOnly says, on the 415 that refuses a compressed request body, which content codings the proxy accepts:
+// none (RFC 9110, 15.5.16 and 12.5.3).
+func acceptIdentityOnly(w http.ResponseWriter) {
+	w.Header().Set("Accept-Encoding", "identity")
 }

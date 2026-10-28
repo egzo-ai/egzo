@@ -170,6 +170,9 @@ the proxy answers the token and revoke URLs, and passes the rest of that host wi
           revoke_url: https://auth.example.com/oauth/revoke     # optional
 ```
 
+The proxy reads what goes to the token and revoke URLs, so a compressed request body there is refused (`415`, with
+`Accept-Encoding: identity`); the provider's answers are decoded whatever the client asked for.
+
 Clients that pin certificates, or whose tokens are bound to a key the client holds (DPoP, mTLS), cannot be served this
 way.
 
@@ -199,7 +202,8 @@ place needs (form, JSON). Sent anywhere else, the placeholder stays a meaningles
 rotate the secret.
 
 The proxy has to read a request to find the placeholder, so a request to a placeholder host whose body is compressed
-or larger than 1 MiB is refused with a message saying so (`413` or `415`), always, not sometimes. Use `inject` for a
+or larger than 1 MiB is refused with a message saying so (`413` or `415`, the `415` with `Accept-Encoding: identity`, as
+RFC 9110 has it), always, not sometimes. Use `inject` for a
 host that takes uploads, or send the upload to a host that has no placeholder.
 
 Some clients cannot be served this way: see [known issues](../known-issues/secret-injection-limits.md). HTTP Basic

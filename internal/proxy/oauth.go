@@ -405,7 +405,13 @@ type tokenBody struct {
 	values map[string]string
 }
 
+// errCoded is a token request whose body is compressed: the proxy has to read it, so it is refused with 415.
+var errCoded = errors.New("a compressed body (Content-Encoding) cannot be read: send it uncompressed")
+
 func readTokenBody(r *http.Request) (*tokenBody, error) {
+	if contentCoded(r) {
+		return nil, errCoded
+	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxTokenBody+1))
 	if err != nil {
 		return nil, err
@@ -449,6 +455,11 @@ func oauthError(w http.ResponseWriter, status int, code, description string) {
 // agent never gets a real token through the proxy. A stand-in is never sent to the provider.
 func (s *Server) serveToken(w http.ResponseWriter, r *http.Request, service string, oauth OAuth) (status int) {
 	body, err := readTokenBody(r)
+	if errors.Is(err, errCoded) {
+		acceptIdentityOnly(w)
+		oauthError(w, http.StatusUnsupportedMediaType, "invalid_request", "egzo: "+err.Error())
+		return http.StatusUnsupportedMediaType
+	}
 	if err != nil {
 		oauthError(w, http.StatusBadRequest, "invalid_request", "egzo: the body cannot be read: "+err.Error())
 		return http.StatusBadRequest
@@ -507,6 +518,11 @@ func (s *Server) serveToken(w http.ResponseWriter, r *http.Request, service stri
 // serveRevoke answers a request to the revoke URL: a stand-in revokes the real token and signs the project out.
 func (s *Server) serveRevoke(w http.ResponseWriter, r *http.Request, service string, oauth OAuth) int {
 	body, err := readTokenBody(r)
+	if errors.Is(err, errCoded) {
+		acceptIdentityOnly(w)
+		oauthError(w, http.StatusUnsupportedMediaType, "invalid_request", "egzo: "+err.Error())
+		return http.StatusUnsupportedMediaType
+	}
 	if err != nil {
 		oauthError(w, http.StatusBadRequest, "invalid_request", "egzo: the body cannot be read: "+err.Error())
 		return http.StatusBadRequest

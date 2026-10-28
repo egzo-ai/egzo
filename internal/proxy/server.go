@@ -641,6 +641,9 @@ func (s *Server) interceptHandler(c *conn, decision Decision, swap *swapper, qui
 				event := record.event(OutcomeDeny)
 				event.Reason = because(CodePlaceholder, reason)
 				c.log(event)
+				if status == http.StatusUnsupportedMediaType {
+					acceptIdentityOnly(w)
+				}
 				http.Error(w, "egzo: "+reason, status)
 				return
 			}
