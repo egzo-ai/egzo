@@ -3,7 +3,9 @@
 **Status.** The mechanism is built: `credential: { method: oauth }`, the built-in `chatgpt` service, `egzo proxy logout`
 ([docs/sandboxing.md](../docs/sandboxing.md#oauth-services), specs in `specs/proxy/test_proxy_oauth.py`). Not built yet:
 the Codex harness (below), the hub's status feed for a sign-in that ended, and a real session to confirm it end to end.
-Decided since: the configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind
+Claude Code's subscription sign-in works through the same mechanism, tried end to end with a custom service
+([below](#claude-codes-sign-in)); a built-in service and harness support for it are not built. Decided since: the
+configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind
 `proxy.upstream`; sign-ins live in the proxy's private volume and end at `project down`, like the CA.
 
 ## The problem
@@ -133,11 +135,64 @@ Read from the source, not run against a real account.
 - A refresh the proxy cannot serve (a dead chain) is answered with OAuth's `invalid_grant`, which Codex treats as permanent and
   asks for a new sign-in; that sign-in is captured.
 
+## Claude Code's sign-in
+
+Tried on 2026-10-28 with Claude Code 2.1.310 and a Claude Pro account, through a custom service under the `custom`
+harness, and read from the code Claude Code ships (the strings of its binary):
+
+```yaml
+claude:
+  hosts: [api.anthropic.com]
+  credential: { method: oauth, token_url: https://platform.claude.com/v1/oauth/token }
+```
+
+`/login` in the agent, the model calls, a refresh, a new proxy container and an agent restart all worked; the agent held only
+stand-ins. It is a second user of the mechanism, next to `claude setup-token`, which stays the simpler way to a subscription.
+
+- **Sign-in.** `/login`, then *Claude account with subscription*. The authorize URL (`claude.com/cai/oauth/authorize`, with
+  PKCE) redirects to `platform.claude.com/oauth/code/callback`, which shows a code the user pastes into the terminal: no
+  callback port, so it works in a container.
+- **Tokens.** The exchange goes to `https://platform.claude.com/v1/oauth/token` as JSON (public client id
+  `9d1c250a-e61b-44d9-88ed-5944d1962f5e`). The answer has an opaque access token (`sk-ant-oat01-…`, 8 hours), a refresh token
+  (`sk-ant-ort01-…`), `scope`, the account and the organization. Claude Code keeps them in `~/.claude/.credentials.json`.
+- **Refresh.** JSON, with the scope. Claude Code keeps a refreshed token only if the answer's `scope` has `user:inference`;
+  otherwise it drops it without a word and goes on with the old one until it expires. A refresh token works once
+  (Claude Code's own message for `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` says it "cannot be used again").
+- **Where the token goes:** `api.anthropic.com`, as `Authorization: Bearer`: `/v1/messages`, `/v1/mcp_servers`,
+  `/api/oauth/profile`, `/api/oauth/claude_cli/roles`. The test set no `paths`; a limit would be `/v1/` and `/api/oauth/`.
+- **Compression.** Claude Code asks for compressed answers and Anthropic's servers compress them.
+- **Prefix checks.** Claude Code checks `startsWith("sk-ant-oat")` on a static key and on `CLAUDE_CODE_OAUTH_TOKEN`, not on a
+  `/login` sign-in, so `egzo-…` stand-ins work there.
+
+### Proxy changes this needed
+
+- Answers from the token and revoke URLs are decoded: the client's `Accept-Encoding` is not forwarded, and an answer the proxy
+  cannot read is refused, never passed on. A compressed request body there is refused (`415`, `Accept-Encoding: identity`).
+- Every answer the proxy gives repeats what the provider's last answer said besides the tokens (`scope`, the account), kept
+  with the sign-in; a renewal that leaves the scope out keeps the old one.
+- The proxy renews in the client's encoding (JSON here).
+
+### Not seen yet
+
+- **The proxy's own renewal** against Anthropic: it runs five minutes before the real access token expires, eight hours
+  after a sign-in.
+- **A refused refresh.** Anthropic's errors read `{"error": {"type", "message"}}`. The proxy ends a sign-in only on OAuth's
+  `invalid_grant`; if a refusal is shaped like the other errors, the proxy keeps retrying instead of asking for a sign-in.
+- **Logout.** Whether `/logout` revokes the token, and at which URL (the test service had no `revoke_url`).
+
+### For a built-in
+
+- A `claude` service: `api.anthropic.com` and the token URL, as above.
+- The `claude-code` harness sets an `ANTHROPIC_API_KEY` placeholder in every agent, which would win over the sign-in: an agent
+  whose profile has the `oauth` service gets none.
+- **Agents after the first.** `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` with `CLAUDE_CODE_OAUTH_SCOPES` makes Claude Code sign in from
+  a refresh token. Given the stand-in refresh token, its first refresh is answered by the proxy: no file to write, unlike
+  Codex's `auth.json`. Not tried.
+
 ## Open questions
 
-- **A real session** to confirm the above end to end.
+- **A real Codex session** to confirm the above end to end.
 - **Clients this cannot serve:** a client that pins its certificate, or tokens bound to a key the client holds (DPoP, mTLS).
-- **Claude's regular sign-in** (not `setup-token`) likely has the same shape and would be the second user. Not checked.
 - **Terms of use**, to be read before it ships.
 
 ## Specs
