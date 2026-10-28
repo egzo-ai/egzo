@@ -115,13 +115,6 @@ func (s *signIns) load() error {
 	return nil
 }
 
-// forget drops every sign-in: the store moved to another key, and what was sealed with the old one cannot be opened.
-func (s *signIns) forget() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.byName = map[string]*signIn{}
-}
-
 // save seals a sign-in; it runs under s.mu, before the change it records is used.
 func (s *signIns) save(record *signIn) error {
 	data, err := json.Marshal(record)
@@ -373,14 +366,6 @@ func (s *signIns) logout(ctx context.Context, service string, oauth OAuth, send 
 		return false
 	}
 	return s.revoke(ctx, service, oauth, record.StandInRefresh, send)
-}
-
-// knows reports whether a token is a stand-in of any sign-in (live or ended) of service.
-func (s *signIns) knows(service, token string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record := s.byName[service]
-	return record != nil && (record.StandInRefresh == token || record.StandInID == token || slices.Contains(record.StandInAccess, token))
 }
 
 // --- the token endpoint -------------------------------------------------------------------------------------------
