@@ -217,8 +217,8 @@ egress:
 egress:
   default:
     services:
-      one: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY, paths: [/api/] }
-      two: { hosts: [api.example.com], inject: { header: A }, secret: main/KEY }
+      one: { hosts: [api.example.com], inject: { header: A }, credential: main/KEY, paths: [/api/] }
+      two: { hosts: [api.example.com], inject: { header: A }, credential: main/KEY }
 `, `services "one" and "two" put the same credential on host "api.example.com" with different paths`)
 	// Nor are different hosts.
 	mustResolve(t, t.TempDir(), vaultFixture+`
