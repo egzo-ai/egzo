@@ -248,6 +248,8 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			e.Hold()
 		case "release":
 			e.Release()
+		case "fail-next": // the next spawn, start, stop or removal fails, saying c.State
+			e.FailNext(c.State)
 		case "calls":
 			json.NewEncoder(rw).Encode(e.Calls())
 			return

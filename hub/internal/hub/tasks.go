@@ -14,6 +14,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/engines"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
+	corenames "github.com/egzo-ai/egzo/internal/names"
 )
 
 // Every action of the hub on an engine (a spawn, a start, a stop, a removal) can take from a second to a minute, longer than a
@@ -44,6 +45,8 @@ var (
 	// ErrNameRequired is returned for a spawn without a name: the hub names the agent before it exists, so that it is one agent from
 	// the start.
 	ErrNameRequired = errors.New("an agent needs a name")
+	// ErrBadName is returned for a spawn of a name an agent cannot have.
+	ErrBadName = errors.New("a name is " + corenames.IdentifierRule)
 	// ErrTaskRunning is returned for a task that cannot be dismissed because it has not ended.
 	ErrTaskRunning = errors.New("the task has not ended")
 )
@@ -108,6 +111,9 @@ func (h *Hub) RecoverTasks(ctx context.Context) error {
 func (h *Hub) StartSpawn(ctx context.Context, user store.User, engine, project, template, name string) (Task, error) {
 	if name == "" {
 		return Task{}, ErrNameRequired
+	}
+	if !corenames.Instance(name) {
+		return Task{}, ErrBadName
 	}
 	if _, err := h.access(ctx, user, engine, project); err != nil {
 		return Task{}, err

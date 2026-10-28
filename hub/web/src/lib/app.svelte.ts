@@ -20,13 +20,33 @@ export const app = $state({
   palette: false,
 });
 
-export const toasts = $state<{ id: number; text: string; tone: "ok" | "error" }[]>([]);
+/** A toast: "busy" while something it follows runs (it stays), "ok" goes away by itself, "error" stays until it is closed. */
+export interface Toast {
+  id: number;
+  text: string;
+  tone: "ok" | "error" | "busy";
+  /** Where the toast leads: the agent a task was for. */
+  link?: string;
+}
+
+export const toasts = $state<Toast[]>([]);
 let toastId = 0;
 
-export function toast(text: string, tone: "ok" | "error" = "ok"): void {
+export function toast(text: string, tone: Toast["tone"] = "ok", link?: string): number {
   const id = ++toastId;
-  toasts.push({ id, text, tone });
+  toasts.push({ id, text, tone, link });
   if (tone === "ok") setTimeout(() => dismissToast(id), 5000);
+  return id;
+}
+
+/** Changes what a toast says, as a task it follows goes on; one that is gone is shown again. */
+export function updateToast(id: number, text: string, tone: Toast["tone"], link?: string): number {
+  const t = toasts.find((x) => x.id === id);
+  if (!t) return toast(text, tone, link);
+  const settles = t.tone !== "ok" && tone === "ok";
+  Object.assign(t, { text, tone, link });
+  if (settles) setTimeout(() => dismissToast(id), 5000);
+  return id;
 }
 
 export function dismissToast(id: number): void {

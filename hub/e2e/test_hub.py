@@ -10,12 +10,21 @@ def projects_table(page):
 
 
 def spawn(page, name, template=None):
+    """Spawns from the project page: the dialog closes at once and the agent's page shows it being made."""
     page.get_by_role("button", name="Spawn agent").click()
     dialog = page.get_by_role("dialog")
     if template:
         dialog.get_by_label("Template").select_option(template)
     dialog.get_by_label("Name").fill(name)
     dialog.get_by_role("button", name="Spawn", exact=True).click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    expect(page.get_by_role("heading", name=name)).to_be_visible()
+
+
+def close_terminal(page, agent):
+    """Closes the terminal that opened on a new agent once it was ready, back to its page."""
+    expect(terminal_state(page, agent)).to_have_text("connected")
+    page.locator(f".tpane[aria-label='Terminal of {agent}']").get_by_role("button", name="Close terminal").click()
 
 
 def terminal_text(page, agent="coder-1"):
@@ -123,10 +132,10 @@ def test_spawn_stop_start_and_remove_an_agent(single_hub, page):
     sign_in(page, single_hub, "admin")
     projects_table(page).get_by_role("link", name="web").click()
     spawn(page, "fix-bug", "reviewer")
-    expect(page.get_by_role("status").filter(has_text="Spawned fix-bug")).to_be_visible()
-    page.locator("tr[data-agent=fix-bug]").get_by_role("link", name="fix-bug").click()
-    expect(page.get_by_role("heading", name="fix-bug")).to_be_visible()
+    # once made, its terminal opens: the user asked for an agent to work with
+    close_terminal(page, "fix-bug")
     expect(page.get_by_test_id("activity")).to_have_text("idle")
+    expect(page.get_by_test_id("task")).to_have_count(0)
 
     page.get_by_role("button", name="Stop", exact=True).click()
     expect(page.get_by_test_id("activity")).to_have_text("stopped")
@@ -139,41 +148,79 @@ def test_spawn_stop_start_and_remove_an_agent(single_hub, page):
     expect(page.get_by_role("heading", name="fix-bug")).to_be_visible()  # still here: the confirmation was refused
     page.get_by_role("button", name="Remove", exact=True).click()
     page.get_by_role("dialog").get_by_role("button", name="Remove", exact=True).click()
-    expect(page.get_by_role("status").last).to_contain_text("Removed fix-bug")
+    # the project's list, where the agent is until it is gone; that was seen, so no toast says it
     expect(page.locator("tr[data-agent=fix-bug]")).to_have_count(0)
     expect(page.locator("tr[data-agent=coder-1]")).to_be_visible()
+    expect(page.get_by_role("status").filter(has_text="Removed fix-bug")).to_have_count(0)
     assert single_hub.calls()[:1] and single_hub.calls()[0].startswith("spawn web/fix-bug user:")
 
 
-def test_a_spawn_that_takes_long_is_listed_while_it_runs_and_a_toast_says_how_it_ended(single_hub, page):
+def test_the_spawn_dialog_suggests_a_name_that_is_not_a_number(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + "/e/local/p/web")
+    page.get_by_role("button", name="Spawn agent").click()
+    name = page.get_by_role("dialog").get_by_label("Name")
+    expect(name).to_have_value(re.compile(r"^coder-[a-z]+[0-9]{4}$"))
+    first = name.input_value()
+    page.get_by_role("dialog").get_by_label("Template").select_option("reviewer")
+    expect(name).to_have_value(re.compile(r"^reviewer-[a-z]+[0-9]{4}$"))  # a suggestion follows the template
+    page.get_by_role("dialog").get_by_role("button", name="Another suggestion").click()
+    expect(name).not_to_have_value(first)
+    name.fill("mine")
+    page.get_by_role("dialog").get_by_label("Template").select_option("coder")
+    expect(name).to_have_value("mine")  # a name the user typed stays
+    name.fill("coder-1")
+    page.get_by_role("dialog").get_by_role("button", name="Spawn", exact=True).click()
+    expect(page.get_by_role("dialog").get_by_role("alert")).to_contain_text("There is already an agent named coder-1")
+
+
+def test_a_slow_spawn_is_one_agent_from_the_start_and_its_page_shows_the_steps(single_hub, page):
     sign_in(page, single_hub, "admin")
     projects_table(page).get_by_role("link", name="web").click()
-    single_hub.world("hold-spawns", engine="local")
+    single_hub.world("hold", engine="local")
     spawn(page, "slow-one")
-    # the dialog closes at once, and the project lists the spawn: who asked, and that it runs
-    expect(page.get_by_role("dialog")).to_have_count(0)
-    expect(page.get_by_role("status").filter(has_text="Spawning slow-one")).to_be_visible()
-    row = page.locator("tr[data-spawn]").filter(has_text="slow-one")
-    expect(row.get_by_test_id("spawn-state")).to_have_text("spawning")
+    expect(page.get_by_test_id("task")).to_have_text("spawning")
+    expect(page.get_by_test_id("task-step")).to_have_text("create network web-slow-one")
+    # the project lists it once, as the agent it will be, with who asked
+    page.get_by_role("navigation", name="Breadcrumb").get_by_role("link", name="web").click()
+    row = page.locator("tr[data-agent=slow-one]")
+    expect(row.get_by_test_id("task")).to_have_text("spawning")
     expect(row).to_contain_text("admin")
-    expect(page.locator("tr[data-agent=slow-one]")).to_have_count(0)
+    expect(row).to_have_attribute("aria-busy", "true")
 
-    single_hub.world("release-spawns", engine="local")
-    expect(page.get_by_role("status").filter(has_text="Spawned slow-one")).to_be_visible()
-    expect(page.locator("tr[data-agent=slow-one]")).to_be_visible()
-    expect(page.locator("tr[data-spawn]")).to_have_count(0)
+    single_hub.world("release", engine="local")
+    expect(row.get_by_test_id("task")).to_have_count(0)
+    expect(row).to_contain_text("idle")
+    expect(page.locator("tr[data-agent=slow-one]")).to_have_count(1)
 
-    # a spawn that fails stays listed with why, and the toast says so
-    spawn(page, "coder-1")  # taken: the project has an agent of that name
-    expect(page.get_by_role("alert").filter(has_text="Could not spawn coder-1")).to_be_visible()
-    failed = page.locator("tr[data-spawn]").filter(has_text="coder-1")
-    expect(failed.get_by_test_id("spawn-state")).to_have_text("failed")
-    expect(failed).to_contain_text("already exists")
 
-    # once read, it is dismissed with its trash icon, and the list is the agents again
-    failed.get_by_role("button", name="Dismiss the failed spawn of coder-1").click()
-    expect(page.locator("tr[data-spawn]")).to_have_count(0)
-    expect(page.locator("tr[data-agent=coder-1]")).to_be_visible()
+def test_a_task_away_from_its_agent_has_a_toast_and_a_failure_stays_on_the_agent(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + "/e/local/p/web")
+    single_hub.world("hold", engine="local")
+    page.locator("tr[data-agent=coder-1]").get_by_role("button", name="Stop coder-1").click()
+    row = page.locator("tr[data-agent=coder-1]")
+    expect(row.get_by_test_id("task")).to_have_text("stopping")
+    expect(row.get_by_role("button", name="Remove coder-1")).to_be_disabled()  # one task at a time
+    # away from the agent, a toast says what runs, then how it ended
+    page.get_by_role("link", name="Projects").first.click()
+    expect(page.get_by_role("status").filter(has_text="Stopping coder-1")).to_be_visible()
+    single_hub.world("release", engine="local")
+    expect(page.get_by_role("status").filter(has_text="Stopped coder-1")).to_be_visible()
+
+    # a failure is on the agent, with why, until somebody who may dismisses it; the activity keeps it
+    page.goto(single_hub.url + "/e/local/p/web")
+    single_hub.world("fail-next", engine="local", state="no room on the engine")
+    page.locator("tr[data-agent=coder-1]").get_by_role("button", name="Start coder-1").click()
+    expect(row.get_by_test_id("task")).to_have_text("start failed")
+    expect(row.get_by_test_id("task-error")).to_have_text("no room on the engine")
+    expect(page.get_by_role("alert").filter(has_text="Could not start coder-1: no room on the engine")).to_be_visible()
+    row.get_by_role("button", name="Dismiss the failure on coder-1").click()
+    expect(row.get_by_test_id("task")).to_have_count(0)
+    page.get_by_role("tab", name="Activity").click()
+    activity = page.get_by_test_id("activity")
+    expect(activity.locator("tr").nth(1)).to_contain_text("start failed")
+    expect(activity.locator("tr").nth(2)).to_contain_text("done")
 
 
 def test_the_page_follows_the_agent_without_reloading(single_hub, page):
@@ -299,6 +346,7 @@ def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person
     expect(alice.get_by_role("button", name="Remove coder-1")).to_have_count(0)
     # but a user's own agent is theirs
     spawn(alice, "alices")
+    alice.goto(hub.url + "/e/local/p/web")
     mine = alice.locator("tr[data-agent=alices]")
     expect(mine.get_by_role("button", name="Stop alices")).to_be_visible()
     expect(mine.get_by_role("button", name="Remove alices")).to_be_visible()
@@ -421,7 +469,7 @@ def test_the_audit_log_shows_who_did_what_and_what_was_refused(hub, page, new_pe
     hub.world("grant", engine="local", project="web", user="alice", role="user")
     alice.goto(hub.url + "/e/local/p/web")
     spawn(alice, "alices")
-    expect(alice.get_by_role("status").filter(has_text="Spawned alices")).to_be_visible()
+    expect(alice.get_by_test_id("activity")).to_have_text("idle")  # made
     alice.request.post(hub.url + "/api/v1/e/local/p/web/a/coder-1/rm", data={}, headers={"Origin": hub.url})  # refused: not alice's
     page.goto(hub.url + "/e/local/p/web/audit")
     audit = page.get_by_test_id("audit")

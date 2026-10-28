@@ -5,9 +5,13 @@ lets people spawn, start, stop, remove and attach to agents (the agent's real TU
 who may do what. It is optional and separate from the CLI: a container of its own (`ghcr.io/egzo-ai/egzo-hub`), which reads
 the engines like `egzo` does, so a project made with the CLI shows up in it and an agent spawned in it shows up in `egzo ps`.
 
-A spawn runs in the background and is listed in the project's agents until it has ended. One that failed stays there with why
-(a name or a git branch that already exists, for instance) until whoever may operate its agent dismisses it with its trash icon,
-or the hub restarts.
+What the hub does on an engine (a spawn, a start, a stop, a removal) can take from a second to a minute, so it is a task: the hub
+answers at once and runs it in the background, and the agent shows it while it runs (`spawning`, `stopping`, with the step it is
+at), next to what the engine says, for everyone who sees the project. One task at a time runs on an agent. A spawn needs a name,
+and the dialog suggests one such as `coder-sunnycar2332`; the agent is in the list from then on, and its page shows the steps and
+opens its terminal when it is ready. A task that failed stays on its agent with why (a git branch left by an earlier agent of that
+name, for instance) until whoever may operate the agent dismisses it, and the project's **Activity** tab lists every task, who
+asked and how it went. Whoever asked gets a toast when the agent is not on their screen, or when the task failed.
 
 ![Two agents' terminals side by side in the hub: one waiting on a question, one answering](../assets/hub-terminals.png)
 

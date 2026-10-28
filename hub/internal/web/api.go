@@ -64,6 +64,8 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusConflict, "conflict", "The task is still running: it ends on its own.")
 	case errors.Is(err, hub.ErrNameRequired):
 		s.apiFail(w, http.StatusBadRequest, "bad_request", "Give the agent a name.")
+	case errors.Is(err, hub.ErrBadName):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "That name is not valid: "+err.Error()+".")
 	case errors.As(err, new(hub.ExistsError)):
 		s.apiFail(w, http.StatusConflict, "conflict", "There is already an agent named "+errorAs[hub.ExistsError](err).Agent+". Pick another name.")
 	case errors.As(err, new(hub.BusyError)):

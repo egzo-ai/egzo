@@ -39,6 +39,7 @@ type Engine struct {
 	watchTries  int
 	publishedBy map[string]engines.Published
 	gate        chan struct{} // while not nil, a spawn, start, stop or removal waits for it to close: Hold, Release
+	failNext    error         // the next spawn, start, stop or removal fails with it: FailNext
 	publishedN  int
 	projectN    int
 
@@ -212,20 +213,30 @@ func (e *Engine) Release() {
 	}
 }
 
-// wait waits while the engine is held.
+// FailNext makes the next spawn, start, stop or removal fail with why, once it is no longer held.
+func (e *Engine) FailNext(why string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.failNext = errors.New(why)
+}
+
+// wait waits while the engine is held, then fails as FailNext said.
 func (e *Engine) wait(ctx context.Context) error {
 	e.mu.Lock()
 	gate := e.gate
 	e.mu.Unlock()
-	if gate == nil {
-		return nil
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	select {
-	case <-gate:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	err := e.failNext
+	e.failNext = nil
+	return err
 }
 
 // Spawn says it creates the network, waits while the engine is held, then makes the agent.

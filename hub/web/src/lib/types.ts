@@ -59,6 +59,8 @@ export interface AgentBrief {
   activity: string;
   status: string;
   waiting: boolean;
+  /** The verb of the task the hub runs on it. */
+  task?: TaskVerb;
 }
 
 /** How far the agents' activity can be trusted: the status the control sidecar logs, followed by the hub. */
@@ -98,6 +100,29 @@ export interface Agent {
   holder: string;
   /** Hosts the proxy refused the agent in the last hour, and that it has not reached since. */
   denied: number;
+  /** What the hub does on it, or the failure of what it did that nobody dismissed. With no `state`, the engine does not have the
+   * agent: a spawn that runs or failed, or a removal that is ending. */
+  task?: Task;
+}
+
+export type TaskVerb = "spawn" | "start" | "stop" | "rm";
+
+/** One action of the hub on an engine. `interrupted`: the hub stopped while it ran. */
+export interface Task {
+  id: string;
+  verb: TaskVerb;
+  agent: string;
+  template?: string;
+  /** Who asked. */
+  creator: string;
+  state: "running" | "done" | "failed" | "interrupted";
+  /** What it does now, or did last. */
+  step?: string;
+  error?: string;
+  startedAt: string;
+  endedAt?: string;
+  /** The user may take an ended one off its agent. */
+  canDismiss: boolean;
 }
 
 export interface Service {
@@ -117,27 +142,9 @@ export interface Project {
   templates: string[];
   services: Service[];
   agents: Agent[] | null;
-  /** Spawns started from the hub that are running, or ended a short while ago. */
-  spawns: Spawn[];
   canSpawn: boolean;
   canManage: boolean;
   canAudit: boolean;
-}
-
-/** A spawn the hub runs in the background: `agent` once it is ready, `error` when it failed. */
-export interface Spawn {
-  id: string;
-  template: string;
-  /** As asked: empty when the engine chooses. */
-  name: string;
-  creator: string;
-  state: "spawning" | "ready" | "failed";
-  agent?: string;
-  error?: string;
-  startedAt: string;
-  endedAt?: string;
-  /** The user may take it off the list: it has ended, and they may operate its agent. */
-  canDismiss: boolean;
 }
 
 export interface AgentAnswer {

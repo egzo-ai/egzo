@@ -1,6 +1,6 @@
 # Roadmap: hub tasks, feedback for actions that take time
 
-**Status.** Not built. From [#54](https://github.com/egzo-ai/egzo/issues/54).
+**Status.** Built, as below; "Not now" is open. From [#54](https://github.com/egzo-ai/egzo/issues/54).
 
 Every action of the hub that calls an engine can take from a second to a minute: spawn, start, stop, remove, and later project
 up / down and saving an engine. Today:
@@ -25,11 +25,11 @@ up / down and saving an engine. Today:
 ## Tasks
 
 - Every action that calls an engine **answers 202 with a task**: id, actor, verb, engine, project, agent, state (running, done,
-  failed, interrupted), the current step, the error, started, ended. It grows out of `spawning` in `internal/hub/spawn.go`,
-  which already runs in the background, queues per project and dismisses failures.
+  failed, interrupted), the current step, the error, started, ended (`hub/internal/hub/tasks.go`, which replaced the spawns of
+  `spawn.go`). Spawns and removals of a project run one at a time, in order: both take the engine's project lock.
 - **Tasks are kept in the hub's database.** A task that ran when the hub stopped is marked `interrupted` at start-up. A failed
-  one stays until it is dismissed, as a failed spawn does now. Each task points at its audit entry: the audit log stays the record
-  of who was allowed to do what, the task is what happened.
+  one stays until it is dismissed; a new task on the agent takes it off by itself. The audit log stays the record of who was
+  allowed to do what, the task is what happened.
 - **One task per agent at a time.** A second one is refused with 409, naming the running task and who started it.
 - **Steps.** `stack.Spawn` and `stack.RemoveInstances` already write what they do ("create container ...", "remove volume
   ..."); the Docker engine sends it to `io.Discard`. The `Engine` methods take a progress callback and the latest line is the
@@ -37,16 +37,16 @@ up / down and saving an engine. Today:
 
 ## The task is part of the agent's status
 
-`Hub.overlay` (`internal/hub/feeds.go`) already rewrites each agent's activity: `stopped`, `starting`, `unknown`. A running
-task is one more case: the activity is `creating`, `starting`, `stopping` or `removing`, and the status line is the step and
-who asked. The project table, the agent page, the terminal tab in the sidebar and the counts on Home all show it with no code
-of their own. A failed task shows on its agent, with the error, until it is dismissed.
+Every agent of the project view carries its task (`task` in the API): the one that runs, or the failure nobody dismissed. The
+agent's own activity stays what the status feed says; the task is shown next to it, as a pill (`spawning`, `starting`, `stopping`,
+`removing`, or `stop failed`) with its step and who asked. The project table, the agent page and the terminal tab in the sidebar
+show it, and their buttons wait while it runs.
 
 ## A spawn is one row from the start
 
 - **The spawn modal requires a name**, filled in with a suggestion the user can change. The task is keyed by the name from the
   first second.
-- **A spawn task whose container does not exist yet adds an agent** with its name, its template and `creating`. When the scan
+- **A spawn task whose container does not exist yet adds an agent** with its name, its template, no state and the task. When the scan
   finds the container, the real agent takes its place under the same name and the task stays on it until it ends. The separate
   list of spawns (`spawnsOf`, the `pending` rows in `Project.svelte`) goes away.
 - **Suggested names are not numbered.** Removed agents keep their branch, so a name such as `coder-3` is often refused (see
@@ -54,7 +54,8 @@ of their own. A failed task shows on its agent, with the error, until it is dism
   way Docker names containers: `<template>-<adjective><noun><digits>`, such as `coder-sunnycar2332`, from short word lists
   checked for unfortunate pairs, avoiding the names in use. A clash with an old branch is then rare, and fails like any other
   spawn error. The CLI keeps its numbered names.
-- **After the modal, the agent's page.** It shows the steps as they happen and attaches the terminal when the agent runs.
+- **After the modal, the agent's page.** It shows the steps as they happen and opens the terminal when the agent is made, if the
+  user is still on that page.
 
 ## Activity
 
@@ -63,6 +64,7 @@ of their own. A failed task shows on its agent, with the error, until it is dism
 - **The agent page** lists that agent's tasks.
 - **Toasts** only for whoever started the task, and only when the agent is not on the screen or the task failed. A task's toast
   is one toast, updated from the step to the result, with a link to the agent.
+- **Not on Home.** The project list does not mark a project where something runs; the agents' own pages and the sidebar do.
 
 ## Not now
 
