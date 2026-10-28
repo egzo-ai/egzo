@@ -4,8 +4,8 @@
 ([docs/sandboxing.md](../docs/sandboxing.md#oauth-services), `specs/proxy/test_proxy_oauth.py`), and the `codex` harness
 ([docs/harnesses.md](../docs/harnesses.md#codex), `specs/harness/test_harness_codex.py`). Not built yet: the hub's status
 feed for a sign-in that ended, the online spec with a real account, and a real session to confirm it end to end (see Open
-questions). Claude Code's subscription sign-in works through the same mechanism, tried end to end with a custom service
-([below](#claude-codes-sign-in)); a built-in service and harness support for it are not built. Decided since: the
+questions). Claude Code signs in with a Claude subscription through the built-in `claude` service, the default for Claude
+Code ([below](#claude-codes-sign-in), [docs/harnesses.md](../docs/harnesses.md#claude-code)). Decided since: the
 configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind `proxy.upstream`;
 sign-ins live in the proxy's private volume and end at `project down`, like the CA; Codex gets its settings as `-c`
 overrides and runs egzo's hooks with `--dangerously-bypass-hook-trust`.
@@ -182,14 +182,19 @@ stand-ins. It is a second user of the mechanism, next to `claude setup-token`, w
   `invalid_grant`; if a refusal is shaped like the other errors, the proxy keeps retrying instead of asking for a sign-in.
 - **Logout.** Whether `/logout` revokes the token, and at which URL (the test service had no `revoke_url`).
 
-### For a built-in
+### Built
 
-- A `claude` service: `api.anthropic.com` and the token URL, as above.
-- The `claude-code` harness sets an `ANTHROPIC_API_KEY` placeholder in every agent, which would win over the sign-in: an agent
-  whose profile has the `oauth` service gets none.
-- **Agents after the first.** `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` with `CLAUDE_CODE_OAUTH_SCOPES` makes Claude Code sign in from
-  a refresh token. Given the stand-in refresh token, its first refresh is answered by the proxy: no file to write, unlike
-  Codex's `auth.json`. Not tried.
+- The built-in `claude` service: `api.anthropic.com` and the token URL above, no `revoke_url`.
+- The `claude-code` harness sets no `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` placeholder with it: either would win
+  over the sign-in.
+- **Agents after the first.** Spawn gives a new agent the sign-in's stand-in refresh token and scope
+  (`CLAUDE_CODE_OAUTH_REFRESH_TOKEN`, `CLAUDE_CODE_OAUTH_SCOPES`), and `egzo agent run` runs `claude auth login` with them
+  when Claude Code has no sign-in, before the TUI: only that command reads them. The proxy answers its refresh with the
+  current stand-ins, so one stand-in serves every agent.
+- `egzo project init --harness claude-code` scaffolds it. `anthropic-oauth` (`claude setup-token`) stays, for agents that
+  start with nobody there to sign in, and `anthropic` for an API key.
+- Specs: `specs/harness/test_harness_claude_sign_in.py`, with the stub answering as `platform.claude.com` and
+  `api.anthropic.com`.
 
 ## Open questions
 

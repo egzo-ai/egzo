@@ -303,6 +303,43 @@ func TestEveryIntegrationNamesWhatItsPromptLooksLike(t *testing.T) {
 	}
 }
 
+func TestAClaudeSignInGetsNoCredentialPlaceholderWhichWouldWinOverIt(t *testing.T) {
+	env := claudeCode{}.ContainerEnv(true, Providers{AnthropicSignIn: true, AnthropicBearer: true})
+	for _, key := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", EnvClaudeRefreshToken} {
+		if _, present := env[key]; present {
+			t.Errorf("%s is set: %v", key, env)
+		}
+	}
+	if env["IS_SANDBOX"] != "1" {
+		t.Error("bypass mode still needs IS_SANDBOX")
+	}
+}
+
+func TestANewClaudeCodeAgentSignsInWithTheProjectsSignInOnlyWhenItHasNone(t *testing.T) {
+	if env := (claudeCode{}).SignInEnv(SignIn{Access: "egzo-a", Refresh: "egzo-r"}); env != nil {
+		t.Errorf("without a scope, which Claude Code requires: %v", env)
+	}
+	env := claudeCode{}.SignInEnv(SignIn{Access: "egzo-a", Refresh: "egzo-r", Scope: "user:inference user:profile"})
+	if env[EnvClaudeRefreshToken] != "egzo-r" || env[EnvClaudeScopes] != "user:inference user:profile" {
+		t.Fatalf("SignInEnv = %v", env)
+	}
+
+	o := options(t)
+	if plan, _ := (claudeCode{}).Plan(o, nil); len(plan.Setup) != 0 {
+		t.Errorf("without a sign-in to use: %v", plan.Setup)
+	}
+	o.Getenv = func(key string) string { return env[key] }
+	plan, _ := claudeCode{}.Plan(o, nil)
+	if len(plan.Setup) != 1 || strings.Join(plan.Setup[0], " ") != "claude auth login" {
+		t.Errorf("setup = %v", plan.Setup)
+	}
+	os.MkdirAll(filepath.Join(o.Home, ".claude"), 0o700)
+	os.WriteFile(filepath.Join(o.Home, ".claude", ".credentials.json"), []byte(`{"claudeAiOauth":{"refreshToken":"egzo-r"}}`), 0o600)
+	if plan, _ := (claudeCode{}).Plan(o, nil); len(plan.Setup) != 0 {
+		t.Errorf("signed in already, it signs in again (the user's own sign-in would be replaced): %v", plan.Setup)
+	}
+}
+
 func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) {
 	env := claudeCode{}.ContainerEnv(true, Providers{AnthropicBearer: true})
 	if !strings.HasPrefix(env["CLAUDE_CODE_OAUTH_TOKEN"], "sk-ant-oat01-") {

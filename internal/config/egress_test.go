@@ -55,7 +55,7 @@ func TestEgressUnknownService(t *testing.T) {
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      anthropc: main/KEY\n",
 		`unknown service "anthropc" (did you mean "anthropic"?)`)
 	wantProblems(t, t.TempDir(), vaultFixture+"egress:\n  default:\n    services:\n      kubernetes: main/KEY\n",
-		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, chatgpt, github, openai, opencode)`)
+		`unknown service "kubernetes" (built-in services: anthropic, anthropic-oauth, chatgpt, claude, github, openai, opencode)`)
 }
 
 func TestEgressEmptyServiceEntryIsRejected(t *testing.T) {
@@ -269,7 +269,7 @@ func TestProfileReaches(t *testing.T) {
 }
 
 func TestBuiltinsAreSortedAndComplete(t *testing.T) {
-	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "chatgpt", "github", "openai", "opencode"}; !reflect.DeepEqual(got, want) {
+	if got, want := builtinNames(), []string{"anthropic", "anthropic-oauth", "chatgpt", "claude", "github", "openai", "opencode"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("builtinNames = %v, want %v", got, want)
 	}
 	if got, want := HarnessNames(), []string{"claude-code", "codex", "custom", "opencode", "pi"}; !reflect.DeepEqual(got, want) {

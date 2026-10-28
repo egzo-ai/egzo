@@ -43,6 +43,16 @@ var builtinServices = map[string]ResolvedService{
 		Hosts:  []string{"api.openai.com"},
 		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
 	},
+	// A Claude subscription (Pro, Max, Team, Enterprise), signed in from Claude Code's own /login (its token URL in
+	// @anthropic-ai/claude-code 2.1.310). Claude Code sends the token to api.anthropic.com only, for the model and its account;
+	// its logout forgets the tokens locally, so there is no revoke URL.
+	"claude": {
+		Hosts: []string{"api.anthropic.com"},
+		Credential: &Credential{
+			Method:   MethodOAuth,
+			TokenURL: "https://platform.claude.com/v1/oauth/token",
+		},
+	},
 	// A ChatGPT Plus or Pro sign-in, as Codex makes it (openai/codex, login/src/auth/manager.rs and revoke.rs). chatgpt.com
 	// is also ChatGPT's website: Codex's calls go under /backend-api/ (the model, usage, apps), and nothing else gets the token.
 	"chatgpt": {

@@ -8,6 +8,9 @@
   claims a client reads (Codex decodes them without checking the signature); the refresh token is opaque.
 - POST /oauth/revoke: a `token` that is the chain's refresh token ends the chain.
 - /backend-api/... (any method), and a websocket upgrade there: answered with the Authorization header it got.
+- As Anthropic (under the names platform.claude.com and api.anthropic.com): POST /v1/oauth/token, JSON, the same chain with opaque
+  tokens (`sk-ant-oat01-...`, `sk-ant-ort01-...`) and what Claude Code reads besides them (`scope`, the account, the organization);
+  GET /api/oauth/profile and /api/oauth/claude_cli/roles answer the chain's access token, and 401 any other.
 - Anything else: 404.
 
 Every request is a JSON line in the log (method, path, the Authorization header, the form or JSON body). The file /tmp/end-chain, when it
@@ -34,6 +37,29 @@ def b64(data):
 def jwt(claims):
     header = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
     return f"{header}.{b64(json.dumps(claims).encode())}.{b64(secrets.token_bytes(64))}"
+
+
+SCOPE = "user:inference user:profile user:sessions:claude_code user:mcp_servers"
+
+
+def issue_anthropic():
+    chain["access"] = "sk-ant-oat01-stub-" + secrets.token_urlsafe(32)
+    chain["refresh"] = "sk-ant-ort01-stub-" + secrets.token_urlsafe(32)
+    return {
+        "access_token": chain["access"],
+        "refresh_token": chain["refresh"],
+        "expires_in": EXPIRES_IN,
+        "token_type": "Bearer",
+        "scope": SCOPE,
+        "account": {"uuid": "acct-spec", "email_address": "spec@example.com"},
+        "organization": {"uuid": "org-spec", "name": "spec"},
+    }
+
+
+PROFILE = {
+    "account": {"uuid": "acct-spec", "email": "spec@example.com", "display_name": "spec"},
+    "organization": {"uuid": "org-spec", "name": "spec", "organization_type": "claude_pro", "rate_limit_tier": "default_claude_ai"},
+}
 
 
 def issue():
@@ -90,7 +116,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 return
             return self.answer(200, {"authorization": self.headers.get("Authorization"), "path": self.path})
-        if self.command != "POST" or self.path not in ("/oauth/token", "/oauth/revoke"):
+        if self.path in ("/api/oauth/profile", "/api/oauth/claude_cli/roles"):
+            self.record()
+            if not chain["access"] or self.headers.get("Authorization") != "Bearer " + chain["access"]:
+                return self.answer(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid token"}})
+            if self.path == "/api/oauth/profile":
+                return self.answer(200, PROFILE)
+            return self.answer(200, {"organization_role": "admin", "workspace_role": None, "organization_name": "spec"})
+        if self.command != "POST" or self.path not in ("/oauth/token", "/oauth/revoke", "/v1/oauth/token"):
             self.record()
             return self.answer(404, {"error": "not_found"})
         body = self.body()
@@ -100,10 +133,11 @@ class Handler(BaseHTTPRequestHandler):
                 chain["refresh"] = chain["access"] = None
             return self.answer(200, {})
         grant = body.get("grant_type")
+        make = issue_anthropic if self.path == "/v1/oauth/token" else issue
         if grant == "authorization_code" and body.get("code") == "spec-code":
-            return self.answer(200, issue())
+            return self.answer(200, make())
         if grant == "refresh_token" and chain["refresh"] and body.get("refresh_token") == chain["refresh"]:
-            return self.answer(200, issue())
+            return self.answer(200, make())
         return self.answer(400, {"error": "invalid_grant", "error_description": "refresh_token_reused"})
 
     do_GET = do_POST = do_PUT = do_DELETE = handle_any

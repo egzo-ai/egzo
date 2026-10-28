@@ -119,7 +119,7 @@ var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // (the proxy and trust store wiring, EGZO_*, the home, and what a harness sets).
 func placeholderReserved(key string) bool {
 	switch key {
-	case "HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "IS_SANDBOX":
+	case "HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "IS_SANDBOX":
 		return true
 	}
 	return reservedEnvName(key)
