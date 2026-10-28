@@ -82,7 +82,7 @@ func TestDenialsAreGroupedByInstanceHostAndReasonAndAHostReachedSinceIsFixed(t *
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	op := r.operator()
-	if _, err := r.hub.Spawn(ctx, op, "local", "web", "coder", ""); err != nil {
+	if err := r.hub.Spawn(ctx, op, "local", "web", "coder", "coder-1"); err != nil {
 		t.Fatal(err)
 	}
 	r.startFeeds(flushing)
@@ -169,7 +169,7 @@ func TestAUserSeesTheNetworkOfTheAgentsTheyMayOperateAndAnAdministratorAllOfIt(t
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
 	r.store.SetRole(ctx, "local", "web", bob.ID, rbac.User)
 	r.store.SetRole(ctx, "local", "web", carol.ID, rbac.Administrator)
-	r.hub.Spawn(ctx, alice, "local", "web", "coder", "")
+	r.hub.Spawn(ctx, alice, "local", "web", "coder", "coder-1")
 	r.startFeeds(flushing)
 	r.scan()
 	a := trailOf(r.agentNamed("web", "coder-1"))
@@ -204,7 +204,7 @@ func TestTheHubReadsTheTrailAgainFromWhereItStoppedAndCountsNothingTwice(t *test
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	op := r.operator()
-	r.hub.Spawn(ctx, op, "local", "web", "coder", "")
+	r.hub.Spawn(ctx, op, "local", "web", "coder", "coder-1")
 	a := trailOf(r.agentNamed("web", "coder-1"))
 	r.fakes["local"].AddAudit("web", a.denied("evil.example", proxy.CodeNotInProfile), a.denied("evil.example", proxy.CodeNotInProfile))
 

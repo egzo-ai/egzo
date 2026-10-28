@@ -42,7 +42,7 @@ type Hub struct {
 	pubMu    sync.Mutex
 	pub      map[projectKey]*publishedEntry
 	signIn   SignInOptions // set by SetupSignIn
-	spawns   spawning      // the spawns started from the hub (spawn.go)
+	tasks    taskList      // what the hub does on the engines (tasks.go)
 }
 
 type engineScan struct {
@@ -201,6 +201,8 @@ type ProjectRef struct {
 	Operator bool
 	// Feed says how far what the agents are doing can be trusted.
 	Feed Feed
+	// Tasks are what the hub does on the project's agents now.
+	Tasks []Task
 }
 
 // Projects lists the projects the user holds a role on (an operator: every project), across engines, from the last scan. unreachable lists the engines that
@@ -238,7 +240,7 @@ func (h *Hub) Projects(ctx context.Context, user store.User) (refs []ProjectRef,
 			}
 			if ok {
 				shown, feed := h.overlay(v.Name, p)
-				refs = append(refs, ProjectRef{Engine: v.Name, Project: shown, Role: role, Operator: user.IsOperator, Feed: feed})
+				refs = append(refs, ProjectRef{Engine: v.Name, Project: shown, Role: role, Operator: user.IsOperator, Feed: feed, Tasks: h.runningTasks(v.Name, p.Name)})
 			}
 		}
 	}
@@ -270,6 +272,8 @@ type AgentView struct {
 	Holder string
 	// Denied is how many hosts the proxy refused the agent in the last hour, and that it has not reached since.
 	Denied int
+	// Task is what the hub does on the agent, or the failure of what it did that nobody dismissed; nil when neither.
+	Task *TaskView
 }
 
 // ProjectView is the project page.
@@ -281,7 +285,6 @@ type ProjectView struct {
 	// Feed says how far what the agents are doing can be trusted.
 	Feed      Feed
 	Agents    []AgentView
-	Spawns    []SpawnView // started from the hub and not yet ended, or ended a short while ago
 	CanSpawn  bool
 	CanManage bool
 }
@@ -383,9 +386,7 @@ func (h *Hub) Project(ctx context.Context, user store.User, engine, name string)
 		}
 		view.Agents = append(view.Agents, av)
 	}
-	for _, s := range h.spawnsOf(engine, name) {
-		view.Spawns = append(view.Spawns, SpawnView{Spawn: s, CanDismiss: s.State != SpawnPending && rbac.Can(user.Subject(), role, rbac.Operate, s.Actor)})
-	}
+	view.Agents = h.withTasks(user, role, engine, name, view.Agents)
 	return view, nil
 }
 
@@ -460,34 +461,6 @@ func (h *Hub) creatorOf(ctx context.Context, engine, project, agent string) (str
 		return "", ErrNotFound
 	}
 	return found, err
-}
-
-// Operate runs start, stop or rm on an agent.
-func (h *Hub) Operate(ctx context.Context, user store.User, verb, engine, project, agent string) error {
-	if verb != "start" && verb != "stop" && verb != "rm" {
-		return fmt.Errorf("unknown operation %q", verb)
-	}
-	if _, err := h.access(ctx, user, engine, project); err != nil {
-		return err
-	}
-	creator, err := h.creatorOf(ctx, engine, project, agent)
-	if err != nil {
-		return err
-	}
-	if _, err := h.authorize(ctx, user, engine, project, agent, rbac.Operate, creator, "agent."+verb); err != nil {
-		return err
-	}
-	err = h.call(ctx, engine, func(e engines.Engine) error {
-		switch verb {
-		case "start":
-			return e.Start(ctx, project, agent)
-		case "stop":
-			return e.Stop(ctx, project, agent)
-		}
-		return e.Remove(ctx, project, agent)
-	})
-	h.afterOperation(ctx, engine)
-	return err
 }
 
 // afterOperation refreshes what the next page shows.

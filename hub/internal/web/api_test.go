@@ -200,80 +200,110 @@ func TestTheAgentsActivityComesFromTheStatusFeedAndTheFeedIsReported(t *testing.
 	}
 }
 
-func TestSpawnStopStartAndRemove(t *testing.T) {
+func TestSpawnStopStartAndRemoveAreTasks(t *testing.T) {
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	r.hub.Scan(ctx)
 	b := r.browser()
 	b.signIn("admin")
 	uid := r.userID("admin")
+	agentNamed := func(name string) map[string]any {
+		_, v := b.get("/e/local/p/web")
+		for _, a := range list(v, "agents") {
+			if a["name"] == name {
+				return a
+			}
+		}
+		return nil
+	}
+	taskOf := func(a map[string]any) map[string]any {
+		task, _ := a["task"].(map[string]any)
+		return task
+	}
 
-	// a spawn is answered at once, before the agent exists; the project lists it until it has ended, and then how it ended
-	r.fakes["local"].HoldSpawns()
+	// a spawn needs a name, and is answered at once, before the agent exists, which is in the project from then on
+	if code, out := b.post("/e/local/p/web/spawn", json_{"template": "coder"}); code != http.StatusBadRequest {
+		t.Errorf("a spawn without a name = %d %v", code, out)
+	}
+	r.fakes["local"].Hold()
 	code, out := b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "fix-bug"})
-	started, _ := out["spawn"].(map[string]any)
-	if code != http.StatusAccepted || started["state"] != "spawning" || started["id"] == "" || started["name"] != "fix-bug" || started["template"] != "coder" {
+	started, _ := out["task"].(map[string]any)
+	if code != http.StatusAccepted || started["state"] != "running" || started["id"] == "" || started["verb"] != "spawn" || started["agent"] != "fix-bug" ||
+		started["template"] != "coder" || started["creator"] != "admin" {
 		t.Fatalf("spawn = %d %v", code, out)
 	}
-	spawns := func() []map[string]any {
-		_, v := b.get("/e/local/p/web")
-		return list(v, "spawns")
+	a := agentNamed("fix-bug")
+	if a == nil || a["state"] != "" || taskOf(a)["id"] != started["id"] || taskOf(a)["step"] != "create network web-fix-bug" {
+		t.Errorf("while it is made: %v", a)
 	}
-	if got := spawns(); len(got) != 1 || got[0]["id"] != started["id"] || got[0]["state"] != "spawning" || got[0]["creator"] != "admin" {
-		t.Errorf("while it runs: %v", got)
+	if code, out := b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "fix-bug"}); code != http.StatusConflict ||
+		out["message"] != "fix-bug is being made by admin. Wait for it to end." {
+		t.Errorf("a second spawn of the name = %d %v", code, out)
 	}
-	r.fakes["local"].ReleaseSpawns()
-	r.hub.WaitForSpawns()
-	if got := spawns(); len(got) != 1 || got[0]["state"] != "ready" || got[0]["agent"] != "fix-bug" || got[0]["endedAt"] == nil {
-		t.Errorf("once it has ended: %v", got)
+	if code, _ := b.del("/e/local/p/web/tasks/" + started["id"].(string)); code != http.StatusConflict {
+		t.Errorf("dismissing a task that runs = %d", code)
+	}
+	r.fakes["local"].Release()
+	r.hub.WaitForTasks()
+	if a := agentNamed("fix-bug"); a["state"] != "running" || a["task"] != nil {
+		t.Errorf("once made: %v", a)
+	}
+	if code, out := b.get("/e/local/p/web/tasks/" + started["id"].(string)); code != 200 || taskOf(out)["state"] != "done" || taskOf(out)["endedAt"] == nil {
+		t.Errorf("the task once ended = %d %v", code, out)
 	}
 	if calls := r.fakes["local"].Calls(); calls[0] != "spawn web/fix-bug user:"+uid {
 		t.Errorf("calls = %v", calls)
 	}
-	state := func() map[string]any {
-		_, v := b.get("/e/local/p/web/a/fix-bug")
-		agent, _ := v["agent"].(map[string]any)
-		return agent
+	if code, out := b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "fix-bug"}); code != http.StatusConflict ||
+		out["message"] != "There is already an agent named fix-bug. Pick another name." {
+		t.Errorf("a spawn of a name an agent has = %d %v", code, out)
 	}
-	if code, _ := b.post("/e/local/p/web/a/fix-bug/stop", nil); code != 200 || state()["running"] != false {
-		t.Errorf("after stop: %v", state())
+
+	// start, stop and rm too
+	for _, step := range []struct {
+		verb    string
+		running bool
+	}{{"stop", false}, {"start", true}} {
+		code, out := b.post("/e/local/p/web/a/fix-bug/"+step.verb, nil)
+		if task, _ := out["task"].(map[string]any); code != http.StatusAccepted || task["verb"] != step.verb {
+			t.Errorf("%s = %d %v", step.verb, code, out)
+		}
+		r.hub.WaitForTasks()
+		if a := agentNamed("fix-bug"); a["running"] != step.running {
+			t.Errorf("after %s: %v", step.verb, a)
+		}
 	}
-	if code, _ := b.post("/e/local/p/web/a/fix-bug/start", nil); code != 200 || state()["running"] != true {
-		t.Errorf("after start: %v", state())
-	}
-	if code, _ := b.post("/e/local/p/web/a/fix-bug/rm", nil); code != 200 {
+	if code, _ := b.post("/e/local/p/web/a/fix-bug/rm", nil); code != http.StatusAccepted {
 		t.Errorf("rm = %d", code)
 	}
+	r.hub.WaitForTasks()
 	if code, _ := b.get("/e/local/p/web/a/fix-bug"); code != 404 {
 		t.Errorf("a removed agent = %d", code)
 	}
-	code, out = b.post("/e/local/p/web/spawn", json_{"template": "ghost"})
-	failed, _ := out["spawn"].(map[string]any)
-	r.hub.WaitForSpawns()
-	for _, s := range spawns() {
-		if s["id"] == failed["id"] && (s["state"] != "failed" || !strings.Contains(s["error"].(string), "ghost") || s["canDismiss"] != true) {
-			t.Errorf("a spawn that fails = %d %v", code, s)
-		}
+
+	// a failed spawn stays an agent, with why, until it is dismissed; the activity keeps it
+	_, out = b.post("/e/local/p/web/spawn", json_{"template": "ghost", "name": "lost"})
+	failed, _ := out["task"].(map[string]any)
+	r.hub.WaitForTasks()
+	if task := taskOf(agentNamed("lost")); task["state"] != "failed" || !strings.Contains(task["error"].(string), "ghost") || task["canDismiss"] != true {
+		t.Errorf("a spawn that fails = %v", task)
 	}
-	// an ended spawn can be taken off the list; then it is gone
-	if code, out := b.del("/e/local/p/web/spawns/" + failed["id"].(string)); code != 200 || out["ok"] != true {
+	if code, out := b.del("/e/local/p/web/tasks/" + failed["id"].(string)); code != 200 || out["ok"] != true {
 		t.Errorf("dismiss = %d %v", code, out)
 	}
-	for _, s := range spawns() {
-		if s["id"] == failed["id"] {
-			t.Errorf("a dismissed spawn is listed: %v", s)
-		}
+	if a := agentNamed("lost"); a != nil {
+		t.Errorf("a dismissed spawn is an agent: %v", a)
 	}
-	if code, _ := b.del("/e/local/p/web/spawns/" + failed["id"].(string)); code != 404 {
+	if code, _ := b.del("/e/local/p/web/tasks/" + failed["id"].(string)); code != 404 {
 		t.Errorf("dismissing it again = %d", code)
 	}
-	r.fakes["local"].HoldSpawns()
-	_, out = b.post("/e/local/p/web/spawn", json_{"template": "coder", "name": "slow"})
-	if code, _ := b.del("/e/local/p/web/spawns/" + out["spawn"].(map[string]any)["id"].(string)); code != 409 {
-		t.Errorf("dismissing a running spawn = %d", code)
+	_, out = b.get("/e/local/p/web/tasks")
+	if rows := list(out, "tasks"); len(rows) != 5 || rows[0]["agent"] != "lost" || rows[0]["state"] != "failed" || rows[4]["verb"] != "spawn" {
+		t.Errorf("the activity = %v", rows)
 	}
-	r.fakes["local"].ReleaseSpawns()
-	r.hub.WaitForSpawns()
+	if _, out = b.get("/e/local/p/web/tasks?agent=fix-bug"); len(list(out, "tasks")) != 4 {
+		t.Errorf("one agent's activity = %v", out)
+	}
 	if code, _ := b.post("/e/local/p/web/a/x/explode", nil); code != 404 {
 		t.Errorf("an unknown verb = %d", code)
 	}
@@ -312,7 +342,7 @@ func TestStateChangingRequestsNeedTheOriginAndJSON(t *testing.T) {
 	b := r.browser()
 	b.signIn("admin")
 	try := func(origin, contentType string) int {
-		req, _ := http.NewRequest("POST", b.base+"/api/v1/e/local/p/web/spawn", strings.NewReader(`{"template":"coder"}`))
+		req, _ := http.NewRequest("POST", b.base+"/api/v1/e/local/p/web/spawn", strings.NewReader(`{"template":"coder","name":"x"}`))
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}

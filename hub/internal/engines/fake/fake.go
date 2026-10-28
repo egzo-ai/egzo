@@ -38,7 +38,7 @@ type Engine struct {
 	watchStarts int
 	watchTries  int
 	publishedBy map[string]engines.Published
-	spawnGate   chan struct{} // while not nil, a spawn waits for it to close: HoldSpawns, ReleaseSpawns
+	gate        chan struct{} // while not nil, a spawn, start, stop or removal waits for it to close: Hold, Release
 	publishedN  int
 	projectN    int
 
@@ -193,36 +193,48 @@ func (e *Engine) agent(project, name string) (*engines.Agent, error) {
 	return nil, fmt.Errorf("no agent %q in project %q", name, project)
 }
 
-// HoldSpawns makes every spawn wait, from now until ReleaseSpawns, as a spawn that takes long does.
-func (e *Engine) HoldSpawns() {
+// Hold makes every spawn, start, stop and removal wait, from now until Release, as one that takes long does.
+func (e *Engine) Hold() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.spawnGate == nil {
-		e.spawnGate = make(chan struct{})
+	if e.gate == nil {
+		e.gate = make(chan struct{})
 	}
 }
 
-// ReleaseSpawns lets the spawns that wait go on.
-func (e *Engine) ReleaseSpawns() {
+// Release lets what waits go on.
+func (e *Engine) Release() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.spawnGate != nil {
-		close(e.spawnGate)
-		e.spawnGate = nil
+	if e.gate != nil {
+		close(e.gate)
+		e.gate = nil
 	}
 }
 
-func (e *Engine) Spawn(ctx context.Context, project, template, name, actor string) (string, error) {
+// wait waits while the engine is held.
+func (e *Engine) wait(ctx context.Context) error {
 	e.mu.Lock()
-	gate := e.spawnGate
+	gate := e.gate
 	e.mu.Unlock()
-	if gate != nil {
-		select {
-		case <-gate:
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
+	if gate == nil {
+		return nil
 	}
+	select {
+	case <-gate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Spawn says it creates the network, waits while the engine is held, then makes the agent.
+func (e *Engine) Spawn(ctx context.Context, project, template, name, actor string, progress func(string)) (string, error) {
+	progress(fmt.Sprintf("create network %s-%s", project, name))
+	if err := e.wait(ctx); err != nil {
+		return "", err
+	}
+	progress(fmt.Sprintf("create container %s-%s-1", project, name))
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.down != nil {
@@ -257,6 +269,9 @@ func (e *Engine) Spawn(ctx context.Context, project, template, name, actor strin
 }
 
 func (e *Engine) Start(ctx context.Context, project, agent string) error {
+	if err := e.wait(ctx); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a, err := e.agent(project, agent)
@@ -270,6 +285,9 @@ func (e *Engine) Start(ctx context.Context, project, agent string) error {
 }
 
 func (e *Engine) Stop(ctx context.Context, project, agent string) error {
+	if err := e.wait(ctx); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a, err := e.agent(project, agent)
@@ -282,7 +300,12 @@ func (e *Engine) Stop(ctx context.Context, project, agent string) error {
 	return nil
 }
 
-func (e *Engine) Remove(ctx context.Context, project, agent string) error {
+func (e *Engine) Remove(ctx context.Context, project, agent string, progress func(string)) error {
+	progress(fmt.Sprintf("remove container %s-%s-1", project, agent))
+	if err := e.wait(ctx); err != nil {
+		return err
+	}
+	progress(fmt.Sprintf("remove network %s-%s", project, agent))
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, err := e.agent(project, agent); err != nil {

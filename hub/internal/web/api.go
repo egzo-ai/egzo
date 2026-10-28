@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -59,8 +60,15 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusConflict, "conflict", "That user is disabled. Enable them first.")
 	case errors.Is(err, hub.ErrLastWayIn):
 		s.apiFail(w, http.StatusConflict, "conflict", "That is your last way to sign in: link another account first.")
-	case errors.Is(err, hub.ErrSpawnRunning):
-		s.apiFail(w, http.StatusConflict, "conflict", "The spawn is still running: it ends on its own.")
+	case errors.Is(err, hub.ErrTaskRunning):
+		s.apiFail(w, http.StatusConflict, "conflict", "The task is still running: it ends on its own.")
+	case errors.Is(err, hub.ErrNameRequired):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "Give the agent a name.")
+	case errors.As(err, new(hub.ExistsError)):
+		s.apiFail(w, http.StatusConflict, "conflict", "There is already an agent named "+errorAs[hub.ExistsError](err).Agent+". Pick another name.")
+	case errors.As(err, new(hub.BusyError)):
+		t := errorAs[hub.BusyError](err).Task
+		s.apiFail(w, http.StatusConflict, "busy", fmt.Sprintf("%s is being %s by %s. Wait for it to end.", t.Agent, beingDone[t.Verb], s.namer(r.Context()).actor(t.Actor)))
 	case errors.Is(err, hub.ErrNotDisabled):
 		s.apiFail(w, http.StatusConflict, "conflict", "Only a disabled user's account can be removed. Disable the user first.")
 	default:
@@ -68,6 +76,15 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusBadGateway, "engine_error", err.Error())
 	}
 }
+
+func errorAs[E error](err error) E {
+	var e E
+	errors.As(err, &e)
+	return e
+}
+
+// beingDone says what a task does to its agent: "agent-3 is being removed".
+var beingDone = map[string]string{hub.VerbSpawn: "made", hub.VerbStart: "started", hub.VerbStop: "stopped", hub.VerbRm: "removed"}
 
 // decode reads a JSON body of a state-changing request.
 func decode(w http.ResponseWriter, r *http.Request, into any) bool {
@@ -167,6 +184,9 @@ type agentJSON struct {
 	CanOperate bool      `json:"canOperate"`
 	Holder     string    `json:"holder"`
 	Denied     int       `json:"denied"` // hosts the proxy refused it in the last hour, not reached since
+	// Task is what the hub does on the agent, or the failure of what it did that nobody dismissed. An agent with a task and no state
+	// is one the engine does not have: a spawn that runs or failed, or a removal that is ending.
+	Task *taskJSON `json:"task,omitempty"`
 }
 
 // feedJSON says how far the agents' activity can be trusted: live, connecting, stale or unavailable, and why.
@@ -193,7 +213,6 @@ type projectJSON struct {
 	Templates []string      `json:"templates"`
 	Services  []serviceJSON `json:"services"`
 	Agents    []agentJSON   `json:"agents"`
-	Spawns    []spawnJSON   `json:"spawns"`
 	CanSpawn  bool          `json:"canSpawn"`
 	CanManage bool          `json:"canManage"`
 	CanAudit  bool          `json:"canAudit"`
@@ -201,26 +220,27 @@ type projectJSON struct {
 	Ignored []string `json:"ignored,omitempty"`
 }
 
-// spawnJSON is a spawn started from the hub: state spawning, ready (agent says which) or failed (error says why).
-type spawnJSON struct {
+// taskJSON is one action of the hub on an engine: state running, done, failed or interrupted (the hub stopped while it ran).
+type taskJSON struct {
 	ID        string     `json:"id"`
-	Template  string     `json:"template"`
-	Name      string     `json:"name"` // as asked: empty when the engine chooses
-	Creator   string     `json:"creator"`
+	Verb      string     `json:"verb"` // spawn, start, stop or rm
+	Agent     string     `json:"agent"`
+	Template  string     `json:"template,omitempty"`
+	Creator   string     `json:"creator"` // who asked
 	State     string     `json:"state"`
-	Agent     string     `json:"agent,omitempty"`
+	Step      string     `json:"step,omitempty"`
 	Error     string     `json:"error,omitempty"`
 	StartedAt time.Time  `json:"startedAt"`
 	EndedAt   *time.Time `json:"endedAt,omitempty"`
-	// CanDismiss: the user may take it off the list (an ended spawn, for who may operate its agent).
+	// CanDismiss: the user may take an ended one off its agent (who may operate the agent).
 	CanDismiss bool `json:"canDismiss"`
 }
 
-func spawnOf(sp hub.Spawn, n namer) spawnJSON {
-	j := spawnJSON{ID: sp.ID, Template: sp.Template, Name: sp.Name, Creator: n.actor(sp.Actor), State: sp.State, Agent: sp.Agent, Error: sp.Err,
-		StartedAt: sp.Started}
-	if !sp.Ended.IsZero() {
-		j.EndedAt = &sp.Ended
+func taskOf(t hub.Task, n namer) taskJSON {
+	j := taskJSON{ID: t.ID, Verb: t.Verb, Agent: t.Agent, Template: t.Template, Creator: n.actor(t.Actor), State: t.State, Step: t.Step, Error: t.Err,
+		StartedAt: t.Started}
+	if !t.Ended.IsZero() {
+		j.EndedAt = &t.Ended
 	}
 	return j
 }
@@ -228,12 +248,21 @@ func spawnOf(sp hub.Spawn, n namer) spawnJSON {
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 	return agentJSON{Name: a.Name, Template: a.Template, State: a.State, Running: a.Running(), Activity: a.Activity, Status: a.Status,
 		Waiting: a.Waiting, Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder,
-		Denied: a.Denied}
+		Denied: a.Denied, Task: taskViewOf(a.Task, n)}
+}
+
+func taskViewOf(t *hub.TaskView, n namer) *taskJSON {
+	if t == nil {
+		return nil
+	}
+	j := taskOf(t.Task, n)
+	j.CanDismiss = t.CanDismiss
+	return &j
 }
 
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Operator: v.Operator, Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
-		Services: []serviceJSON{}, Agents: []agentJSON{}, Spawns: []spawnJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
+		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
 	if p.Templates == nil {
 		p.Templates = []string{}
 	}
@@ -242,11 +271,6 @@ func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 	}
 	for _, a := range v.Agents {
 		p.Agents = append(p.Agents, s.agentOf(a, n))
-	}
-	for _, sp := range v.Spawns {
-		j := spawnOf(sp.Spawn, n)
-		j.CanDismiss = sp.CanDismiss
-		p.Spawns = append(p.Spawns, j)
 	}
 	if p.CanAudit {
 		p.Ignored = v.Project.Ignored
@@ -313,6 +337,7 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Activity string `json:"activity"`
 		Status   string `json:"status"`
 		Waiting  bool   `json:"waiting"`
+		Task     string `json:"task,omitempty"` // the verb of the task that runs on it
 	}
 	type project struct {
 		Engine   string    `json:"engine"`
@@ -329,8 +354,13 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 	}{Projects: []project{}, Unreachable: []engineJSON{}}
 	for _, ref := range refs {
 		p := project{Engine: ref.Engine, Name: ref.Project.Name, Role: ref.Role, Operator: ref.Operator, Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
+		running := map[string]string{}
+		for _, t := range ref.Tasks {
+			running[t.Agent] = t.Verb
+		}
 		for _, a := range ref.Project.Agents {
-			p.Agents = append(p.Agents, agent{Name: a.Name, Template: a.Template, Running: a.Running(), Activity: a.Activity, Status: a.Status, Waiting: a.Waiting})
+			p.Agents = append(p.Agents, agent{Name: a.Name, Template: a.Template, Running: a.Running(), Activity: a.Activity, Status: a.Status, Waiting: a.Waiting,
+				Task: running[a.Name]})
 		}
 		out.Projects = append(out.Projects, p)
 	}
@@ -393,45 +423,67 @@ func (s *Server) eventRows(events []engines.Event, n namer) []eventJSON {
 	return rows
 }
 
+// spawn is answered at once: the task runs on in the hub, and the agent is in the project from now on (hub/internal/hub/tasks.go).
 func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) {
 	var body struct{ Template, Name string }
 	if !decode(w, r, &body) {
 		return
 	}
-	// answered at once: the spawn runs on in the hub, and the project lists it until it has ended (hub/internal/hub/spawn.go)
-	started, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
+	t, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
 	if err != nil {
 		s.problem(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]spawnJSON{"spawn": spawnOf(started, s.namer(r.Context()))})
+	writeJSON(w, http.StatusAccepted, map[string]taskJSON{"task": taskOf(t, s.namer(r.Context()))})
 }
 
-// dismissSpawn takes an ended spawn off the project's list.
-func (s *Server) dismissSpawn(w http.ResponseWriter, r *http.Request, user store.User) {
-	if err := s.hub.DismissSpawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("id")); err != nil {
+// operate starts, stops or removes an agent: answered at once, like spawn.
+func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User) {
+	engine, project, agent, verb := r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent"), r.PathValue("verb")
+	if verb != hub.VerbStart && verb != hub.VerbStop && verb != hub.VerbRm {
+		s.apiFail(w, http.StatusNotFound, "not_found", "There is nothing here.")
+		return
+	}
+	t, err := s.hub.StartOperation(r.Context(), user, verb, engine, project, agent)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]taskJSON{"task": taskOf(t, s.namer(r.Context()))})
+}
+
+// tasks is the project's activity, or one agent's: the latest tasks, newest first.
+func (s *Server) tasks(w http.ResponseWriter, r *http.Request, user store.User) {
+	list, err := s.hub.Tasks(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.URL.Query().Get("agent"), 100)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	n := s.namer(r.Context())
+	rows := make([]taskJSON, 0, len(list))
+	for _, t := range list {
+		rows = append(rows, taskOf(t, n))
+	}
+	writeJSON(w, http.StatusOK, map[string][]taskJSON{"tasks": rows})
+}
+
+// task is one task, which whoever asked for it follows until it ends.
+func (s *Server) task(w http.ResponseWriter, r *http.Request, user store.User) {
+	t, err := s.hub.TaskOf(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("id"))
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]taskJSON{"task": taskOf(t, s.namer(r.Context()))})
+}
+
+// dismissTask takes an ended task off its agent.
+func (s *Server) dismissTask(w http.ResponseWriter, r *http.Request, user store.User) {
+	if err := s.hub.DismissTask(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("id")); err != nil {
 		s.problem(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User) {
-	engine, project, agent, verb := r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent"), r.PathValue("verb")
-	if verb != "start" && verb != "stop" && verb != "rm" {
-		s.apiFail(w, http.StatusNotFound, "not_found", "There is nothing here.")
-		return
-	}
-	err := s.hub.Operate(r.Context(), user, verb, engine, project, agent)
-	if errors.Is(err, hub.ErrNotFound) || errors.Is(err, hub.ErrForbidden) {
-		s.problem(w, r, err)
-		return
-	}
-	if err != nil {
-		s.apiFail(w, http.StatusBadGateway, "operation_failed", "Could not "+verb+" "+agent+": "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"agent": agent, "verb": verb})
 }
 
 // --- network ---------------------------------------------------------------------------------------------------------------------

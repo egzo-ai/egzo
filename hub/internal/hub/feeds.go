@@ -455,10 +455,13 @@ func (m *feedManager) due(now time.Time) []string {
 	return names
 }
 
-// Run is discovery and the streams: it lists every engine, then lists one again when its events say something changed, or when it
+// Run is discovery and the streams, after the tasks that ran when the hub stopped are marked interrupted: it lists every engine, then lists one again when its events say something changed, or when it
 // has not been listed for a while, and keeps the status followers and event watchers in step with what it finds. It returns when
 // ctx ends.
 func (h *Hub) Run(ctx context.Context, opt FeedOptions) {
+	if err := h.RecoverTasks(ctx); err != nil {
+		h.log.Warn("read the tasks", "err", err)
+	}
 	h.StartFeeds(ctx, opt)
 	m := h.feedManager()
 	scan := func(names []string) {
@@ -475,6 +478,7 @@ func (h *Hub) Run(ctx context.Context, opt FeedOptions) {
 		}
 		_ = h.store.PurgeSessions(listing)
 		_ = h.store.PurgeDenials(listing, time.Now().Add(-denialRetention))
+		_ = h.store.PurgeTasks(listing, time.Now().Add(-taskRetention))
 	}
 	scan(nil)
 	tick := time.NewTicker(m.opt.Fast)
