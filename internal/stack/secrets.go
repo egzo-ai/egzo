@@ -131,6 +131,9 @@ func (e *DotenvError) Error() string {
 
 var dotenvLine = regexp.MustCompile(`^line (\d+):`)
 
+// ReadDotenv reads the variables of the project's .env (none when there is no file). An error never holds a value.
+func ReadDotenv(dir string) (map[string]string, error) { return readDotenv(dir) }
+
 // readDotenv parses the project's .env with Compose's own parser, ${VAR} taken from the environment first, then
 // from the lines above. No file, or a directory by that name, is no variable.
 func readDotenv(dir string) (map[string]string, error) {
