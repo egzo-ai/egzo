@@ -9,7 +9,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+
+	"github.com/compose-spec/compose-go/v2/dotenv"
+	"github.com/compose-spec/compose-go/v2/template"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/seal"
@@ -21,7 +27,8 @@ var ErrEmptySecret = errors.New("empty secret")
 // ErrPassNotFound is wrapped by the error for a pass vault when `pass` is not on PATH.
 var ErrPassNotFound = errors.New("`pass` was not found on PATH")
 
-// ReadSecret reads the value of a secret from its backend. dir is the project directory.
+// ReadSecret reads the value of a secret from its backend. dir is the project directory, where the env backend finds
+// the project's .env.
 // An error never contains a value.
 func ReadSecret(ref config.SecretRef, dir string) (string, error) {
 	return readSecret(ref, dir, false)
@@ -55,15 +62,105 @@ func ReadSecretKey(ref config.SecretRef, dir string) (string, error) {
 func readSecret(ref config.SecretRef, dir string, whole bool) (string, error) {
 	switch ref.Backend {
 	case "env":
-		value, ok := os.LookupEnv(ref.Name)
-		if !ok || value == "" {
-			return "", fmt.Errorf("environment variable %s is not set", ref.Name)
-		}
-		return value, nil
+		return readEnv(ref.Name, dir)
 	case "pass":
 		return readPass(ref.Name, whole)
 	}
 	return "", fmt.Errorf("unknown backend %q", ref.Backend)
+}
+
+// DotenvFile is the file of the project directory the env backend reads a variable from when the environment does not
+// have it, as Docker Compose does.
+const DotenvFile = ".env"
+
+// readEnv reads a variable from the environment or, when the environment does not have it, from the project's .env.
+// Compose's order: a variable of the environment wins, even set to nothing.
+func readEnv(name, dir string) (string, error) {
+	if value, ok := os.LookupEnv(name); ok {
+		if value != "" {
+			return value, nil
+		}
+		if vars, err := readDotenv(dir); err == nil && vars[name] != "" {
+			return "", fmt.Errorf("environment variable %s is not set: it is empty, which hides the one in %s", name, DotenvFile)
+		}
+		return "", fmt.Errorf("environment variable %s is not set", name)
+	}
+	vars, err := readDotenv(dir)
+	if err != nil {
+		return "", err
+	}
+	value, ok := vars[name]
+	if !ok {
+		return "", fmt.Errorf("environment variable %s is not set", name)
+	}
+	if value == "" {
+		return "", fmt.Errorf("%w: %s is empty in %s", ErrEmptySecret, name, DotenvFile)
+	}
+	return value, nil
+}
+
+// FromDotenv tells whether the env backend reads ref from the project's .env rather than the environment.
+func FromDotenv(ref config.SecretRef, dir string) bool {
+	if ref.Backend != "env" {
+		return false
+	}
+	if _, ok := os.LookupEnv(ref.Name); ok {
+		return false
+	}
+	vars, err := readDotenv(dir)
+	_, ok := vars[ref.Name]
+	return err == nil && ok
+}
+
+// DotenvError is a .env that cannot be parsed. It never holds a value: the parser's own messages can quote one.
+type DotenvError struct {
+	Line   int    // 0 when the parser does not say
+	Reason string // a message of egzo's, or empty
+}
+
+func (e *DotenvError) Error() string {
+	message := DotenvFile + " cannot be read"
+	if e.Line > 0 {
+		message = fmt.Sprintf("%s: line %d is not valid", DotenvFile, e.Line)
+	}
+	if e.Reason != "" {
+		message += ": " + e.Reason
+	}
+	return message
+}
+
+var dotenvLine = regexp.MustCompile(`^line (\d+):`)
+
+// readDotenv parses the project's .env with Compose's own parser, ${VAR} taken from the environment first, then
+// from the lines above. No file, or a directory by that name, is no variable.
+func readDotenv(dir string) (map[string]string, error) {
+	path := filepath.Join(dir, DotenvFile)
+	if info, err := os.Stat(path); errors.Is(err, os.ErrNotExist) || err == nil && info.IsDir() {
+		return nil, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	vars, err := dotenv.ParseWithLookup(file, os.LookupEnv)
+	if err == nil {
+		return vars, nil
+	}
+	problem := &DotenvError{}
+	var missing *template.MissingRequiredError
+	var invalid *template.InvalidTemplateError
+	switch {
+	case errors.As(err, &missing):
+		problem.Reason = "required variable " + missing.Variable + " is missing a value"
+	case errors.As(err, &invalid):
+		problem.Reason = "a ${...} in a value is not valid"
+	default:
+		if m := dotenvLine.FindStringSubmatch(err.Error()); m != nil {
+			problem.Line, _ = strconv.Atoi(m[1])
+		}
+	}
+	return nil, problem
 }
 
 // ErrNotASecret is wrapped by the error for a pass name that is a directory of the store.

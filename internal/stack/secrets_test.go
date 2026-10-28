@@ -119,3 +119,89 @@ func TestEnvSecret(t *testing.T) {
 		t.Errorf("got %q, %v", got, err)
 	}
 }
+
+func envRef(name string) config.SecretRef {
+	return config.SecretRef{Vault: "main", Name: name, Backend: "env"}
+}
+
+// unsetenv unsets a variable for the test; t.Setenv restores it after.
+func unsetenv(t *testing.T, name string) {
+	t.Helper()
+	t.Setenv(name, "")
+	os.Unsetenv(name)
+}
+
+func writeDotenv(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, DotenvFile), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestEnvSecretFromDotenvWhenTheEnvironmentDoesNotHaveIt(t *testing.T) {
+	unsetenv(t, "EGZO_STACK_SECRET")
+	dir := writeDotenv(t, "EGZO_STACK_SECRET=from-file\n")
+	if got, err := ReadSecret(envRef("EGZO_STACK_SECRET"), dir); err != nil || got != "from-file" {
+		t.Errorf("got %q, %v", got, err)
+	}
+	if !FromDotenv(envRef("EGZO_STACK_SECRET"), dir) {
+		t.Error("FromDotenv = false")
+	}
+}
+
+func TestEnvSecretTheEnvironmentWinsOverDotenvEvenEmpty(t *testing.T) {
+	dir := writeDotenv(t, "EGZO_STACK_SECRET=from-file\n")
+	t.Setenv("EGZO_STACK_SECRET", "from-shell")
+	if got, err := ReadSecret(envRef("EGZO_STACK_SECRET"), dir); err != nil || got != "from-shell" {
+		t.Errorf("got %q, %v", got, err)
+	}
+	if FromDotenv(envRef("EGZO_STACK_SECRET"), dir) {
+		t.Error("FromDotenv = true")
+	}
+	t.Setenv("EGZO_STACK_SECRET", "")
+	_, err := ReadSecret(envRef("EGZO_STACK_SECRET"), dir)
+	if err == nil || !strings.Contains(err.Error(), "hides the one in .env") {
+		t.Errorf("empty: %v", err)
+	}
+}
+
+func TestEnvSecretEmptyInDotenvIsEmpty(t *testing.T) {
+	unsetenv(t, "EGZO_STACK_SECRET")
+	_, err := ReadSecret(envRef("EGZO_STACK_SECRET"), writeDotenv(t, "EGZO_STACK_SECRET=\n"))
+	if !errors.Is(err, ErrEmptySecret) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestDotenvErrorsNeverHoldAValue(t *testing.T) {
+	unsetenv(t, "EGZO_STACK_SECRET")
+	unsetenv(t, "EGZO_STACK_UNSET")
+	cases := map[string]string{
+		"bad name":     "OK=1\nBAD@NAME=the-value\n",
+		"key space":    "MY KEY=the-value\n",
+		"unterminated": "EGZO_STACK_SECRET=\"the-value\n",
+		"template":     "EGZO_STACK_SECRET=the-value${\n",
+		"required":     "EGZO_STACK_SECRET=${EGZO_STACK_UNSET:?the-value}\n",
+	}
+	for name, content := range cases {
+		_, err := ReadSecret(envRef("EGZO_STACK_SECRET"), writeDotenv(t, content))
+		var problem *DotenvError
+		if !errors.As(err, &problem) || strings.Contains(err.Error(), "the-value") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestNoDotenvOrADirectoryIsNoVariable(t *testing.T) {
+	unsetenv(t, "EGZO_STACK_SECRET")
+	dir := t.TempDir()
+	for _, prepare := range []func(){func() {}, func() { os.Mkdir(filepath.Join(dir, DotenvFile), 0o755) }} {
+		prepare()
+		_, err := ReadSecret(envRef("EGZO_STACK_SECRET"), dir)
+		if err == nil || !strings.Contains(err.Error(), "is not set") {
+			t.Errorf("err = %v", err)
+		}
+	}
+}

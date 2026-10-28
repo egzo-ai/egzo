@@ -70,7 +70,7 @@ def test_an_unknown_backend_is_refused_and_names_the_ones_that_exist(project):
 
 
 def test_there_is_no_file_backend(project):
-    """Secrets in plain files are not supported: `file` is refused exactly like a name nobody ever heard of."""
+    """A file of secrets is only the env backend's `.env`, as Compose has it: `file` is refused exactly like a name nobody ever heard of."""
     unknown = project.config(spec(vaults=vault("not-a-backend")))
     removed = project.config(spec(vaults=vault("file")))
     assert removed.returncode != 0
@@ -147,6 +147,130 @@ def test_the_env_backend_reads_the_variable_of_the_same_name(project):
     found = rows(result)
     assert "set" in found["main/SET_ONE"] and "missing" in found["main/UNSET_ONE"]
     assert "env-secret-value" not in result.stdout + result.stderr
+
+
+# --- the env backend also reads .env in the project directory, as Docker Compose does ----------------------------------
+#
+# A secret key is at least 32 bytes and `project check` says how many a short one has: the specs below see the value
+# egzo got through that, without ever printing it.
+
+KEY_32 = "k" * 32
+KEY_31 = "k" * 31
+
+
+def keyed(**sections):
+    """A file whose secret key is `main/KEY`, in the env vault `main`."""
+    return spec(**{"vaults": {"main": {"backend": "env"}}, **sections}, secret_key="main/KEY")
+
+
+def test_an_env_secret_missing_from_the_environment_is_read_from_dotenv_in_the_project_directory(project):
+    project.write(spec(**uses("main/FROM_FILE")))
+    project.write("FROM_FILE=dotenv-secret-value\n", filename=".env")
+    result = project.sh("project check")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "is set" in rows(result)["main/FROM_FILE"]
+    assert "dotenv-secret-value" not in result.stdout + result.stderr
+
+
+def test_project_check_says_a_secret_came_from_dotenv(project):
+    project.write(spec(**uses("main/FROM_FILE", "main/FROM_SHELL")))
+    project.write("FROM_FILE=a-value\n", filename=".env")
+    found = rows(project.sh("project check", env={"FROM_SHELL": "b-value"}))
+    assert ".env" in found["main/FROM_FILE"]
+    assert ".env" not in found["main/FROM_SHELL"]
+
+
+def test_the_environment_wins_over_dotenv(project):
+    """Compose's order: a variable of the shell is never replaced by the file's."""
+    project.write(keyed())
+    project.write(f"KEY={KEY_32}\n", filename=".env")
+    result = project.sh("project check", env={"KEY": KEY_31})
+    assert "31 bytes" in rows(result)["main/KEY"]
+
+
+def test_a_variable_set_to_nothing_in_the_environment_still_hides_dotenv(project):
+    """Compose's order again: set counts, empty or not. The line says why the file was not read."""
+    project.write(spec(**uses("main/TOKEN")))
+    project.write("TOKEN=a-value\n", filename=".env")
+    result = project.sh("project check", env={"TOKEN": ""})
+    assert result.returncode == 1
+    line = rows(result)["main/TOKEN"]
+    assert "is set" not in line and ".env" in line
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"KEY={KEY_31} # a comment after a space\n",
+        f'KEY="{KEY_31}"\n',
+        f"KEY='{KEY_31}'\n",
+        f"export KEY={KEY_31}\n",
+        f"# a comment line\n\nKEY={KEY_31}\n",
+        f"PART={KEY_31[:20]}\nKEY=${{PART}}{KEY_31[20:]}\n",
+        f"KEY='${{PART}}{KEY_31[:24]}'\n",  # single quotes are literal: `${PART}` is 7 bytes
+    ],
+)
+def test_dotenv_is_read_with_the_syntax_of_compose(project, text):
+    project.write(keyed())
+    project.write(text, filename=".env")
+    assert "31 bytes" in rows(project.sh("project check"))["main/KEY"]
+
+
+def test_a_value_in_dotenv_may_refer_to_the_environment(project):
+    project.write(keyed())
+    project.write(f"KEY=${{FROM_SHELL}}{KEY_31[:11]}\n", filename=".env")
+    assert "31 bytes" in rows(project.sh("project check", env={"FROM_SHELL": KEY_31[:20]}))["main/KEY"]
+
+
+def test_the_project_secret_key_can_be_kept_in_dotenv(project):
+    project.write(keyed())
+    project.write(f"KEY={KEY_32}\n", filename=".env")
+    result = project.sh("project check")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_dotenv_is_the_one_next_to_the_project_file_not_in_the_current_directory(project):
+    project.write(keyed())
+    project.write(f"KEY={KEY_31}\n", filename=".env")
+    below = project.mkdir("src/deeper")
+    (below / ".env").write_text(f"KEY={KEY_32}\n")
+    result = project.egzo.run("project", "check", cwd=below, env=project.env)
+    assert "31 bytes" in rows(result)["main/KEY"]
+
+
+def test_a_dotenv_that_is_a_directory_is_ignored(project):
+    project.write(spec(**uses("main/TOKEN")))
+    project.mkdir(".env")
+    result = project.sh("project check", env={"TOKEN": "a-value"})
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_broken_dotenv_names_the_file_and_line_and_never_a_value(project):
+    project.write(spec(**uses("main/TOKEN")))
+    project.write("FIRST=fine\nBAD@NAME=a-secret-value\n", filename=".env")
+    result = project.sh("project check")
+    assert result.returncode == 1
+    line = rows(result)["main/TOKEN"]
+    assert ".env" in line and "line 2" in line, line
+    assert "a-secret-value" not in result.stdout + result.stderr
+
+
+def test_an_unterminated_quote_in_dotenv_never_shows_the_value(project):
+    """Compose's parser quotes the value in its own message; egzo does not pass it on."""
+    project.write(spec(**uses("main/TOKEN")))
+    project.write('FIRST=fine\nTOKEN="unterminated-secret-value\n', filename=".env")
+    result = project.sh("project check")
+    assert result.returncode == 1
+    assert ".env" in rows(result)["main/TOKEN"]
+    assert "unterminated-secret-value" not in result.stdout + result.stderr
+
+
+def test_a_broken_dotenv_is_not_read_when_the_environment_has_every_secret(project):
+    project.write(spec(**uses("main/TOKEN")))
+    project.write('TOKEN="unterminated\n', filename=".env")
+    result = project.sh("project check", env={"TOKEN": "a-value"})
+    assert result.returncode == 0, result.stdout + result.stderr
+
 
 
 # --- the pass backend runs `pass` -------------------------------------------------------------------------------

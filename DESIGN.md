@@ -425,8 +425,12 @@ templates are declared and published by `up`.
   (`unknown backend "x"`, naming the two that exist). The schema, the errors, the docs and the specs mention
   nothing that does not exist: no removed or planned backends, no reserved names. A backend is added when it
   works, together with its specs.
-- **`env`** reads the environment variable of the same name from the shell that runs the CLI. A secret name
-  must be a valid variable name. It is accepted but discouraged (every process of the user can read it, and
+- **`env`** reads the environment variable of the same name from the shell that runs the CLI or, when the
+  environment does not have it, from `.env` in the project directory (the directory of `egzo.yaml`), as Docker Compose
+  does: the environment wins, even a variable set to nothing; Compose's own parser (`compose-go/v2/dotenv`), so the
+  syntax and `${VAR}` are Compose's; no file, or a directory, is no variable. The file is read only for a variable the
+  environment lacks. Its errors keep a line number and egzo's own words, never the parser's message (it can quote a
+  value). `project check` says which secrets came from `.env`. A secret name must be a valid variable name. It is accepted but discouraged (every process of the user can read it, and
   it ends up in shell history and dotfiles): every command that loads a project with an `env` vault, except the ones that relay a process's own output (`exec`, `attach`, `logs`), prints
   `Using ENV var based secret backend is not recommended.` on stderr, once, and goes on.
 - **`pass`** runs the `pass` program (https://www.passwordstore.org/) directly, `pass show <name>`, with the
