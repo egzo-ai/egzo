@@ -31,7 +31,7 @@ does the rest.
 - **[gVisor and rootless Podman](docs/install.md#pick-an-engine).** Supported and tested, for additional security.
 - **[Built-in HTTPS and SSH proxy](docs/sandboxing.md).** List the services your agents can reach, everything else is denied by default.
 - **[Credential injection](docs/security.md#how-secret-injection-works).** Agents can't leak passwords and tokens they don't have access to.
-- **[Secrets](docs/project-file.md#vaults-and-secrets).** Read from `pass` or environment variables. More password managers planned.
+- **[Secrets](docs/project-file.md#vaults-and-secrets).** Read from `pass`, environment variables or a `.env` file. More password managers planned.
 - **[Git integration](docs/workspaces.md).** Git worktrees and multiple repos per agent are supported.
 - **[Messaging](docs/messaging.md).** User to agent, agent to agent and agent to user. External bridges (Discord) in the works.
 - **[Built-in browser](docs/browser.md).** Batteries included with Chromium and the Playwright MCP pre-installed in our default

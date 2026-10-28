@@ -45,6 +45,9 @@ func secretState(ref config.SecretRef, dir string, secretKey bool) (string, erro
 	case errors.As(err, &passErr):
 		return "missing (" + passErr.Message + ")", nil
 	case strings.Contains(err.Error(), "is not set"):
+		if _, why, ok := strings.Cut(err.Error(), "is not set: "); ok {
+			return "missing (" + why + ")", nil
+		}
 		return "missing", nil
 	}
 	return "unreadable (" + firstLine(err.Error()) + ")", nil
