@@ -401,6 +401,7 @@ type StandIns struct {
 	Access    string    `json:"access_token"`
 	Refresh   string    `json:"refresh_token"`
 	ID        string    `json:"id_token,omitempty"`
+	Scope     string    `json:"scope,omitempty"` // as the provider granted it
 	Refreshed time.Time `json:"refreshed"`
 }
 
@@ -412,7 +413,9 @@ func (s *signIns) standIns(service string) (StandIns, bool) {
 	if !s.open || record == nil || record.Ended != "" {
 		return StandIns{}, false
 	}
-	return StandIns{Access: record.StandInAccess[len(record.StandInAccess)-1], Refresh: record.StandInRefresh, ID: record.StandInID, Refreshed: record.Refreshed}, true
+	scope, _ := record.Extra["scope"].(string)
+	return StandIns{Access: record.StandInAccess[len(record.StandInAccess)-1], Refresh: record.StandInRefresh, ID: record.StandInID,
+		Scope: scope, Refreshed: record.Refreshed}, true
 }
 
 // --- the token endpoint -------------------------------------------------------------------------------------------

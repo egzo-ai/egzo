@@ -25,6 +25,16 @@ def test_init_scaffolds_one_agent_with_the_requested_harness(project):
     assert [a["harness"] for a in document["agents"].values()] == ["opencode"]
 
 
+def test_init_for_claude_code_signs_in_with_a_claude_subscription_and_needs_no_secret_but_the_key(project):
+    result = project.sh("project init --harness claude-code")
+    assert result.returncode == 0, result.stderr
+    document = yaml.safe_load((project.root / "egzo.yaml").read_text())
+    assert document["egress"]["default"]["services"] == {"claude": {"credential": {"method": "oauth"}}}
+    assert "ANTHROPIC_API_KEY" not in (project.root / "egzo.yaml").read_text()
+    assert "/login" in result.stdout, "init says where to sign in"
+    assert project.sh("project check --resolved").returncode == 0
+
+
 def test_init_never_overwrites_an_existing_file(project):
     project.write("name: mine\n")
     result = project.sh("project init")

@@ -370,7 +370,8 @@ func agentContainer(
 		env["EGZO_MODEL"] = agent.Model
 	}
 	if integration, ok := harness.For(agent.Harness); ok {
-		providers := harness.Providers{AnthropicBearer: bearerProvider(project, agent), OpenAIKey: openAIKey(project, agent)}
+		providers := harness.Providers{AnthropicBearer: bearerProvider(project, agent), OpenAIKey: openAIKey(project, agent),
+			AnthropicSignIn: signInFor(project, agent, "api.anthropic.com")}
 		for key, value := range integration.ContainerEnv(agent.Permissions != "default", providers) {
 			env[key] = value
 		}
@@ -491,6 +492,20 @@ func openAIKey(project *config.Resolved, agent config.ResolvedAgent) bool {
 	}
 	for _, service := range profile.Services {
 		if service.Inject != nil && slices.Contains(service.Hosts, "api.openai.com") {
+			return true
+		}
+	}
+	return false
+}
+
+// signInFor reports whether an agent's profile has an OAuth service for host: its client signs in.
+func signInFor(project *config.Resolved, agent config.ResolvedAgent, host string) bool {
+	profile := project.Egress[agent.Egress]
+	if profile == nil {
+		return false
+	}
+	for _, service := range profile.Services {
+		if service.OAuth() && slices.Contains(service.Hosts, host) {
 			return true
 		}
 	}

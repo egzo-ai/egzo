@@ -29,13 +29,22 @@ session holder (`egzo agent run`), so what you see on `egzo agent attach` is the
 
 ## Claude Code
 
+Claude Code reaches `api.anthropic.com` with one of three credentials, each a built-in service. A profile takes one of
+them: two that cover `api.anthropic.com` are refused at `egzo project check`.
+
+| service | the credential | in a vault | for |
+|---|---|---|---|
+| `claude` | a Claude subscription (Pro, Max, Team, Enterprise), signed in from Claude Code | nothing | the default: sign in once, every agent after the first starts signed in |
+| `anthropic-oauth` | a Claude subscription token from `claude setup-token`, valid for a year | the token | agents that start with nobody there to sign in |
+| `anthropic` | an API key from the Anthropic Console, billed per use | the key | API billing |
+
 ```yaml
 egress:
   default:
-    allow: [platform.claude.com]
     services:
-      anthropic: main/ANTHROPIC_API_KEY      # an API key
-      # anthropic-oauth: main/CLAUDE_TOKEN   # or a subscription token from `claude setup-token`
+      claude: { credential: { method: oauth } }   # a Claude subscription: sign in with /login
+      # anthropic-oauth: main/CLAUDE_TOKEN          # or a `claude setup-token` token
+      # anthropic: main/ANTHROPIC_API_KEY           # or an API key
 
 agents:
   coder:
@@ -43,8 +52,24 @@ agents:
     model: claude-sonnet-5-5
 ```
 
-The agent receives `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN` for `anthropic-oauth`) as a placeholder that is
-only meaningful to the proxy. Extra workspaces become additional directories with workspace trust pre-seeded.
+- **`claude`, a sign-in.** An [OAuth service](sandboxing.md#oauth-services): no vault secret, and nothing to renew. The
+  first Claude Code agent of the project starts signed out, and `egzo agent spawn` says so. Attach (`egzo agent attach
+  coder-1`), run `/login`, choose *Claude account with subscription*, open the link it shows in your browser and paste
+  the code back. The proxy keeps the sign-in, renews it, and answers Claude Code's own refreshes. An agent spawned after
+  that runs `claude auth login` with the sign-in's stand-in refresh token (`CLAUDE_CODE_OAUTH_REFRESH_TOKEN`) before its
+  TUI starts, so it starts signed in. No agent holds a token that works without the proxy.
+  - Sign in before spawning more agents: the stand-in reaches an agent when it is spawned. A `/login` in another agent
+    starts a new sign-in, which replaces the first and signs its agents out.
+  - `egzo proxy logout claude` ends the project's sign-in. Claude Code's own `/logout` only forgets its stand-ins.
+- **`anthropic-oauth`, a subscription token.** Run `claude setup-token` on your own machine: it signs in in your browser
+  and prints a token valid for a year, which goes in a vault. The agent gets `CLAUDE_CODE_OAUTH_TOKEN` as a placeholder.
+  Nobody has to sign in from an agent, which suits agents spawned with nobody watching, such as from the hub or a
+  script. Make a new token before the year is out.
+- **`anthropic`, an API key.** The agent gets `ANTHROPIC_API_KEY` as a placeholder.
+- With `anthropic` or `anthropic-oauth`, allow `platform.claude.com`, which Claude Code calls without a credential. The
+  `claude` service reaches it already: its token URL is there.
+
+Extra workspaces become additional directories with workspace trust pre-seeded.
 
 ## OpenCode
 
