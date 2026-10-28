@@ -191,6 +191,7 @@ fieldset.group legend { padding: 0 var(--space-1); font-size: var(--text-xs); co
 .toast[data-tone="ok"] .glyph { color: var(--status-running); }
 .toast[data-tone="error"] { border-color: var(--status-error); }
 .toast[data-tone="error"] .glyph { color: var(--status-error); }
+.toast[data-tone="busy"] .glyph { display: inline-block; color: var(--accent-text); animation: spin 1s steps(4) infinite; }
 .toast .body { flex: 1; min-width: 0; }
 @keyframes toast-in { from { transform: translateY(6px); opacity: 0; } }
 

@@ -52,28 +52,29 @@ def test_the_admin_links_dex_signs_in_with_it_and_works_with_a_real_project(page
     expect(page.get_by_role("heading", name="No agent yet")).to_be_visible()
 
     page.get_by_role("button", name="Spawn agent").click()
+    agent = page.get_by_role("dialog").get_by_label("Name").input_value()  # the name it suggests
     page.get_by_role("dialog").get_by_role("button", name="Spawn", exact=True).click()
-    # the hub answers at once and runs the spawn: the real engine takes a while, and a toast says when the agent is ready
-    expect(page.get_by_role("status").filter(has_text="Spawned coder-1")).to_be_visible(timeout=120000)
-    page.locator("tr[data-agent=coder-1]").get_by_role("link", name="coder-1").click()
-    expect(page.get_by_test_id("activity")).not_to_have_text("stopped", timeout=15000)
+    # the hub answers at once and runs the spawn: the agent's page shows it while the real engine makes it (how fast is the engine's)
+    expect(page.get_by_role("heading", name=agent)).to_be_visible()
 
-    # the terminal of the real session holder
-    page.get_by_role("button", name="Attach", exact=True).click()
-    expect(page.get_by_test_id("terminal-state")).to_have_text("connected", timeout=15000)
+    # once made, the terminal of the real session holder opens by itself
+    expect(page.get_by_test_id("terminal-state")).to_have_text("connected", timeout=120000)
     terminal = page.locator(".tpane .xterm-rows")
     expect(terminal).to_contain_text("READY", timeout=20000)
     page.locator(".tpane .xterm").click()
     page.keyboard.type("hello from the browser")
     expect(terminal).to_contain_text("hello from the browser", timeout=10000)
     page.get_by_role("button", name="Close terminal").click()
+    expect(page.get_by_test_id("activity")).not_to_have_text("stopped")
 
     page.get_by_role("button", name="Stop", exact=True).click()
     expect(page.get_by_test_id("activity")).to_have_text("stopped", timeout=20000)
     page.get_by_role("button", name="Remove", exact=True).click()
     page.get_by_role("dialog").get_by_role("button", name="Remove", exact=True).click()
-    expect(page.get_by_role("status").last).to_contain_text("Removed coder-1")
-    expect(page.get_by_role("heading", name="No agent yet")).to_be_visible()
+    expect(page.get_by_role("heading", name="No agent yet")).to_be_visible(timeout=60000)
+    page.get_by_role("tab", name="Activity").click()
+    for verb in ("remove", "stop", "spawn"):
+        expect(page.get_by_test_id("activity")).to_contain_text(verb)
 
     page.get_by_role("tab", name="Audit log").click()
     audit = page.get_by_test_id("audit")

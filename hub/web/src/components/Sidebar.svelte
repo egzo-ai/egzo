@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app, multiEngine, signOut, toggleTheme } from "../lib/app.svelte";
+  import { taskDoing } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
   import { closeTerm, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
   import Avatar from "./Avatar.svelte";
@@ -39,6 +40,7 @@
       case "error": return ["error", t.message || "Error"];
       case "stopped": return ["", "Agent stopped"];
     }
+    if (a?.task) return ["", `${taskDoing(a.task)[0]!.toUpperCase()}${taskDoing(a.task).slice(1)}…`];
     if (a?.waiting) return ["waiting", "? " + (a.status || "Waiting for an answer")];
     return ["", a?.status || (a?.activity && a.activity !== "unknown" ? a.activity : "")];
   }

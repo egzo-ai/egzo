@@ -2,11 +2,12 @@
   import { api } from "../lib/api";
   import { app, errorText, multiEngine, toast } from "../lib/app.svelte";
   import { operate } from "../lib/agentops";
-  import { activityKind, activityLabel, ago, initials } from "../lib/format";
+  import { activityKind, activityLabel, initials, taskDoing, taskFailedLabel } from "../lib/format";
   import { poll } from "../lib/live";
-  import { href, type ProjectTab } from "../lib/router.svelte";
-  import { followSpawn, unfollowSpawn } from "../lib/spawns";
-  import type { AuditEntry, Members, Project, TimelineEvent } from "../lib/types";
+  import { suggestName } from "../lib/names";
+  import { href, nav, navigate, type ProjectTab } from "../lib/router.svelte";
+  import { followTask, onScreen } from "../lib/tasks";
+  import type { AuditEntry, Members, Project, Task, TimelineEvent } from "../lib/types";
   import { openTerm, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
   import EngineBadge from "../components/EngineBadge.svelte";
@@ -16,6 +17,7 @@
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import SpecView from "../components/SpecView.svelte";
+  import TaskTable from "../components/TaskTable.svelte";
   import Timeline from "../components/Timeline.svelte";
   import ErrorPage from "./ErrorPage.svelte";
 
@@ -27,8 +29,9 @@
   let spec = $state<string | null>(null);
   let audit = $state<AuditEntry[] | null>(null);
   let members = $state<Members | null>(null);
+  let activity = $state<Task[] | null>(null);
   let spawning = $state(false);
-  let spawnForm = $state({ template: "", name: "" });
+  let spawnForm = $state({ template: "", name: "", suggested: "" });
   let spawnError = $state("");
   let submitting = $state(false);
 
@@ -60,40 +63,62 @@
   async function loadMembers() {
     members = await api.members(engine, name);
   }
+  async function loadActivity() {
+    activity = await api.tasks(engine, name);
+  }
   $effect(() => {
+    if (tab === "activity") return poll(loadActivity, 5000);
     if (tab === "audit") return poll(loadAudit, 5000);
     if (tab === "members") return poll(loadMembers, 5000);
   });
 
+  // an agent the engine does not have (yet, or any more) is in the list while a task runs on it, and a spawn that failed until it is
+  // dismissed: such an agent has a task and no state
   const agents = $derived(project?.agents ?? []);
-  // a ready spawn is its agent's row; one that runs or failed has a row of its own until the hub forgets it
-  const pending = $derived((project?.spawns ?? []).filter((s) => s.state !== "ready"));
   const running = $derived(agents.filter((a) => a.running).length);
   const waiting = $derived(agents.filter((a) => a.waiting).length);
   const tabs = $derived.by(() => {
-    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null], ["timeline", "Timeline", null], ["network", "Network", null], ["spec", "Spec", null]];
+    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null], ["timeline", "Timeline", null], ["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]];
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canManage) list.push(["members", "Members", null]);
     return list;
   });
 
+  function suggest(template: string): string {
+    return suggestName(template, agents.map((a) => a.name));
+  }
+
   function openSpawn() {
-    spawnForm = { template: project?.templates[0] ?? "", name: "" };
+    const template = project?.templates[0] ?? "";
+    const suggested = suggest(template);
+    spawnForm = { template, name: suggested, suggested };
     spawnError = "";
     spawning = true;
   }
 
-  // The hub answers at once and runs the spawn; the project lists it, and a toast says how it ended.
+  // a suggestion follows the template; a name the user typed stays
+  function pickTemplate() {
+    if (spawnForm.name !== spawnForm.suggested) return;
+    spawnForm.suggested = spawnForm.name = suggest(spawnForm.template);
+  }
+
+  function anotherName() {
+    spawnForm.suggested = spawnForm.name = suggest(spawnForm.template);
+  }
+
+  // The hub answers at once and runs the spawn as a task; the agent is in the project from then on. Its page shows the steps, and
+  // opens its terminal when it is ready, if the user is still there.
   async function spawn(e: Event) {
     e.preventDefault();
     spawnError = "";
     submitting = true;
     try {
-      const { spawn: started } = await api.spawn(engine, name, spawnForm.template, spawnForm.name);
+      const task = await api.spawn(engine, name, spawnForm.template, spawnForm.name.trim());
       spawning = false;
-      followSpawn(engine, name, started);
-      toast(`Spawning ${started.name || started.template}…`);
-      await loadProject();
+      followTask(engine, name, task, (ended) => {
+        if (ended.state === "done" && onScreen(engine, name, ended.agent) && nav.route.name === "agent") openTerm(engine, name, ended.agent);
+      });
+      navigate(href.agent(engine, name, task.agent));
     } catch (err) {
       spawnError = errorText(err);
     } finally {
@@ -101,10 +126,9 @@
     }
   }
 
-  async function dismiss(id: string) {
+  async function dismiss(task: Task) {
     try {
-      unfollowSpawn(id);
-      await api.dismissSpawn(engine, name, id);
+      await api.dismissTask(engine, name, task.id);
       await loadProject();
     } catch (err) {
       toast(errorText(err), "error");
@@ -156,44 +180,38 @@
     </div>
 
     {#if tab === "agents"}
-      {#if agents.length || pending.length}
+      {#if agents.length}
         <div class="table-wrap">
           <table class="table" data-testid="agents">
             <thead><tr><th>Agent</th><th>Activity</th><th>Status</th><th>Terminal</th><th>Spawned by</th><th></th></tr></thead>
             <tbody>
-              {#each pending as s (s.id)}
-                <tr data-spawn={s.id}>
-                  <td><span class="name">{s.name || "(automatic)"}</span> <span class="muted">{s.template}</span></td>
-                  <td>{#if s.state === "spawning"}<Pill kind="starting" label="spawning" testid="spawn-state" />{:else}<Pill kind="error" label="failed" testid="spawn-state" />{/if}</td>
-                  <td class="wrap" style="white-space:normal;min-width:18ch">{#if s.error}<span class="status" style:color="var(--status-error)">{s.error}</span>{:else}<span class="muted">started {ago(s.startedAt)}</span>{/if}</td>
-                  <td><span class="muted">—</span></td>
-                  <td>{s.creator}</td>
-                  <td class="actions">
-                    {#if s.canDismiss}
-                      <span class="row-actions">
-                        <button class="btn" data-size="sm" data-icon-only aria-label="Dismiss the failed spawn of {s.name || s.template}" title="Dismiss" onclick={() => dismiss(s.id)}><Icon name="trash" size="sm" /></button>
-                      </span>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
               {#each agents as a (a.name)}
                 {@const open = workspace.terms.some((t) => t.engine === engine && t.project === name && t.agent === a.name)}
-                <tr data-row tabindex="-1" data-agent={a.name} aria-selected={open}>
+                {@const busy = a.task?.state === "running"}
+                {@const made = a.state !== ""}
+                <tr data-row tabindex="-1" data-agent={a.name} aria-selected={open} aria-busy={busy}>
                   <td><a class="name" href={href.agent(engine, name, a.name)}>{a.name}</a> <span class="muted">{a.template}</span>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}{#if a.denied} <a class="pill" data-s="error" data-testid="denied" href={href.agent(engine, name, a.name, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}</td>
-                  <td><Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} /></td>
-                  <td class="wrap" style="white-space:normal;min-width:18ch"><span class="status" style:color={a.waiting ? "var(--status-waiting)" : undefined}>{a.status}</span></td>
-                  <td>{#if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
+                  <td>
+                    {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} />{/if}
+                    {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
+                  </td>
+                  <td class="wrap" style="white-space:normal;min-width:18ch">
+                    {#if a.task && busy}<span class="muted" data-testid="task-step">{a.task.step || "…"} · {a.task.creator}</span>
+                    {:else if a.task}<span class="status" style:color="var(--status-error)" data-testid="task-error">{a.task.error}</span>
+                    {:else}<span class="status" style:color={a.waiting ? "var(--status-waiting)" : undefined}>{a.status}</span>{/if}
+                  </td>
+                  <td>{#if !made}<span class="muted">—</span>{:else if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
                   <td>{a.creator}</td>
                   <td class="actions">
-                    {#if a.canOperate}
-                      <span class="row-actions">
-                        <button class="btn" data-size="sm" data-key="a" aria-label="{open ? 'Open terminal of' : 'Attach'} {a.name}" disabled={!a.running} onclick={() => attach(a.name)}><Icon name="attach" size="sm" />{open ? "Open terminal" : "Attach"}</button>
-                        {#if a.running}<button class="btn" data-size="sm" data-icon-only aria-label="Stop {a.name}" title="Stop" onclick={() => act(a.name, "stop")}><Icon name="stop" size="sm" /></button>
-                        {:else}<button class="btn" data-size="sm" data-icon-only aria-label="Start {a.name}" title="Start" onclick={() => act(a.name, "start")}><Icon name="play" size="sm" /></button>{/if}
-                        <button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove {a.name}" title="Remove" onclick={() => act(a.name, "rm")}><Icon name="trash" size="sm" /></button>
-                      </span>
-                    {/if}
+                    <span class="row-actions">
+                      {#if a.task?.canDismiss}<button class="btn" data-size="sm" data-icon-only aria-label="Dismiss the failure on {a.name}" title="Dismiss" onclick={() => dismiss(a.task!)}><Icon name="x" size="sm" /></button>{/if}
+                      {#if made && a.canOperate}
+                        <button class="btn" data-size="sm" data-key="a" aria-label="{open ? 'Open terminal of' : 'Attach'} {a.name}" disabled={!a.running || busy} onclick={() => attach(a.name)}><Icon name="attach" size="sm" />{open ? "Open terminal" : "Attach"}</button>
+                        {#if a.running}<button class="btn" data-size="sm" data-icon-only aria-label="Stop {a.name}" title="Stop" disabled={busy} onclick={() => act(a.name, "stop")}><Icon name="stop" size="sm" /></button>
+                        {:else}<button class="btn" data-size="sm" data-icon-only aria-label="Start {a.name}" title="Start" disabled={busy} onclick={() => act(a.name, "start")}><Icon name="play" size="sm" /></button>{/if}
+                        <button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove {a.name}" title="Remove" disabled={busy} onclick={() => act(a.name, "rm")}><Icon name="trash" size="sm" /></button>
+                      {/if}
+                    </span>
                   </td>
                 </tr>
               {/each}
@@ -217,6 +235,8 @@
       </div>
     {:else if tab === "timeline"}
       <Timeline {events} />
+    {:else if tab === "activity"}
+      {#if activity}<TaskTable {engine} project={name} tasks={activity} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}
       <NetworkView {engine} project={name} />
     {:else if tab === "spec"}
@@ -235,10 +255,13 @@
           <p class="muted" style="margin:0">The project has published no template. Run <code>egzo project up</code> on the project.</p>
         {:else}
           <div class="field"><label for="sp-template">Template</label>
-            <select id="sp-template" class="select" bind:value={spawnForm.template}>{#each project.templates as t}<option value={t}>{t}</option>{/each}</select></div>
+            <select id="sp-template" class="select" bind:value={spawnForm.template} onchange={pickTemplate}>{#each project.templates as t}<option value={t}>{t}</option>{/each}</select></div>
           <div class="field"><label for="sp-name">Name</label>
-            <input id="sp-name" class="input" bind:value={spawnForm.name} placeholder="(automatic)" pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" maxlength="63" />
-            <span class="help">Optional. Letters, digits, . - and _.</span></div>
+            <span style="display:flex;gap:var(--space-2)">
+              <input id="sp-name" class="input" style="flex:1" bind:value={spawnForm.name} required pattern="[a-z0-9][a-z0-9_\-]*" maxlength="63" />
+              <button type="button" class="btn" data-icon-only aria-label="Another suggestion" title="Another suggestion" onclick={anotherName}><Icon name="refresh" /></button>
+            </span>
+            <span class="help">Lowercase letters, digits, - and _. The name stays with the agent's branch, even after it is removed.</span></div>
         {/if}
         {#if spawnError}<div class="field-error" role="alert">{spawnError}</div>{/if}
       </form>

@@ -4,8 +4,9 @@
   import { FitAddon } from "@xterm/addon-fit";
   import { WebglAddon } from "@xterm/addon-webgl";
   import "@xterm/xterm/css/xterm.css";
-  import { api, terminalURL } from "../lib/api";
-  import { app, errorText, setRenderer, toast } from "../lib/app.svelte";
+  import { terminalURL } from "../lib/api";
+  import { operate } from "../lib/agentops";
+  import { app, setRenderer, toast } from "../lib/app.svelte";
   import { href, navigate } from "../lib/router.svelte";
   import { copyText, osc52Text } from "../lib/clipboard";
   import { registerSender } from "../lib/registry";
@@ -175,13 +176,11 @@
     });
   });
 
+  // the hub starts the agent as a task: the terminal connects again once it has
   async function startAndReconnect() {
-    try {
-      await api.operate(term.engine, term.project, term.agent, "start");
-      reconnect(term.id);
-    } catch (e) {
-      toast(errorText(e), "error");
-    }
+    await operate(term.engine, term.project, term.agent, "start", (task) => {
+      if (task.state === "done") reconnect(term.id);
+    });
   }
 
   const stateLabel: Record<string, string> = {

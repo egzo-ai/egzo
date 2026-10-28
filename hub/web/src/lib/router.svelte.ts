@@ -1,9 +1,9 @@
 // A small router over the History API. The hub serves index.html for every address, so these paths survive a reload.
 
-export type ProjectTab = "agents" | "services" | "timeline" | "network" | "spec" | "audit" | "members";
-export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "network", "spec", "audit", "members"];
+export type ProjectTab = "agents" | "services" | "timeline" | "activity" | "network" | "spec" | "audit" | "members";
+export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "activity", "network", "spec", "audit", "members"];
 
-export type AgentTab = "overview" | "network" | "logs";
+export type AgentTab = "overview" | "activity" | "network" | "logs";
 
 export type SettingsTab = "engines" | "users" | "account";
 export const settingsTabs: SettingsTab[] = ["engines", "users", "account"];
@@ -40,7 +40,7 @@ export function parse(pathname: string): Route {
     }
     if (rest[0] === "a" && rest[1]) {
       if (rest.length === 2) return { name: "agent", engine, project, agent: rest[1], tab: "overview" };
-      if (rest.length === 3 && (rest[2] === "logs" || rest[2] === "network")) return { name: "agent", engine, project, agent: rest[1], tab: rest[2] };
+      if (rest.length === 3 && (rest[2] === "logs" || rest[2] === "network" || rest[2] === "activity")) return { name: "agent", engine, project, agent: rest[1], tab: rest[2] };
     }
   }
   return { name: "notfound" };

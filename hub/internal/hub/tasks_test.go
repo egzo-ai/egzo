@@ -81,6 +81,9 @@ func TestASpawnNeedsANameNotTakenARoleAndIsRefusedAtOnce(t *testing.T) {
 	if _, err := r.hub.StartSpawn(ctx, op, "local", "web", "coder", ""); !errors.Is(err, ErrNameRequired) {
 		t.Errorf("a spawn without a name: %v", err)
 	}
+	if _, err := r.hub.StartSpawn(ctx, op, "local", "web", "coder", "Not-Valid"); !errors.Is(err, ErrBadName) {
+		t.Errorf("a spawn of a name an agent cannot have: %v", err)
+	}
 	if _, err := r.hub.StartSpawn(ctx, op, "local", "web", "coder", "taken"); !errors.As(err, new(ExistsError)) {
 		t.Errorf("a spawn of a name an agent has: %v", err)
 	}

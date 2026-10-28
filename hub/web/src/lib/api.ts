@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Network, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, Spawn, TimelineEvent,
+  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Network, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, Task, TimelineEvent,
   UserRow,
 } from "./types";
 
@@ -70,11 +70,15 @@ export const api = {
   project: (engine: string, name: string) => request<Project>("GET", project(engine, name)),
   events: (engine: string, name: string, agentName = "", limit = 40) =>
     request<{ events: TimelineEvent[] }>("GET", `${project(engine, name)}/events?limit=${limit}${agentName ? "&agent=" + enc(agentName) : ""}`).then((r) => r.events),
-  /** Answered at once: the hub runs the spawn, and the project lists it until it has ended. */
+  /** Answered at once: the hub runs the spawn as a task, and the agent is in the project from then on. */
   spawn: (engine: string, name: string, template: string, agentName: string) =>
-    request<{ spawn: Spawn }>("POST", `${project(engine, name)}/spawn`, { template, name: agentName }),
-  /** Takes an ended spawn off the project's list. */
-  dismissSpawn: (engine: string, name: string, id: string) => request<{ ok: true }>("DELETE", `${project(engine, name)}/spawns/${enc(id)}`),
+    request<{ task: Task }>("POST", `${project(engine, name)}/spawn`, { template, name: agentName }).then((r) => r.task),
+  /** The project's activity, or one agent's: the latest tasks, newest first. */
+  tasks: (engine: string, name: string, agentName = "") =>
+    request<{ tasks: Task[] }>("GET", `${project(engine, name)}/tasks${agentName ? "?agent=" + enc(agentName) : ""}`).then((r) => r.tasks),
+  task: (engine: string, name: string, id: string) => request<{ task: Task }>("GET", `${project(engine, name)}/tasks/${enc(id)}`).then((r) => r.task),
+  /** Takes an ended task off its agent. */
+  dismissTask: (engine: string, name: string, id: string) => request<{ ok: true }>("DELETE", `${project(engine, name)}/tasks/${enc(id)}`),
   spec: (engine: string, name: string) => request<{ text: string }>("GET", `${project(engine, name)}/spec`).then((r) => r.text),
   members: (engine: string, name: string) => request<Members>("GET", `${project(engine, name)}/members`),
   setRole: (engine: string, name: string, user: string, role: string) =>
@@ -84,7 +88,9 @@ export const api = {
     request<Network>("GET", `${project(engine, name)}/network${agentName ? "?agent=" + enc(agentName) : ""}`),
 
   agent: (engine: string, p: string, a: string) => request<AgentAnswer>("GET", agent(engine, p, a)),
-  operate: (engine: string, p: string, a: string, verb: "start" | "stop" | "rm") => request<{ agent: string }>("POST", `${agent(engine, p, a)}/${verb}`),
+  /** Answered at once: the hub runs it as a task, shown on the agent. */
+  operate: (engine: string, p: string, a: string, verb: "start" | "stop" | "rm") =>
+    request<{ task: Task }>("POST", `${agent(engine, p, a)}/${verb}`).then((r) => r.task),
   logs: (engine: string, p: string, a: string) => request<{ text: string }>("GET", `${agent(engine, p, a)}/logs`).then((r) => r.text),
 };
 

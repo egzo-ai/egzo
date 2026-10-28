@@ -44,3 +44,40 @@ export function activityKind(activity: string, waiting: boolean): string {
   }
   return "neutral";
 }
+
+const taskWords: Record<string, [string, string, string]> = {
+  // what it does, what it did, what it could not do
+  spawn: ["spawning", "Spawned", "spawn"],
+  start: ["starting", "Started", "start"],
+  stop: ["stopping", "Stopped", "stop"],
+  rm: ["removing", "Removed", "remove"],
+};
+
+/** What a task does, for its pill: "stopping". */
+export function taskDoing(verb: string): string {
+  return taskWords[verb]?.[0] ?? verb;
+}
+
+/** How a task ended, for whoever asked: "Stopped agent-3", "Could not stop agent-3: why". */
+export function taskEnded(verb: string, agent: string, state: string, error = ""): string {
+  const words = taskWords[verb] ?? [verb, verb, verb];
+  if (state === "done") return `${words[1]} ${agent}`;
+  if (state === "interrupted") return `The hub stopped while ${words[0]} ${agent}: look at the agent`;
+  return `Could not ${words[2]} ${agent}${error ? ": " + error : ""}`;
+}
+
+/** The pill of a task that ended badly: "stop failed". */
+export function taskFailedLabel(verb: string, state: string): string {
+  return state === "interrupted" ? "interrupted" : `${taskWords[verb]?.[2] ?? verb} failed`;
+}
+
+/** How long something took: "4 s", "2 min 5 s". */
+export function duration(fromIso: string, toIso?: string, now = Date.now()): string {
+  const from = +new Date(fromIso);
+  const to = toIso ? +new Date(toIso) : now;
+  if (isNaN(from) || isNaN(to)) return "";
+  const s = Math.max(0, Math.round((to - from) / 1000));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
+  return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+}

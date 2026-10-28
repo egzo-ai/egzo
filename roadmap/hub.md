@@ -181,6 +181,9 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   engines), project page (agents, spawn, start / stop / remove, services, timeline, network, spec, audit log, members), agent page
   (status, timeline, network, logs), and terminals: several at once, in a sidebar, held by one person each with presence and take-over. No
   messaging. A question an agent is waiting on is shown as a status.
+- Tasks ([hub-tasks.md](hub-tasks.md)): a spawn, start, stop or removal is answered at once and runs in the background, shown on
+  its agent with its step for everyone, one at a time per agent; a spawn is one agent from the start; failures stay until dismissed;
+  the project's Activity tab lists them.
 - Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
   the terminal websocket.
 - Tests: Go unit tests with the engine seam faked; Playwright tests of the pages; `make hub-integration` (real engine, real
@@ -190,7 +193,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
-- **Tasks** (feedback for spawn, start, stop and remove, one row per spawn, an Activity tab): see [hub-tasks.md](hub-tasks.md).
 - **Discovery, the rest** (a Refresh button, showing how fresh a listing is): see [discovery.md](discovery.md).
 - **The timelines without a command in the sidecar.** The status is streamed, but the project and agent timelines, the spec and the
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,

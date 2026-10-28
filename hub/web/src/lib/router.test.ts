@@ -15,6 +15,8 @@ describe("the router", () => {
     expect(parse("/e/lab/p/web/network")).toEqual({ name: "project", engine: "lab", project: "web", tab: "network" });
     expect(parse("/e/lab/p/web/a/coder-1/network")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "network" });
     expect(href.agent("lab", "web", "coder-1", "network")).toBe("/e/lab/p/web/a/coder-1/network");
+    expect(parse("/e/lab/p/web/activity")).toEqual({ name: "project", engine: "lab", project: "web", tab: "activity" });
+    expect(parse("/e/lab/p/web/a/coder-1/activity")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "activity" });
   });
 
   it("answers not found for anything else", () => {
