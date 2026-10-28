@@ -258,9 +258,8 @@ func TestUsersOperateTheirOwnAgentsAndAdministratorsAllOfThem(t *testing.T) {
 	r.store.SetRole(ctx, "local", "web", bob.ID, rbac.User)
 	r.store.SetRole(ctx, "local", "web", carol.ID, rbac.Administrator)
 
-	name, err := r.hub.Spawn(ctx, alice, "local", "web", "coder", "")
-	if err != nil || name != "coder-1" {
-		t.Fatalf("spawn: %q %v", name, err)
+	if err := r.hub.Spawn(ctx, alice, "local", "web", "coder", "coder-1"); err != nil {
+		t.Fatalf("spawn: %v", err)
 	}
 	if calls := r.fakes["local"].Calls(); calls[len(calls)-1] != "spawn web/coder-1 user:"+alice.ID {
 		t.Errorf("the agent was not made on behalf of the user: %v", calls)
@@ -328,11 +327,11 @@ func TestSpawnNeedsARoleAndATemplate(t *testing.T) {
 	r.operator()
 	alice := r.login("alice")
 	r.scan()
-	if _, err := r.hub.Spawn(ctx, alice, "local", "web", "coder", ""); !errors.Is(err, ErrNotFound) {
+	if err := r.hub.Spawn(ctx, alice, "local", "web", "coder", "coder-1"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("spawn without a role: %v", err)
 	}
 	r.store.SetRole(ctx, "local", "web", alice.ID, rbac.User)
-	if _, err := r.hub.Spawn(ctx, alice, "local", "web", "ghost", ""); err == nil {
+	if err := r.hub.Spawn(ctx, alice, "local", "web", "ghost", "ghost-1"); err == nil {
 		t.Error("spawned a template that does not exist")
 	}
 }

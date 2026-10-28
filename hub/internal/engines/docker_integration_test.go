@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -155,14 +156,21 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 	}
 
 	// spawn on behalf of a user: the actor label is what the hub's own-agents rule reads
-	spawned, err := eng.Spawn(ctx, name, "coder", "", "user:u1")
+	// it says each step as it goes, as `egzo spawn` prints them
+	var steps []string
+	record := func(step string) { steps = append(steps, step) }
+	spawned, err := eng.Spawn(ctx, name, "coder", "", "user:u1", record)
 	if err != nil || spawned != "coder-1" {
 		t.Fatalf("spawn = %q, %v", spawned, err)
 	}
-	if _, err := eng.Spawn(ctx, name, "coder", "coder-1", "user:u1"); err == nil {
+	if len(steps) < 2 || !slices.ContainsFunc(steps, func(s string) bool { return strings.HasPrefix(s, "create container ") }) {
+		t.Errorf("the steps of a spawn = %q", steps)
+	}
+	ignore := func(string) {}
+	if _, err := eng.Spawn(ctx, name, "coder", "coder-1", "user:u1", ignore); err == nil {
 		t.Error("spawned an instance name twice")
 	}
-	if _, err := eng.Spawn(ctx, name, "coder", "bad", "someone"); err == nil {
+	if _, err := eng.Spawn(ctx, name, "coder", "bad", "someone", ignore); err == nil {
 		t.Error("an invalid actor was accepted")
 	}
 	detail, _ = eng.Project(ctx, name)
@@ -288,13 +296,17 @@ func TestDockerEngineAgainstARealProject(t *testing.T) {
 	if err := eng.Stop(ctx, name, "coder-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := eng.Remove(ctx, name, "coder-1"); err != nil {
+	steps = nil
+	if err := eng.Remove(ctx, name, "coder-1", record); err != nil {
 		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(steps, func(s string) bool { return strings.HasPrefix(s, "remove container ") }) {
+		t.Errorf("the steps of a removal = %q", steps)
 	}
 	if detail, _ = eng.Project(ctx, name); len(detail.Agents) != 0 {
 		t.Errorf("agents after rm: %+v", detail.Agents)
 	}
-	if err := eng.Remove(ctx, name, "coder-1"); err == nil {
+	if err := eng.Remove(ctx, name, "coder-1", ignore); err == nil {
 		t.Error("removed an agent twice")
 	}
 }

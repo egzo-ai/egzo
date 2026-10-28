@@ -10,6 +10,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -202,17 +203,18 @@ func (d *Docker) instance(ctx context.Context, project, agent string) (stack.Obs
 	return observed, nil, fmt.Errorf("agent %q has no container: it needs to be removed and spawned again", agent)
 }
 
-func (d *Docker) Spawn(ctx context.Context, project, template, name, actor string) (string, error) {
+func (d *Docker) Spawn(ctx context.Context, project, template, name, actor string, progress func(string)) (string, error) {
 	published, err := stack.ReadPublished(ctx, d.client, project)
 	if err != nil {
 		return "", err
 	}
+	progress("take the project's lock")
 	release, err := stack.LockWait(ctx, d.client, project, published.Image, 30*time.Second)
 	if err != nil {
 		return "", err
 	}
 	defer release()
-	spawned, err := stack.Spawn(ctx, d.client, project, "", stack.SpawnRequest{Template: template, Name: name, Actor: actor}, io.Discard)
+	spawned, err := stack.Spawn(ctx, d.client, project, "", stack.SpawnRequest{Template: template, Name: name, Actor: actor}, &steps{progress: progress})
 	if err != nil {
 		return "", err
 	}
@@ -245,11 +247,12 @@ func (d *Docker) Stop(ctx context.Context, project, agent string) error {
 	return d.client.API.ContainerStop(ctx, target.ID, container.StopOptions{Timeout: &timeout})
 }
 
-func (d *Docker) Remove(ctx context.Context, project, agent string) error {
+func (d *Docker) Remove(ctx context.Context, project, agent string, progress func(string)) error {
 	published, err := stack.ReadPublished(ctx, d.client, project)
 	if err != nil {
 		return err
 	}
+	progress("take the project's lock")
 	release, err := stack.LockWait(ctx, d.client, project, published.Image, 30*time.Second)
 	if err != nil {
 		return err
@@ -260,8 +263,31 @@ func (d *Docker) Remove(ctx context.Context, project, agent string) error {
 		return err
 	}
 	env := stack.PrepEnv{Image: published.Image, User: published.User}
-	_, err = stack.RemoveInstances(ctx, d.client, observed, env, project, published.Dir, []string{agent}, true, io.Discard)
+	_, err = stack.RemoveInstances(ctx, d.client, observed, env, project, published.Dir, []string{agent}, true, &steps{progress: progress})
 	return err
+}
+
+// steps hands what core prints as it goes, a line per step, to progress.
+type steps struct {
+	mu       sync.Mutex
+	progress func(string)
+	partial  []byte
+}
+
+func (s *steps) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.partial = append(s.partial, p...)
+	for {
+		i := bytes.IndexByte(s.partial, '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		if line := strings.TrimSpace(string(s.partial[:i])); line != "" {
+			s.progress(line)
+		}
+		s.partial = s.partial[i+1:]
+	}
 }
 
 // Attach runs `egzo agent attach` in the agent's container on a terminal, as `egzo attach` does.

@@ -32,11 +32,13 @@ type Engine interface {
 	// Watch calls changed when the egzo containers of the engine change (made, started, stopped, removed), and returns when
 	// ctx ends or the event stream breaks. It is how the hub knows to look again without asking on a timer.
 	Watch(ctx context.Context, changed func()) error
-	// Spawn makes an instance of a template; actor is the `actor` label it gets ("user:<id>").
-	Spawn(ctx context.Context, project, template, name, actor string) (agent string, err error)
+	// Spawn makes an instance of a template; actor is the `actor` label it gets ("user:<id>"). It calls progress with each step it
+	// takes ("create container ..."), as `egzo spawn` prints them.
+	Spawn(ctx context.Context, project, template, name, actor string, progress func(step string)) (agent string, err error)
 	Start(ctx context.Context, project, agent string) error
 	Stop(ctx context.Context, project, agent string) error
-	Remove(ctx context.Context, project, agent string) error
+	// Remove removes an instance and what it owns, calling progress with each step, as `egzo agent rm` prints them.
+	Remove(ctx context.Context, project, agent string, progress func(step string)) error
 	// Attach connects a terminal to an agent's session until it ends or ctx is cancelled.
 	Attach(ctx context.Context, project, agent string, term Terminal) error
 	// Events returns the latest events of a project's control sidecar (message texts left out), oldest first.

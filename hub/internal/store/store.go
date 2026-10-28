@@ -1,4 +1,4 @@
-// Package store is the hub's database: users, grants, engines, sessions, the audit log and what the proxies denied. SQLite,
+// Package store is the hub's database: users, grants, engines, sessions, the audit log, the tasks and what the proxies denied. SQLite,
 // one file, no cgo.
 package store
 
@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -111,6 +111,24 @@ CREATE TABLE IF NOT EXISTS denials (
 	PRIMARY KEY (engine, project, instance, claimed_agent, protocol, host, code)
 );
 CREATE INDEX IF NOT EXISTS denials_recent ON denials (engine, project, last_at);
+-- What the hub did on the engines, and how it went (hub/internal/hub/tasks.go). Times are Unix milliseconds.
+CREATE TABLE IF NOT EXISTS tasks (
+	id TEXT PRIMARY KEY,
+	verb TEXT NOT NULL,                  -- spawn, start, stop or rm
+	engine TEXT NOT NULL,
+	project TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	template TEXT NOT NULL DEFAULT '',
+	actor TEXT NOT NULL,
+	state TEXT NOT NULL,                 -- running, done, failed or interrupted
+	step TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	started_at INTEGER NOT NULL,
+	ended_at INTEGER,
+	dismissed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS tasks_project ON tasks (engine, project, started_at);
+CREATE INDEX IF NOT EXISTS tasks_open ON tasks (state, dismissed);
 -- How far the hub read each project's audit trail: the time of the last event it handled.
 CREATE TABLE IF NOT EXISTS audit_cursors (
 	engine TEXT NOT NULL,

@@ -16,7 +16,7 @@ func TestEventsTheProxyNeverWritesAreNotKeptAndTheNetworkViewStaysSmall(t *testi
 	r := newRig(t, "local")
 	r.fakes["local"].AddProject(project("web", "coder"))
 	op := r.operator()
-	if _, err := r.hub.Spawn(ctx, op, "local", "web", "coder", ""); err != nil {
+	if err := r.hub.Spawn(ctx, op, "local", "web", "coder", "coder-1"); err != nil {
 		t.Fatal(err)
 	}
 	r.startFeeds(flushing)
