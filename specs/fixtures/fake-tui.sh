@@ -53,12 +53,17 @@ modes-old) # a TUI that turned the mouse on when it started and has written more
 	printf '\r\nREADY\r\n'
 	while :; do sleep 1; done
 	;;
-emit) # escape sequences a terminal passes on: OSC 52, OSC 8, truecolor, wide characters
+emit) # escape sequences a terminal passes on: OSC 52, OSC 8, truecolor, wide characters; at start, and again for each line read
+	stty -echo
 	printf 'READY\r\n'
-	printf '\033]52;c;aGVsbG8=\007'
-	printf '\033]8;;http://example.test/\007link\033]8;;\007\r\n'
-	printf '\033[38;2;1;2;3mtruecolor\033[0m\r\n'
-	printf 'wide:\344\275\240\345\245\275\360\237\230\200\r\n'
+	emit() {
+		printf '\033]52;c;aGVsbG8=\007'
+		printf '\033]8;;http://example.test/\007link\033]8;;\007\r\n'
+		printf '\033[38;2;1;2;3mtruecolor\033[0m\r\n'
+		printf 'wide:\344\275\240\345\245\275\360\237\230\200\r\n'
+	}
+	emit
+	while IFS= read -r _; do emit; done
 	while :; do sleep 1; done
 	;;
 reporting) # a harness with state reports and tools: it reports its life cycle like Claude Code does, and when a line

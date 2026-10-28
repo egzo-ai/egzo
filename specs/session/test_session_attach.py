@@ -142,7 +142,7 @@ def test_end_of_input_typed_at_the_start_of_a_line_reaches_the_program(sandbox, 
     detach(eof)
 
 
-def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_and_the_modes_it_set_are_reset_on_detach(sandbox):
+def test_the_program_gets_a_truecolor_terminal_its_signals_and_the_modes_it_set_are_reset_on_detach(sandbox):
     p = sandbox
     environment = p.pty("agent attach", p.spawn("env"))
     environment.expect(rb"READY TERM=xterm-256color COLORTERM=truecolor")
@@ -155,14 +155,6 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
     sigint.send(b"\x03")
     sigint.expect(b"got-int")  # twice: the attach client is still there
     detach(sigint)
-
-    emit = p.pty("agent attach", p.spawn("emit"))
-    emit.expect(rb"wide:\xe4\xbd\xa0\xe5\xa5\xbd\xf0\x9f\x98\x80")
-    seen = emit.before
-    assert b"\x1b]52;c;" + base64.b64encode(b"hello") + b"\x07" in seen  # OSC 52 clipboard
-    assert b"\x1b]8;;http://example.test/\x07link\x1b]8;;\x07" in seen  # OSC 8 hyperlink
-    assert b"\x1b[38;2;1;2;3mtruecolor" in seen  # 24-bit colour
-    detach(emit)
 
     # a TUI that enabled mouse tracking, bracketed paste or focus events cannot reset them once the user has detached
     modes = p.pty("agent attach", p.spawn("modes"))
@@ -193,6 +185,26 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_escape_sequences_
     client.expect(pexpect.EOF, timeout=30)
     client.close()
     assert p.ps()[lines]["STATE"] == "exited"
+
+
+def test_escape_sequences_pass_through_and_a_clipboard_write_reaches_the_clients_attached_but_is_not_replayed_to_a_later_one(sandbox):
+    """A client that attaches gets what the program wrote last, so the screen is not blank. A clipboard write (OSC 52) in it is
+    something the program did, not part of the screen: replayed, it would copy stale text again on every attach, in a terminal or a
+    browser. What the program writes while a client is attached reaches it whole, the clipboard write included."""
+    p = sandbox
+    emit = p.pty("agent attach", p.spawn("emit"))
+    emit.expect(rb"wide:\xe4\xbd\xa0\xe5\xa5\xbd\xf0\x9f\x98\x80")  # the program wrote it before anyone attached
+    history = emit.before
+    assert b"\x1b]8;;http://example.test/\x07link\x1b]8;;\x07" in history  # OSC 8 hyperlink
+    assert b"\x1b[38;2;1;2;3mtruecolor" in history  # 24-bit colour
+    assert b"\x1b]52;" not in history, "a clipboard write the program made before the client attached is not replayed"
+
+    emit.send(b"again\r")
+    emit.expect(rb"wide:\xe4\xbd\xa0\xe5\xa5\xbd\xf0\x9f\x98\x80")
+    live = emit.before
+    assert b"\x1b]52;c;" + base64.b64encode(b"hello") + b"\x07" in live  # OSC 52 clipboard, while attached
+    assert b"\x1b]8;;http://example.test/\x07link\x1b]8;;\x07" in live
+    detach(emit)
 
 
 def test_attach_is_refused_without_a_terminal_for_an_unknown_agent_and_for_an_agent_without_a_session_and_a_program_that_exits_at_once_fails_spawn(sandbox):

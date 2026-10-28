@@ -270,7 +270,7 @@ func (h *Holder) handle(conn net.Conn) {
 		return
 	default:
 	}
-	if recent := h.recent(); len(recent) > 0 {
+	if recent := withoutClipboardWrites(h.recent()); len(recent) > 0 {
 		c.enqueue(frameOutput, recent)
 	}
 	// The modes follow the history: a program sets them when it starts, which the history may no longer reach, and they
