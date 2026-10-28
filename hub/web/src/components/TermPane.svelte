@@ -51,11 +51,18 @@
     }
   }
 
+  // A TUI may write the clipboard several times in a row: one toast says so.
+  let copiedAt = 0;
+  function copied() {
+    if (Date.now() - copiedAt > 1500) toast("Copied");
+    copiedAt = Date.now();
+  }
+
   function flushPendingCopy() {
     if (pendingCopy === null) return;
     const text = pendingCopy;
     pendingCopy = null;
-    void copyText(text).then((ok) => { if (ok) toast("Copied"); });
+    void copyText(text).then((ok) => { if (ok) copied(); });
   }
 
   // The DOM renderer draws box characters from the font, so a line height above 1 breaks the vertical borders of a TUI into dashes.
@@ -108,7 +115,7 @@
     // A TUI copies a selection with OSC 52. Over plain http the browser only allows the copy inside a user gesture, so a refused one waits for the next.
     xterm.parser.registerOscHandler(52, (data) => {
       const text = osc52Text(data);
-      if (text !== null) void copyText(text).then((ok) => { if (ok) toast("Copied"); else pendingCopy = text; });
+      if (text !== null) void copyText(text).then((ok) => { if (ok) copied(); else pendingCopy = text; });
       return true;
     });
     useRenderer(app.renderer);
