@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -55,6 +56,10 @@ type signIn struct {
 	Expires   time.Time `json:"expires"`
 	Refreshed time.Time `json:"refreshed"`
 	ClientID  string    `json:"client_id,omitempty"`
+	// JSON says the client sends its token requests as JSON; the proxy renews the same way.
+	JSON bool `json:"json,omitempty"`
+	// Extra is what the provider's last answer said besides the tokens (scope, the account); every answer repeats it.
+	Extra map[string]any `json:"extra,omitempty"`
 	// Ended is why the sign-in no longer works (revoked, refused by the provider); its stand-ins get "sign in again".
 	Ended string `json:"ended,omitempty"`
 
@@ -69,6 +74,21 @@ type tokens struct {
 	Refresh   string `json:"refresh_token"`
 	ID        string `json:"id_token"`
 	ExpiresIn int64  `json:"expires_in"`
+	// Extra is the rest of the answer, which the client may read: Claude Code keeps a refresh only with its scope.
+	Extra map[string]any `json:"-"`
+}
+
+// extras is an answer without its tokens.
+func extras(whole map[string]any) map[string]any {
+	rest := map[string]any{}
+	for key, value := range whole {
+		switch key {
+		case "access_token", "refresh_token", "id_token", "expires_in":
+		default:
+			rest[key] = value
+		}
+	}
+	return rest
 }
 
 // SignInStatus is what `project check` and the hub are told about the sign-in of a service: none, live or ended.
@@ -86,7 +106,7 @@ type signIns struct {
 	open    bool
 	byName  map[string]*signIn
 	now     func() time.Time
-	refresh func(ctx context.Context, service string, oauth OAuth, form url.Values) (*http.Response, error)
+	refresh func(ctx context.Context, service string, oauth OAuth, form url.Values, asJSON bool) (*http.Response, error)
 }
 
 func newSignIns(store *Store) *signIns {
@@ -158,8 +178,9 @@ func isStandIn(token string) bool {
 	return len(parts) == 3 && strings.HasPrefix(parts[2], standInMark)
 }
 
-// capture records the tokens of a sign-in the provider just issued, and answers with stand-ins.
-func (s *signIns) capture(service, clientID string, issued tokens) (tokens, error) {
+// capture records the tokens of a sign-in the provider just issued, and answers with stand-ins. asJSON says the client
+// sent the exchange as JSON.
+func (s *signIns) capture(service, clientID string, asJSON bool, issued tokens) (tokens, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.open {
@@ -168,7 +189,7 @@ func (s *signIns) capture(service, clientID string, issued tokens) (tokens, erro
 	now := s.now()
 	record := &signIn{
 		Service: service, Access: issued.Access, Refresh: issued.Refresh, ID: issued.ID,
-		Expires: expiry(now, issued.ExpiresIn, issued.Access), Refreshed: now, ClientID: clientID,
+		Expires: expiry(now, issued.ExpiresIn, issued.Access), Refreshed: now, ClientID: clientID, JSON: asJSON, Extra: issued.Extra,
 		StandInAccess: []string{standIn(issued.Access)}, StandInRefresh: standIn(issued.Refresh),
 	}
 	if issued.ID != "" {
@@ -187,7 +208,7 @@ func (r *signIn) answer(now time.Time) tokens {
 	if expiresIn < 0 {
 		expiresIn = 0
 	}
-	return tokens{Access: r.StandInAccess[len(r.StandInAccess)-1], Refresh: r.StandInRefresh, ID: r.StandInID, ExpiresIn: expiresIn}
+	return tokens{Access: r.StandInAccess[len(r.StandInAccess)-1], Refresh: r.StandInRefresh, ID: r.StandInID, ExpiresIn: expiresIn, Extra: r.Extra}
 }
 
 // expiry is when an access token expires: expires_in when the provider said, else the JWT's exp claim, else in an hour.
@@ -261,15 +282,22 @@ func (s *signIns) renew(ctx context.Context, record *signIn, oauth OAuth) {
 	if record.ClientID != "" {
 		form.Set("client_id", record.ClientID)
 	}
-	response, err := s.refresh(ctx, record.Service, oauth, form)
+	response, err := s.refresh(ctx, record.Service, oauth, form, record.JSON)
 	if err != nil {
 		return
 	}
 	defer response.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, maxTokenBody))
 	var issued tokens
-	if response.StatusCode == http.StatusOK && json.Unmarshal(body, &issued) == nil && issued.Access != "" {
+	var whole map[string]any
+	if response.StatusCode == http.StatusOK && json.Unmarshal(body, &issued) == nil && json.Unmarshal(body, &whole) == nil && issued.Access != "" {
 		next := *record
+		// What a refresh leaves out (often the scope) stays as the sign-in said it.
+		next.Extra = maps.Clone(record.Extra)
+		if next.Extra == nil {
+			next.Extra = map[string]any{}
+		}
+		maps.Copy(next.Extra, extras(whole))
 		next.Access, next.Expires, next.Refreshed = issued.Access, expiry(s.now(), issued.ExpiresIn, issued.Access), s.now()
 		if issued.Refresh != "" {
 			next.Refresh = issued.Refresh
@@ -436,7 +464,7 @@ func (s *Server) serveToken(w http.ResponseWriter, r *http.Request, service stri
 			oauthError(w, http.StatusBadRequest, "invalid_grant", "egzo: the sign-in of service "+service+" ended: sign in again")
 			return http.StatusBadRequest
 		}
-		writeTokens(w, answer, nil)
+		writeTokens(w, answer)
 		return http.StatusOK
 	}
 	for _, value := range body.values {
@@ -454,18 +482,25 @@ func (s *Server) serveToken(w http.ResponseWriter, r *http.Request, service stri
 	data, _ := io.ReadAll(io.LimitReader(response.Body, maxTokenBody))
 	var issued tokens
 	var whole map[string]any
-	if json.Unmarshal(data, &issued) != nil || json.Unmarshal(data, &whole) != nil || (issued.Access == "" && issued.Refresh == "" && issued.ID == "") {
+	understood := json.Unmarshal(data, &issued) == nil && json.Unmarshal(data, &whole) == nil
+	if !understood && response.StatusCode/100 == 2 {
+		// It may hold tokens the proxy cannot see: it does not reach the client.
+		oauthError(w, http.StatusBadGateway, "temporarily_unavailable", "egzo: the provider's answer is not understood")
+		return http.StatusBadGateway
+	}
+	if !understood || (issued.Access == "" && issued.Refresh == "" && issued.ID == "") {
 		copyHeaders(w, response)
 		w.WriteHeader(response.StatusCode)
 		w.Write(data)
 		return response.StatusCode
 	}
-	answer, err := s.signIns.capture(service, body.values["client_id"], issued)
+	issued.Extra = extras(whole)
+	answer, err := s.signIns.capture(service, body.values["client_id"], body.json, issued)
 	if err != nil {
 		oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "egzo: the sign-in could not be kept: "+err.Error())
 		return http.StatusServiceUnavailable
 	}
-	writeTokens(w, answer, whole)
+	writeTokens(w, answer)
 	return http.StatusOK
 }
 
@@ -496,9 +531,13 @@ func (s *Server) serveRevoke(w http.ResponseWriter, r *http.Request, service str
 }
 
 // writeTokens answers with stand-ins: the provider's own answer with its tokens replaced, or a token answer of its own.
-func writeTokens(w http.ResponseWriter, answer tokens, whole map[string]any) {
+func writeTokens(w http.ResponseWriter, answer tokens) {
+	whole := maps.Clone(answer.Extra)
 	if whole == nil {
-		whole = map[string]any{"token_type": "Bearer"}
+		whole = map[string]any{}
+	}
+	if _, ok := whole["token_type"]; !ok {
+		whole["token_type"] = "Bearer"
 	}
 	whole["access_token"], whole["refresh_token"], whole["expires_in"] = answer.Access, answer.Refresh, answer.ExpiresIn
 	if answer.ID != "" {
@@ -511,14 +550,15 @@ func writeTokens(w http.ResponseWriter, answer tokens, whole map[string]any) {
 	json.NewEncoder(w).Encode(whole)
 }
 
-// forward sends a request the proxy read the body of to the upstream it was meant for.
+// forward sends a request the proxy read the body of to the upstream it was meant for. The client's Accept-Encoding is
+// not sent: the transport then asks for compression itself and decodes the answer, which the proxy has to read.
 func (s *Server) forward(r *http.Request, body []byte) (*http.Response, error) {
 	out, err := http.NewRequestWithContext(r.Context(), r.Method, "https://"+r.Host+r.URL.RequestURI(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	for name, values := range r.Header {
-		if !strings.EqualFold(name, "Proxy-Authorization") {
+		if !strings.EqualFold(name, "Proxy-Authorization") && !strings.EqualFold(name, "Accept-Encoding") {
 			out.Header[name] = values
 		}
 	}
@@ -533,14 +573,26 @@ func copyHeaders(w http.ResponseWriter, response *http.Response) {
 	}
 }
 
-// refreshUpstream is how the sign-ins renew at the provider: a standard refresh grant, form encoded, through the
-// policy's upstream.
-func (s *Server) refreshUpstream(ctx context.Context, service string, oauth OAuth, form url.Values) (*http.Response, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, oauth.TokenURL, strings.NewReader(form.Encode()))
+// refreshUpstream is how the sign-ins renew at the provider: a standard refresh grant, through the policy's upstream,
+// form encoded or as JSON, as the client sent it (some providers take only one).
+func (s *Server) refreshUpstream(ctx context.Context, service string, oauth OAuth, form url.Values, asJSON bool) (*http.Response, error) {
+	body, contentType := form.Encode(), "application/x-www-form-urlencoded"
+	if asJSON {
+		values := map[string]string{}
+		for key := range form {
+			values[key] = form.Get(key)
+		}
+		data, err := json.Marshal(values)
+		if err != nil {
+			return nil, err
+		}
+		body, contentType = string(data), "application/json"
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, oauth.TokenURL, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Accept", "application/json")
 	return s.transport().RoundTrip(request)
 }

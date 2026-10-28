@@ -4,10 +4,12 @@
 package proxy
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,14 +20,15 @@ import (
 	"time"
 )
 
-// provider is a token endpoint: it answers refreshes with what answer says, and counts them.
+// provider is a token endpoint: it answers refreshes with what answer says, and counts them (and how each was encoded).
 type provider struct {
 	answer   func(form url.Values) (int, string)
 	refreshs []url.Values
+	asJSON   []bool
 }
 
-func (p *provider) refresh(_ context.Context, _ string, _ OAuth, form url.Values) (*http.Response, error) {
-	p.refreshs = append(p.refreshs, form)
+func (p *provider) refresh(_ context.Context, _ string, _ OAuth, form url.Values, asJSON bool) (*http.Response, error) {
+	p.refreshs, p.asJSON = append(p.refreshs, form), append(p.asJSON, asJSON)
 	status, body := p.answer(form)
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
 }
@@ -75,7 +78,7 @@ func TestACapturedSignInSwapsItsStandInsRenewsAheadOfExpiryAndIsSealed(t *testin
 	s := openSignIns(t, dir, p)
 	now := time.Now()
 	s.now = func() time.Time { return now }
-	held, err := s.capture("idp", "app_x", tokens{Access: jwtWith(`{"sub":"u","n":1}`), Refresh: "rt-1", ExpiresIn: 3600})
+	held, err := s.capture("idp", "app_x", false, tokens{Access: jwtWith(`{"sub":"u","n":1}`), Refresh: "rt-1", ExpiresIn: 3600})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +121,7 @@ func TestAProviderThatRefusesEndsTheSignInAndAnErrorKeepsIt(t *testing.T) {
 	status, body := 500, `{"error":"server_error"}`
 	p := &provider{answer: func(url.Values) (int, string) { return status, body }}
 	s := openSignIns(t, t.TempDir(), p)
-	held, _ := s.capture("idp", "", tokens{Access: "at", Refresh: "rt", ExpiresIn: 1})
+	held, _ := s.capture("idp", "", false, tokens{Access: "at", Refresh: "rt", ExpiresIn: 1})
 	now := time.Now().Add(time.Hour)
 	s.now = func() time.Time { return now }
 	oauth := OAuth{TokenURL: "https://idp.example/oauth/token"}
@@ -172,6 +175,99 @@ func TestTheTokenEndpointAnswersARefreshItselfAndNeverSendsAStandInUpstream(t *t
 	refused := post("grant_type=urn:ietf:params:oauth:grant-type:token-exchange&subject_token="+signedIn["refresh_token"].(string), "application/x-www-form-urlencoded")
 	if refused["error"] != "invalid_grant" || len(upstream) != 1 {
 		t.Errorf("a stand-in in another grant: %v", refused)
+	}
+}
+
+// Claude Code's sign-in: JSON requests, and an answer whose scope it reads on every refresh (it keeps a refresh only if
+// the scope has user:inference).
+func TestEveryAnswerRepeatsWhatTheProviderSaidAndTheProxyRenewsAsTheClientAsked(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"access_token":"sk-ant-oat01-real","refresh_token":"sk-ant-ort01-real","expires_in":3600,"token_type":"Bearer",`+
+			`"scope":"user:inference user:profile","account":{"uuid":"a-1"}}`)
+	}))
+	defer backend.Close()
+	p := &provider{answer: func(url.Values) (int, string) {
+		return 200, `{"access_token":"sk-ant-oat01-real-2","refresh_token":"sk-ant-ort01-real-2","expires_in":3600,"organization":{"uuid":"o-1"}}`
+	}}
+	server := NewServer(mustCA(t), NewAudit(io.Discard))
+	server.Transport = rewriteTo(backend.URL)
+	server.signIns = openSignIns(t, t.TempDir(), p)
+	now := time.Now()
+	server.signIns.now = func() time.Time { return now }
+	oauth := OAuth{TokenURL: "https://platform.example/v1/oauth/token"}
+	post := func(body string) map[string]any {
+		r := httptest.NewRequest("POST", oauth.TokenURL, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		server.serveToken(w, r, "claude", oauth)
+		var answer map[string]any
+		json.Unmarshal(w.Body.Bytes(), &answer)
+		return answer
+	}
+
+	signedIn := post(`{"grant_type":"authorization_code","code":"c","client_id":"app"}`)
+	refresh := fmt.Sprint(signedIn["refresh_token"])
+	refreshed := post(`{"grant_type":"refresh_token","refresh_token":"` + refresh + `","client_id":"app"}`)
+	if refreshed["scope"] != "user:inference user:profile" || fmt.Sprint(refreshed["account"]) != "map[uuid:a-1]" || refreshed["token_type"] != "Bearer" {
+		t.Fatalf("a refresh the proxy answered: %v", refreshed)
+	}
+
+	now = now.Add(56 * time.Minute) // the proxy renews, and the provider's answer has no scope
+	server.signIns.renewDue(context.Background(), map[string]OAuth{"claude": oauth})
+	if len(p.asJSON) != 1 || !p.asJSON[0] {
+		t.Fatalf("the renewal was not sent as JSON, as the client sends it: %v", p.asJSON)
+	}
+	renewed := post(`{"grant_type":"refresh_token","refresh_token":"` + refresh + `","client_id":"app"}`)
+	if renewed["scope"] != "user:inference user:profile" || fmt.Sprint(renewed["organization"]) != "map[uuid:o-1]" || renewed["access_token"] == refreshed["access_token"] {
+		t.Errorf("after a renewal: %v", renewed)
+	}
+	for _, answer := range []map[string]any{signedIn, refreshed, renewed} {
+		if text, _ := json.Marshal(answer); strings.Contains(string(text), "real") {
+			t.Errorf("a real token reached the client: %s", text)
+		}
+	}
+}
+
+func TestACompressedAnswerIsReadAndOneThatCannotBeReadNeverReachesTheClient(t *testing.T) {
+	garbled := false
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		answer := `{"access_token":"at-real","refresh_token":"rt-real","expires_in":3600,"scope":"user:inference"}`
+		if garbled {
+			io.WriteString(w, "not json at-real rt-real")
+			return
+		}
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			io.WriteString(w, answer)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		compressed := gzip.NewWriter(w)
+		io.WriteString(compressed, answer)
+		compressed.Close()
+	}))
+	defer backend.Close()
+	server := NewServer(mustCA(t), NewAudit(io.Discard))
+	server.Transport = rewriteTo(backend.URL)
+	server.signIns = openSignIns(t, t.TempDir(), &provider{answer: func(url.Values) (int, string) { return 500, "" }})
+	exchange := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "https://idp.example/oauth/token", strings.NewReader(`{"grant_type":"authorization_code","code":"c"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Accept-Encoding", "gzip, compress, deflate, br") // what Claude Code's HTTP client asks for
+		w := httptest.NewRecorder()
+		server.serveToken(w, r, "idp", OAuth{TokenURL: "https://idp.example/oauth/token"})
+		return w
+	}
+
+	w := exchange()
+	var answer map[string]any
+	if json.Unmarshal(w.Body.Bytes(), &answer) != nil || !isStandIn(fmt.Sprint(answer["access_token"])) || w.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("a compressed answer: %d %q %v", w.Code, w.Body.String(), w.Header())
+	}
+
+	garbled = true
+	if w = exchange(); w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "real") {
+		t.Errorf("an answer the proxy cannot read: %d %q", w.Code, w.Body.String())
 	}
 }
 
