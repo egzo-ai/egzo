@@ -55,7 +55,7 @@ $ openssl rand -hex 32 | pass insert --multiline egzo/shop-key
 ```
 
 - **Required.** A file without it is refused, and the error gives the command above for the file's own vault. `egzo
-  project init` writes the line and prints the command.
+  project init` writes the line, makes a key and adds it to [`.env`](#env).
 - **At least 32 bytes**, opaque: egzo does not parse it. `egzo project check` reads it like the other secrets.
 - **One per project, or shared**: the keys egzo uses are derived from it and the project's name, so one secret can serve
   several projects without them sharing a key.
@@ -161,7 +161,8 @@ agents:
   committed stays on its branch in the base.
 - Git sources are HTTPS only. The clone and the fetch go through the proxy, which injects the token (the `github`
   service), so agents hold no git credential and push their own work.
-- egzo keeps nothing in the project directory, so there is nothing to add to `.gitignore`.
+- egzo keeps nothing in the project directory. `egzo project init` puts the secret key in `.env` and, in a git
+  repository, adds `.env` to `.gitignore` unless git ignores it already. It writes no secret to a `.env` git tracks.
 
 ## Agents
 

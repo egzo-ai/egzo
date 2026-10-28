@@ -51,8 +51,7 @@ $ install -m 0755 egzo-linux-amd64 ~/.local/bin/egzo
 In a clone of your repository:
 
 ```console
-$ egzo project init                   # writes egzo.yaml: one Claude Code agent, your repo as its workspace
-$ export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)   # keep it: it seals what egzo keeps at rest
+$ egzo project init                   # writes egzo.yaml: one Claude Code agent, your repo as its workspace; the secret key in .env
 $ egzo project up
 $ egzo agent spawn claude --attach    # Claude Code in a sandbox: sign in normally with /login; Ctrl-] detaches
 ```
