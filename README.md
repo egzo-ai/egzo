@@ -52,14 +52,14 @@ In a clone of your repository:
 
 ```console
 $ egzo project init                   # writes egzo.yaml: one Claude Code agent, your repo as its workspace
-$ export ANTHROPIC_API_KEY=...
+$ export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)   # keep it: it seals what egzo keeps at rest
 $ egzo project up
-$ egzo agent spawn claude --attach    # Claude Code in a sandbox; Ctrl-] detaches
+$ egzo agent spawn claude --attach    # Claude Code in a sandbox: sign in normally with /login; Ctrl-] detaches
 ```
 
-With a Claude subscription, run `claude setup-token` and use the `anthropic-oauth` service
-([sandboxing](docs/sandboxing.md#built-in-services)). To clone a private repo or push, give the agent a GitHub token: the
-`github` service ([workspaces](docs/workspaces.md)).
+Sign in once with your Claude subscription: the proxy keeps the sign-in, and every agent after the first starts signed in.
+An API key or a `claude setup-token` token works too ([Claude Code](docs/harnesses.md#claude-code)). To clone a private
+repo or push, give the agent a GitHub token: the `github` service ([workspaces](docs/workspaces.md)).
 
 ## Web UI
 
