@@ -193,6 +193,8 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
+- **Projects link themselves to the hub** instead of the hub connecting to engines: see [hub-link.md](hub-link.md). It removes
+  engines as data, discovery by labels and the engine credentials described on this page.
 - **Previews of an agent's dev server** (one origin per preview on a domain of its own, through `engine exec`), and the
   `__Host-` session cookie they need first: see [agent-ports.md](agent-ports.md).
 - **Discovery, the rest** (a Refresh button, showing how fresh a listing is): see [discovery.md](discovery.md).

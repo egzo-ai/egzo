@@ -8,8 +8,8 @@ to try it. Today they cannot:
 
 - an agent is on an internal network of its own, shared only with the control sidecar and the proxy; nothing is published on
   the host, and an internal network cannot publish a port;
-- the hub never joins those networks, and it may run on another machine: it reaches an engine only through the engine API
-  (unix socket, tcp+TLS, ssh);
+- the hub never joins those networks, and it runs on another machine: it reaches a project only through the project's link
+  ([hub-link.md](hub-link.md)), and the CLI only through the engine API (unix socket, tcp+TLS, ssh);
 - dev servers listen on `127.0.0.1` inside the container by default (Vite does), so even a neighbour on the network could not
   reach them;
 - the agent has no address to give: it does not know where, or whether, a hub serves its project.
@@ -23,12 +23,13 @@ the browser. A port is the same, without a terminal:
 2. `POST /exec/{id}/start` hijacks the HTTP connection into a raw stream, over whatever carries the engine API.
 3. In the container, `egzo agent forward` connects to `127.0.0.1:3000` and copies bytes between that socket and its stdin and
    stdout. End of stdin shuts down the socket's write side; the server closing ends the command.
-4. The client copies bytes between its end of the stream and whoever wants the port.
+4. The client copies bytes between its end of the stream and whoever wants the port. The client is the CLI
+   (`egzo agent port-forward`), or the project's link, for the hub, which carries the bytes over its connection.
 
 ```
-browser ──HTTP──▶ hub (machine A) ──engine API over ssh/TLS──▶ dockerd (machine B) ──exec──▶ agent container
-                  reverse proxy                                 one exec per connection      egzo agent forward 3000
-                                                                                              └─▶ 127.0.0.1:3000
+browser ──HTTPS──▶ hub (machine A) ◀──link connection, outbound from B──  link (machine B) ──exec──▶ agent container
+                   reverse proxy        one stream per connection          engine socket            egzo agent forward 3000
+                                                                                                    └─▶ 127.0.0.1:3000
 ```
 
 - **One exec per TCP connection.** Without a TTY, Docker frames stdout and stderr in one stream; core already splits them
@@ -54,9 +55,8 @@ tools:
 - **`unexpose(port)`**: the preview is gone; the address answers 404.
 - Nothing is checked at `expose` time: a server may start after it, and stop and start again. A preview of a port where nothing
   listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
-- The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status line the
-  sidecar already writes for the hub carries them, so the hub learns of a new preview within a second and runs no command for
-  it.
+- The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status feed carries
+  them, so the hub learns of a new preview from the link within a second.
 - **The id** in the address is made by control at the first `expose` of (instance id, port), random (80 bits, base32) and kept:
   stable, so a restart of the agent, the sidecar or the hub keeps the address an agent already gave out; keyed by the instance
   id, because a name can come back (`roadmap/instance-id.md`) and a new instance must not inherit the old one's address. Opaque,
@@ -66,15 +66,9 @@ tools:
 
 ### Where the preview domain comes from
 
-The domain belongs to the hub's deployment, not to the project: one project can be seen by a hub or by none. So the hub tells
-control, through the operator API it already uses (`PUT /v1/previews {"domain": "egzo-preview.example.net"}`, by `engine exec`,
-when it discovers a project and when its setting changes). It is runtime state of the sidecar, not project configuration: the
-hub still never writes the project file. Without a hub, there is none.
-
-- Two hubs serving one engine with different domains: the last one wins, and the other's links stop matching. Not supported;
-  `docs/hub.md` says one hub per engine serves previews.
-- Alternative considered: `previews.domain` in `egzo.yaml`. Simpler for core, but the project file then names a hub's
-  deployment, and a project moved to another hub keeps a stale domain.
+The domain belongs to the hub's deployment, not to the project. A project names its hub ([hub-link.md](hub-link.md)), and the
+hub gives its preview domain to the project's link at each connection; the link hands it to control. A project without `hub:`
+has none. The project file never names the domain, so a project moved to another hub gets that hub's.
 
 ### For people without a hub
 
@@ -97,26 +91,20 @@ hub still never writes the project file. Without a hub, there is none.
 
 ## The hub: previews
 
-### Shape: one binary, a second listener, a boundary for later
+### Shape: one binary, a second listener
 
-The preview proxy needs the engine credentials (to open the exec streams) and the users and roles (to decide who may open what).
-Splitting it into another service does not take those away:
+A preview connection is a stream the hub opens over the project's link ([hub-link.md](hub-link.md)); the link runs
+`egzo agent forward` on its engine. The links are connected to the hub's process, so the preview proxy lives there too: a second
+listener (`EGZO_PREVIEW_LISTEN`) of the same binary, in the same container.
 
-| | Shape | Engine credentials | For the user | What it gives |
-|---|---|---|---|---|
-| A | one process, a second listener (`EGZO_PREVIEW_LISTEN`) | the hub | one more port | simplest |
-| B | the same image, a second compose service (`egzo-hub preview`) sharing the data volume and `EGZO_SECRET_KEY` | both | one more service in the shipped compose file | restarts, upgrades, limits and crashes apart; previews survive a hub redeploy |
-| C | a preview service without engine credentials, asking the hub for a stream to (agent, port, user); the hub splices the exec | the hub | like B | only the hub reaches engines, but every byte still goes through it |
-| D | a separate binary and image with its own engine access and auth | both | a second image, version skew, a second set of settings | nothing over B |
-
-The workload is not new: a terminal is already a long-lived exec stream bridged to a WebSocket, and a preview is the same behind
+The workload is not new: a terminal is already a long-lived stream bridged to a WebSocket, and a preview is the same behind
 `httputil.ReverseProxy`, with more connections. What differs is volume and an untrusted server on the other side, which limits
 handle (below).
 
-**Proposed: A, built with the boundary of B and C.** The preview code is its own package (`hub/internal/preview`) that depends
-on two things only: authorizing a request (cookie to user and preview) and `DialPort(engine, project, agent, port)
-(net.Conn, error)` on the `Engine` seam (faked in tests with `net.Pipe`). Moving to B, or to C if isolating the credentials ever
-matters, is then a change to `main.go` and the compose file.
+The preview code is its own package (`hub/internal/preview`) that depends on two things only: authorizing a request (cookie to
+user and preview) and `DialPort(project, agent, port) (net.Conn, error)` on the `Engine` seam (faked in tests with `net.Pipe`).
+A preview service of its own would have to reach the links through the hub anyway, so every byte would still cross the hub's
+process; it is not worth a second service.
 
 ### Addresses: one origin per preview, on a domain of its own
 
@@ -208,15 +196,15 @@ service with the DNS-01 recipe, commented out.
 ## Order of work
 
 1. The `__Host-` cookies in the hub, with the unit test. Independent of the rest.
-2. Core: `egzo agent forward` and `egzo agent port-forward`, with specs. Then the `expose` and `unexpose` tools, the exposures in
-   the status line and `ps`, and `PUT /v1/previews`, with specs. Docs: `docs/messaging.md` (the tools),
-   `docs/managing-projects.md`, `docs/security.md`.
-3. Hub: `DialPort` on the seam (Docker and fake), the preview domain pushed to control, `hub/internal/preview` (hosts, the
-   sign-in redirects, tickets, proxy, limits), `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`, the Previews panel. Unit tests
-   with the fake engine, a Playwright test, `make hub-integration` with a real agent exposing `python3 -m http.server`, and
-   `make hub-stack` with a preview through Caddy (its internal CA).
-4. The viewer role, once decided.
-5. Docs: `docs/hub.md` (previews, the certificate recipes, the separate domain), `docs/security.md` (agent code served to
+2. Core: `egzo agent forward` and `egzo agent port-forward`, with specs. They do not wait for the link.
+3. After the link ([hub-link.md](hub-link.md)): the `expose` and `unexpose` tools, the exposures in the status feed and `ps`, the
+   preview domain from the hub through the link, with specs. Docs: `docs/messaging.md` (the tools), `docs/managing-projects.md`,
+   `docs/security.md`.
+4. Hub: `DialPort` on the seam (the link and the fake), `hub/internal/preview` (hosts, the sign-in redirects, tickets, proxy,
+   limits), `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`, the Previews panel. Unit tests with the fake engine, a Playwright
+   test, and `make hub-stack` with a linked project exposing `python3 -m http.server`, through Caddy (its internal CA).
+5. The viewer role, once decided.
+6. Docs: `docs/hub.md` (previews, the certificate recipes, the separate domain), `docs/security.md` (agent code served to
    people's browsers, and why it gets its own origin).
 
 ## Open questions
@@ -242,4 +230,4 @@ service with the DNS-01 recipe, commented out.
 - **The proxy sidecar as an ingress**: it is on every agent's network, but has no published port either, and loopback servers
   stay unreachable.
 - **A path prefix on the hub's own origin**: breaks apps with absolute paths, and runs agent code with the hub's session.
-- **A separate preview binary and image** (D above): costs a second image and its settings, and gives nothing over B.
+- **A separate preview service**: it would reach the links through the hub anyway, so every byte would still cross the hub.
