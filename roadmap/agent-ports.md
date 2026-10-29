@@ -1,17 +1,18 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** Draft, not decided. Nothing is built. The session cookie fix (below) is needed before previews and is worth doing on
-its own.
+**Status.** Draft. Nothing is built. The session cookie fix (below) is needed before previews and is worth doing on its own.
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
-itself). A person wants to open it in their own browser, from their machine, to try it. Today they cannot:
+itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,
+to try it. Today they cannot:
 
 - an agent is on an internal network of its own, shared only with the control sidecar and the proxy; nothing is published on
   the host, and an internal network cannot publish a port;
 - the hub never joins those networks, and it may run on another machine: it reaches an engine only through the engine API
   (unix socket, tcp+TLS, ssh);
 - dev servers listen on `127.0.0.1` inside the container by default (Vite does), so even a neighbour on the network could not
-  reach them.
+  reach them;
+- the agent has no address to give: it does not know where, or whether, a hub serves its project.
 
 ## How: a byte stream through `engine exec`
 
@@ -41,18 +42,58 @@ browser ──HTTP──▶ hub (machine A) ──engine API over ssh/TLS──�
 
 ## Core (specs first)
 
-- **`egzo agent forward <port>`**, an in-container role of the same binary, like `egzo agent attach`. Loopback only (`127.0.0.1`,
-  then `::1`). A port where nothing listens is an exit status and one line on stderr that the client shows ("nothing listens on
-  port 3000 in coder-1").
+### The agent exposes a port: the `expose` tool
+
+The agent decides what is a preview: it knows it started a demo, on which port, and what it is. The `egzo` MCP server gets two
+tools:
+
+- **`expose(port, name?)`**: records that the agent serves something on `port` of its own loopback, with an optional short name
+  ("shop"), and answers with **the preview's address** when a hub serves the project (`https://k7f3q9x2m4ad.egzo-preview.example.net/`),
+  or, without one, the command a person runs instead (`egzo agent port-forward coder-1 3000`). The agent passes the address to
+  its user. Exposing an exposed port again changes the name and answers the same address.
+- **`unexpose(port)`**: the preview is gone; the address answers 404.
+- Nothing is checked at `expose` time: a server may start after it, and stop and start again. A preview of a port where nothing
+  listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
+- The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status line the
+  sidecar already writes for the hub carries them, so the hub learns of a new preview within a second and runs no command for
+  it.
+- **The id** in the address is made by control at the first `expose` of (instance id, port), random (80 bits, base32) and kept:
+  stable, so a restart of the agent, the sidecar or the hub keeps the address an agent already gave out; keyed by the instance
+  id, because a name can come back (`roadmap/instance-id.md`) and a new instance must not inherit the old one's address. Opaque,
+  never the project's or the agent's name: links travel in chat and logs.
+- **The address** is the id under the project's **preview domain**, which control learns from the hub (below). Without one, the
+  answer is the `port-forward` command. Control never needs to reach the hub.
+
+### Where the preview domain comes from
+
+The domain belongs to the hub's deployment, not to the project: one project can be seen by a hub or by none. So the hub tells
+control, through the operator API it already uses (`PUT /v1/previews {"domain": "egzo-preview.example.net"}`, by `engine exec`,
+when it discovers a project and when its setting changes). It is runtime state of the sidecar, not project configuration: the
+hub still never writes the project file. Without a hub, there is none.
+
+- Two hubs serving one engine with different domains: the last one wins, and the other's links stop matching. Not supported;
+  `docs/hub.md` says one hub per engine serves previews.
+- Alternative considered: `previews.domain` in `egzo.yaml`. Simpler for core, but the project file then names a hub's
+  deployment, and a project moved to another hub keeps a stale domain.
+
+### For people without a hub
+
+- **`egzo agent forward <port>`**, the in-container role above, like `egzo agent attach`. Loopback only (`127.0.0.1`, then
+  `::1`). A port where nothing listens is an exit status and one line on stderr that the client shows.
 - **`egzo agent port-forward <agent> [[address:]local:]port`** on the host, like `kubectl port-forward`: listens on
   `127.0.0.1:<local>` (default: the same number) of the machine where it runs, and opens one exec per connection it accepts. With
-  `DOCKER_HOST=ssh://box` on a laptop, the port is on the laptop. Ctrl-C ends it; it ends by itself when the agent stops.
-- **`egzo agent ports <agent>`** (`--json`): the TCP ports listening in the container, read from `/proc/net/tcp*` through an exec,
-  with the process when it can be read. The agent does nothing to be found. An MCP tool for the agent to name its demo ("the
-  shop, on 5173") is a later addition, not a requirement.
-- Specs: a server in an agent reached through `port-forward` (bytes both ways, a WebSocket upgrade, a large body, the server
-  closing first, the client closing first), a server bound to `127.0.0.1` only, nothing listening, a stopped agent, `ports`
-  listing what listens. On every reference platform, gVisor included.
+  `DOCKER_HOST=ssh://box` on a laptop, the port is on the laptop. Ctrl-C ends it; it ends by itself when the agent stops. It
+  forwards any port, exposed or not: whoever holds the engine holds the agent anyway.
+- **`egzo agent ls`** / **`egzo ps --json`** show the exposed ports.
+
+### Specs
+
+- `expose` without a preview domain answers the `port-forward` command; with one, the address; the same address again after
+  `expose` again, a restart of the agent and of the sidecar; another after the agent is removed and a new one has its name.
+- `unexpose`; the exposures in the status log line and in `ps --json`; an agent cannot expose for another.
+- A server in an agent reached through `port-forward`: bytes both ways, a WebSocket upgrade, a large body, the server closing
+  first, the client closing first; a server bound to `127.0.0.1` only; nothing listening; a stopped agent.
+- On every reference platform, gVisor included.
 
 ## The hub: previews
 
@@ -73,25 +114,20 @@ The workload is not new: a terminal is already a long-lived exec stream bridged 
 handle (below).
 
 **Proposed: A, built with the boundary of B and C.** The preview code is its own package (`hub/internal/preview`) that depends
-on two things only: authorizing a request (cookie to user, agent and port) and `DialPort(engine, project, agent, port)
+on two things only: authorizing a request (cookie to user and preview) and `DialPort(engine, project, agent, port)
 (net.Conn, error)` on the `Engine` seam (faked in tests with `net.Pipe`). Moving to B, or to C if isolating the credentials ever
 matters, is then a change to `main.go` and the compose file.
 
 ### Addresses: one origin per preview, on a domain of its own
 
 A preview is code the agent wrote, served to people's browsers. On the hub's origin it would run with the viewer's hub session.
-So every preview has its own origin, `<id>.<EGZO_PREVIEW_DOMAIN>`, and the hub serves it on the preview listener only.
+So every preview has its own origin, `<id>.<EGZO_PREVIEW_DOMAIN>`, and the hub serves it on the preview listener only. The hub
+maps a host to (engine, project, instance, port) from the exposures it reads in the status stream; an unknown host is a 404.
 
-- **The id is opaque and stable**: a random id the hub keeps per (engine, project, instance id, port), never the agent's or the
-  project's name. Stable, so a restart of the agent or the hub keeps the address (and the certificate, below); keyed by the
-  instance id, because a name can come back (`roadmap/instance-id.md`) and a new instance must not inherit the old one's origin,
-  with its cookies and storage. Opaque, because a certificate's names are public (Certificate Transparency logs): a host name
-  must not tell the world the project and agent names.
-- **Recommend a separate registrable domain** for previews (`*.egzo-preview.example.net`, not `*.preview.example.com` next to
-  the hub at `hub.example.com`). A sibling subdomain is the same *site* as the hub: `SameSite` cookies do not separate them, and a
-  page there can set a cookie on `.example.com` that the hub then receives (cookie tossing). The fix below closes that for the
-  session, but a separate domain removes the whole class, and gives previews their own certificate rate-limit budget (below).
-  The docs say so; a sibling subdomain works, with the fix.
+- **A separate registrable domain** for previews (`*.egzo-preview.example.net`, not `*.preview.example.com` next to the hub at
+  `hub.example.com`). A sibling subdomain is the same *site* as the hub: `SameSite` cookies do not separate them, and a page
+  there can set a cookie on `.example.com` that the hub then receives (cookie tossing). The fix below closes that for the
+  session; a separate domain removes the whole class. The docs recommend it; a sibling subdomain works, with the fix.
 - Routing on the host name keeps apps working unchanged: a path prefix (`/preview/abc/`) breaks every app that uses absolute
   paths (`/assets/...`), and distinct ports on one host share cookies with each other and with the hub (cookies ignore ports).
 
@@ -108,17 +144,32 @@ choosing (session fixation). The hub's Origin check still stops cross-site reque
 - Before 1.0 there is no migration: everyone signs in again once.
 - A unit test: a request carrying a planted unprefixed `egzo_session` next to the real one is the real one's user, or nobody.
 
-### Signing in on the preview origin
+### Signing in: always
 
-The hub's cookie never reaches a preview host, and must not. **Open** on the agent page asks the hub for a one-time ticket (short
-expiry, bound to the user, the preview and the browser's session) and goes to `https://<id>.<domain>/_egzo/enter?ticket=...`. The
-preview listener checks it, sets its own host-only cookie for that preview and redirects to the app.
+**A preview is never public.** Every request needs a person signed in to the hub who may view it; there is no anonymous
+preview, no setting to make one, and no share link that works without signing in.
 
-- Every request is checked: the user is enabled and may operate the agent (the same rule as the terminal), and the agent still
-  is that instance. A disabled user or a removed role loses previews at the next request.
+The link the agent gives out is a plain address, and signing in happens by redirects, because the hub's cookie never reaches a
+preview host, and must not:
+
+1. A request to `https://<id>.<domain>/...` without a preview cookie is redirected to the hub: `<EGZO_PUBLIC_URL>/preview/<id>?to=<path>`.
+2. The hub signs the person in if needed (password or SSO, as for any page), checks that they may view the preview, and
+   redirects back to `https://<id>.<domain>/_egzo/enter?ticket=...`, with a one-time ticket (seconds, bound to the user and the
+   preview).
+3. The preview listener checks the ticket, sets its own host-only cookie for that preview, and redirects to the path first asked
+   for.
+
+- Every request is checked again: the user is enabled, still may view it, and the preview still is exposed by that instance. A
+  disabled user or a removed role loses previews at the next request.
 - `/_egzo/` is the hub's on every preview host and never reaches the app. The preview cookie is stripped before the request goes
   on; the rest (the app's own cookies, `Authorization`) is the app's.
-- Sharing a preview with someone who has no role on the project is not in this item.
+- The audit log records who opened which preview (once per ticket, not per request).
+
+**Who may view a preview: to be decided.** Whoever may operate the agent is the floor. Previews are often for someone who should
+not get a terminal on the agent (a reviewer, a client), so this likely needs a new project role that may view previews and
+nothing else (**viewer**, or **external**: they see the project's previews, not its agents, terminals, network or spec). An
+external person then needs a hub account: single sign-on, or a local account the hub does not have yet
+([hub-access.md](../docs/hub-access.md) has only `admin`). Decide with the role.
 
 ### The proxy
 
@@ -128,67 +179,62 @@ preview listener checks it, sets its own host-only cookie for that preview and r
 - Limits, because the server on the other side is untrusted: open streams per preview and per hub, response header size and
   time, idle time. Going over is a 503 that says which limit, never a hub that slows down.
 - Redeploying the hub drops open previews, as it drops terminals today. A reload brings them back.
-- The audit log records who opened which preview (once per sign-in on the preview, not per request).
 
 ### The web app
 
-A **Ports** panel on the agent page: what listens (`egzo agent ports`), each with **Open**, refreshed while the panel is shown.
-No preview domain configured: the panel says what to set, and shows the `egzo agent port-forward` command for the CLI.
+A **Previews** panel on the agent page, and on the project page for every agent: each exposed port with its name and address,
+**Open**, and **Copy link**. No preview domain configured: the panel says what to set, and shows the `egzo agent port-forward`
+command.
 
-## Certificates for the preview domain
+## Certificates for the preview domain: a wildcard, with DNS-01
 
-The hub does not terminate TLS (`docs/hub.md`); the reverse proxy in front does. A wildcard certificate needs the ACME DNS-01
-challenge, which needs the reverse proxy to hold credentials for the DNS provider's API: a pain to set up, and not possible with
-every provider. Options, to document as recipes:
+The hub does not terminate TLS (`docs/hub.md`); the reverse proxy in front does, with **one wildcard certificate**
+(`*.egzo-preview.example.net`), which the ACME DNS-01 challenge issues. It is more setup once than a per-host certificate, and
+everything after is simpler:
 
-1. **One certificate per preview host, on demand** (Caddy's `on_demand_tls`). Caddy asks for a certificate at the first TLS
-   handshake for a host it has none for, with HTTP-01 or TLS-ALPN-01. Needs only a wildcard DNS *record* pointing at the reverse
-   proxy, which any DNS provider can make by hand.
-   - The hub answers Caddy's `ask` endpoint (`GET /_egzo/preview/ask?domain=<host>` on the preview listener, 200 or 404): only a
-     host the hub made gets a certificate, so nobody can make the proxy request certificates for random names. It must answer in
-     milliseconds, from memory.
-   - **It needs the preview listener reachable from the internet** on 80 or 443: the CA has to reach it to validate. That
-     contradicts "the hub is meant for a private network". Only the preview hosts need to be public, not the hub, but they are
-     public: the ticket and the per-request role check are then what protect them.
-   - **Rate limits.** Let's Encrypt issues at most 50 certificates per registered domain per 7 days (refilling one every 202
-     minutes), and 5 for the same exact name per week. A certificate per (instance, port) means one per new agent that is
-     previewed: a busy team can hit 50. Hence stable ids (an agent's restart costs nothing) and a registrable domain of its own
-     (the budget is not shared with the company's other sites). Caddy falls back to ZeroSSL by default, which helps.
-   - The first open of a new preview waits for issuance (seconds).
-   - Traefik and nginx have no on-demand issuance; this is a Caddy recipe.
-2. **A wildcard certificate with DNS-01**: one certificate, nothing public, no rate limit concern, no host names in CT logs. The
-   setup cost the user pays once. `acme-dns` (a CNAME for `_acme-challenge` delegated to a small DNS server) avoids giving the
-   proxy credentials for the main zone; Caddy and lego support it.
-3. **A private CA on a private network**: Caddy's `tls internal` (on demand works with it too) or the team's own CA. No public
-   exposure, no rate limits; every viewer's browser must trust the root once.
-4. **Plain http on a private network**: works, but some browser APIs need a secure context (clipboard, service workers,
-   `crypto.subtle`), and the hub's cookies lose the `__Host-` prefix, so the preview domain must not be a subdomain of the hub's
-   site.
+- **Nothing has to be public.** The CA checks a DNS record, never the server, so a hub on a LAN or a tailnet gets a real
+  certificate.
+- **No rate limit to plan for.** One certificate, renewed every two months, whatever the number of previews.
+- **Preview addresses stay private.** Every certificate's names are published in the Certificate Transparency logs; a
+  wildcard publishes only the domain.
+- **No delay** at the first open of a new preview.
 
-Proposed: the docs lead with 1 for a hub that faces the internet and with 2 or 3 for a private one, and `hub/compose.yaml` gets an
-optional Caddy service with the on-demand recipe, commented out. The hub terminating TLS itself (Go's `autocert` on the preview
-listener) would remove the reverse proxy for previews, but contradicts "the hub does not terminate TLS"; not now.
+The docs give recipes for Caddy and Traefik with a DNS provider's API, and the lighter way when the proxy should not hold
+credentials for the zone: **`acme-dns`**, a CNAME from `_acme-challenge.egzo-preview.example.net` to a small DNS server that
+only answers challenges (Caddy and lego support it). A team with its own CA (a private network) uses it instead, and every
+viewer's browser trusts the root once (Caddy's `tls internal` does this for a trial). `hub/compose.yaml` gets an optional Caddy
+service with the DNS-01 recipe, commented out.
 
 ## Order of work
 
 1. The `__Host-` cookies in the hub, with the unit test. Independent of the rest.
-2. Core: `egzo agent forward`, `egzo agent port-forward`, `egzo agent ports`, with specs and docs (`docs/managing-projects.md`,
-   `docs/security.md`).
-3. Hub: `DialPort` on the seam (Docker and fake), `hub/internal/preview` (hosts, tickets, proxy, limits, `ask`), the setting
-   `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`, the Ports panel. Unit tests with the fake engine, a Playwright test,
-   `make hub-integration` with a real agent running `python3 -m http.server`, and the on-demand recipe in `make hub-stack`
-   (Caddy with its internal CA).
-4. Docs: `docs/hub.md` (previews, the certificate recipes, the separate domain), `docs/security.md` (agent code served to
+2. Core: `egzo agent forward` and `egzo agent port-forward`, with specs. Then the `expose` and `unexpose` tools, the exposures in
+   the status line and `ps`, and `PUT /v1/previews`, with specs. Docs: `docs/messaging.md` (the tools),
+   `docs/managing-projects.md`, `docs/security.md`.
+3. Hub: `DialPort` on the seam (Docker and fake), the preview domain pushed to control, `hub/internal/preview` (hosts, the
+   sign-in redirects, tickets, proxy, limits), `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`, the Previews panel. Unit tests
+   with the fake engine, a Playwright test, `make hub-integration` with a real agent exposing `python3 -m http.server`, and
+   `make hub-stack` with a preview through Caddy (its internal CA).
+4. The viewer role, once decided.
+5. Docs: `docs/hub.md` (previews, the certificate recipes, the separate domain), `docs/security.md` (agent code served to
    people's browsers, and why it gets its own origin).
 
 ## Open questions
 
-- Who may open a preview: whoever may operate the agent (proposed), or anyone with a role on the project?
-- Ports found by the hub only, or also declared by the agent through an MCP tool?
-- Previews for people without a role (a link to share with a client): not now; it needs expiring links and its own audit.
+- Who may view a preview, and the role for it (viewer, external); how an external person gets an account.
+- Whether a person may also open a port the agent did not expose, from the hub (the CLI's `port-forward` can).
 
 ## Alternatives considered
 
+- **A certificate per preview host, on demand** (Caddy's `on_demand_tls`, with the hub answering its `ask` endpoint so only its
+  hosts get one): needs only a wildcard DNS record, no DNS API. Rejected: the CA must reach the preview listener from the
+  internet (HTTP-01, TLS-ALPN-01), which a hub on a private network cannot offer; Let's Encrypt issues at most 50 certificates
+  per registered domain per 7 days, one per new previewed agent; every preview's host name lands in the public CT logs; the
+  first open waits for issuance; Traefik and nginx cannot do it.
+- **The hub terminating TLS itself** (Go's `autocert` on the preview listener): contradicts "the hub does not terminate TLS",
+  with the same limits as on demand.
+- **Ports found by the hub** (`/proc/net/tcp` through an exec) instead of declared: needs no tool, but the agent still has no
+  address to give, and anything listening (a debugger, a database) would be offered as a preview.
 - **Publishing a port** (`docker run -p`): only at creation, so the agent is recreated; an internal network cannot publish; a
   remote hub would need a route to the engine host besides the engine API; the server must listen on `0.0.0.0`.
 - **The hub joining the agent's network**: breaks one network per agent, a remote hub cannot, and loopback servers stay
