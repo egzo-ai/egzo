@@ -193,6 +193,8 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
+- **Previews of an agent's dev server** (one origin per preview on a domain of its own, through `engine exec`), and the
+  `__Host-` session cookie they need first: see [agent-ports.md](agent-ports.md).
 - **Discovery, the rest** (a Refresh button, showing how fresh a listing is): see [discovery.md](discovery.md).
 - **The timelines without a command in the sidecar.** The status is streamed, but the project and agent timelines, the spec and the
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
