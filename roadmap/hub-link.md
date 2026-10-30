@@ -80,9 +80,9 @@ link: registered as web, owned by alice
 - It follows the engine's events and the control sidecar's and the proxy's logs itself (the code of the hub's `docker_feed.go`
   moves here) and pushes what changed: the hub runs nothing on the engine to keep up.
 - **gVisor**: a container under gVisor probably cannot connect to a host unix socket through a bind mount (DESIGN.md, "Control
-  plane", to verify). If the spike confirms it, a project on a gVisor engine cannot be linked: `up` refuses `hub:` there and says
-  why. The hub is optional, gVisor still works without it, and a project that needs that isolation runs unlinked on its own
-  machine.
+  plane", to verify). egzo refuses nothing in advance: `up` starts the link as anywhere else, and if the engine stops it, the
+  link fails with the engine's own error and `egzo ps` shows it. The specs run on gVisor like on every reference platform, and
+  the docs say what works there. The hub is optional: a project that needs gVisor's isolation and cannot link runs unlinked.
 - One link per project, created and removed with it, recreated by `up` when its image changes.
 
 ## The connection
@@ -130,7 +130,8 @@ Changed:
 
 - Core, specs first: `hub:` in the project file and `check --resolved`; registration (pending, approved, refused, revoked) and
   each verb against a small fake hub in `specs/fixtures`; the link reconnecting; nothing listening on the host; the link not
-  reachable from an agent; `down` unlinking; `up` refusing `hub:` on gVisor, if the spike says so.
+  reachable from an agent; `down` unlinking. On gVisor, what does not work is a
+  strict xfail of that platform, as for any unsupported feature.
 - The hub: Go unit tests with the seam faked, as now; the link endpoint tested with core's link against `httptest`;
   `make hub-stack` with a real project linking to the hub in the compose stack.
 
