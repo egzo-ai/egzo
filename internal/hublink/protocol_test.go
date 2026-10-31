@@ -226,6 +226,50 @@ func TestControlMessagesAreHeldBack(t *testing.T) {
 	}
 }
 
+func TestTheAnswerToAnUnlinkArrivesAndThenTheConnectionEnds(t *testing.T) {
+	peer, _, lines := proved(t)
+	asked := make(chan struct{}, 1)
+	go peer.Run(context.Background(), Handlers{Unlink: func() Verdict {
+		asked <- struct{}{}
+		return Verdict{State: StateUnlinked}
+	}})
+	if err := lines.Write(Unlink{Unlink: true}); err != nil {
+		t.Fatal(err)
+	}
+	<-asked
+	var verdict Verdict
+	if err := lines.Read(&verdict); err != nil || verdict.State != StateUnlinked {
+		t.Fatalf("the link heard %+v, %v", verdict, err)
+	}
+	select {
+	case <-peer.Closed():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection stayed up")
+	}
+}
+
+func TestALinkThatDoesNotHangUpIsClosed(t *testing.T) {
+	peer, _, _ := proved(t)
+	began := time.Now()
+	if err := peer.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(began); took < finishGrace {
+		t.Errorf("it was closed after %v, with no time to hear its verdict", took)
+	}
+	select {
+	case <-peer.Closed():
+	default:
+		t.Error("the connection stayed up")
+	}
+
+	peer, link, _ := proved(t)
+	done := make(chan struct{})
+	go func() { _ = peer.Finish(); close(done) }()
+	link.Close()
+	<-done
+}
+
 func TestAFeedIsPacedInBytesBeforeItIsDecoded(t *testing.T) {
 	link, hub := pair(t)
 	peer := &Peer{session: hub, control: NewLines(silence{})}
