@@ -74,7 +74,7 @@ approves it. `egzo ps` and `egzo project check` say where it stands:
 | approved | linked: `linked to ... as ..., owned by ...` | ok |
 | refused, revoked | the hub turned it away; the link does nothing the hub asks | fails |
 | unreachable | the last try failed, and the link keeps trying, from every second up to every minute | warns |
-| locked | the sidecar restarted and has not got the secret key: run `egzo project up` | warns |
+| locked | the sidecar restarted and has not got the secret key: `egzo project up` brings it | warns |
 
 Until a project is approved, and after it is revoked, the hub can ask it nothing and the link pushes nothing. Once approved, the hub can do what its
 verbs say and no more: spawn from the project's own templates, start, stop and remove instances, attach to their sessions, and read logs, events
@@ -88,6 +88,15 @@ and the published templates. It cannot run a container, mount a path or run a co
   project linked again is a new project on the hub.
 - **The link's key** is an Ed25519 key on its volume, sealed with the [secret key](project-file.md#the-secret-key). It is what the hub knows the
   project by, so a change of secret key without the old one means registering again.
+
+## After a restart
+
+After a restart of the machine or the engine, run `egzo project up`. A project does not resume by itself: the proxy holds your credentials and the link
+its key in memory only, and egzo reads secrets from your vault when you run a command. `up` starts the sidecars, reloads the policy and opens the link's
+key. A linked project is back on its hub as it was, with the same key and owner: nobody registers it again. Until then the link waits `locked`, which
+`egzo ps` shows, and the hub shows the project offline. Agents stay stopped until you, or the hub, start them.
+
+How `up` gets run is yours to arrange, by hand or from your own boot script.
 
 ## Editing the file
 

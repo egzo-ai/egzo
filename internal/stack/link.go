@@ -100,6 +100,7 @@ func desireLink(project *config.Resolved, in Inputs, identity engine.Identity) (
 		},
 		Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run/egzo": sidecarTmpfsState},
 		Network:        network.Name,
+		Restart:        "unless-stopped", // it comes back locked, which says what to do where a stopped container says nothing
 		Healthcheck:    []string{"/egzo", "link", "--healthcheck"},
 		ReadonlyRootfs: true,
 		Identity:       identity,

@@ -238,3 +238,47 @@ def test_a_key_sealed_with_another_secret_key_is_refused_and_says_so(live_projec
     other = "b" * 64
     result = live_project.run("project", "up", "--recreate", env={SECRET_KEY_VARIABLE: other})
     assert result.returncode != 0 and "another secret key" in result.stderr
+
+
+def test_after_a_reboot_up_brings_the_project_back_with_the_same_key_and_nobody_registers_again(live_project, engine, egzo, fake_hub):
+    """`up` is required after a restart. Who runs it is outside egzo."""
+    p = live_project
+    p.write(document(engine, egzo, fake_hub))
+    p.ok("project up")
+    assert eventually(lambda: fake_hub.registration(p.name))
+    fake_hub.decide(p.name, "approved", "alice")
+    assert eventually(lambda: "owned by alice" in row(p, "link")["status"])
+    p.ok("agent spawn web worker")
+    registered = fake_hub.registration(p.name)
+
+    assert engine.run("stop", *[c.name for c in engine.containers(p.name)]).returncode == 0  # what a reboot leaves
+    assert eventually(lambda: not fake_hub.registration(p.name)["Online"]), "the hub sees it go"
+
+    p.ok("project up")
+    assert eventually(lambda: "owned by alice" in row(p, "link")["status"])
+    assert fake_hub.registration(p.name)["Key"] == registered["Key"]
+    assert fake_hub.registration(p.name)["ID"] == registered["ID"]
+    assert [r for r in fake_hub.registrations() if r["Project"] == p.name and r["State"] == "pending"] == []
+
+    assert eventually(lambda: fake_hub.verb(p.name, "project").get("error") is None), "the verbs are back"
+    fake_hub.must(p.name, "start", Agent="worker")
+    container = engine.instance(p.name, "worker").name
+    denied = lambda: engine.exec(container, "curl", "-s", "-m", "5", "-o", "/dev/null", "-w", "%{http_connect}", "https://denied.example.com").stdout
+    assert eventually(lambda: denied() == "403"), f"the proxy has its policy again and refuses by it, not with a 503: {denied()}"
+
+
+def test_a_link_that_restarted_alone_is_locked_and_says_what_opens_it(live_project, engine, egzo, fake_hub):
+    p = live_project
+    p.write(document(engine, egzo, fake_hub))
+    p.ok("project up")
+    assert eventually(lambda: fake_hub.registration(p.name))
+    link = f"{p.name}-link-1"
+    assert link_of(engine, p).raw["HostConfig"]["RestartPolicy"]["Name"] == "unless-stopped"
+    started = engine.inspect(link)["State"]["StartedAt"]
+    engine.exec(link, "kill", "-TERM", "1")  # the process ends: the engine starts it again, without the secret key
+    assert eventually(lambda: engine.inspect(link)["State"]["StartedAt"] != started and engine.inspect(link)["State"]["Running"])
+    assert eventually(lambda: "locked" in row(p, "link")["status"])
+    assert "egzo project up" in row(p, "link")["status"]
+    assert "locked" in check(p).stdout
+    p.ok("project up")
+    assert eventually(lambda: "pending" in row(p, "link")["status"])

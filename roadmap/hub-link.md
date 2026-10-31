@@ -79,8 +79,10 @@ link: pending: register this project at https://my-egzo.example.org/link/QXRB-7K
 - It runs as the sidecars' user with the socket's group as its primary group. Only the engine's host knows that group and the CLI may
   be elsewhere, so `up` reads it with a throwaway container that mounts the socket. The socket's path is the one the CLI dials when
   that is a unix socket, and `/var/run/docker.sock` otherwise.
-- The secret key and any `HTTPS_PROXY` reach it through `engine exec`, on stdin, so they are never in `inspect`. It holds them in memory:
-  a link that restarted by itself is `locked` until the next `up`.
+- The secret key and any `HTTPS_PROXY` reach it through `engine exec`, on stdin, so they are never in `inspect`, and it holds them in memory.
+- **After a restart, `egzo project up` is required**, and resumes the project with the same key and registration. Whether something runs it
+  unattended is outside egzo: a person, or a host's own boot script. egzo stores nothing to resume by itself. The link has a restart policy so
+  that it is there to say `locked`, but it cannot connect until `up`: the hub shows the project offline.
 - It follows the engine's events and the control sidecar's and the proxy's logs itself (the code of the hub's `docker_feed.go`
   moves here) and pushes what changed: the hub runs nothing on the engine to keep up.
 - **gVisor**: a container under gVisor probably cannot connect to a host unix socket through a bind mount (DESIGN.md, "Control
