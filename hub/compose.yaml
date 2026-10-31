@@ -1,11 +1,9 @@
-# The egzo hub: a web UI over the egzo projects of one or more container engines.
+# The egzo hub: a web UI over the egzo projects that link to it. It mounts nothing of the host: projects dial in.
 #
-#   cp .env.example .env     # set EGZO_SECRET_KEY
+#   cp .env.example .env     # set EGZO_PUBLIC_URL
 #   docker compose up -d
 #   docker compose logs hub  # the admin password, printed once
 #   open http://localhost:8080
-#
-# Read docs/hub.md first: mounting the engine socket is root-equivalent on the host.
 name: egzo-hub
 
 services:
@@ -15,7 +13,11 @@ services:
     ports:
       - "8080:8080"           # meant for a private network (LAN, Tailscale, a tunnel), not the open internet
     environment:
-      EGZO_SECRET_KEY: ${EGZO_SECRET_KEY:?set EGZO_SECRET_KEY in .env}
+      # The address projects name in `hub:`. A link in a container reaches it, so not localhost.
+      EGZO_PUBLIC_URL: ${EGZO_PUBLIC_URL:?set EGZO_PUBLIC_URL in .env}
+      # When projects reach the hub at another address, or on a listener of its own that serves links and no page.
+      EGZO_LINK_URL: ${EGZO_LINK_URL:-}
+      EGZO_LINK_LISTEN: ${EGZO_LINK_LISTEN:-}
       # The starter account, admin: a password from here (saved at every start), else one printed once in the log.
       EGZO_ADMIN_PASSWORD: ${EGZO_ADMIN_PASSWORD:-}
       EGZO_LOCAL_LOGIN: ${EGZO_LOCAL_LOGIN:-true}
@@ -24,15 +26,9 @@ services:
       EGZO_OIDC_CLIENT_ID: ${EGZO_OIDC_CLIENT_ID:-}
       EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:-}
       EGZO_OIDC_NAME: ${EGZO_OIDC_NAME:-}
-      EGZO_PUBLIC_URL: ${EGZO_PUBLIC_URL:-}
       EGZO_TRUSTED_PROXIES: ${EGZO_TRUSTED_PROXIES:-}
-      # The engine of the quick start. "none" starts with no engine; add engines in the UI.
-      EGZO_LOCAL_ENGINE: ${EGZO_LOCAL_ENGINE:-unix:///var/run/docker.sock}
     volumes:
       - hub-data:/data
-      - /var/run/docker.sock:/var/run/docker.sock   # root-equivalent: see docs/hub.md for safer ways
-    group_add:
-      - "${DOCKER_GID:-0}"      # the group that owns the socket: stat -c %g /var/run/docker.sock
 
 volumes:
   hub-data:

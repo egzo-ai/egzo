@@ -82,14 +82,6 @@ CREATE TABLE IF NOT EXISTS grants (
 	role TEXT NOT NULL,
 	PRIMARY KEY (project, user_id)
 );
-CREATE TABLE IF NOT EXISTS engines (
-	name TEXT PRIMARY KEY,
-	host TEXT NOT NULL,
-	ssh_user TEXT NOT NULL DEFAULT '',
-	host_key TEXT NOT NULL DEFAULT '',    -- the pinned ssh host key fingerprint
-	credentials BLOB,                     -- sealed JSON: CA, cert, key, ssh key
-	created_at INTEGER NOT NULL
-);
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -893,75 +885,6 @@ func endSessions(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]
 func (s *Store) PurgeSessions(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= ?`, time.Now().Unix())
 	return err
-}
-
-// --- engines -----------------------------------------------------------------------------------------------------------------
-
-// EngineRow is a stored engine; Credentials is still sealed.
-type EngineRow struct {
-	Name, Host, SSHUser, HostKey string
-	Credentials                  []byte
-	CreatedAt                    time.Time
-}
-
-func (s *Store) PutEngine(ctx context.Context, e EngineRow) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO engines (name, host, ssh_user, host_key, credentials, created_at) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (name) DO UPDATE SET host = excluded.host, ssh_user = excluded.ssh_user, host_key = excluded.host_key, credentials = excluded.credentials`,
-		e.Name, e.Host, e.SSHUser, e.HostKey, e.Credentials, time.Now().Unix())
-	return err
-}
-
-func (s *Store) Engine(ctx context.Context, name string) (EngineRow, error) {
-	var e EngineRow
-	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT name, host, ssh_user, host_key, credentials, created_at FROM engines WHERE name = ?`, name).
-		Scan(&e.Name, &e.Host, &e.SSHUser, &e.HostKey, &e.Credentials, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return e, ErrNotFound
-	}
-	e.CreatedAt = time.Unix(created, 0)
-	return e, err
-}
-
-func (s *Store) Engines(ctx context.Context) ([]EngineRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, host, ssh_user, host_key, credentials, created_at FROM engines ORDER BY created_at, name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var engines []EngineRow
-	for rows.Next() {
-		var e EngineRow
-		var created int64
-		if err := rows.Scan(&e.Name, &e.Host, &e.SSHUser, &e.HostKey, &e.Credentials, &created); err != nil {
-			return nil, err
-		}
-		e.CreatedAt = time.Unix(created, 0)
-		engines = append(engines, e)
-	}
-	return engines, rows.Err()
-}
-
-// DeleteEngine removes an engine, and the grants and the denials of its projects.
-func (s *Store) DeleteEngine(ctx context.Context, name string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `DELETE FROM engines WHERE name = ?`, name)
-	if err != nil {
-		return err
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	for _, table := range []string{"grants", "denials", "audit_cursors"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE engine = ?`, name); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // --- audit -------------------------------------------------------------------------------------------------------------------
