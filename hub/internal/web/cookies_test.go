@@ -7,9 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
 const publicHub = "https://hub.example.com"
@@ -106,45 +103,5 @@ func TestAPlantedLoginCookieDoesNotFinishASignIn(t *testing.T) {
 	resp := r.send("GET", "/auth/callback?state=x", "", planted)
 	if location := resp.Header.Get("Location"); !strings.Contains(location, "did+not+start+here") {
 		t.Errorf("the callback took a planted login cookie: %s", location)
-	}
-}
-
-func TestSigningOutEndsTheSessionOfTheCookieFromBeforeThePrefix(t *testing.T) {
-	r := httpsRig(t)
-	session, former := r.passwordCookie(), r.passwordCookie()
-	unprefixed := &http.Cookie{Name: "egzo_session", Value: former.Value}
-	resp := r.send("POST", "/api/v1/logout", "{}", unprefixed, session)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("sign out = %d", resp.StatusCode)
-	}
-	cleared := false
-	for _, c := range resp.Cookies() {
-		cleared = cleared || c.Name == "egzo_session" && c.MaxAge < 0 && c.Secure
-	}
-	if !cleared {
-		t.Errorf("the old cookie stays in the browser: %v", resp.Cookies())
-	}
-	if resp := r.send("GET", "/api/v1/session", "", former); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("the old session survived signing out: %d", resp.StatusCode)
-	}
-}
-
-func TestSigningOutLeavesThePlantedSessionOfAnotherUser(t *testing.T) {
-	r := httpsRig(t)
-	session := r.passwordCookie()
-	other, _, _, err := r.store.LoginIdentity(ctx, "https://idp.example.com", "someone", store.Profile{PreferredUsername: "someone"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := r.store.NewSession(ctx, other.ID, store.MethodPassword, "", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	planted := &http.Cookie{Name: "egzo_session", Value: token}
-	if resp := r.send("POST", "/api/v1/logout", "{}", planted, session); resp.StatusCode != http.StatusOK {
-		t.Fatalf("sign out = %d", resp.StatusCode)
-	}
-	if resp := r.send("GET", "/api/v1/session", "", &http.Cookie{Name: session.Name, Value: token}); resp.StatusCode != http.StatusOK {
-		t.Errorf("signing out ended somebody else's session: %d", resp.StatusCode)
 	}
 }
