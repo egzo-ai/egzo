@@ -304,11 +304,32 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := s.readCookie(r, sessionCookie); err == nil {
+		s.endUnprefixedSession(w, r, c.Value)
 		_ = s.hub.Store().EndSession(r.Context(), c.Value)
 		s.endTerminals([]string{store.HashToken(c.Value)})
 	}
 	http.SetCookie(w, s.cookie(r, sessionCookie, "", -time.Hour))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// endUnprefixedSession clears what a browser signed in over https before the cookies had their prefix still holds: signing out
+// must not leave that session alive. Another host can plant this cookie, so its session ends only if it is the same user's.
+func (s *Server) endUnprefixedSession(w http.ResponseWriter, r *http.Request, token string) {
+	old, err := r.Cookie(sessionCookie)
+	if err != nil || !s.urls.Secure(r) {
+		return
+	}
+	expired := s.cookie(r, sessionCookie, "", -time.Hour)
+	expired.Name = sessionCookie
+	http.SetCookie(w, expired)
+	user, err := s.hub.Store().SessionUser(r.Context(), token)
+	if err != nil {
+		return
+	}
+	if owner, err := s.hub.Store().SessionUser(r.Context(), old.Value); err == nil && owner.ID == user.ID {
+		_ = s.hub.Store().EndSession(r.Context(), old.Value)
+		s.endTerminals([]string{store.HashToken(old.Value)})
+	}
 }
 
 // unlink removes one of the signed-in user's own identities.
