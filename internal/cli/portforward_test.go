@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/portforward"
 )
 
 // pair is the two ends of a TCP connection: hanging up is about what the kernel does with unread bytes.
@@ -123,5 +126,35 @@ func TestACancelledContextEndsThePause(t *testing.T) {
 	}
 	if _, err := f.accept(ctx, &failingListener{errors: emfile}); !errors.Is(err, syscall.EMFILE) {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestTheImageIsBlamedOnlyWhenItIsAtFault(t *testing.T) {
+	notEgzo := "does not contain egzo"
+	cases := []struct {
+		name   string
+		result engine.ExecResult
+		err    error
+		want   string
+	}{
+		{name: "it refuses the port", result: engine.ExecResult{Stderr: []byte(`"0" ` + portforward.NotAPort), ExitCode: 1}},
+		{name: "not in the image", result: engine.ExecResult{ExitCode: 127}, want: notEgzo},
+		{name: "cannot run it", result: engine.ExecResult{ExitCode: 126}, want: notEgzo},
+		{name: "older", result: engine.ExecResult{Stderr: []byte("unknown command"), ExitCode: 1}, want: notEgzo},
+		{name: "start failed", err: errors.New(`exec: "egzo": executable file not found in $PATH`), want: notEgzo},
+		{name: "engine failure", err: errors.New("server error 500"), want: "server error 500"},
+		{name: "killed", result: engine.ExecResult{ExitCode: 137}, want: "killed"},
+	}
+	for _, c := range cases {
+		err := probed("web", c.result, c.err)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	if err := probed("web", engine.ExecResult{}, context.Canceled); !errors.Is(err, context.Canceled) {
+		t.Errorf("the cause is lost: %v", err)
 	}
 }

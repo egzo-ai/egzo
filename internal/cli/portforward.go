@@ -98,14 +98,21 @@ func newPortForwardCommand(opts *options) *cobra.Command {
 // canForward asks the egzo in the agent's image for a port that it refuses: only one that knows `agent forward` says so.
 func canForward(ctx context.Context, c *engine.Client, id, name string) error {
 	result, err := c.Exec(ctx, id, portforward.Command(0), nil)
-	if err != nil && ctx.Err() != nil {
-		return err
+	return probed(name, result, err)
+}
+
+// probed reads the answer of canForward. Only a command that ran, or that was not found, says anything about the image.
+func probed(name string, result engine.ExecResult, err error) error {
+	switch {
+	case err != nil && !strings.Contains(err.Error(), "executable file not found"):
+		return fmt.Errorf("asking agent %q if it can forward a port: %w", name, err)
+	case err == nil && strings.Contains(string(result.Stderr), portforward.NotAPort):
+		return nil
+	case err == nil && result.ExitCode > 128:
+		return fmt.Errorf("asking agent %q if it can forward a port: the command was killed (code %d)", name, result.ExitCode)
 	}
-	if !strings.Contains(string(result.Stderr), portforward.NotAPort) {
-		return fmt.Errorf("agent %q cannot forward a port: its image does not contain egzo, or one older than `egzo agent forward` "+
-			"(the egzo harness images of this version do)", name)
-	}
-	return nil
+	return fmt.Errorf("agent %q cannot forward a port: its image does not contain egzo, or one older than `egzo agent forward` "+
+		"(the egzo harness images of this version do)", name)
 }
 
 type forwarder struct {
