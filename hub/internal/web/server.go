@@ -61,6 +61,9 @@ type Server struct {
 const (
 	sessionCookie = "egzo_session"
 	loginCookie   = "egzo_login"
+	// hostOnly is the prefix of the cookies over https. A browser takes a __Host- cookie only from the host itself, Secure, with
+	// Path=/ and no Domain, so another host of the site cannot plant or overwrite one. Plain http cannot have it.
+	hostOnly = "__Host-"
 )
 
 // New builds the server. a is nil without single sign-on. The hub's sign-in must be set up first (hub.SetupSignIn).
@@ -191,7 +194,21 @@ func (s *Server) appHandler() http.Handler {
 // --- login ---------------------------------------------------------------------------------------------------------------------
 
 func (s *Server) cookie(r *http.Request, name, value string, ttl time.Duration) *http.Cookie {
-	return &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.urls.Secure(r), MaxAge: int(ttl.Seconds())}
+	return &http.Cookie{Name: s.cookieName(r, name), Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.urls.Secure(r), MaxAge: int(ttl.Seconds())}
+}
+
+// cookieName is the name a cookie has on this request. Over https only the prefixed one is read: an unprefixed cookie of the same
+// name is somebody else's, however valid its value.
+func (s *Server) cookieName(r *http.Request, name string) string {
+	if s.urls.Secure(r) {
+		return hostOnly + name
+	}
+	return name
+}
+
+// readCookie finds one of the hub's own cookies on a request.
+func (s *Server) readCookie(r *http.Request, name string) (*http.Cookie, error) {
+	return r.Cookie(s.cookieName(r, name))
 }
 
 // safeNext only lets a path of this hub through: a login link must not become an open redirect. Control characters are refused
@@ -322,7 +339,7 @@ func (s *Server) linkStart(w http.ResponseWriter, r *http.Request, user store.Us
 }
 
 func (s *Server) loginCallback(w http.ResponseWriter, r *http.Request) {
-	c, err := r.Cookie(loginCookie)
+	c, err := s.readCookie(r, loginCookie)
 	if err != nil || s.auth == nil {
 		s.loginFail(w, r, "The login did not start here. Try again.")
 		return
@@ -375,7 +392,7 @@ func (s *Server) loginCallback(w http.ResponseWriter, r *http.Request) {
 // linkCallback adds the identity to the user who started the link, if they are still the one signed in. No session is made.
 func (s *Server) linkCallback(w http.ResponseWriter, r *http.Request, l loginState, claims auth.Claims, profile store.Profile, fail func(http.ResponseWriter, *http.Request, string)) {
 	var user store.User
-	c, err := r.Cookie(sessionCookie)
+	c, err := s.readCookie(r, sessionCookie)
 	if err == nil {
 		user, err = s.hub.Store().SessionUser(r.Context(), c.Value)
 	}
@@ -446,7 +463,7 @@ type authedHandler func(w http.ResponseWriter, r *http.Request, user store.User)
 
 func (s *Server) authed(next authedHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
+		c, err := s.readCookie(r, sessionCookie)
 		var user store.User
 		if err == nil {
 			user, err = s.hub.Store().SessionUser(r.Context(), c.Value)

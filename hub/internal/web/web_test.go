@@ -36,6 +36,7 @@ type rig struct {
 	fakes    map[string]*fake.Engine
 	oidc     *oidctest.Provider
 	signIn   hub.SignInOptions
+	public   string // EGZO_PUBLIC_URL
 }
 
 var ctx = context.Background()
@@ -83,7 +84,7 @@ func newRigWith(t *testing.T, options []func(*rig), engineNames ...string) *rig 
 	if _, err := r.hub.SetupSignIn(ctx, r.signIn); err != nil {
 		t.Fatal(err)
 	}
-	urls, _ := publicurl.New("", nil)
+	urls, _ := publicurl.New(r.public, nil)
 	var sso web.Authenticator
 	if r.signIn.Issuer != "" {
 		sso = auth.New(auth.Config{Issuer: r.provider.URL, ClientID: "hub", ClientSecret: "secret"})

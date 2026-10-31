@@ -303,7 +303,7 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := s.readCookie(r, sessionCookie); err == nil {
 		_ = s.hub.Store().EndSession(r.Context(), c.Value)
 		s.endTerminals([]string{store.HashToken(c.Value)})
 	}
