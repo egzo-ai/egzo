@@ -158,3 +158,26 @@ func TestTheImageIsBlamedOnlyWhenItIsAtFault(t *testing.T) {
 		t.Errorf("the cause is lost: %v", err)
 	}
 }
+
+func TestAFailureSaysSomethingEvenWithoutWords(t *testing.T) {
+	if got := lastWords("  nothing listens on port 3000\n").reason(1); got != "nothing listens on port 3000" {
+		t.Errorf("got %q", got)
+	}
+	if got := lastWords(nil).reason(137); got != "the forward ended with code 137" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestAWriteToAClientThatLeftIsNoted(t *testing.T) {
+	client, accepted := pair(t)
+	client.Close()
+	accepted.Close()
+	w := clientWriter{Writer: accepted}
+	if _, err := w.Write([]byte("x")); err == nil || !w.left {
+		t.Errorf("got %v, left %v", err, w.left)
+	}
+	fine := clientWriter{Writer: io.Discard}
+	if _, err := fine.Write([]byte("x")); err != nil || fine.left {
+		t.Errorf("got %v, left %v", err, fine.left)
+	}
+}

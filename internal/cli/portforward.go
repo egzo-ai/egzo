@@ -171,14 +171,27 @@ func exhausted(err error) bool {
 func (f forwarder) carry(ctx context.Context, conn net.Conn) {
 	defer hangUp(conn)
 	var said lastWords
-	code, err := f.engine.ExecStream(ctx, f.id, portforward.Command(f.port), engine.Stream{In: conn, Out: conn, Err: &said}, nil)
+	client := clientWriter{Writer: conn}
+	code, err := f.engine.ExecStream(ctx, f.id, portforward.Command(f.port), engine.Stream{In: conn, Out: &client, Err: &said}, nil)
 	switch {
-	case ctx.Err() != nil:
+	case ctx.Err() != nil, client.left:
 	case err != nil:
 		f.report(fmt.Sprintf("%s:%d: %v", f.name, f.port, err))
 	case code != 0:
-		f.report(fmt.Sprintf("%s:%d: %s", f.name, f.port, termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(said))), 200)))
+		f.report(fmt.Sprintf("%s:%d: %s", f.name, f.port, said.reason(code)))
 	}
+}
+
+// clientWriter notes a write to the client that failed: a client leaving in the middle of an answer is not a failure to report.
+type clientWriter struct {
+	io.Writer
+	left bool
+}
+
+func (w *clientWriter) Write(data []byte) (int, error) {
+	n, err := w.Writer.Write(data)
+	w.left = w.left || err != nil
+	return n, err
 }
 
 // hangUpTimeout is how long a connection whose exec ended goes on taking what the client still sends.
@@ -198,6 +211,14 @@ func hangUp(conn net.Conn) {
 
 // lastWords keeps the start of what a command says on stderr: one line, written by a program in the agent's container.
 type lastWords []byte
+
+// reason is what to report about a command that ended with code. One that was killed said nothing.
+func (w lastWords) reason(code int) string {
+	if said := termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(w))), 200); said != "" {
+		return said
+	}
+	return fmt.Sprintf("the forward ended with code %d", code)
+}
 
 func (w *lastWords) Write(data []byte) (int, error) {
 	if room := 1024 - len(*w); room > 0 {
