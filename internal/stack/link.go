@@ -187,6 +187,13 @@ func unlockLink(ctx context.Context, c *engine.Client, project, secretKey string
 	return nil
 }
 
+// RekeyLink moves the link's key to another secret key, for `egzo project rotate-ca`.
+func RekeyLink(ctx context.Context, c *engine.Client, project, secretKey string) error {
+	body, _ := json.Marshal(LinkUnlock{SecretKey: secretKey})
+	_, err := linkRequest(ctx, c, project, "PUT", "/rekey", bytes.NewReader(body))
+	return err
+}
+
 // unlink tells the hub to forget the project, through the link, when the link runs. Never fatal: the project is going either way.
 func unlink(ctx context.Context, c *engine.Client, observed Observed, out io.Writer) {
 	for _, r := range observed.Resources {

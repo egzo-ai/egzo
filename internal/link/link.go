@@ -129,7 +129,12 @@ func (l *Link) Unlock(secret []byte, proxy string) error {
 	}
 	key, err := loadKey(l.options.Dir, keys)
 	if err != nil {
-		l.setState(hublink.StateLocked, err.Error())
+		l.mu.Lock()
+		locked := l.key == nil
+		l.mu.Unlock()
+		if locked { // a link that holds its key goes on serving: only `up` was given the wrong one
+			l.setState(hublink.StateLocked, err.Error())
+		}
 		return err
 	}
 	l.mu.Lock()
@@ -143,13 +148,46 @@ func (l *Link) Unlock(secret []byte, proxy string) error {
 	return nil
 }
 
+// Rekey seals the link's key with another secret key: how the link follows `egzo project rotate-ca`. Only a link that holds its key
+// can: one that restarted has only the sealed file, and needs the old secret key first.
+func (l *Link) Rekey(secret []byte) error {
+	l.mu.Lock()
+	key := l.key
+	l.mu.Unlock()
+	if key == nil {
+		return errors.New("the link is locked: run `egzo project up` with the old secret key, then rotate again")
+	}
+	keys, err := seal.New(secret, l.options.Project)
+	if err != nil {
+		return err
+	}
+	return storeKey(l.options.Dir, keys, key)
+}
+
+// storeKey replaces the sealed key in one step: a link that dies half way keeps the one it had.
+func storeKey(dir string, keys *seal.Keys, key ed25519.PrivateKey) error {
+	sealed, err := keys.Seal(seal.UseLink, key.Seed())
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, keyFile)
+	if err := os.WriteFile(path+".new", sealed, 0o600); err != nil {
+		return fmt.Errorf("keep the link's key: %w", err)
+	}
+	if err := os.Rename(path+".new", path); err != nil {
+		return fmt.Errorf("keep the link's key: %w", err)
+	}
+	return nil
+}
+
 func loadKey(dir string, keys *seal.Keys) (ed25519.PrivateKey, error) {
 	path := filepath.Join(dir, keyFile)
 	sealed, err := os.ReadFile(path)
 	if err == nil {
 		seed, err := keys.Open(seal.UseLink, sealed)
 		if errors.Is(err, seal.ErrWrongKey) {
-			return nil, errors.New("the link's key was sealed with another secret key: give that key back, or `egzo project down` and register again")
+			return nil, errors.New("the link's key was sealed with another secret key: `egzo project rotate-ca` moves a running link to this one; " +
+				"otherwise give that key back, or `egzo project down` and register again")
 		}
 		if err != nil {
 			return nil, err
@@ -163,12 +201,8 @@ func loadKey(dir string, keys *seal.Keys) (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	sealed, err = keys.Seal(seal.UseLink, private.Seed())
-	if err != nil {
+	if err := storeKey(dir, keys, private); err != nil {
 		return nil, err
-	}
-	if err := os.WriteFile(path, sealed, 0o600); err != nil {
-		return nil, fmt.Errorf("keep the link's key: %w", err)
 	}
 	return private, nil
 }

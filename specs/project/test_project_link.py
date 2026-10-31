@@ -248,6 +248,21 @@ def test_a_key_sealed_with_another_secret_key_is_refused_and_says_so(live_projec
     assert result.returncode != 0 and "another secret key" in result.stderr
 
 
+def test_rotate_ca_moves_the_links_key_to_the_new_secret_key(live_project, engine, egzo, fake_hub):
+    live_project.write(document(engine, egzo, fake_hub))
+    live_project.ok("project up")
+    key = fake_hub.registration(live_project.name)["Key"]
+    other = "b" * 64
+    live_project.ok("project rotate-ca", env={SECRET_KEY_VARIABLE: other}, timeout=300)
+    live_project.ok("project up", env={SECRET_KEY_VARIABLE: other})
+    link = f"{live_project.name}-link-1"
+    assert engine.run("restart", link).returncode == 0
+    assert eventually(lambda: "locked" in row(live_project, "link")["status"])
+    live_project.ok("project up", env={SECRET_KEY_VARIABLE: other})
+    assert eventually(lambda: fake_hub.registration(live_project.name)["Online"])
+    assert fake_hub.registration(live_project.name)["Key"] == key
+
+
 def test_after_a_reboot_up_brings_the_project_back_with_the_same_key_and_nobody_registers_again(live_project, engine, egzo, fake_hub):
     """`up` is required after a restart. Who runs it is outside egzo."""
     p = live_project

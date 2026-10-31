@@ -109,6 +109,16 @@ func linkOperator(l *link.Link) http.Handler {
 			http.Error(w, err.Error(), http.StatusConflict)
 		}
 	})
+	mux.HandleFunc("PUT /rekey", func(w http.ResponseWriter, r *http.Request) {
+		var body stack.LinkUnlock
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+			http.Error(w, "the body is not what `rotate-ca` sends", http.StatusBadRequest)
+			return
+		}
+		if err := l.Rekey([]byte(body.SecretKey)); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+		}
+	})
 	mux.HandleFunc("POST /unlink", func(w http.ResponseWriter, r *http.Request) {
 		if err := l.Unlink(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)

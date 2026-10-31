@@ -87,7 +87,8 @@ and the published templates. It cannot run a container, mount a path or run a co
 - **Unlinking:** remove `hub:` and run `up`, or run `project down`. Both tell the hub, which forgets the project, and remove the link's key. A
   project linked again is a new project on the hub.
 - **The link's key** is an Ed25519 key on its volume, sealed with the [secret key](project-file.md#the-secret-key). It is what the hub knows the
-  project by, so a change of secret key without the old one means registering again.
+  project by. `egzo project rotate-ca` moves it to the new secret key while the link runs and holds it; a link that restarted is locked and cannot
+  follow, so it warns, and a change of secret key without the old one means registering again.
 
 ## After a restart
 
