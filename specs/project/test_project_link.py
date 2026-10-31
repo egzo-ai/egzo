@@ -174,6 +174,20 @@ def test_a_terminal_goes_through_the_link_both_ways(linked, fake_hub):
     assert "through the link" in output
 
 
+def test_the_feeds_are_pushed(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    assert eventually(lambda: hub.feed(p, "project")), "the project, at once"
+    before = len(hub.feed(p, "project"))
+    hub.must(p, "stop", Agent="fromhub")
+    assert eventually(lambda: len(hub.feed(p, "project")) > before), "and each time it changes"
+    hub.must(p, "start", Agent="fromhub")
+    assert eventually(lambda: hub.feed(p, "status"))
+
+    container = engine.instance(p, "fromhub").name
+    engine.exec(container, "curl", "-sS", "-m", "5", "https://denied.example.com")
+    assert eventually(lambda: [e for e in hub.feed(p, "audit") if e.get("Host", e.get("host")) == "denied.example.com"])
+
+
 def test_the_hub_can_ask_nothing_else(linked, fake_hub):
     assert "no verb" in fake_hub.verb(linked.name, "exec")["error"]
     assert "no agent" in fake_hub.verb(linked.name, "stop", Agent="nobody")["error"]

@@ -24,6 +24,21 @@ import (
 	"github.com/egzo-ai/egzo/internal/seal"
 )
 
+// broken is a control stream that has ended.
+type broken struct{}
+
+func (broken) Read([]byte) (int, error)  { return 0, io.EOF }
+func (broken) Write([]byte) (int, error) { return 0, errors.New("session shutdown") }
+
+// heard is a control stream that collects what the link writes.
+type heard struct{ said chan string }
+
+func (h heard) Read([]byte) (int, error) { select {} }
+func (h heard) Write(p []byte) (int, error) {
+	h.said <- string(p)
+	return len(p), nil
+}
+
 func TestRegisterOfALinkThatIsLockedOrRegisteredSendsNoCode(t *testing.T) {
 	l := New(Options{Project: "web", Hub: "https://hub"})
 	if _, err := l.Register(context.Background(), "egzo-link-x"); err == nil || !strings.Contains(err.Error(), "locked") {
