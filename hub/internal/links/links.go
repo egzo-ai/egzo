@@ -42,6 +42,8 @@ type Conn interface {
 	// Closed is closed when the connection has ended.
 	Closed() <-chan struct{}
 	Close() error
+	// Finish ends the connection after its last verdict: it lets the link hang up, and closes it if it does not.
+	Finish() error
 }
 
 // What a link says: the same types, in core.

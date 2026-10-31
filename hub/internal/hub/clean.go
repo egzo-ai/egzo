@@ -37,7 +37,7 @@ func validNames(list []string, limit int) []string {
 	return out
 }
 
-// cleanHello keeps of what a link says first what is shown to whoever approves it.
+// cleanHello keeps of what a link says first what is shown to the operators.
 func cleanHello(hello links.Hello) links.Hello {
 	hello.Host, hello.Release = word(hello.Host, maxHost), word(hello.Release, maxWord)
 	hello.Templates = validNames(hello.Templates, maxTemplates)

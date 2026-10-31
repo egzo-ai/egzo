@@ -49,15 +49,10 @@ func New(fixed string, proxies []string) (*Resolver, error) {
 }
 
 func (r *Resolver) trusted(remote string) bool {
-	host, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		host = remote
-	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
+	addr := parseAddr(remote)
+	if !addr.IsValid() {
 		return false
 	}
-	addr = addr.Unmap()
 	for _, p := range r.proxies {
 		if p.Contains(addr) {
 			return true
@@ -89,6 +84,40 @@ func (r *Resolver) Base(req *http.Request) string {
 		}
 	}
 	return scheme + "://" + host
+}
+
+// ClientIP is the address a request came from. Behind a configured proxy it is the last address in X-Forwarded-For that is not one of the
+// proxies: what is to the left of that was written by the client, who can write anything. Without a proxy the header is ignored.
+func (r *Resolver) ClientIP(req *http.Request) netip.Addr {
+	client := parseAddr(req.RemoteAddr)
+	if !r.trusted(req.RemoteAddr) {
+		return client
+	}
+	hops := strings.Split(strings.Join(req.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop := parseAddr(strings.TrimSpace(hops[i]))
+		if !hop.IsValid() {
+			break
+		}
+		client = hop
+		if !r.trusted(hop.String()) {
+			break
+		}
+	}
+	return client
+}
+
+// parseAddr reads an address, with a port or without; the zero Addr when it is not one.
+func parseAddr(remote string) netip.Addr {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return addr.Unmap()
 }
 
 // Secure reports whether users reach the hub over https: cookies are marked Secure then.

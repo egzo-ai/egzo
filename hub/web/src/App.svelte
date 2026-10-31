@@ -17,7 +17,6 @@
   import ErrorPage from "./pages/ErrorPage.svelte";
   import Home from "./pages/Home.svelte";
   import Project from "./pages/Project.svelte";
-  import Register from "./pages/Register.svelte";
   import Settings from "./pages/Settings.svelte";
   import SignIn from "./pages/SignIn.svelte";
 
@@ -48,7 +47,7 @@
   $effect(() => {
     const r = nav.route;
     document.title =
-      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "register" ? "Register a project · " : r.name === "settings" ? ({ users: "Users", links: "Links", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
+      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", links: "Links", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
   });
 
   const routeKey = $derived.by(() => {
@@ -85,7 +84,6 @@
             {@const r = nav.route}
             {#if r.name === "home"}<Home />
             {:else if r.name === "settings"}<Settings tab={r.tab} />
-            {:else if r.name === "register"}<Register code={r.code} />
             {:else if r.name === "project"}<Project id={r.project} tab={r.tab} />
             {:else if r.name === "agent"}<AgentPage project={r.project} agent={r.agent} tab={r.tab} />
             {:else}<ErrorPage error={new Error("There is no such page.")} />{/if}

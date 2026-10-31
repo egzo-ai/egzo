@@ -41,7 +41,7 @@
     }
   }));
   $effect(() => {
-    if (tab !== "overview") return;
+    if (tab !== "overview" || offline) return;
     return poll(async () => {
       events = await api.events(project, agent, 40);
     }, 15000);
@@ -145,7 +145,7 @@
 
     {#if tab === "overview"}
       <div class="twocol">
-        <Timeline {events} />
+        {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
         <section class="panel">
           <header><h2 class="h-section">Details</h2></header>
           <div class="pad">

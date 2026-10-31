@@ -4,8 +4,10 @@
 package hub
 
 import (
+	"context"
 	"errors"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,106 +19,294 @@ import (
 	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
-// waiting is a project that dialled the hub and was told to wait for a person.
-func (r *rig) waiting(name string) (*fake.Engine, store.Registration) {
-	r.t.Helper()
-	f := fake.New(name, "laptop", "coder")
-	r.connect(f)
-	reg, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	return f, reg
-}
-
 func last(f *fake.Engine) links.Verdict {
 	verdicts := f.Verdicts()
 	return verdicts[len(verdicts)-1]
 }
 
-func TestALinkWithANewKeyWaitsForAPersonAndSaysWhere(t *testing.T) {
-	r := newRig(t)
-	f, reg := r.waiting("web")
-	if reg.State != hublink.StatePending || reg.Host != "laptop" || len(reg.Templates) != 1 || len(reg.Code) != 9 {
-		t.Fatalf("registration = %+v", reg)
+// nothingStored says a link left no trace: no project, no audit entry, no connection, no code spent.
+func (r *rig) nothingStored(codes int) {
+	r.t.Helper()
+	if regs, _ := r.store.Registrations(ctx); len(regs) != 0 {
+		r.t.Errorf("a project was made: %+v", regs)
 	}
-	verdict := last(f)
-	if verdict.State != hublink.StatePending || verdict.Code != reg.Code || verdict.Address != "https://hub.example.org/link/"+reg.Code {
-		t.Errorf("the link was told %+v", verdict)
+	if entries, _ := r.store.AuditOf(ctx, "", 50); len(entries) != 0 {
+		r.t.Errorf("the audit log grew: %+v", entries)
 	}
-	// nobody sees it, nothing is asked of it, and nothing it pushes is kept
-	op := r.operator()
-	if refs, _ := r.hub.Projects(ctx, op); len(refs) != 0 {
-		t.Errorf("a pending project is listed: %s", names(refs))
+	r.hub.mu.RLock()
+	defer r.hub.mu.RUnlock()
+	if len(r.hub.conns) != 0 {
+		r.t.Errorf("%d connections are held", len(r.hub.conns))
 	}
-	if _, err := r.hub.Project(ctx, op, reg.ID); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a pending project's page: %v", err)
-	}
-	f.PushProject(links.ProjectUpdate{Project: links.Project{Name: "web", Up: true}})
-	if _, known := r.hub.knownProject(reg.ID); known {
-		t.Error("what a pending link pushed was kept")
-	}
-	if len(f.Calls()) != 0 {
-		t.Errorf("a pending project was asked %v", f.Calls())
+	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != codes {
+		r.t.Errorf("%d codes are left, want %d", len(got), codes)
 	}
 }
 
-func TestOnlyAnOperatorApprovesAndWhoeverDoesOwnsIt(t *testing.T) {
+func TestALinkWithoutACodeIsToldItIsUnregisteredAndLeavesNothing(t *testing.T) {
 	r := newRig(t)
-	f, reg := r.waiting("web")
-	alice, op := r.login("alice"), r.operator()
-	if _, err := r.hub.Pending(ctx, alice, reg.Code); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user reading a pending project: %v", err)
+	f := fake.New("web", "laptop", "coder")
+	if err := r.turnedAway(f, ""); !errors.Is(err, ErrUnregistered) {
+		t.Errorf("Link ended with %v", err)
 	}
-	if _, err := r.hub.Approve(ctx, alice, reg.Code); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user approving: %v", err)
-	}
-	if err := r.hub.Refuse(ctx, alice, reg.Code, ""); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user refusing: %v", err)
-	}
-	if got := last(f); got.State != hublink.StatePending {
-		t.Fatalf("a refused attempt told the link %+v", got)
-	}
-	shown, err := r.hub.Pending(ctx, op, strings.ToLower(reg.Code)) // typed by hand
-	if err != nil || shown.ID != reg.ID {
-		t.Fatalf("the page of the code = %+v, %v", shown, err)
-	}
-	approved, err := r.hub.Approve(ctx, op, reg.Code)
-	if err != nil || approved.State != hublink.StateApproved || approved.Owner != op.ID {
-		t.Fatalf("approve = %+v, %v", approved, err)
-	}
-	eventually(t, "the link to hear it", f.Served)
-	if verdict := last(f); verdict.State != hublink.StateApproved || verdict.Project != reg.ID || verdict.Owner != "admin" {
+	if verdict := last(f); verdict.State != hublink.StateUnregistered || verdict.Message != "" || verdict.Project != "" {
 		t.Errorf("the link was told %+v", verdict)
 	}
-	if role := r.role(op, reg.ID); role != rbac.Owner {
-		t.Errorf("who approved holds %q", role)
-	}
-	if refs, _ := r.hub.Projects(ctx, op); len(refs) != 1 || refs[0].ID != reg.ID || refs[0].Host != "laptop" {
-		t.Errorf("projects = %+v", refs)
-	}
-	// a code is good once
-	if _, err := r.hub.Approve(ctx, op, reg.Code); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a code used twice: %v", err)
-	}
-	entries, _ := r.store.AuditOf(ctx, reg.ID, 5)
-	if len(entries) != 1 || entries[0].Action != "project.approve" || !entries[0].Allowed {
-		t.Errorf("audit = %+v", entries)
+	r.nothingStored(0)
+	if f.Running() || len(f.Calls()) != 0 {
+		t.Errorf("a stranger was taken: running %v, calls %v", f.Running(), f.Calls())
 	}
 }
 
-func TestTheOwnerStaysOwnerWhenTheyStopBeingAnOperator(t *testing.T) {
+func TestEveryCodeThatFailsFailsTheSameAndLeavesNothing(t *testing.T) {
 	r := newRig(t)
-	f, reg := r.waiting("web")
 	op, alice := r.operator(), r.login("alice")
 	if err := r.hub.SetOperator(ctx, op, alice.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	alice, _ = r.store.User(ctx, alice.ID)
-	if _, err := r.hub.Approve(ctx, alice, reg.Code); err != nil {
+	spent := r.code()
+	r.dial(fake.New("first", "laptop"), spent)
+	eventually(t, "the code to be spent", func() bool { regs, _ := r.store.Registrations(ctx); return len(regs) == 1 })
+	cancelled, cancelledCode, _ := r.hub.CreateLinkCode(ctx, op)
+	if err := r.hub.CancelLinkCode(ctx, op, cancelled.ID); err != nil {
 		t.Fatal(err)
 	}
+	_, expired, _ := r.store.CreateLinkCode(ctx, op.ID, time.Now().Add(-store.LinkCodeLife-time.Second))
+	_, former, _ := r.hub.CreateLinkCode(ctx, alice)
+	if err := r.hub.SetOperator(ctx, op, alice.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	var told []links.Verdict
+	for name, code := range map[string]string{"wrong": store.LinkCodePrefix + "nonsense", "used": spent, "cancelled": cancelledCode, "expired": expired, "of a former operator": former} {
+		f := fake.New("web", "laptop", "coder")
+		if err := r.turnedAway(f, code); !errors.Is(err, ErrBadCode) {
+			t.Errorf("a code that is %s: %v", name, err)
+		}
+		told = append(told, last(f))
+	}
+	for _, verdict := range told {
+		if verdict != (links.Verdict{State: hublink.StateUnregistered}) {
+			t.Errorf("the link was told %+v: there is nothing to tell one failure from another", verdict)
+		}
+	}
+	if regs, _ := r.store.Registrations(ctx); len(regs) != 1 {
+		t.Errorf("registrations = %+v", regs)
+	}
+}
+
+func TestAGoodCodeMakesAnApprovedProjectOwnedByWhoeverMadeIt(t *testing.T) {
+	r := newRig(t)
+	op := r.operator()
+	code := r.code()
+	f := fake.New("web", "laptop", "coder")
+	r.dial(f, code)
+	r.held(f)
 	eventually(t, "the link to hear it", f.Served)
+	reg, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
+	if err != nil || reg.State != hublink.StateApproved || reg.Owner != op.ID || reg.Host != "laptop" || len(reg.Templates) != 1 {
+		t.Fatalf("registration = %+v, %v", reg, err)
+	}
+	if verdict := last(f); verdict.State != hublink.StateApproved || verdict.Project != reg.ID || verdict.Owner != "admin" {
+		t.Errorf("the link was told %+v", verdict)
+	}
+	if role := r.role(op, reg.ID); role != rbac.Owner {
+		t.Errorf("who made the code holds %q", role)
+	}
+	if refs, _ := r.hub.Projects(ctx, op); len(refs) != 1 || refs[0].ID != reg.ID {
+		t.Errorf("projects = %+v", refs)
+	}
+	entries, _ := r.store.AuditOf(ctx, reg.ID, 5)
+	if len(entries) != 1 || entries[0].Action != "project.register" || !entries[0].Allowed || entries[0].Actor != rbac.Actor(op.ID) {
+		t.Errorf("audit = %+v", entries)
+	}
+	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 0 {
+		t.Errorf("the code is still good: %+v", got)
+	}
+}
+
+func TestOnlyAnOperatorMakesListsAndCancelsCodesAndEachLeavesATrace(t *testing.T) {
+	r := newRig(t)
+	alice, op := r.login("alice"), r.operator()
+	if _, _, err := r.hub.CreateLinkCode(ctx, alice); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a user making a code: %v", err)
+	}
+	if _, err := r.hub.LinkCodes(ctx, alice); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a user listing codes: %v", err)
+	}
+	made, code, err := r.hub.CreateLinkCode(ctx, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^egzo-link-[a-z2-7]{26}$`).MatchString(code) || time.Until(made.Expires) > 15*time.Minute || time.Until(made.Expires) < 14*time.Minute {
+		t.Errorf("code = %q, %+v", code, made)
+	}
+	if err := r.hub.CancelLinkCode(ctx, alice, made.ID); !errors.Is(err, ErrForbidden) {
+		t.Errorf("a user cancelling: %v", err)
+	}
+	listed, err := r.hub.LinkCodes(ctx, op)
+	if err != nil || len(listed) != 1 || listed[0].ID != made.ID || listed[0].CreatorName != "admin" {
+		t.Fatalf("codes = %+v, %v", listed, err)
+	}
+	if err := r.hub.CancelLinkCode(ctx, op, made.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.hub.CancelLinkCode(ctx, op, made.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cancelled twice: %v", err)
+	}
+	entries, _ := r.store.AuditOf(ctx, "", 20)
+	actions := map[string]bool{}
+	for _, e := range entries {
+		if e.Allowed {
+			actions[e.Action] = true
+		}
+		if strings.Contains(e.Detail, code) {
+			t.Errorf("the code is in the audit log: %+v", e)
+		}
+	}
+	if !actions["linkcode.create"] || !actions["linkcode.cancel"] {
+		t.Errorf("audit = %+v", entries)
+	}
+}
+
+func TestAnApprovedKeyIgnoresACodeAndDoesNotSpendIt(t *testing.T) {
+	r := newRig(t)
+	f := r.link("web", "coder")
+	id := r.id("web")
+	code := r.code()
+	f.Drop()
+	eventually(t, "the connection to end", func() bool { return r.hub.connected(id) == nil })
+	r.dial(f, code)
+	r.held(f)
+	if verdict := last(f); verdict.State != hublink.StateApproved || verdict.Project != id {
+		t.Errorf("the link was told %+v", verdict)
+	}
+	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 1 {
+		t.Errorf("the code was spent: %+v", got)
+	}
+}
+
+func TestARevokedKeyIsRefusedKeepsItsCodeAndComesBackNewOnceForgotten(t *testing.T) {
+	r := newRig(t)
+	f := r.link("web", "coder")
+	op, id := r.operator(), r.id("web")
+	if err := r.hub.Revoke(ctx, op, id, "the laptop was stolen"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the connection to end", func() bool { return r.hub.connected(id) == nil })
+	code := r.code()
+	if err := r.turnedAway(f, code); err != nil {
+		t.Errorf("Link ended with %v", err)
+	}
+	if verdict := last(f); verdict.State != hublink.StateRevoked || verdict.Message != "the laptop was stolen" {
+		t.Errorf("the link was told %+v", verdict)
+	}
+	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 1 {
+		t.Errorf("the code was spent: %+v", got)
+	}
+	if err := r.hub.Forget(ctx, op, id); err != nil {
+		t.Fatal(err)
+	}
+	// its key is unknown again: it needs a code like any other, and it has nothing of what it had
+	if err := r.turnedAway(f, ""); !errors.Is(err, ErrUnregistered) {
+		t.Errorf("a forgotten key without a code: %v", err)
+	}
+	r.dial(f, code)
+	r.held(f)
+	again, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
+	if err != nil || again.ID == id || again.State != hublink.StateApproved {
+		t.Errorf("after forgetting: %+v, %v", again, err)
+	}
+	if granted, _ := r.store.GrantsOf(ctx, r.login("alice").ID); len(granted) != 0 {
+		t.Errorf("grants = %+v", granted)
+	}
+}
+
+func TestOfTwoLinksWithOneCodeExactlyOneRegisters(t *testing.T) {
+	r := newRig(t)
+	code := r.code()
+	const contenders = 8
+	ended := make([]<-chan error, contenders)
+	for i := range ended {
+		ended[i] = r.dial(fake.New("web", "laptop", "coder"), code)
+	}
+	failed := 0
+	for _, e := range ended {
+		select {
+		case err := <-e:
+			if !errors.Is(err, ErrBadCode) {
+				t.Errorf("a loser ended with %v", err)
+			}
+			failed++
+		case <-time.After(300 * time.Millisecond): // the winner is held
+		}
+	}
+	regs, _ := r.store.Registrations(ctx)
+	if failed != contenders-1 || len(regs) != 1 {
+		t.Errorf("%d of %d failed, %d registered", failed, contenders, len(regs))
+	}
+}
+
+func TestTwoConnectionsOfOneNewKeySpendOneCode(t *testing.T) {
+	r := newRig(t)
+	f := fake.New("web", "laptop", "coder")
+	first, second := r.code(), r.code()
+	r.dial(f, first)
+	r.held(f)
+	reg, err := r.store.RedeemLinkCode(ctx, second, store.Registration{Key: f.Hello().Key, Name: "web"}, time.Now())
+	if !errors.Is(err, store.ErrKeyTaken) {
+		t.Fatalf("a key redeemed twice: %+v, %v", reg, err)
+	}
+	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 1 {
+		t.Errorf("the code of the loser was spent: %+v", got)
+	}
+}
+
+func TestAProjectRevokedAsItsLinkArrivesEndsUpRevoked(t *testing.T) {
+	// the Revoke that comes after Link read the project, and before it published the connection: it finds nobody to tell
+	r := newRig(t)
+	f := r.link("web", "coder")
+	id := r.id("web")
+	f.Drop()
+	eventually(t, "the connection to end", func() bool { return r.hub.connected(id) == nil })
+	if err := r.hub.Revoke(ctx, r.operator(), id, "stolen"); err != nil {
+		t.Fatal(err)
+	}
+	conn := f.Connect()
+	ended := make(chan error, 1)
+	go func() { ended <- r.hub.hold(ctx, id, f.Hello(), conn) }()
+	select {
+	case <-ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a revoked project is held")
+	}
+	if verdict := last(f); verdict.State != hublink.StateRevoked || verdict.Message != "stolen" {
+		t.Errorf("the link was told %+v", verdict)
+	}
+	if f.Running() {
+		t.Error("a revoked project reached Run")
+	}
+	if r.hub.connected(id) != nil {
+		t.Error("a revoked project stayed published")
+	}
+}
+
+func TestTheOwnerStaysOwnerWhenTheyStopBeingAnOperator(t *testing.T) {
+	r := newRig(t)
+	op, alice := r.operator(), r.login("alice")
+	if err := r.hub.SetOperator(ctx, op, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	alice, _ = r.store.User(ctx, alice.ID)
+	_, code, err := r.hub.CreateLinkCode(ctx, alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fake.New("web", "laptop", "coder")
+	r.dial(f, code)
+	r.held(f)
+	eventually(t, "the link to hear it", f.Served)
+	reg, _ := r.store.RegistrationByKey(ctx, f.Hello().Key)
 	if err := r.hub.SetOperator(ctx, op, alice.ID, false); err != nil {
 		t.Fatal(err)
 	}
@@ -124,40 +314,6 @@ func TestTheOwnerStaysOwnerWhenTheyStopBeingAnOperator(t *testing.T) {
 	view, err := r.hub.Project(ctx, alice, reg.ID)
 	if err != nil || view.Role != rbac.Owner || view.Operator {
 		t.Errorf("the owner's view = %+v, %v", view, err)
-	}
-}
-
-func TestARefusedProjectIsToldAndStaysConnectedToSaySo(t *testing.T) {
-	r := newRig(t)
-	f, reg := r.waiting("web")
-	op := r.operator()
-	if err := r.hub.Refuse(ctx, op, reg.Code, "not one of ours"); err != nil {
-		t.Fatal(err)
-	}
-	if verdict := last(f); verdict.State != hublink.StateRefused || verdict.Message != "not one of ours" {
-		t.Errorf("the link was told %+v", verdict)
-	}
-	select {
-	case <-f.Closed():
-		t.Error("the connection was closed: the link would call the hub unreachable")
-	default:
-	}
-	// it comes back with the same key: still refused
-	f.Drop()
-	eventually(t, "the connection to end", func() bool { return r.hub.connected(reg.ID) == nil })
-	r.connect(f)
-	if verdict := last(f); verdict.State != hublink.StateRefused {
-		t.Errorf("a refused key that came back was told %+v", verdict)
-	}
-	// an operator can take it back: the same link is then a new project
-	if err := r.hub.Forget(ctx, op, reg.ID); err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "the connection to end", func() bool { return r.hub.connected(reg.ID) == nil })
-	r.connect(f)
-	again, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
-	if err != nil || again.ID == reg.ID || again.State != hublink.StatePending {
-		t.Errorf("after forgetting: %+v, %v", again, err)
 	}
 }
 
@@ -198,7 +354,15 @@ func TestRevokingTakesAProjectOffTheHubAndEndsWhatRunsOverItsLink(t *testing.T) 
 		t.Errorf("the link was told %+v", verdict)
 	}
 	select {
-	case <-ended:
+	case <-f.Closed():
+	case <-time.After(3 * time.Second):
+		t.Fatal("the connection of a revoked project stayed open")
+	}
+	select {
+	case err := <-ended:
+		if !errors.As(err, new(OfflineError)) {
+			t.Errorf("the terminal ended with %v: it looks like a session that ended by itself", err)
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("the terminal outlived the project's approval")
 	}
@@ -213,9 +377,8 @@ func TestRevokingTakesAProjectOffTheHubAndEndsWhatRunsOverItsLink(t *testing.T) 
 		t.Error("what a revoked link pushed was kept")
 	}
 	before := len(f.Calls())
-	f.Drop()
 	eventually(t, "the connection to end", func() bool { return r.hub.connected(id) == nil })
-	r.connect(f)
+	r.turnedAway(f, "")
 	if verdict := last(f); verdict.State != hublink.StateRevoked {
 		t.Errorf("a revoked key that came back was told %+v", verdict)
 	}
@@ -337,6 +500,33 @@ func TestATerminalOverALinkThatDropsSaysSo(t *testing.T) {
 	}
 }
 
+func TestWhatTheConnectionCutIsOfflineEvenIfItSaysNothingWentWrong(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	id := r.id("web")
+	c := r.hub.connected(id)
+
+	// the caller leaving is the caller's own doing: a person who closed their terminal
+	leaving, leave := context.WithCancel(ctx)
+	err := r.hub.call(leaving, id, func(ctx context.Context, _ links.Engine) error {
+		leave()
+		<-ctx.Done()
+		return nil // what a terminal says when its context ends
+	})
+	if err != nil {
+		t.Errorf("a caller that left: %v", err)
+	}
+
+	err = r.hub.call(ctx, id, func(ctx context.Context, _ links.Engine) error {
+		c.end() // a link that dropped, or a revocation
+		<-ctx.Done()
+		return nil
+	})
+	if !errors.As(err, new(OfflineError)) {
+		t.Errorf("a terminal the connection took with it ended with %v: it looks like a session that ended by itself", err)
+	}
+}
+
 func TestTwoConnectionsOfOneKeyAreOneLinkAndTheNewestWins(t *testing.T) {
 	r := newRig(t)
 	f := r.link("web", "coder")
@@ -388,12 +578,119 @@ func TestALinkThatUnlinksIsForgottenWithItsRolesAndComesBackNew(t *testing.T) {
 	if entries, _ := r.store.AuditOf(ctx, id, 10); len(entries) == 0 || entries[0].Action != "project.unlink" {
 		t.Errorf("the audit log = %+v", entries)
 	}
-	f.Drop()
+	select {
+	case <-f.Closed():
+	default:
+		t.Error("the connection stayed open after the answer")
+	}
 	eventually(t, "the connection to end", func() bool { return r.hub.connected(id) == nil })
-	r.connect(f)
+	f.PushProject(links.ProjectUpdate{Project: links.Project{Name: "web", Up: true}}) // a feed that had a line on its way
+	r.hub.mu.RLock()
+	_, held := r.hub.held[id]
+	r.hub.mu.RUnlock()
+	if held {
+		t.Error("what the project last pushed is still held")
+	}
+	if err := r.turnedAway(f, ""); !errors.Is(err, ErrUnregistered) {
+		t.Errorf("it came back without a code: %v", err)
+	}
+	r.dial(f, r.code())
+	r.held(f)
 	again, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
-	if err != nil || again.ID == id || again.State != hublink.StatePending {
+	if err != nil || again.ID == id {
 		t.Errorf("registered again: %+v, %v", again, err)
+	}
+}
+
+func TestARevokedLinkCannotEraseItsOwnRevocation(t *testing.T) {
+	r := newRig(t)
+	f := r.link("web", "coder")
+	op, id := r.operator(), r.id("web")
+	if err := r.hub.Revoke(ctx, op, id, "stolen"); err != nil {
+		t.Fatal(err)
+	}
+	// an Unlink that was on its way when the revocation came
+	if verdict := f.Unlink(); verdict.State != hublink.StateRevoked || verdict.Message != "stolen" {
+		t.Errorf("the link was told %+v", verdict)
+	}
+	reg, err := r.store.Registration(ctx, id)
+	if err != nil || reg.State != hublink.StateRevoked || reg.Message != "stolen" {
+		t.Fatalf("the revocation = %+v, %v", reg, err)
+	}
+	entries, _ := r.store.AuditOf(ctx, id, 10)
+	for _, e := range entries {
+		if e.Action == "project.unlink" {
+			t.Errorf("an unlink that did nothing is in the log: %+v", e)
+		}
+	}
+}
+
+func TestAConnectionThatComesBackAsTheOldOneEndsStaysOnline(t *testing.T) {
+	r := newRig(t)
+	f := r.link("web", "coder")
+	op, id := r.operator(), r.id("web")
+	for range 100 {
+		old, next := r.hub.connected(id), f.Again()
+		r.dial(next, "")
+		old.link.Close()
+		r.held(next)
+		eventually(t, "the feeds", next.Served)
+		eventually(t, "the old connection to end", func() bool { return old.gone() })
+		f = next
+	}
+	eventually(t, "what ended to settle", func() bool { return r.hub.connected(id) != nil })
+	time.Sleep(50 * time.Millisecond)
+	if reg, _ := r.store.Registration(ctx, id); !reg.Online() {
+		t.Errorf("a project with a connection up is offline since %v", reg.Offline)
+	}
+	if view, err := r.hub.Project(ctx, op, id); err != nil || view.Feed.State == FeedOffline {
+		t.Errorf("view = %+v, %v", view.Feed, err)
+	}
+}
+
+func TestLogsOfAProjectThatIsOfflineSayOfflineAndARealDenialStaysADenial(t *testing.T) {
+	r := newRig(t)
+	f := r.link("web", "coder")
+	op, id, alice := r.operator(), r.id("web"), r.login("alice")
+	if err := r.hub.SetRole(ctx, op, id, alice.ID, rbac.User); err != nil {
+		t.Fatal(err)
+	}
+	f.SetAgent(agent("hers", rbac.Actor(alice.ID)))
+	f.SetAgent(agent("theirs", "operator"))
+	if _, err := r.hub.Logs(ctx, alice, id, "theirs", 10); !errors.Is(err, ErrForbidden) {
+		t.Errorf("logs of someone else's agent: %v", err)
+	}
+	if _, err := r.hub.Logs(ctx, alice, id, "control", 10); !errors.Is(err, ErrForbidden) {
+		t.Errorf("logs of a sidecar: %v", err)
+	}
+	if _, err := r.hub.Logs(ctx, alice, id, "hers", 10); err != nil {
+		t.Errorf("logs of her own agent: %v", err)
+	}
+	f.Drop()
+	eventually(t, "the hub to notice", func() bool { return r.hub.connected(id) == nil })
+	if _, err := r.hub.Logs(ctx, alice, id, "hers", 10); !errors.As(err, new(OfflineError)) {
+		t.Errorf("logs of her own agent, offline: %v", err)
+	}
+}
+
+func TestATaskAsksTheLinkNothingAfterItsVerb(t *testing.T) {
+	r := newRig(t)
+	f := r.link("web", "coder")
+	op, id := r.operator(), r.id("web")
+	reads := f.ProjectReads()
+	task, err := r.hub.StartSpawn(ctx, op, id, "coder", "fix-bug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.hub.WaitForTasks()
+	if got, _ := r.hub.TaskOf(ctx, op, id, task.ID); got.State != store.TaskDone {
+		t.Fatalf("task = %+v", got)
+	}
+	if f.ProjectReads() != reads {
+		t.Errorf("a finished task read the project %d times: a link that hangs on that keeps the task busy", f.ProjectReads()-reads)
+	}
+	if a, _ := r.agentIn(op, id, "fix-bug"); a.State != "running" {
+		t.Errorf("what the page shows after the task comes from the feed: %+v", a)
 	}
 }
 
@@ -459,7 +756,7 @@ func TestWhatALinkSaysOfItselfIsBounded(t *testing.T) {
 func TestALinkThatNamesNoProjectEgzoCouldMakeIsTurnedAwayAndWhatItSaysIsClipped(t *testing.T) {
 	r := newRig(t)
 	bad := fake.New("not a name", "laptop")
-	if err := r.hub.Link(ctx, bad.Hello(), bad.Connect(), "https://hub"); !errors.Is(err, ErrBadHello) {
+	if err := r.hub.Link(ctx, bad.Hello(), "", bad.Connect()); !errors.Is(err, ErrBadHello) {
 		t.Errorf("a bad name: %v", err)
 	}
 	if regs, _ := r.store.Registrations(ctx); len(regs) != 0 {

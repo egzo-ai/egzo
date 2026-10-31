@@ -28,6 +28,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
+	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
@@ -108,45 +109,35 @@ type world struct {
 	projects map[string]*fake.Engine
 }
 
-// dial is a project's link reaching the hub: it waits until the hub holds the connection, whatever it decides.
-func (w *world) dial(f *fake.Engine) {
+// dial is a project's link reaching the hub with a code, or with its key alone: it waits until the hub holds the connection or has told
+// it to go.
+func (w *world) dial(f *fake.Engine, code string) {
 	before := len(f.Verdicts())
-	go w.hub.Link(context.Background(), f.Hello(), f.Connect(), w.address)
+	go w.hub.Link(context.Background(), f.Hello(), code, f.Connect())
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && (len(f.Verdicts()) == before || !f.Running()) {
+	for time.Now().Before(deadline) && (len(f.Verdicts()) == before || f.Verdicts()[len(f.Verdicts())-1].State == hublink.StateApproved && !f.Served()) {
 		time.Sleep(time.Millisecond)
 	}
 }
 
-func (w *world) approve(f *fake.Engine) error {
-	ctx := context.Background()
-	reg, err := w.db.RegistrationByKey(ctx, f.Hello().Key)
-	if err != nil {
-		return err
-	}
-	admin, err := w.db.UserByName(ctx, store.StarterUsername)
-	if err != nil {
-		return err
-	}
-	if _, err := w.hub.Approve(ctx, admin, reg.Code); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && !f.Served() {
-		time.Sleep(time.Millisecond)
-	}
-	return nil
-}
-
-// add links and approves a project.
+// add registers a project, with a code of the starter account.
 func (w *world) add(machine, project string, prepare func(*fake.Engine), templates ...string) (*fake.Engine, error) {
 	f := fake.New(project, machine, templates...)
 	if prepare != nil {
 		prepare(f)
 	}
 	w.projects[machine+"/"+project] = f
-	w.dial(f)
-	return f, w.approve(f)
+	ctx := context.Background()
+	admin, err := w.db.UserByName(ctx, store.StarterUsername)
+	if err != nil {
+		return f, err
+	}
+	_, code, err := w.hub.CreateLinkCode(ctx, admin)
+	if err != nil {
+		return f, err
+	}
+	w.dial(f, code)
+	return f, nil
 }
 
 func (w *world) seed(machine string) error {
@@ -227,19 +218,12 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 		case "down":
 			e.Drop()
 		case "up":
-			w.dial(e)
-		case "register": // a project that dials the hub for the first time: answers its device code
+			w.dial(e, "")
+		case "register": // `egzo project register`: a project that dials the hub for the first time, with the code a person gave it
 			machine := orDefault(c.Machine, "local")
 			f := fake.New(c.Project, machine, "coder")
 			w.projects[machine+"/"+c.Project] = f
-			w.dial(f)
-			reg, err := db.RegistrationByKey(ctx, f.Hello().Key)
-			if err != nil {
-				http.Error(rw, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			json.NewEncoder(rw).Encode(reg.Code)
-			return
+			w.dial(f, c.Code)
 		case "verdict": // what the link was told last
 			verdicts := e.Verdicts()
 			json.NewEncoder(rw).Encode(verdicts[len(verdicts)-1])

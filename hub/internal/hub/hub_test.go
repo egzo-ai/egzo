@@ -40,44 +40,75 @@ func newRig(t *testing.T) *rig {
 	return r
 }
 
-// connect brings a project's link to the hub, on a connection of its own, and waits until the hub holds it.
+// dial brings a project's link to the hub on a connection of its own, and returns what Link ends with.
+func (r *rig) dial(f *fake.Engine, code string) <-chan error {
+	ended := make(chan error, 1)
+	conn := f.Connect()
+	go func() { ended <- r.hub.Link(ctx, f.Hello(), code, conn) }()
+	r.t.Cleanup(f.Drop)
+	return ended
+}
+
+// connect brings a registered project's link to the hub, and waits until the hub holds it.
 func (r *rig) connect(f *fake.Engine) {
 	r.t.Helper()
-	go r.hub.Link(ctx, f.Hello(), f.Connect(), "https://hub.example.org")
-	r.t.Cleanup(f.Drop)
+	r.dial(f, "")
+	r.held(f)
+}
+
+func (r *rig) held(f *fake.Engine) {
+	r.t.Helper()
 	eventually(r.t, "the link to be held", func() bool {
 		reg, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
 		return err == nil && r.hub.connected(reg.ID) != nil && len(f.Verdicts()) > 0 && f.Running()
 	})
 }
 
-// link makes a project that linked and was approved, by the operator.
+// turnedAway is a link that dials the hub with a code and is told something other than approved. It returns the error Link ended with.
+func (r *rig) turnedAway(f *fake.Engine, code string) error {
+	r.t.Helper()
+	before := len(f.Verdicts())
+	select {
+	case err := <-r.dial(f, code):
+		if len(f.Verdicts()) == before {
+			r.t.Fatal("the link was told nothing")
+		}
+		select {
+		case <-f.Closed():
+		default:
+			r.t.Error("the connection stayed open")
+		}
+		return err
+	case <-time.After(3 * time.Second):
+		r.t.Fatal("the hub held a link it should have turned away")
+		return nil
+	}
+}
+
+// code makes a link code, as the operator.
+func (r *rig) code() string {
+	r.t.Helper()
+	_, code, err := r.hub.CreateLinkCode(ctx, r.operator())
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return code
+}
+
+// link makes a project that registered with a code of the operator's.
 func (r *rig) link(name string, templates ...string) *fake.Engine {
 	r.t.Helper()
 	return r.adopt(fake.New(name, "laptop", templates...))
 }
 
-// adopt links a project a test has prepared.
+// adopt registers a project a test has prepared.
 func (r *rig) adopt(f *fake.Engine) *fake.Engine {
 	r.t.Helper()
-	name := f.Hello().Project
-	r.connect(f)
-	r.approve(f)
-	r.fakes[name] = f
-	return f
-}
-
-// approve approves a project, as the operator, on the page of its code.
-func (r *rig) approve(f *fake.Engine) {
-	r.t.Helper()
-	reg, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	if _, err := r.hub.Approve(ctx, r.operator(), reg.Code); err != nil {
-		r.t.Fatal(err)
-	}
+	r.dial(f, r.code())
+	r.held(f)
 	eventually(r.t, "the link to hear it", f.Served)
+	r.fakes[f.Hello().Project] = f
+	return f
 }
 
 // id is the id of a project that linked.

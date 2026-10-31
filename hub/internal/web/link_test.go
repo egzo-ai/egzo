@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egzo-ai/egzo/hub/internal/links/fake"
+	"github.com/hashicorp/yamux"
+
+	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/link"
@@ -74,60 +77,293 @@ func (r *rig) state(l *link.Link, want string) hublink.Status {
 	return l.Status()
 }
 
-func TestARealLinkRegistersIsApprovedAndIsForgottenWhenItUnlinks(t *testing.T) {
+// register has a running link present a code, as `egzo project register` does.
+func register(t *testing.T, l *link.Link, code string) hublink.Status {
+	t.Helper()
+	status, err := l.Register(ctx, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func TestARealLinkRegistersWithACodeAndIsForgottenWhenItUnlinks(t *testing.T) {
 	r := newRig(t)
 	l, _ := dial(t, r.linkURL)
-	status := r.state(l, hublink.StatePending)
-	if !strings.HasPrefix(status.Address, r.server.URL+"/link/") || status.Code == "" {
-		t.Fatalf("pending = %+v", status)
+	status := r.state(l, hublink.StateUnregistered)
+	if !strings.Contains(status.Text(), "egzo project register") {
+		t.Errorf("unregistered = %q", status.Text())
 	}
-	regs, _ := r.store.Registrations(ctx)
-	if len(regs) != 1 || regs[0].Name != "web" || regs[0].Host != "the-laptop" || regs[0].Code != status.Code {
-		t.Fatalf("registrations = %+v", regs)
+	if regs, _ := r.store.Registrations(ctx); len(regs) != 0 {
+		t.Fatalf("a link without a code left %+v", regs)
 	}
 
 	root := r.browser()
 	root.signIn("admin")
-	code, page := root.get("/register/" + status.Code)
-	if code != 200 || at(page, "link", "name") != "web" || at(page, "link", "host") != "the-laptop" {
-		t.Fatalf("the page of the code = %d %v", code, page)
-	}
 	alice := r.browser()
 	alice.signIn("alice")
-	if code, _ := alice.get("/register/" + status.Code); code != 403 {
-		t.Errorf("the page of the code for a user = %d", code)
+	if code, _ := alice.post("/links/codes", json_{}); code != 403 {
+		t.Errorf("a user making a code = %d", code)
 	}
-	if code, _ := alice.post("/register/"+status.Code, json_{"approve": true}); code != 403 {
-		t.Errorf("a user approving = %d", code)
+	if code, _ := alice.get("/links/codes"); code != 403 {
+		t.Errorf("a user listing codes = %d", code)
 	}
-	if code, _ := root.post("/register/"+status.Code, json_{}); code != 400 {
-		t.Errorf("a decision that says nothing = %d", code)
+	code, made := root.post("/links/codes", json_{})
+	if code != 200 || made["hub"] != r.linkURL || !strings.HasPrefix(made["code"].(string), "egzo-link-") {
+		t.Fatalf("make a code = %d %v", code, made)
 	}
-	code, out := root.post("/register/"+status.Code, json_{"approve": true})
-	if code != 200 || out["project"] != regs[0].ID {
-		t.Fatalf("approve = %d %v", code, out)
+	_, listed := root.get("/links/codes")
+	codes := list(listed, "codes")
+	if len(codes) != 1 || codes[0]["id"] != made["id"] || codes[0]["createdBy"] != "admin" || codes[0]["code"] != nil {
+		t.Fatalf("codes = %v", codes)
 	}
-	status = r.state(l, hublink.StateApproved)
-	if status.Project != regs[0].ID || status.Owner != "admin" {
-		t.Errorf("approved = %+v", status)
+
+	status = register(t, l, made["code"].(string))
+	regs, _ := r.store.Registrations(ctx)
+	if status.State != hublink.StateApproved || status.Owner != "admin" || len(regs) != 1 || status.Project != regs[0].ID || regs[0].Host != "the-laptop" {
+		t.Fatalf("registered = %+v, %+v", status, regs)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", l.Status()), made["code"].(string)) {
+		t.Error("the status shows the code")
+	}
+	if _, listed = root.get("/links/codes"); len(list(listed, "codes")) != 0 {
+		t.Errorf("a code that was used is listed: %v", listed)
 	}
 	if _, listed := root.get("/projects"); len(list(listed, "projects")) != 1 {
 		t.Errorf("projects = %v", listed)
 	}
 	// a verb goes down the connection, and the link's own answer comes back: its engine has no such project
-	code, out = root.get("/p/" + regs[0].ID + "/spec")
+	code, out := root.get("/p/" + regs[0].ID + "/spec")
 	if code != http.StatusBadGateway || !strings.Contains(out["message"].(string), "project") {
 		t.Errorf("spec = %d %v", code, out)
 	}
 
-	if err := l.Unlink(ctx); err != nil {
-		t.Fatal(err)
+	if state, err := l.Unlink(ctx); err != nil || state != hublink.StateUnlinked {
+		t.Fatalf("unlink = %q, %v", state, err)
 	}
 	if code, _ := root.get("/p/" + regs[0].ID); code != 404 {
 		t.Errorf("a forgotten project = %d", code)
 	}
 	if regs, _ = r.store.Registrations(ctx); len(regs) != 0 {
 		t.Errorf("registrations = %+v", regs)
+	}
+}
+
+func TestACodeCanBeCancelled(t *testing.T) {
+	r := newRig(t)
+	root := r.browser()
+	root.signIn("admin")
+	_, made := root.post("/links/codes", json_{})
+	id := made["id"].(string)
+	alice := r.browser()
+	alice.signIn("alice")
+	if code, _ := alice.del("/links/codes/" + id); code != 403 {
+		t.Errorf("a user cancelling = %d", code)
+	}
+	if code, out := root.del("/links/codes/" + id); code != 200 {
+		t.Errorf("cancel = %d %v", code, out)
+	}
+	if code, _ := root.del("/links/codes/" + id); code != 404 {
+		t.Errorf("cancelled twice = %d", code)
+	}
+	l, _ := dial(t, r.linkURL)
+	r.state(l, hublink.StateUnregistered)
+	if status := register(t, l, made["code"].(string)); status.State != hublink.StateUnregistered {
+		t.Errorf("a cancelled code = %+v", status)
+	}
+}
+
+func TestALinkThatIsTurnedAwayStopsDialingUntilSomethingChanges(t *testing.T) {
+	r := newRig(t)
+	l, _ := dial(t, r.linkURL)
+	r.state(l, hublink.StateUnregistered)
+	time.Sleep(1500 * time.Millisecond) // more than the first retry
+	if got := r.dials.Load(); got != 1 {
+		t.Fatalf("a link the hub said no to dialed %d times", got)
+	}
+	// `up` again: one more try, and the same answer
+	if err := l.Unlock([]byte(secretKey), ""); err != nil {
+		t.Fatal(err)
+	}
+	r.waitFor("it to dial again", func() bool { return r.dials.Load() == 2 })
+	r.state(l, hublink.StateUnregistered)
+
+	status := register(t, l, r.code())
+	if status.State != hublink.StateApproved {
+		t.Fatalf("registered = %+v", status)
+	}
+	// revoked: it says so, and stops dialing too
+	admin, _ := r.store.UserByName(ctx, store.StarterUsername)
+	if err := r.hub.Revoke(ctx, admin, status.Project, "stolen"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.state(l, hublink.StateRevoked); got.Error != "stolen" {
+		t.Errorf("revoked = %+v", got)
+	}
+	dials := r.dials.Load()
+	time.Sleep(1500 * time.Millisecond)
+	if got := r.dials.Load(); got != dials {
+		t.Errorf("a revoked link dialed %d more times", got-dials)
+	}
+	// its own unlink has nothing to ask, and the record stays
+	if state, err := l.Unlink(ctx); err != nil || state != hublink.StateRevoked {
+		t.Errorf("unlink = %q, %v", state, err)
+	}
+	if reg, err := r.store.Registration(ctx, status.Project); err != nil || reg.State != hublink.StateRevoked {
+		t.Errorf("the revocation = %+v, %v", reg, err)
+	}
+	// a code does not help until an operator forgets it, and then it does: the way back of a link revoked by mistake
+	code := r.code()
+	if got := register(t, l, code); got.State != hublink.StateRevoked {
+		t.Errorf("a revoked link with a code = %+v", got)
+	}
+	if err := r.hub.Forget(ctx, admin, status.Project); err != nil {
+		t.Fatal(err)
+	}
+	again := register(t, l, code)
+	if again.State != hublink.StateApproved || again.Project == status.Project {
+		t.Errorf("registered again = %+v", again)
+	}
+}
+
+// stranger is a client that proved a key of its own, as anyone who reaches the endpoint can. It returns what the hub said.
+func stranger(t *testing.T, address, code string) (*yamux.Session, hublink.Verdict) {
+	t.Helper()
+	session, _, verdict := proves(t, address, code)
+	return session, verdict
+}
+
+// proves is stranger, with the control stream.
+func proves(t *testing.T, address, code string) (*yamux.Session, *hublink.Lines, hublink.Verdict) {
+	t.Helper()
+	session, err := hublink.Dialer{Hub: address}.Dial(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { session.Close() })
+	public, private, _ := ed25519.GenerateKey(nil)
+	stream, err := session.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := hublink.NewLines(stream)
+	if err := control.Write(hublink.Hello{Protocol: hublink.Version, Project: "web", Key: public}); err != nil {
+		t.Fatal(err)
+	}
+	var greeting hublink.Greeting
+	if err := control.Read(&greeting); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(private, hublink.Signed(address, greeting.Nonce, public, code)), Code: code}); err != nil {
+		t.Fatal(err)
+	}
+	var verdict hublink.Verdict
+	if err := control.Read(&verdict); err != nil {
+		t.Fatalf("the verdict did not arrive before the close: %v", err)
+	}
+	return session, control, verdict
+}
+
+func TestAStrangerIsToldAndClosedAndCanPushNothing(t *testing.T) {
+	r := newRig(t)
+	for _, code := range []string{"", "egzo-link-wrong"} {
+		session, verdict := stranger(t, r.linkURL, code)
+		if verdict != (hublink.Verdict{State: hublink.StateUnregistered}) {
+			t.Errorf("code %q: the stranger was told %+v", code, verdict)
+		}
+		select {
+		case <-session.CloseChan():
+		case <-time.After(3 * time.Second):
+			t.Fatal("the hub held a stranger's connection")
+		}
+		if feed, err := session.OpenStream(); err == nil {
+			_ = hublink.NewLines(feed).Write(hublink.FeedOpen{Feed: hublink.FeedStatus})
+			var start hublink.FeedStart
+			if hublink.NewLines(feed).Read(&start) == nil {
+				t.Error("a stranger opened a feed")
+			}
+		}
+	}
+	if regs, _ := r.store.Registrations(ctx); len(regs) != 0 {
+		t.Errorf("registrations = %+v", regs)
+	}
+	if entries, _ := r.store.AuditOf(ctx, "", 10); len(entries) != 0 {
+		t.Errorf("audit = %+v", entries)
+	}
+}
+
+func TestAVerdictSentRightBeforeTheCloseArrivesWhileTheLinkIsPushing(t *testing.T) {
+	r := newRig(t)
+	admin, _ := r.store.UserByName(ctx, store.StarterUsername)
+	lost := 0
+	const rounds = 30
+	for range rounds {
+		session, control, verdict := proves(t, r.linkURL, r.code())
+		if verdict.State != hublink.StateApproved {
+			t.Fatalf("registered = %+v", verdict)
+		}
+		feed, err := session.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := hublink.NewLines(feed)
+		if err := lines.Write(hublink.FeedOpen{Feed: hublink.FeedStatus}); err != nil {
+			t.Fatal(err)
+		}
+		var start hublink.FeedStart
+		if err := lines.Read(&start); err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			for lines.Write(hublink.StatusLine{Reason: strings.Repeat("x", 32<<10)}) == nil {
+			}
+		}()
+		time.Sleep(5 * time.Millisecond)
+		if err := r.hub.Revoke(ctx, admin, verdict.Project, "stolen"); err != nil {
+			t.Fatal(err)
+		}
+		var last hublink.Verdict
+		if err := control.Read(&last); err != nil {
+			lost++
+		} else if last.State != hublink.StateRevoked || last.Message != "stolen" {
+			t.Errorf("the link heard %+v", last)
+		}
+		session.Close()
+	}
+	if lost != 0 {
+		t.Errorf("%d of %d verdicts were lost", lost, rounds)
+	}
+}
+
+func TestAFeedThatPushesFastIsHeldBackInBytes(t *testing.T) {
+	r := newRig(t)
+	session, verdict := stranger(t, r.linkURL, r.code())
+	if verdict.State != hublink.StateApproved {
+		t.Fatalf("registered = %+v", verdict)
+	}
+	feed, err := session.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := hublink.NewLines(feed)
+	if err := lines.Write(hublink.FeedOpen{Feed: hublink.FeedStatus}); err != nil {
+		t.Fatal(err)
+	}
+	var start hublink.FeedStart
+	if err := lines.Read(&start); err != nil {
+		t.Fatal(err)
+	}
+	line := hublink.StatusLine{Reason: strings.Repeat("x", 1<<20)}
+	began, sent := time.Now(), 0
+	for time.Since(began) < 2*time.Second && sent < 64 {
+		if err := lines.Write(line); err != nil {
+			t.Fatalf("after %d MiB: %v", sent, err)
+		}
+		sent++
+	}
+	// a second's worth to spend at once, and what the stream holds, and the rest at the rate: what the hub takes in two seconds
+	if sent >= 32 {
+		t.Errorf("%d MiB were pushed in %v: nothing held them back", sent, time.Since(began))
 	}
 }
 
@@ -145,13 +381,12 @@ func TestARealLinkThatGoesAwayIsOfflineSinceAndComesBackWithItsKey(t *testing.T)
 		return l, cancel
 	}
 	l, stop := start()
-	status := r.state(l, hublink.StatePending)
-	admin, _ := r.store.UserByName(ctx, "admin")
-	reg, err := r.hub.Approve(ctx, admin, status.Code)
+	r.state(l, hublink.StateUnregistered)
+	status := register(t, l, r.code())
+	reg, err := r.store.Registration(ctx, status.Project)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.state(l, hublink.StateApproved)
 
 	stop()
 	r.waitFor("the project to be offline", func() bool { got, _ := r.store.Registration(ctx, reg.ID); return !got.Online() })
@@ -179,7 +414,7 @@ func TestALinkThatSignsForAnotherHubIsRefused(t *testing.T) {
 	r := newRig(t)
 	// a link that trusts some other hub, whose challenge came from this one: what it signed names the other
 	l, _ := dial(t, r.linkURL+"/")
-	r.state(l, hublink.StatePending) // the address with a slash is the same address
+	r.state(l, hublink.StateUnregistered) // the address with a slash is the same address
 
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		q.Host = strings.TrimPrefix(r.server.URL, "http://")
@@ -187,13 +422,7 @@ func TestALinkThatSignsForAnotherHubIsRefused(t *testing.T) {
 	}))
 	t.Cleanup(other.Close)
 	liar, _ := dial(t, other.URL)
-	time.Sleep(100 * time.Millisecond)
-	if state := liar.Status().State; state == hublink.StatePending || state == hublink.StateApproved {
-		t.Errorf("a proof for %s was taken: %+v", other.URL, liar.Status())
-	}
-	if regs, _ := r.store.Registrations(ctx); len(regs) != 1 {
-		t.Errorf("registrations = %+v", regs)
-	}
+	r.state(liar, hublink.StateUnreachable)
 }
 
 func TestAProofIsForTheConfiguredAddressWhateverTheRequestSays(t *testing.T) {
@@ -202,9 +431,21 @@ func TestAProofIsForTheConfiguredAddressWhateverTheRequestSays(t *testing.T) {
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { r.server.Config.Handler.ServeHTTP(w, q) }))
 	t.Cleanup(other.Close)
 	l, _ := dial(t, other.URL)
-	time.Sleep(100 * time.Millisecond)
-	if state := l.Status().State; state == hublink.StatePending {
-		t.Errorf("a proof for the Host of the request was taken: %+v", l.Status())
+	r.state(l, hublink.StateUnreachable)
+}
+
+func TestAnAddressThatKeepsFailingIsToldToWait(t *testing.T) {
+	r := newRig(t)
+	for range 20 {
+		stranger(t, r.linkURL, "egzo-link-wrong")
+	}
+	time.Sleep(100 * time.Millisecond) // the stranger hears its verdict before the hub has counted it
+	session, err := hublink.Dialer{Hub: r.linkURL}.Dial(ctx)
+	if err == nil {
+		session.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("after 20 failures: %v", err)
 	}
 }
 
@@ -255,8 +496,7 @@ func TestAProjectThatIsOfflineSaysSoInTheLists(t *testing.T) {
 func TestAnOperatorListsRevokesAndForgetsLinks(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")
-	waiting := fake.New("data", "server", "coder")
-	r.connect(waiting)
+	r.link("data", "coder")
 	root := r.browser()
 	root.signIn("admin")
 	_, listed := root.get("/links")
@@ -264,15 +504,10 @@ func TestAnOperatorListsRevokesAndForgetsLinks(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("links = %v", all)
 	}
-	states := map[string]map[string]any{}
 	for _, one := range all {
-		states[one["state"].(string)] = one
-	}
-	if approved := states["approved"]; approved["owner"] != "admin" || approved["name"] != "web" {
-		t.Errorf("approved = %v", approved)
-	}
-	if pending := states["pending"]; pending["code"] == "" || pending["host"] != "server" {
-		t.Errorf("pending = %v", pending)
+		if one["state"] != hublink.StateApproved || one["owner"] != "admin" || one["code"] != nil {
+			t.Errorf("link = %v", one)
+		}
 	}
 	id := r.id("web")
 	if code, out := root.del("/links/" + id); code != http.StatusConflict {

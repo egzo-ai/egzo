@@ -493,12 +493,24 @@ func TestDenialsGroupAndAreBoundedAndAFixHoldsUntilTheNextOne(t *testing.T) {
 	}
 }
 
-// registered makes a pending project, for what is keyed by one.
+// registered makes a project that spent a code, for what is keyed by one.
 func registered(t *testing.T, s *Store, name string) string {
 	t.Helper()
 	key := make([]byte, 32)
 	rand.Read(key)
-	r, err := s.Register(ctx, Registration{Key: key, Name: name, Host: "laptop", Release: "dev", Templates: []string{"coder"}})
+	u, err := s.UserByName(ctx, "registrar")
+	if errors.Is(err, ErrNotFound) {
+		u = login(t, s, "registrar")
+		_, err = s.SetOperator(ctx, u.ID, true)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, code, err := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.RedeemLinkCode(ctx, code, Registration{Key: key, Name: name, Host: "laptop", Release: "dev", Templates: []string{"coder"}}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +530,7 @@ func TestTheAuditCursorOnlyMovesForwardAndGoesWithItsProject(t *testing.T) {
 		t.Errorf("cursor = %v", got)
 	}
 	s.RecordDenials(ctx, []Denial{{Project: web, Host: "h", Count: 1, First: at, Last: at}})
-	if err := s.ForgetProject(ctx, web); err != nil {
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.AuditCursor(ctx, web); !got.IsZero() {
@@ -529,43 +541,39 @@ func TestTheAuditCursorOnlyMovesForwardAndGoesWithItsProject(t *testing.T) {
 	}
 }
 
-func TestARegistrationWaitsUnderACodeUntilItIsDecidedOnce(t *testing.T) {
+func TestACodeMakesAnApprovedProjectOnceAndIsKeptOnlyAsAHash(t *testing.T) {
 	s := open(t)
-	u := login(t, s, "a")
-	key := make([]byte, 32)
-	r, err := s.Register(ctx, Registration{Key: key, Name: "web", Host: "laptop", Release: "1.2", Templates: []string{"coder", "reviewer"}})
+	u := operatorNamed(t, s, "a")
+	made, code, err := s.CreateLinkCode(ctx, u.ID, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$`).MatchString(r.Code) || r.State != hublink.StatePending || !strings.HasPrefix(r.ID, "p") {
-		t.Fatalf("registration = %+v", r)
+	if !regexp.MustCompile(`^egzo-link-[a-z2-7]{26}$`).MatchString(code) || !made.Expires.After(time.Now().Add(14*time.Minute)) {
+		t.Fatalf("code = %q, %+v", code, made)
 	}
-	if _, err := s.Register(ctx, Registration{Key: key, Name: "web"}); err == nil {
-		t.Error("a key registered twice")
+	var stored int
+	s.db.QueryRow(`SELECT COUNT(*) FROM link_codes WHERE hash = ? OR hash = ?`, []byte(code), code).Scan(&stored)
+	if stored != 0 {
+		t.Error("the code is in the database in clear")
 	}
-	got, err := s.RegistrationByCode(ctx, " "+strings.ToLower(r.Code)+" ")
-	if err != nil || got.ID != r.ID || len(got.Templates) != 2 {
-		t.Fatalf("by its code = %+v, %v", got, err)
-	}
-	if got, err := s.RegistrationByKey(ctx, key); err != nil || got.ID != r.ID {
-		t.Fatalf("by its key = %+v, %v", got, err)
-	}
-	if approved, _ := s.ApprovedProjects(ctx); len(approved) != 0 {
-		t.Errorf("a project that waits is listed: %+v", approved)
-	}
-	if _, err := s.Approve(ctx, r.Code, u.ID); err != nil {
+	key := make([]byte, 32)
+	r, err := s.RedeemLinkCode(ctx, " "+code+"\n", Registration{Key: key, Name: "web", Host: "laptop", Release: "1.2", Templates: []string{"coder", "reviewer"}}, time.Now())
+	if err != nil {
 		t.Fatal(err)
 	}
+	if r.State != hublink.StateApproved || r.Owner != u.ID || !strings.HasPrefix(r.ID, "p") {
+		t.Fatalf("registration = %+v", r)
+	}
+	if got, err := s.RegistrationByKey(ctx, key); err != nil || got.ID != r.ID || len(got.Templates) != 2 {
+		t.Fatalf("by its key = %+v, %v", got, err)
+	}
 	if role, _ := s.Role(ctx, r.ID, u.ID); role != rbac.Owner {
-		t.Errorf("who approved holds %q", role)
+		t.Errorf("who made the code holds %q", role)
 	}
-	if _, err := s.Approve(ctx, r.Code, u.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := s.RedeemLinkCode(ctx, code, Registration{Key: []byte("another"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
 		t.Errorf("a code used twice: %v", err)
 	}
-	if _, err := s.Refuse(ctx, r.Code, ""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a code used twice: %v", err)
-	}
-	if approved, _ := s.ApprovedProjects(ctx); len(approved) != 1 || approved[0].Owner != u.ID || approved[0].Code != "" {
+	if approved, _ := s.ApprovedProjects(ctx); len(approved) != 1 || approved[0].Owner != u.ID {
 		t.Errorf("approved = %+v", approved)
 	}
 	if revoked, err := s.Revoke(ctx, r.ID, "no"); err != nil || revoked.State != hublink.StateRevoked {
@@ -576,34 +584,99 @@ func TestARegistrationWaitsUnderACodeUntilItIsDecidedOnce(t *testing.T) {
 	}
 }
 
-func TestProjectsThatWaitAreBoundedAndNobodyConnectedGivesWay(t *testing.T) {
+func TestACodeOfAKeyThatIsTakenIsNotSpentAndNothingHalfDoneStays(t *testing.T) {
 	s := open(t)
-	var ids []string
-	for i := 0; i < MaxPending; i++ {
-		ids = append(ids, registered(t, s, "web"))
-	}
+	u := operatorNamed(t, s, "a")
 	key := make([]byte, 32)
-	rand.Read(key)
-	if _, err := s.Register(ctx, Registration{Key: key, Name: "web"}); !errors.Is(err, ErrTooManyPending) {
-		t.Fatalf("one too many, all connected: %v", err)
-	}
-	s.Disconnected(ctx, ids[7], time.Now())
-	if _, err := s.Register(ctx, Registration{Key: key, Name: "web"}); err != nil {
+	_, first, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	_, second, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if _, err := s.RedeemLinkCode(ctx, first, Registration{Key: key, Name: "web"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Registration(ctx, ids[7]); !errors.Is(err, ErrNotFound) {
-		t.Errorf("who waits with nobody connected stayed: %v", err)
+	if _, err := s.RedeemLinkCode(ctx, second, Registration{Key: key, Name: "web"}, time.Now()); !errors.Is(err, ErrKeyTaken) {
+		t.Fatalf("a key registered twice: %v", err)
 	}
-	s.Disconnected(ctx, ids[8], time.Now().Add(-48*time.Hour))
-	if err := s.PurgePending(ctx, time.Now().Add(-24*time.Hour)); err != nil {
+	if codes, _ := s.LinkCodes(ctx, time.Now()); len(codes) != 1 {
+		t.Errorf("codes = %+v", codes)
+	}
+	if projects, _ := s.Registrations(ctx); len(projects) != 1 {
+		t.Errorf("projects = %+v", projects)
+	}
+}
+
+func TestACodeIsWorthNothingOnceExpiredOrItsMakerMayNoLongerMakeOne(t *testing.T) {
+	s := open(t)
+	u := operatorNamed(t, s, "a")
+	keep := operatorNamed(t, s, "b")
+	_, expired, _ := s.CreateLinkCode(ctx, u.ID, time.Now().Add(-LinkCodeLife))
+	if _, err := s.RedeemLinkCode(ctx, expired, Registration{Key: []byte("1"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("an expired code: %v", err)
+	}
+	_, former, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if _, err := s.SetOperator(ctx, u.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Registration(ctx, ids[8]); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a registration nobody came to stayed: %v", err)
+	if _, err := s.RedeemLinkCode(ctx, former, Registration{Key: []byte("2"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("a code of someone who is no longer an operator: %v", err)
 	}
-	if _, err := s.Registration(ctx, ids[9]); err != nil {
-		t.Errorf("one that is connected went: %v", err)
+	made, cancelled, _ := s.CreateLinkCode(ctx, keep.ID, time.Now())
+	if err := s.CancelLinkCode(ctx, made.ID); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := s.RedeemLinkCode(ctx, cancelled, Registration{Key: []byte("3"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("a cancelled code: %v", err)
+	}
+	if err := s.CancelLinkCode(ctx, made.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cancelled twice: %v", err)
+	}
+	if projects, _ := s.Registrations(ctx); len(projects) != 0 {
+		t.Errorf("projects = %+v", projects)
+	}
+}
+
+func TestExpiredCodesArePurgedAndAreNotListed(t *testing.T) {
+	s := open(t)
+	u := operatorNamed(t, s, "a")
+	s.CreateLinkCode(ctx, u.ID, time.Now().Add(-time.Hour))
+	live, _, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if codes, _ := s.LinkCodes(ctx, time.Now()); len(codes) != 1 || codes[0].ID != live.ID {
+		t.Errorf("codes = %+v", codes)
+	}
+	if err := s.PurgeLinkCodes(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var kept int
+	s.db.QueryRow(`SELECT COUNT(*) FROM link_codes`).Scan(&kept)
+	if kept != 1 {
+		t.Errorf("%d codes are kept", kept)
+	}
+}
+
+func TestAProjectIsForgottenOnlyInTheStateItWasAskedFor(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	if _, err := s.Revoke(ctx, web, "stolen"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unlink of what was revoked: %v", err)
+	}
+	if r, err := s.Registration(ctx, web); err != nil || r.Message != "stolen" {
+		t.Errorf("the revocation = %+v, %v", r, err)
+	}
+	if err := s.ForgetProject(ctx, web, hublink.StateRevoked); err != nil {
+		t.Errorf("an operator forgetting it: %v", err)
+	}
+}
+
+// operatorNamed signs someone in and makes them an operator.
+func operatorNamed(t *testing.T, s *Store, sub string) User {
+	t.Helper()
+	u := login(t, s, sub)
+	if _, err := s.SetOperator(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	return u
 }
 
 func TestAProjectIsOfflineFromWhenItsLinkWentAwayUntilItComesBack(t *testing.T) {
@@ -640,7 +713,7 @@ func TestForgettingAProjectTakesWhatIsKeyedByIt(t *testing.T) {
 	s.SetRole(ctx, web, u.ID, rbac.User)
 	s.AddTask(ctx, Task{Verb: "spawn", Project: web, Agent: "x", Actor: "operator"})
 	s.Audit(ctx, AuditEntry{Actor: "operator", Action: "agent.stop", Project: web})
-	if err := s.ForgetProject(ctx, web); err != nil {
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); err != nil {
 		t.Fatal(err)
 	}
 	if grants, _ := s.GrantsOf(ctx, u.ID); len(grants) != 0 {
@@ -652,7 +725,7 @@ func TestForgettingAProjectTakesWhatIsKeyedByIt(t *testing.T) {
 	if entries, _ := s.AuditOf(ctx, web, 5); len(entries) != 1 {
 		t.Errorf("the audit log lost what happened: %+v", entries)
 	}
-	if err := s.ForgetProject(ctx, web); !errors.Is(err, ErrNotFound) {
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); !errors.Is(err, ErrNotFound) {
 		t.Errorf("forgetting twice: %v", err)
 	}
 }

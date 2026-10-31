@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
@@ -39,5 +41,22 @@ func TestEventsTheProxyNeverWritesAreNotKeptAndTheNetworkViewStaysSmall(t *testi
 	data, _ := json.Marshal(view)
 	if len(data) > 2<<20 {
 		t.Errorf("the Network view of one project is %d MiB, all of it chosen by an agent", len(data)>>20)
+	}
+}
+
+// The budget of a feed is in bytes, and has to leave room for what is real: the proxy's log read back in one go when a link connects. This is
+// a backlog of lines near their longest; a quiet link has a second's worth to spend at once, so it goes through in about a second.
+func TestABacklogOfTheProxysLogFitsTheBudget(t *testing.T) {
+	event := links.AuditEvent{Time: time.Now(), Conn: "c-0123456789abcdef", Kind: proxy.KindConnect, Decision: proxy.OutcomeError, Agent: "coder-1",
+		Instance: "01JABCDEFGHJKMNPQRSTVWXYZ0", Profile: "default", UserAgent: strings.Repeat("u", 256), Host: strings.Repeat("h", 253),
+		Path: strings.Repeat("p", 1024), Reason: &proxy.Reason{Code: proxy.CodeNotInProfile, Text: strings.Repeat("r", 512)}}
+	line, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backlog := links.AuditBacklog * len(line)
+	t.Logf("one line of %d bytes, %d lines: %d KiB, in a budget of %d KiB a second", len(line), links.AuditBacklog, backlog>>10, bytesPerSecond>>10)
+	if backlog > 2*bytesPerSecond {
+		t.Errorf("a backlog of %d KiB is held back", backlog>>10)
 	}
 }

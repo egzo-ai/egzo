@@ -33,8 +33,9 @@ type Hub struct {
 	store *store.Store
 	log   *slog.Logger
 
+	linking  sync.Mutex // a connection's arrival and its end are one step each (links.go)
 	mu       sync.RWMutex
-	conns    map[string]*connection  // the links connected now, pending ones too, by project id
+	conns    map[string]*connection  // the links connected now, by project id
 	held     map[string]*heldProject // what the links last pushed, by project id
 	attached map[string]*Attachment  // who holds the terminal, by "project/agent"
 	feeds    *feedManager            // the status and audit trails the links push
@@ -176,17 +177,18 @@ func (h *Hub) access(ctx context.Context, user store.User, id string) (rbac.Role
 const readLimit = 30 * time.Second
 
 // call runs f on the project's link. What fails because the link is not there, or went away in between, is an OfflineError, whatever f
-// was told: it is told apart from what the project refused. A connection that ends ends f.
-func (h *Hub) call(ctx context.Context, id string, f func(context.Context, links.Engine) error) error {
+// was told: it is told apart from what the project refused. A connection that ends ends f, and f ended that way is an OfflineError even
+// if it says nothing went wrong: a terminal returns nil when it is cut. caller ending it is the caller's own doing.
+func (h *Hub) call(caller context.Context, id string, f func(context.Context, links.Engine) error) error {
 	c := h.connected(id)
 	if c == nil || !c.served.Load() {
-		return h.offline(ctx, id)
+		return h.offline(caller, id)
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(caller)
 	defer cancel()
 	defer context.AfterFunc(c.ctx, cancel)()
 	err := f(ctx, c.link)
-	if err != nil && c.gone() {
+	if (err != nil || ctx.Err() != nil && caller.Err() == nil) && c.gone() {
 		return OfflineError{Since: time.Now()}
 	}
 	return err
@@ -295,31 +297,6 @@ func (h *Hub) creatorOf(ctx context.Context, id, agent string) (string, error) {
 	return found, err
 }
 
-// afterOperation refreshes what the next page shows, ahead of what the link pushes.
-func (h *Hub) afterOperation(ctx context.Context, id string) {
-	_ = h.call(ctx, id, func(ctx context.Context, e links.Engine) error {
-		project, err := e.Project(ctx)
-		if err != nil {
-			return err
-		}
-		project = cleanProject(project)
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if held := h.held[id]; held != nil {
-			project.Templates = held.project.Templates
-			stale := map[string]bool{}
-			for _, a := range held.project.Agents {
-				stale[a.Name] = a.Stale
-			}
-			for i := range project.Agents {
-				project.Agents[i].Stale = stale[project.Agents[i].Name]
-			}
-			held.project = project
-		}
-		return nil
-	})
-}
-
 // Events returns the timeline of a project, or of one agent.
 func (h *Hub) Events(ctx context.Context, user store.User, id, agent string, limit int) ([]links.Event, error) {
 	if _, err := h.access(ctx, user, id); err != nil {
@@ -344,6 +321,9 @@ func (h *Hub) Logs(ctx context.Context, user store.User, id, container string, t
 	}
 	if !role.AtLeast(rbac.Administrator) {
 		creator, err := h.creatorOf(ctx, id, container)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return "", err // a project that cannot answer has refused nobody
+		}
 		if err != nil || !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
 			return "", ErrForbidden
 		}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/internal/hublink"
 )
@@ -18,13 +19,24 @@ const (
 	// maxHandshakes is how many links may be proving their key at once. Anyone who reaches the endpoint may try, and until the proof is
 	// done nothing says who they are.
 	maxHandshakes = 64
-	// handshakeLimit is how long a link gets to open its control stream and prove its key.
-	handshakeLimit = 30 * time.Second
+	// handshakeLimit is how long a link gets to open its control stream and prove its key: three lines. A link asks its engine what to
+	// say before it dials.
+	handshakeLimit = 10 * time.Second
 )
 
 // link takes one link's connection: its WebSocket, its proof, and then the hub holds it until it ends. A proof that does not verify is
-// refused here, so that what reaches the hub is a key somebody holds.
+// refused here, so that what reaches the hub is a key somebody holds. All that a stranger can reach is this, so what one address may
+// try is limited (gate.go); a project that is registered and connected counts for nothing.
 func (s *Server) link(w http.ResponseWriter, r *http.Request) {
+	client := s.urls.ClientIP(r)
+	if !s.gate.enter(client) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "too many attempts from this address: try again", http.StatusTooManyRequests)
+		return
+	}
+	var left sync.Once
+	leave := func() { left.Do(func() { s.gate.leave(client) }) }
+	defer leave()
 	select {
 	case s.greeted <- struct{}{}:
 	default:
@@ -43,12 +55,21 @@ func (s *Server) link(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	peer, err := hublink.Handshake(proving, session, s.opts.LinkURL)
 	if err != nil {
-		s.log.Warn("a link was refused: does its hub: say "+s.opts.LinkURL+"?", "err", err, "from", r.RemoteAddr)
+		if s.gate.failed(client) {
+			s.log.Warn("a link was refused: does its hub: say "+s.opts.LinkURL+"?", "err", err, "from", client)
+		}
 		return
 	}
 	proved()
+	leave()
 	// the connection is hijacked, and r.Context() knows nothing of its end: Run does
-	if err := s.hub.Link(context.Background(), peer.Hello, peer, s.urls.Base(r)); err != nil && !errors.Is(err, context.Canceled) {
+	err = s.hub.Link(context.Background(), peer.Hello, peer.Code, peer)
+	switch {
+	case errors.Is(err, hub.ErrUnregistered), errors.Is(err, hub.ErrBadCode), errors.Is(err, hub.ErrBadHello):
+		if s.gate.failed(client) {
+			s.log.Info("a link that is not registered was turned away", "err", err, "from", client)
+		}
+	case err != nil && !errors.Is(err, context.Canceled):
 		s.log.Debug("a link went away", "project", peer.Hello.Project, "err", err)
 	}
 }
@@ -60,8 +81,7 @@ type linkJSON struct {
 	Host         string     `json:"host"`
 	Release      string     `json:"release"`
 	Templates    []string   `json:"templates"`
-	State        string     `json:"state"` // pending, approved, refused or revoked
-	Code         string     `json:"code,omitempty"`
+	State        string     `json:"state"` // approved or revoked
 	Owner        string     `json:"owner,omitempty"`
 	Message      string     `json:"message,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
@@ -69,7 +89,7 @@ type linkJSON struct {
 }
 
 func linkOf(r store.Registration, owner string) linkJSON {
-	j := linkJSON{ID: r.ID, Name: r.Name, Host: r.Host, Release: r.Release, Templates: r.Templates, State: r.State, Code: r.Code, Owner: owner, Message: r.Message,
+	j := linkJSON{ID: r.ID, Name: r.Name, Host: r.Host, Release: r.Release, Templates: r.Templates, State: r.State, Owner: owner, Message: r.Message,
 		CreatedAt: r.Created, OfflineSince: offlineOf(r.Offline)}
 	if j.Templates == nil {
 		j.Templates = []string{}
@@ -90,39 +110,38 @@ func (s *Server) listLinks(w http.ResponseWriter, r *http.Request, user store.Us
 	writeJSON(w, http.StatusOK, map[string]any{"links": rows})
 }
 
-// pendingLink is the page that approves a registration: the project behind a device code.
-func (s *Server) pendingLink(w http.ResponseWriter, r *http.Request, user store.User) {
-	reg, err := s.hub.Pending(r.Context(), user, r.PathValue("code"))
+// linkCodeJSON is a link code as it is listed: the code itself is shown when it is made, and never again.
+type linkCodeJSON struct {
+	ID        string    `json:"id"`
+	CreatedBy string    `json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+func (s *Server) createLinkCode(w http.ResponseWriter, r *http.Request, user store.User) {
+	made, code, err := s.hub.CreateLinkCode(r.Context(), user)
 	if err != nil {
 		s.problem(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]linkJSON{"link": linkOf(reg, "")})
+	writeJSON(w, http.StatusOK, map[string]any{"id": made.ID, "code": code, "expiresAt": made.Expires, "hub": s.opts.LinkURL})
 }
 
-// decideLink approves or refuses the project behind a device code.
-func (s *Server) decideLink(w http.ResponseWriter, r *http.Request, user store.User) {
-	var body struct {
-		Approve *bool  `json:"approve"`
-		Message string `json:"message"`
-	}
-	if !decode(w, r, &body) {
+func (s *Server) listLinkCodes(w http.ResponseWriter, r *http.Request, user store.User) {
+	views, err := s.hub.LinkCodes(r.Context(), user)
+	if err != nil {
+		s.problem(w, r, err)
 		return
 	}
-	if body.Approve == nil {
-		s.apiFail(w, http.StatusBadRequest, "bad_request", "Say approve: true or false.")
-		return
+	rows := make([]linkCodeJSON, 0, len(views))
+	for _, v := range views {
+		rows = append(rows, linkCodeJSON{ID: v.ID, CreatedBy: v.CreatorName, CreatedAt: v.Created, ExpiresAt: v.Expires})
 	}
-	if *body.Approve {
-		reg, err := s.hub.Approve(r.Context(), user, r.PathValue("code"))
-		if err != nil {
-			s.problem(w, r, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"project": reg.ID})
-		return
-	}
-	if err := s.hub.Refuse(r.Context(), user, r.PathValue("code"), body.Message); err != nil {
+	writeJSON(w, http.StatusOK, map[string]any{"codes": rows})
+}
+
+func (s *Server) cancelLinkCode(w http.ResponseWriter, r *http.Request, user store.User) {
+	if err := s.hub.CancelLinkCode(r.Context(), user, r.PathValue("id")); err != nil {
 		s.problem(w, r, err)
 		return
 	}

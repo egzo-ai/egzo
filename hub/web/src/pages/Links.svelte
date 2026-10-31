@@ -2,23 +2,49 @@
   import { api } from "../lib/api";
   import { errorText, refreshProjects, toast } from "../lib/app.svelte";
   import { ask } from "../lib/confirm.svelte";
-  import { ago, stamp } from "../lib/format";
+  import { ago, stamp, until } from "../lib/format";
   import { poll } from "../lib/live";
   import { href } from "../lib/router.svelte";
-  import type { Link } from "../lib/types";
+  import type { Link, LinkCode, NewLinkCode } from "../lib/types";
   import ErrorPage from "./ErrorPage.svelte";
 
   let links = $state<Link[] | null>(null);
+  let codes = $state<LinkCode[]>([]);
+  /** The code that was just made: this is the only time it is seen, so it goes when the page does. */
+  let made = $state<NewLinkCode | null>(null);
+  let busy = $state(false);
   let failure = $state<unknown>(null);
 
   async function load() {
     try {
-      links = await api.links();
+      [links, codes] = await Promise.all([api.links(), api.linkCodes()]);
     } catch (e) {
       failure = e;
     }
   }
   $effect(() => poll(load));
+
+  async function makeCode() {
+    busy = true;
+    try {
+      made = await api.createLinkCode();
+      await load();
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function cancelCode(c: LinkCode) {
+    try {
+      await api.cancelLinkCode(c.id);
+      if (made?.id === c.id) made = null;
+      await load();
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  }
 
   async function revoke(l: Link) {
     const ok = await ask({
@@ -39,7 +65,7 @@
   async function forget(l: Link) {
     const ok = await ask({
       title: `Forget ${l.name}?`,
-      lines: ["Its link may ask again, as a new project with no roles."],
+      lines: ["A new link code can then register it, as a new project with no roles."],
       confirm: "Forget",
     });
     if (!ok) return;
@@ -52,14 +78,47 @@
     }
   }
 
-  const tone: Record<string, string> = { pending: "warn", approved: "running", refused: "error", revoked: "error" };
+  const tone: Record<string, string> = { approved: "running", revoked: "error" };
 </script>
 
 {#if failure}
   <ErrorPage error={failure} />
 {:else}
   <div style="display:grid;gap:var(--space-4)">
-    <p class="dim" style="margin:0">The projects that dialled this hub. A project names its hub in its own file and connects itself; this hub holds no way into its machine.</p>
+    <p class="dim" style="margin:0">The projects linked to this hub. A project names its hub in its own file and connects itself; this hub holds no way into its machine.</p>
+    <div class="btn-group">
+      <button class="btn" data-variant="primary" disabled={busy} onclick={makeCode}>Link a project</button>
+    </div>
+    {#if made}
+      <section class="panel" data-testid="new-code" style="max-width:80ch">
+        <div class="pad" style="display:grid;gap:var(--space-3)">
+          <p style="margin:0">This code is shown once. It registers one project, as you, until {stamp(made.expiresAt)}. Whoever holds it can use it: hand it over the way you would a password.</p>
+          <dl class="kv">
+            <dt>code</dt><dd><code data-testid="link-code">{made.code}</code></dd>
+          </dl>
+          <p class="muted" style="margin:0">In the project's file, <code>hub: {made.hub}</code>. Then run these, and paste the code when it asks:</p>
+          <pre class="art" style="margin:0" data-testid="link-command">egzo project up
+egzo project register</pre>
+        </div>
+      </section>
+    {/if}
+    {#if codes.length}
+      <div class="table-wrap">
+        <table class="table" data-testid="link-codes">
+          <thead><tr><th>Code</th><th>Made by</th><th>Expires</th><th></th></tr></thead>
+          <tbody>
+            {#each codes as c (c.id)}
+              <tr data-code={c.id}>
+                <td class="muted">{c.id}</td>
+                <td>{c.createdBy}</td>
+                <td class="muted" title={stamp(c.expiresAt)}>{until(c.expiresAt)}</td>
+                <td class="actions"><button class="btn" data-size="sm" aria-label="Cancel code {c.id}" onclick={() => cancelCode(c)}>Cancel</button></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
     <div class="table-wrap">
       <table class="table" data-testid="links">
         <thead><tr><th>Project</th><th>Host</th><th>State</th><th>Link</th><th>Owner</th><th></th></tr></thead>
@@ -72,13 +131,12 @@
               <td>{#if !l.offlineSince}connected{:else}<span class="muted" title={stamp(l.offlineSince)}>offline {ago(l.offlineSince)}</span>{/if}</td>
               <td>{l.owner ?? "–"}</td>
               <td class="actions">
-                {#if l.state === "pending"}<a class="btn" data-size="sm" href="/link/{l.code}">Review</a>{/if}
                 {#if l.state === "approved"}<button class="btn" data-variant="danger" data-size="sm" aria-label="Revoke {l.name}" onclick={() => revoke(l)}>Revoke</button>{/if}
-                {#if l.state === "refused" || l.state === "revoked"}<button class="btn" data-size="sm" aria-label="Forget {l.name}" onclick={() => forget(l)}>Forget</button>{/if}
+                {#if l.state === "revoked"}<button class="btn" data-size="sm" aria-label="Forget {l.name}" onclick={() => forget(l)}>Forget</button>{/if}
               </td>
             </tr>
           {:else}
-            <tr><td colspan="6" class="muted">No project has dialled this hub yet.</td></tr>
+            <tr><td colspan="6" class="muted">No project has linked to this hub yet.</td></tr>
           {/each}
         </tbody>
       </table>

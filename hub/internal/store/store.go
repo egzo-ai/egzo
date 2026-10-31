@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS user_identities (
 	UNIQUE (issuer, subject),
 	UNIQUE (user_id, issuer)
 );
--- A project is a registration: what a link asked, and what a person decided (projects.go). Its id is what everything else is keyed by.
+-- A project is a registration: a link that presented a key and a link code (projects.go). Its id is what everything else is keyed by.
 CREATE TABLE IF NOT EXISTS projects (
 	id TEXT PRIMARY KEY,
 	key BLOB NOT NULL UNIQUE,             -- the link's public key, which is how the hub knows it
@@ -60,15 +60,22 @@ CREATE TABLE IF NOT EXISTS projects (
 	host TEXT NOT NULL DEFAULT '',        -- the machine it says it runs on
 	release TEXT NOT NULL DEFAULT '',     -- the egzo it says it runs
 	templates TEXT NOT NULL DEFAULT '[]', -- JSON, what it said when it registered
-	state TEXT NOT NULL,                  -- pending, approved, refused or revoked
-	code TEXT UNIQUE,                     -- the device code, while it is pending
-	owner TEXT REFERENCES users(id) ON DELETE SET NULL, -- who approved it
-	message TEXT NOT NULL DEFAULT '',     -- why it was refused or revoked
+	state TEXT NOT NULL,                  -- approved or revoked
+	owner TEXT REFERENCES users(id) ON DELETE SET NULL, -- who made the code it came with
+	message TEXT NOT NULL DEFAULT '',     -- why it was revoked
 	created_at INTEGER NOT NULL,
 	decided_at INTEGER,
 	offline_since INTEGER                 -- Unix milliseconds; null while its link is connected
 );
 CREATE INDEX IF NOT EXISTS projects_state ON projects (state, created_at);
+-- A link code is what lets a project register: an operator makes one, and the project presents it, once (linkcodes.go).
+CREATE TABLE IF NOT EXISTS link_codes (
+	id TEXT PRIMARY KEY,
+	hash BLOB NOT NULL UNIQUE,            -- SHA-256 of the code: the code itself is shown once and kept nowhere
+	created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS grants (
 	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -210,9 +210,6 @@ func (h *Hub) overlay(reg store.Registration, p links.Project) (links.Project, F
 	return p, feed
 }
 
-// pendingRetention is how long a project that nobody approved is kept after its link went away.
-const pendingRetention = 24 * time.Hour
-
 // Run keeps the database tidy until ctx ends. The links do the rest: they dial, and they push.
 func (h *Hub) Run(ctx context.Context) {
 	tick := time.NewTicker(time.Minute)
@@ -222,7 +219,7 @@ func (h *Hub) Run(ctx context.Context) {
 		_ = h.store.PurgeSessions(ctx)
 		_ = h.store.PurgeDenials(ctx, now.Add(-denialRetention))
 		_ = h.store.PurgeTasks(ctx, now.Add(-taskRetention))
-		_ = h.store.PurgePending(ctx, now.Add(-pendingRetention))
+		_ = h.store.PurgeLinkCodes(ctx, now)
 		select {
 		case <-ctx.Done():
 			return

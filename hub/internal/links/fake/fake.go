@@ -108,6 +108,9 @@ func (c *Connection) Close() error {
 	return nil
 }
 
+// Finish ends the connection after its last verdict, which a link hangs up on.
+func (c *Connection) Finish() error { return c.Close() }
+
 // Closed is closed when the newest connection has ended.
 func (e *Engine) Closed() <-chan struct{} {
 	e.mu.Lock()
@@ -172,13 +175,14 @@ func (e *Engine) Served() bool {
 	return e.serving && e.pushed
 }
 
-// Unlink is the link asking to be forgotten: it returns what the hub answers.
+// Unlink is the link asking to be forgotten: it returns what the hub answers, which is the last thing on the connection.
 func (e *Engine) Unlink() links.Verdict {
 	e.mu.Lock()
 	h, c := e.handlers, e.current
 	e.mu.Unlock()
 	v := h.Unlink()
 	_ = c.Send(v)
+	_ = c.Close()
 	return v
 }
 

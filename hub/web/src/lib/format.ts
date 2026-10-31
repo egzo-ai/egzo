@@ -20,6 +20,14 @@ export function ago(iso: string, now = Date.now()): string {
   return `${Math.floor(s / 86400)} days ago`;
 }
 
+/** How long until a moment that is still to come. */
+export function until(iso: string, now = Date.now()): string {
+  const t = +new Date(iso);
+  if (isNaN(t)) return "";
+  const minutes = Math.ceil((t - now) / 60000);
+  return minutes <= 0 ? "now" : minutes === 1 ? "in a minute" : `in ${minutes} min`;
+}
+
 export function initials(name: string): string {
   const parts = name.replace(/@.*/, "").split(/[\s._-]+/).filter(Boolean);
   if (parts.length === 0) return "?";

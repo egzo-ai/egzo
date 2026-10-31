@@ -35,11 +35,11 @@
 └──────────────┘</pre>
       <h2>Nothing here yet</h2>
       {#if app.user?.isOperator}
-        <p>No project has linked to this hub yet. Name it in a project file, <code>hub: {location.origin}</code>, and run <code>egzo project up</code>: it prints the address that approves the project.</p>
+        <p>No project has linked to this hub yet. Name it in a project file, <code>hub: {app.account.hub}</code>, run <code>egzo project up</code>, then <a href={href.settings("links")}>make a link code</a> for <code>egzo project register</code>.</p>
       {:else}
         <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Tell them your username: <code>{app.user?.username}</code>.</p>
       {/if}
-      <p class="muted">Projects are created from the command line with <code>egzo project up</code>, not from the hub.</p>
+      <p class="muted">Projects are created from the command line with <code>egzo project register</code>, not from the hub.</p>
     </div>
   {:else if rows.length === 0 && app.projects.length}
     <p class="muted">No project matches. <a href={href.home()}>Show all</a></p>

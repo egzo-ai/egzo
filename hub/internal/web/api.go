@@ -301,7 +301,7 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 		sso = s.opts.SSOName
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "identities": s.identitiesOf(identities),
-		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer})
+		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer, "hub": s.opts.LinkURL})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

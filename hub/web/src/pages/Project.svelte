@@ -23,6 +23,7 @@
   let { id, tab }: { id: string; tab: ProjectTab } = $props();
 
   let project = $state<Project | null>(null);
+  const offline = $derived(!!project?.offlineSince);
   let failure = $state<unknown>(null);
   let events = $state<TimelineEvent[] | null>(null);
   let spec = $state<string | null>(null);
@@ -45,8 +46,8 @@
   }
   $effect(() => poll(loadProject));
   $effect(() => {
-    if (tab !== "timeline") return;
-    // read from the control sidecar, which runs a command in it: slowly
+    // read from the control sidecar, which runs a command in it: slowly. A project that is offline has nobody to ask.
+    if (tab !== "timeline" || offline) return;
     return poll(async () => {
       events = await api.events(id, "", 60);
     }, 15000);
@@ -236,7 +237,7 @@
         </table>
       </div>
     {:else if tab === "timeline"}
-      <Timeline {events} />
+      {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
     {:else if tab === "activity"}
       {#if activity}<TaskTable project={id} tasks={activity} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}

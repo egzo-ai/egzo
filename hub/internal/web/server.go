@@ -57,6 +57,7 @@ type Server struct {
 	session time.Duration
 	limit   *throttle
 	greeted chan struct{} // links in their handshake, when anyone may be one
+	gate    *linkGate     // what one address may try on the link endpoint
 
 	termMu    sync.Mutex
 	terminals map[string]map[*int]context.CancelFunc // open terminals by the hash of the session that opened them
@@ -79,7 +80,7 @@ func New(h *hub.Hub, a Authenticator, opts Options, urls *publicurl.Resolver, lo
 		opts.SSOName = "SSO"
 	}
 	s := &Server{hub: h, auth: a, opts: opts, urls: urls, log: log, session: 12 * time.Hour, limit: newThrottle(),
-		greeted: make(chan struct{}, maxHandshakes), terminals: map[string]map[*int]context.CancelFunc{}}
+		greeted: make(chan struct{}, maxHandshakes), gate: newLinkGate(), terminals: map[string]map[*int]context.CancelFunc{}}
 	var err error
 	if s.static, err = fs.Sub(distFiles, "dist"); err != nil {
 		return nil, err
@@ -106,10 +107,11 @@ func (s *Server) Handler() http.Handler {
 	api("DELETE "+apiPrefix+"/me/identities/{id}", s.unlink)
 	api("GET "+apiPrefix+"/projects", s.projects)
 	api("GET "+apiPrefix+"/links", s.operatorOnly(s.listLinks))
+	api("POST "+apiPrefix+"/links/codes", s.operatorOnly(s.createLinkCode))
+	api("GET "+apiPrefix+"/links/codes", s.operatorOnly(s.listLinkCodes))
+	api("DELETE "+apiPrefix+"/links/codes/{id}", s.operatorOnly(s.cancelLinkCode))
 	api("POST "+apiPrefix+"/links/{id}/revoke", s.operatorOnly(s.revokeLink))
 	api("DELETE "+apiPrefix+"/links/{id}", s.operatorOnly(s.forgetLink))
-	api("GET "+apiPrefix+"/register/{code}", s.operatorOnly(s.pendingLink))
-	api("POST "+apiPrefix+"/register/{code}", s.operatorOnly(s.decideLink))
 	api("GET "+apiPrefix+"/users", s.operatorOnly(s.listUsers))
 	api("PUT "+apiPrefix+"/users/{id}", s.operatorOnly(s.updateUser))
 	api("DELETE "+apiPrefix+"/users/{id}/identities/{identity}", s.operatorOnly(s.removeIdentity))
@@ -148,7 +150,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // LinkHandler is the link endpoint alone, for a listener of its own: all that has to be reachable by the projects. It serves registered
-// keys and pending registrations, and no page of the hub.
+// keys and links that present a code, and no page of the hub.
 func (s *Server) LinkHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })

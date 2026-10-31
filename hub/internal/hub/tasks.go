@@ -231,7 +231,6 @@ func (h *Hub) startTask(ctx context.Context, t Task, queued bool, do taskFunc) (
 		err := run.Err()
 		if err == nil {
 			err = h.call(run, t.Project, func(ctx context.Context, e links.Engine) error { return do(ctx, e, progress) })
-			h.afterOperation(run, t.Project)
 		}
 		h.endTask(task, done, err)
 	}()

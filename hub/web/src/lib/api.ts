@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, Link, Members, Network, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
+  AgentAnswer, AuditEntry, Link, LinkCode, Members, Network, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -60,10 +60,11 @@ export const api = {
   links: () => request<{ links: Link[] }>("GET", "/links").then((r) => r.links),
   revokeLink: (id: string, message: string) => request<{ ok: true }>("POST", `/links/${enc(id)}/revoke`, { message }),
   forgetLink: (id: string) => request<{ ok: true }>("DELETE", `/links/${enc(id)}`),
-  /** The project that waits under a device code: operators. */
-  pendingLink: (code: string) => request<{ link: Link }>("GET", `/register/${enc(code)}`).then((r) => r.link),
-  approveLink: (code: string) => request<{ project: string }>("POST", `/register/${enc(code)}`, { approve: true }).then((r) => r.project),
-  refuseLink: (code: string, message: string) => request<{ ok: true }>("POST", `/register/${enc(code)}`, { approve: false, message }),
+  /** Makes a code that registers one project. The answer is the only time the code is seen: operators. */
+  createLinkCode: () => request<NewLinkCode>("POST", "/links/codes"),
+  /** The codes that are still good, without their values: operators. */
+  linkCodes: () => request<{ codes: LinkCode[] }>("GET", "/links/codes").then((r) => r.codes),
+  cancelLinkCode: (id: string) => request<{ ok: true }>("DELETE", `/links/codes/${enc(id)}`),
 
   users: () => request<{ users: UserRow[]; me: string }>("GET", "/users"),
   setOperator: (id: string, isOperator: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { isOperator }),

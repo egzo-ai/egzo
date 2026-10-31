@@ -31,7 +31,7 @@ func TestTheAppIsServedForItsOwnAddressesAndTheAPIAnswersJSONWhenSignedOut(t *te
 	if code, _ := b.page("/healthz"); code != 200 {
 		t.Errorf("healthz = %d", code)
 	}
-	for _, path := range []string{"/session", "/projects", "/p/p0123456789ab", "/p/p0123456789ab/a/x/terminal", "/links", "/register/QXRB-7KPM"} {
+	for _, path := range []string{"/session", "/projects", "/p/p0123456789ab", "/p/p0123456789ab/a/x/terminal", "/links", "/links/codes"} {
 		code, body := b.get(path)
 		if code != http.StatusUnauthorized || body["code"] != "unauthorized" {
 			t.Errorf("%s signed out = %d %v, want a JSON 401", path, code, body)

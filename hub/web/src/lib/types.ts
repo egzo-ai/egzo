@@ -41,6 +41,8 @@ export interface Session {
   /** What single sign-on is called; "" without it. */
   sso: string;
   issuer: string;
+  /** The address projects name in `hub:`. */
+  hub: string;
 }
 
 /** One agent, as the project list and the sidebar know it (from what its link pushed). */
@@ -265,20 +267,36 @@ export interface Network {
   events: NetworkEvent[];
 }
 
-/** A registration: a link that presented a key, and what a person decided about it. */
+/** A registration: a project that presented a link code, and goes by its key from then on. */
 export interface Link {
   id: string;
   name: string;
   host: string;
   release: string;
   templates: string[];
-  state: "pending" | "approved" | "refused" | "revoked";
-  code?: string;
+  state: "approved" | "revoked";
   owner?: string;
   message?: string;
   createdAt: string;
   /** When its link went away; null while it is connected. */
   offlineSince: string | null;
+}
+
+/** A link code as it is listed: the code itself is shown once, when it is made. */
+export interface LinkCode {
+  id: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** A link code that was just made. */
+export interface NewLinkCode {
+  id: string;
+  code: string;
+  expiresAt: string;
+  /** The address the project names in `hub:`. */
+  hub: string;
 }
 
 /** The control frames of the terminal websocket (text frames; binary frames are the terminal's bytes). */

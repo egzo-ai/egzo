@@ -110,16 +110,17 @@ func (m *feedManager) startAudit(c *connection) {
 	if fresh {
 		m.loadAudit(c.ctx, key, f)
 	}
+	writing := context.WithoutCancel(c.ctx) // what was heard is taken out of memory to be written: a connection that ends must not cut that
 	go func() {
 		tick := time.NewTicker(m.opt.Flush)
 		defer tick.Stop()
 		for {
 			select {
 			case <-c.ctx.Done():
-				m.flushAudit(context.WithoutCancel(c.ctx), key, f)
+				m.flushAudit(writing, key, f)
 				return
 			case <-tick.C:
-				m.flushAudit(c.ctx, key, f)
+				m.flushAudit(writing, key, f)
 			}
 		}
 	}()

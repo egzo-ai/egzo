@@ -197,6 +197,7 @@ func TestTheNetworkOfAProjectOfflineIsWhatTheHubLastHeard(t *testing.T) {
 	r.fakes["web"].AddAudit(a.denied("evil.example", proxy.CodeNotInProfile))
 	r.fakes["web"].Drop()
 	eventually(t, "the hub to notice", func() bool { return r.hub.connected(r.id("web")) == nil })
+	eventually(t, "what it heard to be written", func() bool { return len(r.networkOf(op, "").Denials) == 1 }) // the last flush runs by itself
 	view := r.networkOf(op, "")
 	if view.Feed.State != FeedUnavailable || !strings.Contains(view.Feed.Message, "offline") || len(view.Denials) != 1 || len(view.Events) != 1 {
 		t.Errorf("view = %+v", view)

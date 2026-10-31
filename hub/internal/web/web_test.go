@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -24,9 +25,11 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/publicurl"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 type rig struct {
+	dials    atomic.Int64 // how many times the link endpoint was reached
 	t        *testing.T
 	server   *httptest.Server
 	app      *web.Server
@@ -78,7 +81,12 @@ func newRigWith(t *testing.T, options []func(*rig)) *rig {
 	}
 	// the server first: a link's proof is for the address it is reached at
 	var handler http.Handler
-	r.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { handler.ServeHTTP(w, q) }))
+	r.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if q.URL.Path == hublink.Path {
+			r.dials.Add(1)
+		}
+		handler.ServeHTTP(w, q)
+	}))
 	t.Cleanup(r.server.Close)
 	r.linkURL = r.server.URL
 	app, err := web.New(r.hub, sso, web.Options{SSOName: "Corp", LinkURL: r.linkURL}, urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -257,39 +265,35 @@ func (r *rig) userID(name string) string {
 	return ""
 }
 
-// link makes a project that linked and was approved.
+// link makes a project that registered with a code.
 func (r *rig) link(name string, templates ...string) *fake.Engine {
 	r.t.Helper()
 	return r.adopt(fake.New(name, "laptop", templates...))
 }
 
-// adopt links a project a test has prepared.
+// adopt registers a project a test has prepared.
 func (r *rig) adopt(f *fake.Engine) *fake.Engine {
 	r.t.Helper()
-	name := f.Hello().Project
-	r.connect(f)
-	reg, err := r.store.RegistrationByKey(ctx, f.Hello().Key)
-	if err != nil {
-		r.t.Fatal(err)
-	}
+	go r.hub.Link(ctx, f.Hello(), r.code(), f.Connect())
+	r.t.Cleanup(f.Drop)
+	r.waitFor("the link to be held", func() bool { return len(f.Verdicts()) > 0 && f.Running() })
+	r.waitFor("the link to hear it", f.Served)
+	r.fakes[f.Hello().Project] = f
+	return f
+}
+
+// code makes a link code, as the starter account.
+func (r *rig) code() string {
+	r.t.Helper()
 	admin, err := r.store.UserByName(ctx, store.StarterUsername)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	if _, err := r.hub.Approve(ctx, admin, reg.Code); err != nil {
+	_, code, err := r.hub.CreateLinkCode(ctx, admin)
+	if err != nil {
 		r.t.Fatal(err)
 	}
-	r.waitFor("the link to hear it", f.Served)
-	r.fakes[name] = f
-	return f
-}
-
-// connect brings a project's link to the hub, on a connection of its own.
-func (r *rig) connect(f *fake.Engine) {
-	r.t.Helper()
-	go r.hub.Link(ctx, f.Hello(), f.Connect(), "http://hub.test")
-	r.t.Cleanup(f.Drop)
-	r.waitFor("the link to be held", func() bool { return len(f.Verdicts()) > 0 && f.Running() })
+	return code
 }
 
 func (r *rig) waitFor(what string, check func() bool) {

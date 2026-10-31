@@ -4,13 +4,14 @@ Run by `make hub-stack` (e2e/stack.sh), never by the plain `pytest`: it needs HU
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
 
 URL = os.environ.get("HUB_STACK_URL")
 PROJECT = os.environ.get("HUB_STACK_PROJECT")
-CODE = os.environ.get("HUB_STACK_CODE")
+CODE_FILE = os.environ.get("HUB_STACK_CODE_FILE")
 ADMIN_PASSWORD = os.environ.get("HUB_STACK_ADMIN_PASSWORD")
 
 pytestmark = pytest.mark.skipif(not URL, reason="needs the stack of e2e/stack.sh (make hub-stack)")
@@ -36,19 +37,23 @@ def dex_sign_in(page, failed):
     page.get_by_role("button", name="Login").click()
 
 
-def test_the_admin_approves_a_real_project_links_dex_and_works_with_the_project(page):
+def test_the_admin_makes_a_link_code(page):
+    sign_in(page)
+    expect(page.get_by_text("No project has linked to this hub yet")).to_be_visible()
+    page.goto(URL + "/settings/links")
+    page.get_by_role("button", name="Link a project").click()
+    # stack.sh hands it to a real `egzo project register`, through a file only that script reads
+    Path(CODE_FILE).write_text(page.get_by_test_id("link-code").inner_text())
+
+
+def test_a_real_project_that_registered_links_dex_and_works_with_the_project(page):
     failed = []
     page.on("requestfailed", lambda request: failed.append(f"{request.url}: {request.failure}"))
     sign_in(page)
-    expect(page.get_by_text("No project has linked to this hub yet")).to_be_visible()
-
-    # the address the project's first `up` printed: what it says of itself, and the operator approves it
-    page.goto(URL + "/link/" + CODE)
-    details = page.get_by_test_id("registration")
-    expect(details).to_contain_text(PROJECT)
-    expect(details).to_contain_text("coder")
-    page.get_by_role("button", name="Approve").click()
-    expect(page.get_by_role("heading", name=PROJECT)).to_be_visible()
+    page.goto(URL + "/settings/links")
+    row = page.get_by_test_id("links").locator(f"tr[data-link={PROJECT}]")
+    expect(row).to_contain_text("approved")
+    expect(row).to_contain_text("admin")
     page.goto(URL)
 
     # link the account at Dex, sign out, and sign in with Dex: the same user
@@ -121,4 +126,4 @@ def test_a_project_that_unlinked_is_forgotten(page):
     sign_in(page)
     expect(page.get_by_text("No project has linked to this hub yet")).to_be_visible(timeout=10000)
     page.goto(URL + "/settings/links")
-    expect(page.get_by_test_id("links")).to_contain_text("No project has dialled this hub yet")
+    expect(page.get_by_test_id("links")).to_contain_text("No project has linked to this hub yet")

@@ -103,50 +103,80 @@ def test_a_terminal_says_when_the_link_drops(single_hub, page):
     expect(page.locator(".tpane[aria-label='Terminal of coder-1'] .tcard")).to_contain_text("link", timeout=8000)
 
 
-def test_an_operator_approves_a_project_at_the_address_its_link_shows(single_hub, page):
-    code = single_hub.world("register", project="fresh", machine="laptop")
-    # signed out, the address goes through the sign-in and comes back
-    page.goto(single_hub.url + "/link/" + code)
-    page.get_by_label("Username").fill("admin")
-    page.get_by_label("Password").fill(ADMIN_PASSWORD)
-    page.get_by_role("button", name="Sign in", exact=True).click()
-    details = page.get_by_test_id("registration")
-    expect(details).to_contain_text("fresh")
-    expect(details).to_contain_text("laptop")
-    expect(details).to_contain_text("coder")
-    page.get_by_role("button", name="Approve").click()
-    expect(page.get_by_role("heading", name="fresh")).to_be_visible()
+def make_code(page, hub):
+    page.goto(hub.url + "/settings/links")
+    page.get_by_role("button", name="Link a project").click()
+    return page.get_by_test_id("link-code").inner_text()
+
+
+def test_an_operator_makes_a_code_and_a_project_registers_with_it(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    code = make_code(page, single_hub)
+    assert code.startswith("egzo-link-")
+    shown = page.get_by_test_id("new-code")
+    expect(shown).to_contain_text("shown once")
+    expect(shown).to_contain_text("hub: ")
+    expect(page.get_by_test_id("link-command")).to_contain_text("egzo project register")
+    expect(page.get_by_test_id("link-codes").locator("tr[data-code]")).to_have_count(1)
+
+    single_hub.world("register", project="fresh", machine="laptop", code=code)
     verdict = single_hub.world("verdict", project="fresh", machine="laptop")
     assert verdict["State"] == "approved" and verdict["Owner"] == "admin"
-    # the code is spent
-    page.goto(single_hub.url + "/link/" + code)
-    expect(page.get_by_role("heading", name="Nothing waits under this code")).to_be_visible()
+    expect(page.get_by_test_id("links").locator("tr[data-link=fresh]")).to_contain_text("approved", timeout=8000)
+    expect(page.get_by_test_id("link-codes")).to_have_count(0)  # the code is spent
+
+    page.reload()
+    expect(page.get_by_test_id("new-code")).to_have_count(0)  # and it is never shown again
 
 
-def test_only_an_operator_approves(single_hub, page):
-    code = single_hub.world("register", project="fresh", machine="laptop")
+def test_a_code_that_is_cancelled_registers_nobody(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    code = make_code(page, single_hub)
+    page.get_by_test_id("link-codes").get_by_role("button", name=re.compile("^Cancel code")).click()
+    expect(page.get_by_test_id("link-codes")).to_have_count(0)
+    expect(page.get_by_test_id("new-code")).to_have_count(0)
+    single_hub.world("register", project="fresh", machine="laptop", code=code)
+    assert single_hub.world("verdict", project="fresh", machine="laptop")["State"] == "unregistered"
+    expect(page.get_by_test_id("links").locator("tr[data-link=fresh]")).to_have_count(0)
+
+
+def test_only_an_operator_makes_a_code(single_hub, page):
     sign_in(page, single_hub, "alice")
-    page.goto(single_hub.url + "/link/" + code)
-    expect(page.get_by_role("heading", name="Only an operator approves a project")).to_be_visible()
+    answer = page.request.post(single_hub.url + "/api/v1/links/codes", data={}, headers={"Origin": single_hub.url})
+    assert answer.status == 403
+
+
+def test_the_address_a_link_used_to_show_is_gone(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + "/link/QXRB-7KPM")
+    expect(page.get_by_test_id("signed-in-as")).to_be_visible()
     expect(page.get_by_role("button", name="Approve")).to_have_count(0)
 
 
-def test_a_refused_project_is_told_why_and_can_be_forgotten(single_hub, page):
-    code = single_hub.world("register", project="fresh", machine="laptop")
+def test_a_revoked_project_can_be_forgotten(single_hub, page):
     sign_in(page, single_hub, "admin")
-    page.goto(single_hub.url + "/link/" + code)
-    page.get_by_label("Why, if you refuse").fill("not one of ours")
-    page.get_by_role("button", name="Refuse").click()
-    page.get_by_role("dialog").get_by_role("button", name="Refuse").click()
-    expect(page.get_by_test_id("refused")).to_be_visible()
-    verdict = single_hub.world("verdict", project="fresh", machine="laptop")
-    assert verdict["State"] == "refused" and verdict["Message"] == "not one of ours"
+    single_hub.world("add-project", project="fresh")
     page.goto(single_hub.url + "/settings/links")
-    row = page.locator("tr[data-link=fresh]")
-    expect(row).to_contain_text("not one of ours")
+    row = page.get_by_test_id("links").locator("tr[data-link=fresh]")
+    row.get_by_role("button", name="Revoke fresh").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("Type").fill("fresh")
+    dialog.get_by_role("button", name="Revoke").click()
+    expect(row).to_contain_text("revoked")
     row.get_by_role("button", name="Forget fresh").click()
     page.get_by_role("dialog").get_by_role("button", name="Forget").click()
     expect(row).to_have_count(0)
+
+
+def test_the_timeline_of_a_project_that_is_offline_says_so(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    single_hub.world("down", project="web")
+    page.goto(single_hub.url + single_hub.p("web") + "/timeline")
+    expect(page.get_by_test_id("timeline-offline")).to_be_visible()
+    page.goto(single_hub.url + single_hub.p("web") + "/a/coder-1")
+    expect(page.get_by_test_id("timeline-offline")).to_be_visible()
+    expect(page.get_by_text("Loading…")).to_have_count(0)
+    single_hub.world("up", project="web")
 
 
 def test_an_operator_revokes_a_project_and_it_leaves_the_hub(single_hub, page):
@@ -452,7 +482,7 @@ def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person
     expect(alice.locator("tr[data-agent=coder-1]").get_by_role("button", name="Stop coder-1")).to_have_count(0)
 
 
-def test_an_operator_holds_a_project_as_soon_as_it_is_approved(single_hub, page):
+def test_an_operator_holds_a_project_as_soon_as_it_is_registered(single_hub, page):
     sign_in(page, single_hub, "admin")
     single_hub.world("add-project", project="fresh")
     expect(projects_table(page).get_by_role("link", name="fresh")).to_be_visible(timeout=10000)  # the page asks every three seconds

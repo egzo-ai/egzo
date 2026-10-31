@@ -20,7 +20,7 @@ describe("the router", () => {
   });
 
   it("answers not found for anything else", () => {
-    for (const path of ["/nope", "/p", "/p/p1/bogus", "/p/p1/a", "/p/p1/a/x/terminal", "/link", "/link/a/b", "/engines", "/settings/nope", "/settings/users/x"]) {
+    for (const path of ["/nope", "/p", "/p/p1/bogus", "/p/p1/a", "/p/p1/a/x/terminal", "/link", "/link/QXRB-7KPM", "/link/a/b", "/engines", "/settings/nope", "/settings/users/x"]) {
       expect(parse(path).name).toBe("notfound");
     }
   });
@@ -41,6 +41,5 @@ describe("the router", () => {
     expect(parse(path)).toEqual({ name: "agent", project: "p1", agent: "fix/bug", tab: "logs" });
     expect(parse(href.project("p1", "spec"))).toMatchObject({ tab: "spec" });
     expect(href.project("p1")).toBe("/p/p1");
-    expect(parse("/link/QXRB-7KPM")).toEqual({ name: "register", code: "QXRB-7KPM" });
   });
 });
