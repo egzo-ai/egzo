@@ -74,6 +74,7 @@ func Handshake(ctx context.Context, session *yamux.Session, hub string) (*Peer, 
 		return nil, errors.New("the link's signature does not verify")
 	}
 	stream.SetDeadline(time.Time{})
+	control.limit = maxControl
 	return &Peer{Hello: hello, Code: proof.Code, session: session, control: control}, nil
 }
 
@@ -120,6 +121,9 @@ func (p *Peer) Run(ctx context.Context, h Handlers) error {
 	}
 }
 
+// controlPause is how long the hub waits between two messages of the control stream. A link has one thing to say on it, once.
+var controlPause = 100 * time.Millisecond
+
 // readControl reads the control stream, for as long as the connection is worth keeping: the stream ending, a line over its limit, and
 // the answer to an Unlink all end the connection.
 func (p *Peer) readControl(h Handlers) {
@@ -133,6 +137,7 @@ func (p *Peer) readControl(h Handlers) {
 			_ = p.Send(h.Unlink())
 			return
 		}
+		time.Sleep(controlPause)
 	}
 }
 
