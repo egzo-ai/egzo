@@ -32,6 +32,7 @@ const (
 	UseCA         = "ca"
 	UseSSHHostKey = "ssh-host-key"
 	UseOAuth      = "oauth"
+	UseLink       = "link"
 )
 
 // ErrWrongKey is a record sealed with another secret key (or for another project).
