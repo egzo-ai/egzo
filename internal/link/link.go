@@ -10,13 +10,20 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	mathrand "math/rand/v2"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/hashicorp/yamux"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/seal"
@@ -351,6 +358,24 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public, code)), Code: code}); err != nil {
 		return err
 	}
+	// Nothing the hub asks runs unless the project is approved, for as long as it is. Whatever else the hub says is
+	// the last thing on this connection.
+	var approval atomic.Pointer[context.Context]
+	go l.serve(ctx, session, &approval)
+	var stopServing context.CancelFunc
+	startServing := func() {
+		serving, cancel := context.WithCancel(ctx)
+		stopServing = cancel
+		approval.Store(&serving)
+	}
+	endServing := func() {
+		if stopServing != nil {
+			approval.Store(nil)
+			stopServing()
+			stopServing = nil
+		}
+	}
+	defer endServing()
 	for {
 		var verdict hublink.Verdict
 		if err := control.Read(&verdict); err != nil {
@@ -364,8 +389,11 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 		if now := l.current(); now == asked || verdict.State != hublink.StateUnregistered {
 			l.answered(now)
 		}
-		if verdict.State != hublink.StateApproved {
+		switch {
+		case verdict.State != hublink.StateApproved:
 			return errTurnedAway
+		case stopServing == nil:
+			startServing()
 		}
 	}
 }
@@ -385,4 +413,134 @@ func (l *Link) record(v hublink.Verdict) {
 	l.set(func(s *Status) {
 		*s = Status{Hub: s.Hub, State: v.State, Project: v.Project, Owner: v.Owner, Error: v.Message}
 	})
+}
+
+// ignoreFor is how long a stream that came without an approval is held before it is closed.
+var ignoreFor = time.Minute
+
+// serve takes the streams the hub opens for as long as the session lasts, and answers those that come while the project is approved.
+// Streams must always be taken: yamux would queue the others, run them when an approval comes, long after their caller gave up, and
+// the hub would close a healthy session over a stream left unaccepted.
+func (l *Link) serve(ctx context.Context, session *yamux.Session, approval *atomic.Pointer[context.Context]) {
+	for {
+		stream, err := session.AcceptStreamWithContext(ctx)
+		if err != nil {
+			return
+		}
+		approved := approval.Load()
+		if approved == nil {
+			go ignore(stream)
+			continue
+		}
+		serving := *approved
+		go func() {
+			defer stream.Close()
+			finished := make(chan struct{})
+			defer close(finished)
+			go func() { // a verb running when the approval ends is cut
+				select {
+				case <-serving.Done():
+					stream.SetDeadline(time.Now())
+				case <-finished:
+				}
+			}()
+			l.answer(serving, stream)
+		}()
+	}
+}
+
+// ignore says nothing to a stream and drops what comes on it: a project that is not approved does not answer, not even to refuse.
+func ignore(stream net.Conn) {
+	defer stream.Close()
+	stream.SetDeadline(time.Now().Add(ignoreFor))
+	_, _ = io.Copy(io.Discard, stream)
+}
+
+// maxResult is the longest result a reply carries once it is JSON: what the hub reads is a line of at most hublink.MaxLine. Over that
+// it would refuse the stream, and say nothing of why.
+const maxResult = hublink.MaxLine - 1<<16
+
+// answer runs one verb.
+func (l *Link) answer(ctx context.Context, stream net.Conn) {
+	lines := hublink.NewLines(stream)
+	var request hublink.Request
+	if err := lines.Read(&request); err != nil || ctx.Err() != nil {
+		return
+	}
+	engine, project := l.options.Engine, l.options.Project
+	progress := func(step string) { _ = lines.Write(hublink.Reply{Progress: step}) }
+	var result any
+	var err error
+	switch request.Verb {
+	case hublink.VerbProject:
+		result, err = engine.Project(ctx, project)
+	case hublink.VerbPublished:
+		result, err = engine.Published(ctx, project)
+	case hublink.VerbSpawn:
+		result, err = engine.Spawn(ctx, project, request.Template, request.Name, request.Actor, progress)
+	case hublink.VerbStart:
+		err = engine.Start(ctx, project, request.Agent)
+	case hublink.VerbStop:
+		err = engine.Stop(ctx, project, request.Agent)
+	case hublink.VerbRemove:
+		err = engine.Remove(ctx, project, request.Agent, progress)
+	case hublink.VerbEvents:
+		result, err = engine.Events(ctx, project, request.Agent, request.Limit)
+	case hublink.VerbLogs:
+		result, err = engine.Logs(ctx, project, request.Container, request.Tail)
+	case hublink.VerbSpec:
+		result, err = engine.Spec(ctx, project)
+	case hublink.VerbAttach:
+		if err = engine.Attachable(ctx, project, request.Agent); err == nil {
+			_ = lines.Write(hublink.Reply{Done: true})
+			l.attach(ctx, stream, lines, request)
+			return
+		}
+	default:
+		err = fmt.Errorf("no verb %q", request.Verb)
+	}
+	reply := hublink.Reply{Done: true}
+	var gone ErrNoProject
+	switch {
+	case errors.As(err, &gone):
+		reply.Gone = true
+	case err != nil:
+		reply.Error = err.Error()
+	case result != nil:
+		reply.Result, reply.Error = encodeResult(request.Verb, result)
+	}
+	_ = lines.Write(reply)
+}
+
+// encodeResult is a verb's result as a reply carries it, or why it cannot.
+func encodeResult(verb string, result any) (json.RawMessage, string) {
+	encoded, err := json.Marshal(result)
+	switch {
+	case err != nil:
+		return nil, err.Error()
+	case len(encoded) > maxResult:
+		return nil, fmt.Sprintf("the answer to %s is %d bytes, over the %d a reply can carry", verb, len(encoded), maxResult)
+	}
+	return encoded, ""
+}
+
+// attach is a terminal on the verb's stream: raw output, and input frames from the hub.
+func (l *Link) attach(ctx context.Context, stream net.Conn, lines *hublink.Lines, request hublink.Request) {
+	input, writer := io.Pipe()
+	resize := make(chan hublink.Size, 8)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		err := hublink.ReadFrames(lines.Rest(), writer, func(size hublink.Size) {
+			select {
+			case resize <- size:
+			default:
+			}
+		})
+		writer.CloseWithError(err)
+		cancel() // the hub's side is gone: the terminal goes with it
+	}()
+	if err := l.options.Engine.Attach(ctx, l.options.Project, request.Agent, Terminal{In: input, Out: stream, Size: request.Size, Resize: resize}); err != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "attach %s: %s\n", request.Agent, strings.TrimSpace(err.Error()))
+	}
 }
