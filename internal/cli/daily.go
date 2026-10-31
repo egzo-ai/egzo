@@ -283,17 +283,26 @@ func newAttachCommand(opts *options) *cobra.Command {
 	return cmd
 }
 
-// attachTo attaches the terminal to an instance's session.
-func attachTo(ctx context.Context, s *session, name, detachKeys string, readOnly bool) error {
+// runningAgent finds an agent that is running. notOne says what it means for name to be something else.
+func (s *session) runningAgent(name, notOne string) (*stack.Resource, error) {
 	target, err := s.service(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if target.Kind != "agent" {
-		return fmt.Errorf("%s is not an agent: nothing to attach to", name)
+		return nil, fmt.Errorf("%s is not an agent: %s", name, notOne)
 	}
 	if target.State != "running" {
-		return fmt.Errorf("agent %q is %s: start it with `egzo agent start %s`", name, target.State, name)
+		return nil, fmt.Errorf("agent %q is %s: start it with `egzo agent start %s`", name, target.State, name)
+	}
+	return target, nil
+}
+
+// attachTo attaches the terminal to an instance's session.
+func attachTo(ctx context.Context, s *session, name, detachKeys string, readOnly bool) error {
+	target, err := s.runningAgent(name, "nothing to attach to")
+	if err != nil {
+		return err
 	}
 	command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys} // no instance: the container's own session
 	if readOnly {

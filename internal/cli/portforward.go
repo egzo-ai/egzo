@@ -45,15 +45,9 @@ func newPortForwardCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 			name := args[0]
-			target, err := s.service(name)
+			target, err := s.runningAgent(name, "it has no ports to forward")
 			if err != nil {
 				return err
-			}
-			if target.Kind != "agent" {
-				return fmt.Errorf("%s is not an agent: it has no ports to forward", name)
-			}
-			if target.State != "running" {
-				return fmt.Errorf("agent %q is %s: start it with `egzo agent start %s`", name, target.State, name)
 			}
 			// Before listening: what a failed exec says would reach the client as if the server had said it.
 			if err := canForward(ctx, s.engine, target.ID, name); err != nil {
