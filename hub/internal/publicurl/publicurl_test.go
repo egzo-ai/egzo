@@ -105,3 +105,33 @@ func TestAWebSocketUpgradeHasTheSchemeOfThePage(t *testing.T) {
 		}
 	}
 }
+
+func TestTheClientIsWhoTheLastProxyTalkedTo(t *testing.T) {
+	r, err := New("", []string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, remote, forwarded, want string
+	}{
+		{"no proxy", "203.0.113.9:1234", "", "203.0.113.9"},
+		{"a client that writes the header", "203.0.113.9:1234", "1.2.3.4", "203.0.113.9"},
+		{"behind a proxy", "10.0.0.1:1234", "203.0.113.9", "203.0.113.9"},
+		{"a client that writes the header to a proxy", "10.0.0.1:1234", "1.2.3.4, 203.0.113.9", "203.0.113.9"},
+		{"behind two proxies", "10.0.0.1:1234", "203.0.113.9, 10.0.0.2", "203.0.113.9"},
+		{"a proxy that says nothing", "10.0.0.1:1234", "", "10.0.0.1"},
+		{"a header that is not an address", "10.0.0.1:1234", "nonsense", "10.0.0.1"},
+		{"nothing but proxies", "10.0.0.1:1234", "10.0.0.2", "10.0.0.2"},
+		{"IPv4 as IPv6", "[::ffff:203.0.113.9]:1234", "", "203.0.113.9"},
+	}
+	for _, c := range cases {
+		q := httptest.NewRequest("GET", "/", nil)
+		q.RemoteAddr = c.remote
+		if c.forwarded != "" {
+			q.Header.Set("X-Forwarded-For", c.forwarded)
+		}
+		if got := r.ClientIP(q).String(); got != c.want {
+			t.Errorf("%s: %s, want %s", c.name, got, c.want)
+		}
+	}
+}
