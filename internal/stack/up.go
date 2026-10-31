@@ -94,13 +94,27 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	}
 
 	fresh := map[string]bool{} // resources created by this run: nothing can be stored in them yet
-	desired, err := Desire(project, dir, Inputs{Image: opts.Image, User: AgentUser(c), HarnessPrefix: opts.HarnessPrefix, Instances: observed.InstanceNames()})
+	inputs := Inputs{Image: opts.Image, User: AgentUser(c), HarnessPrefix: opts.HarnessPrefix, Instances: observed.InstanceNames()}
+	if project.Hub != nil {
+		if inputs.LinkSocket, err = FindLinkSocket(ctx, c, opts.Image); err != nil {
+			return err
+		}
+	}
+	desired, err := Desire(project, dir, inputs)
 	if err != nil {
 		return err
 	}
 	plan := BuildPlan(desired, observed, opts.Recreate)
+	if project.Hub == nil && !opts.DryRun {
+		unlink(ctx, c, observed, out) // before the plan removes the link
+	}
 	if err := Apply(ctx, c, desired, plan, opts.DryRun, out); err != nil {
 		return err
+	}
+	if project.Hub == nil && !opts.DryRun {
+		if err := removeLinkVolume(ctx, c, observed, out); err != nil {
+			return err
+		}
 	}
 	markFresh(fresh, plan)
 	if !opts.DryRun && len(placeholders) > 0 {
@@ -151,15 +165,20 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		fmt.Fprintln(out, "nothing to do")
 	}
 	if !opts.DryRun {
+		warnings := opts.Warnings
+		if warnings == nil {
+			warnings = io.Discard
+		}
+		if desired.Link != "" {
+			if err := unlockLink(ctx, c, project.Name, secrets[project.SecretKey], out, warnings); err != nil {
+				return err
+			}
+		}
 		env := PrepEnv{Image: opts.Image, User: AgentUser(c)}
 		if err := EnsureDirectoryVolumes(ctx, c, env, project, dir); err != nil {
 			return err
 		}
 		// Last, and never fatal: a repository that cannot be reached must not keep the project down.
-		warnings := opts.Warnings
-		if warnings == nil {
-			warnings = io.Discard
-		}
 		CloneBases(ctx, c, project, dir, env, out, warnings)
 	}
 	return nil

@@ -222,7 +222,9 @@ func newPsCommand(opts *options) *cobra.Command {
 			} else {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: cannot tell which instances are stale: %v\n", err)
 			}
-			rows := stack.Rows(s.observed, reportedStatuses(ctx, s), published)
+			reported := reportedStatuses(ctx, s)
+			reportLink(ctx, s, reported)
+			rows := stack.Rows(s.observed, reported, published)
 			if asJSON {
 				if rows == nil {
 					rows = []stack.Row{}
@@ -258,4 +260,14 @@ func reportedStatuses(ctx context.Context, s *session) map[string]stack.Report {
 		}
 	}
 	return reported
+}
+
+// reportLink adds where the link stands to what ps reports. Best effort, like the sidecar's statuses.
+func reportLink(ctx context.Context, s *session, reported map[string]stack.Report) {
+	if s.Resolved.Hub == nil {
+		return
+	}
+	if status, err := stack.LinkStatus(ctx, s.engine, s.Resolved.Name, 0); err == nil {
+		reported[stack.LinkReport] = stack.Report{Status: status.Text()}
+	}
 }

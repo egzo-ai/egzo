@@ -486,3 +486,29 @@ func TestCustomAgentsGetNoHomeVolume(t *testing.T) {
 		}
 	}
 }
+
+func TestTheLinkIsDesiredOnlyForAProjectThatNamesAHub(t *testing.T) {
+	inputs := Inputs{Image: "egzo:test", LinkSocket: LinkSocket{Path: "/var/run/docker.sock", Group: "109"}}
+	without, err := Desire(&config.Resolved{Name: "web"}, "/p", inputs)
+	if err != nil || without.Link != "" {
+		t.Fatalf("link %q, err %v", without.Link, err)
+	}
+	with, err := Desire(&config.Resolved{Name: "web", Hub: &config.ResolvedHub{URL: "https://hub.example.org"}}, "/p", inputs)
+	if err != nil || with.Link != "web-link-1" {
+		t.Fatalf("link %q, err %v", with.Link, err)
+	}
+	link := findContainer(t, with, "web-link-1")
+	if link.User != "65532:109" || !link.ReadonlyRootfs || link.Network != "web_link" {
+		t.Errorf("link %+v", link)
+	}
+	for _, network := range with.Networks {
+		if network.Name == "web_link" && network.Internal {
+			t.Error("the link's network has no way out")
+		}
+	}
+	for _, attachment := range with.Attachments {
+		if attachment.Container == link.Name {
+			t.Errorf("the link joined the agents' networks: %+v", attachment)
+		}
+	}
+}

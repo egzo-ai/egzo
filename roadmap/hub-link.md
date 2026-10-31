@@ -1,6 +1,7 @@
 # Roadmap: a project links itself to a hub
 
-**Status.** Draft, direction decided (below); not built. It replaces the hub's engines: when it lands, the hub no longer connects
+**Status.** Draft, direction decided (below). Core is built (`hub:`, the link sidecar, registration, the verbs and feeds, against a fake hub); the
+hub's side is not. It replaces the hub's engines: when it lands, the hub no longer connects
 to engines, and everything in [hub.md](hub.md) about engines as data, engine credentials and discovery by labels goes away.
 Pre-1.0: no migration and no second mode. The old path is removed, not kept next to the new one.
 
@@ -54,8 +55,7 @@ The first `egzo project up` with a `hub:` registers the project, like a device c
 ```console
 $ egzo project up
 ...
-link: register this project at https://my-egzo.example.org/link/QXRB-7KPM (waiting; Ctrl-C to finish later)
-link: registered as web, owned by alice
+link: pending: register this project at https://my-egzo.example.org/link/QXRB-7KPM
 ```
 
 - The link makes an Ed25519 key pair. The private key stays on the link's volume, sealed with the
@@ -76,6 +76,11 @@ link: registered as web, owned by alice
   reach them except through the engine, like the CLI.
 - It reaches its engine through the engine's socket, mounted by `up`: it is root-equivalent on its host, like the CLI that
   created it, and like the hub's quick start today. Rootless Podman keeps that to the user's account.
+- It runs as the sidecars' user with the socket's group as its primary group. Only the engine's host knows that group and the CLI may
+  be elsewhere, so `up` reads it with a throwaway container that mounts the socket. The socket's path is the one the CLI dials when
+  that is a unix socket, and `/var/run/docker.sock` otherwise.
+- The secret key and any `HTTPS_PROXY` reach it through `engine exec`, on stdin, so they are never in `inspect`. It holds them in memory:
+  a link that restarted by itself is `locked` until the next `up`.
 - It follows the engine's events and the control sidecar's and the proxy's logs itself (the code of the hub's `docker_feed.go`
   moves here) and pushes what changed: the hub runs nothing on the engine to keep up.
 - **gVisor**: a container under gVisor probably cannot connect to a host unix socket through a bind mount (DESIGN.md, "Control
@@ -92,8 +97,11 @@ link: registered as web, owned by alice
   handshake, and a hub refuses a link it does not speak with a message that says which to upgrade
   ([control-compatibility.md](control-compatibility.md) becomes this). Before 1.0, one version at a time: no ranges, no
   compatibility shims.
-- **The protocol lives in core** (`internal/hublink`: the messages, the link's side), and the hub imports it, so core still never
-  imports the hub. The hub stops importing `stack`, `engine` and their dependencies (compose-go, the Docker client).
+- **The protocol lives in core** (`internal/hublink`: the messages and the hub's side, with no engine in it; `internal/link`: the link's
+  side), and the hub imports `hublink`, so core still never imports the hub. The hub stops importing `stack`, `engine` and their
+  dependencies (compose-go, the Docker client).
+- **Nothing runs before an approval.** The link accepts no stream and pushes no feed until a person has approved the project, and stops
+  both the moment that ends. The proof signs the hub's address too, so a hub cannot replay a challenge of another hub to its links.
 - **Reconnecting** with a growing delay, from one second to a minute. A dropped connection ends the terminals and previews that
   ran over it; a task that ran is `interrupted`, as at a hub restart. The project shows as **offline since 14:02** on the hub.
 - **The hub must be reachable by the projects**, which turns its posture around: today it is "meant for a private network".

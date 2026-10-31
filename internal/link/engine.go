@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -302,14 +303,28 @@ func (s *steps) Write(p []byte) (int, error) {
 	}
 }
 
-// Attach runs `egzo agent attach` in the agent's container on a terminal, as `egzo attach` does.
-func (d *Engine) Attach(ctx context.Context, project, agent string, term Terminal) error {
+// Attachable says why an agent has no terminal to attach to, if it has none.
+func (d *Engine) Attachable(ctx context.Context, project, agent string) error {
+	_, err := d.runningInstance(ctx, project, agent)
+	return err
+}
+
+func (d *Engine) runningInstance(ctx context.Context, project, agent string) (*stack.Resource, error) {
 	_, target, err := d.instance(ctx, project, agent)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if target.State != "running" {
-		return fmt.Errorf("agent %q is %s", agent, target.State)
+		return nil, fmt.Errorf("agent %q is %s", agent, target.State)
+	}
+	return target, nil
+}
+
+// Attach runs `egzo agent attach` in the agent's container on a terminal, as `egzo attach` does.
+func (d *Engine) Attach(ctx context.Context, project, agent string, term Terminal) error {
+	target, err := d.runningInstance(ctx, project, agent)
+	if err != nil {
+		return err
 	}
 	command := []string{"egzo", "agent", "attach", "--detach-keys", "ctrl-]"}
 	size := term.Size
@@ -355,7 +370,7 @@ var withText = map[string]bool{"status": true, "activity": true}
 func (d *Engine) Events(ctx context.Context, project, agent string, limit int) ([]Event, error) {
 	path := "/v1/events"
 	if agent != "" {
-		path += "?agent=" + agent
+		path += "?agent=" + url.QueryEscape(agent)
 	}
 	data, err := stack.ControlRequest(ctx, d.client, project, "GET", path, nil)
 	if err != nil {

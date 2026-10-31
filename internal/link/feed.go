@@ -162,8 +162,17 @@ var watched = map[events.Action]bool{
 
 // Watch follows the engine's event stream, for the containers that belong to an egzo project.
 func (d *Engine) Watch(ctx context.Context, changed func()) error {
+	return d.watch(ctx, engine.LabelProject, changed)
+}
+
+// WatchProject follows the engine's event stream for one project's containers.
+func (d *Engine) WatchProject(ctx context.Context, project string, changed func()) error {
+	return d.watch(ctx, engine.LabelProject+"="+project, changed)
+}
+
+func (d *Engine) watch(ctx context.Context, label string, changed func()) error {
 	messages, errs := d.client.API.Events(ctx, events.ListOptions{Filters: filters.NewArgs(
-		filters.Arg("type", string(events.ContainerEventType)), filters.Arg("label", engine.LabelProject))})
+		filters.Arg("type", string(events.ContainerEventType)), filters.Arg("label", label))})
 	for {
 		select {
 		case <-ctx.Done():
