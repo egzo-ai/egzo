@@ -532,3 +532,31 @@ func TestTheAuditCursorOnlyMovesForwardAndGoesWithItsEngine(t *testing.T) {
 		t.Error("the denials outlived their engine")
 	}
 }
+
+func TestExpiredCodesArePurgedAndAreNotListed(t *testing.T) {
+	s := open(t)
+	u := operatorNamed(t, s, "a")
+	s.CreateLinkCode(ctx, u.ID, time.Now().Add(-time.Hour))
+	live, _, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if codes, _ := s.LinkCodes(ctx, time.Now()); len(codes) != 1 || codes[0].ID != live.ID {
+		t.Errorf("codes = %+v", codes)
+	}
+	if err := s.PurgeLinkCodes(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var kept int
+	s.db.QueryRow(`SELECT COUNT(*) FROM link_codes`).Scan(&kept)
+	if kept != 1 {
+		t.Errorf("%d codes are kept", kept)
+	}
+}
+
+// operatorNamed signs someone in and makes them an operator.
+func operatorNamed(t *testing.T, s *Store, sub string) User {
+	t.Helper()
+	u := login(t, s, sub)
+	if _, err := s.SetOperator(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
