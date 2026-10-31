@@ -11,17 +11,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egzo-ai/egzo/hub/internal/engines"
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	corenames "github.com/egzo-ai/egzo/internal/names"
 )
 
-// Every action of the hub on an engine (a spawn, a start, a stop, a removal) can take from a second to a minute, longer than a
+// Every action of the hub on a project (a spawn, a start, a stop, a removal) can take from a second to a minute, longer than a
 // browser, or a proxy in front of the hub, waits for an answer. So each is a task: recorded, answered at once, and run in the
 // background apart from the request that asked for it. While it runs it is part of its agent, for everyone who sees the project; one
 // that failed stays on its agent until somebody dismisses it. Tasks are kept in the database: the project's activity lists them, and
-// those that ran when the hub stopped are marked interrupted when it starts again (RecoverTasks). See roadmap/hub-tasks.md.
+// those that ran when the hub stopped are marked interrupted when it starts again (RecoverTasks), like those whose link dropped while
+// they ran: nothing follows them any more. See roadmap/hub-tasks.md.
 
 const (
 	// taskDeadline is how long one task may take, waiting for the ones before it included.
@@ -38,7 +39,7 @@ const (
 	VerbRm    = "rm"
 )
 
-// Task is one action of the hub on an engine.
+// Task is one action of the hub on a project.
 type Task = store.Task
 
 var (
@@ -70,27 +71,30 @@ type TaskView struct {
 	CanDismiss bool
 }
 
-type agentKey struct{ engine, project, agent string }
+type agentKey struct{ project, agent string }
 
 type taskList struct {
 	mu   sync.Mutex
-	open map[string]*Task             // running, or failed or interrupted and not dismissed; by id
-	busy map[agentKey]string          // the running task of each agent
-	last map[projectKey]chan struct{} // the newest spawn or removal of each project: the next one waits for it
-	done map[string]chan struct{}     // by id: closed when it ends
+	open map[string]*Task         // running, or failed or interrupted and not dismissed; by id
+	busy map[agentKey]string      // the running task of each agent
+	last map[string]chan struct{} // the newest spawn or removal of each project: the next one waits for it
+	done map[string]chan struct{} // by id: closed when it ends
 	wg   sync.WaitGroup
 }
 
 func (l *taskList) init() {
 	if l.open == nil {
-		l.open, l.busy, l.last, l.done = map[string]*Task{}, map[agentKey]string{}, map[projectKey]chan struct{}{}, map[string]chan struct{}{}
+		l.open, l.busy, l.last, l.done = map[string]*Task{}, map[agentKey]string{}, map[string]chan struct{}{}, map[string]chan struct{}{}
 	}
 }
 
-// RecoverTasks marks what ran when the hub stopped as interrupted, and shows on their agents the failures nobody dismissed. Run
-// calls it first.
+// RecoverTasks marks what ran when the hub stopped as interrupted, and shows on their agents the failures nobody dismissed. Every project
+// is offline until its link dials again. Call it before links are taken.
 func (h *Hub) RecoverTasks(ctx context.Context) error {
 	if err := h.store.InterruptTasks(ctx, time.Now()); err != nil {
+		return err
+	}
+	if err := h.store.AllOffline(ctx, time.Now()); err != nil {
 		return err
 	}
 	open, err := h.store.OpenTasks(ctx)
@@ -108,73 +112,76 @@ func (h *Hub) RecoverTasks(ctx context.Context) error {
 
 // StartSpawn checks that the user may spawn from the project and starts a task that makes the agent, which belongs to the user. It
 // returns before the agent exists; the task goes on if the request that asked for it goes away.
-func (h *Hub) StartSpawn(ctx context.Context, user store.User, engine, project, template, name string) (Task, error) {
+func (h *Hub) StartSpawn(ctx context.Context, user store.User, project, template, name string) (Task, error) {
 	if name == "" {
 		return Task{}, ErrNameRequired
 	}
 	if !corenames.Instance(name) {
 		return Task{}, ErrBadName
 	}
-	if _, err := h.access(ctx, user, engine, project); err != nil {
+	if _, err := h.access(ctx, user, project); err != nil {
 		return Task{}, err
 	}
-	if p, ok := h.scannedProject(engine, project); ok {
+	if c := h.connected(project); c == nil || !c.served.Load() {
+		return Task{}, h.offline(ctx, project)
+	}
+	if p, ok := h.knownProject(project); ok {
 		for _, a := range p.Agents {
 			if a.Name == name {
 				return Task{}, ExistsError{Agent: name}
 			}
 		}
 	}
-	if t, ok := h.busyTask(engine, project, name); ok {
+	if t, ok := h.busyTask(project, name); ok {
 		return Task{}, BusyError{Task: t}
 	}
-	if _, err := h.authorize(ctx, user, engine, project, name, rbac.Spawn, "", "agent.spawn"); err != nil {
+	if _, err := h.authorize(ctx, user, project, name, rbac.Spawn, "", "agent.spawn"); err != nil {
 		return Task{}, err
 	}
-	t := Task{Verb: VerbSpawn, Engine: engine, Project: project, Agent: name, Template: template, Actor: rbac.Actor(user.ID)}
+	t := Task{Verb: VerbSpawn, Project: project, Agent: name, Template: template, Actor: rbac.Actor(user.ID)}
 	// one at a time per project, in order: the engine's project lock would make them wait for each other anyway, and not in order
-	return h.startTask(ctx, t, true, func(ctx context.Context, e engines.Engine, progress func(string)) error {
-		_, err := e.Spawn(ctx, project, template, name, t.Actor, progress)
+	return h.startTask(ctx, t, true, func(ctx context.Context, e links.Engine, progress func(string)) error {
+		_, err := e.Spawn(ctx, template, name, t.Actor, progress)
 		return err
 	})
 }
 
 // StartOperation checks that the user may start, stop or remove the agent, and starts a task that does it.
-func (h *Hub) StartOperation(ctx context.Context, user store.User, verb, engine, project, agent string) (Task, error) {
+func (h *Hub) StartOperation(ctx context.Context, user store.User, verb, project, agent string) (Task, error) {
 	if verb != VerbStart && verb != VerbStop && verb != VerbRm {
 		return Task{}, fmt.Errorf("unknown operation %q", verb)
 	}
-	if _, err := h.access(ctx, user, engine, project); err != nil {
+	if _, err := h.access(ctx, user, project); err != nil {
 		return Task{}, err
 	}
-	if t, ok := h.busyTask(engine, project, agent); ok {
+	if t, ok := h.busyTask(project, agent); ok {
 		return Task{}, BusyError{Task: t}
 	}
-	creator, err := h.creatorOf(ctx, engine, project, agent)
+	creator, err := h.creatorOf(ctx, project, agent)
 	if err != nil {
 		return Task{}, err
 	}
-	if _, err := h.authorize(ctx, user, engine, project, agent, rbac.Operate, creator, "agent."+verb); err != nil {
+	if _, err := h.authorize(ctx, user, project, agent, rbac.Operate, creator, "agent."+verb); err != nil {
 		return Task{}, err
 	}
-	t := Task{Verb: verb, Engine: engine, Project: project, Agent: agent, Actor: rbac.Actor(user.ID)}
+	t := Task{Verb: verb, Project: project, Agent: agent, Actor: rbac.Actor(user.ID)}
 	// a removal takes the project's lock, as a spawn does
-	return h.startTask(ctx, t, verb == VerbRm, func(ctx context.Context, e engines.Engine, progress func(string)) error {
+	return h.startTask(ctx, t, verb == VerbRm, func(ctx context.Context, e links.Engine, progress func(string)) error {
 		switch verb {
 		case VerbStart:
-			return e.Start(ctx, project, agent)
+			return e.Start(ctx, agent)
 		case VerbStop:
-			return e.Stop(ctx, project, agent)
+			return e.Stop(ctx, agent)
 		}
-		return e.Remove(ctx, project, agent, progress)
+		return e.Remove(ctx, agent, progress)
 	})
 }
 
-type taskFunc func(ctx context.Context, e engines.Engine, progress func(string)) error
+type taskFunc func(ctx context.Context, e links.Engine, progress func(string)) error
 
 // startTask records the task and runs it. A queued one waits for the queued task of the project before it.
 func (h *Hub) startTask(ctx context.Context, t Task, queued bool, do taskFunc) (Task, error) {
-	key, project := agentKey{t.Engine, t.Project, t.Agent}, projectKey{t.Engine, t.Project}
+	key, project := agentKey{t.Project, t.Agent}, t.Project
 	h.tasks.mu.Lock()
 	h.tasks.init()
 	if id, ok := h.tasks.busy[key]; ok { // asked for twice at once
@@ -189,7 +196,7 @@ func (h *Hub) startTask(ctx context.Context, t Task, queued bool, do taskFunc) (
 	}
 	// a failure shown on the agent gives way to what is done on it now; the activity keeps it
 	for id, old := range h.tasks.open {
-		if (agentKey{old.Engine, old.Project, old.Agent}) == key && old.Over() {
+		if (agentKey{old.Project, old.Agent}) == key && old.Over() {
 			delete(h.tasks.open, id)
 			if err := h.store.DismissTask(ctx, id); err != nil {
 				h.log.Warn("dismiss a task", "task", id, "err", err)
@@ -223,8 +230,7 @@ func (h *Hub) startTask(ctx context.Context, t Task, queued bool, do taskFunc) (
 		}
 		err := run.Err()
 		if err == nil {
-			err = h.call(run, t.Engine, func(e engines.Engine) error { return do(run, e, progress) })
-			h.afterOperation(run, t.Engine)
+			err = h.call(run, t.Project, func(ctx context.Context, e links.Engine) error { return do(ctx, e, progress) })
 		}
 		h.endTask(task, done, err)
 	}()
@@ -244,21 +250,24 @@ func (h *Hub) setStep(task *Task, step string) {
 func (h *Hub) endTask(task *Task, done chan struct{}, err error) {
 	h.tasks.mu.Lock()
 	task.State, task.Ended = store.TaskDone, time.Now()
-	if err != nil {
+	switch {
+	case errors.As(err, new(OfflineError)):
+		task.State, task.Err = store.TaskInterrupted, "the link dropped while it ran: look at the agent to see where it got"
+	case err != nil:
 		task.State, task.Err = store.TaskFailed, err.Error()
 	}
 	t := *task
-	delete(h.tasks.busy, agentKey{t.Engine, t.Project, t.Agent})
+	delete(h.tasks.busy, agentKey{t.Project, t.Agent})
 	delete(h.tasks.done, t.ID)
 	if t.State == store.TaskDone {
 		delete(h.tasks.open, t.ID)
 	}
-	if project := (projectKey{t.Engine, t.Project}); h.tasks.last[project] == done {
-		delete(h.tasks.last, project)
+	if h.tasks.last[t.Project] == done {
+		delete(h.tasks.last, t.Project)
 	}
 	h.tasks.mu.Unlock()
 	if err != nil {
-		h.log.Warn("task failed", "verb", t.Verb, "engine", t.Engine, "project", t.Project, "agent", t.Agent, "actor", t.Actor, "err", err)
+		h.log.Warn("task failed", "verb", t.Verb, "project", t.Project, "agent", t.Agent, "actor", t.Actor, "err", err)
 	}
 	if err := h.store.EndTask(context.Background(), t.ID, t.State, t.Err, t.Ended); err != nil {
 		h.log.Warn("record the end of a task", "task", t.ID, "err", err)
@@ -266,8 +275,8 @@ func (h *Hub) endTask(task *Task, done chan struct{}, err error) {
 }
 
 // Spawn spawns an agent and waits until it exists or the task has failed: StartSpawn, for a caller that has the time.
-func (h *Hub) Spawn(ctx context.Context, user store.User, engine, project, template, name string) error {
-	t, err := h.StartSpawn(ctx, user, engine, project, template, name)
+func (h *Hub) Spawn(ctx context.Context, user store.User, project, template, name string) error {
+	t, err := h.StartSpawn(ctx, user, project, template, name)
 	if err != nil {
 		return err
 	}
@@ -275,8 +284,8 @@ func (h *Hub) Spawn(ctx context.Context, user store.User, engine, project, templ
 }
 
 // Operate starts, stops or removes an agent and waits until it is done: StartOperation, for a caller that has the time.
-func (h *Hub) Operate(ctx context.Context, user store.User, verb, engine, project, agent string) error {
-	t, err := h.StartOperation(ctx, user, verb, engine, project, agent)
+func (h *Hub) Operate(ctx context.Context, user store.User, verb, project, agent string) error {
+	t, err := h.StartOperation(ctx, user, verb, project, agent)
 	if err != nil {
 		return err
 	}
@@ -312,22 +321,22 @@ type taskError string
 func (e taskError) Error() string { return string(e) }
 
 // busyTask is the task that runs on an agent.
-func (h *Hub) busyTask(engine, project, agent string) (Task, bool) {
+func (h *Hub) busyTask(project, agent string) (Task, bool) {
 	h.tasks.mu.Lock()
 	defer h.tasks.mu.Unlock()
-	if id, ok := h.tasks.busy[agentKey{engine, project, agent}]; ok {
+	if id, ok := h.tasks.busy[agentKey{project, agent}]; ok {
 		return *h.tasks.open[id], true
 	}
 	return Task{}, false
 }
 
 // openTasks are the tasks shown on the agents of a project, oldest first.
-func (h *Hub) openTasks(engine, project string) []Task {
+func (h *Hub) openTasks(project string) []Task {
 	h.tasks.mu.Lock()
 	defer h.tasks.mu.Unlock()
 	var list []Task
 	for _, t := range h.tasks.open {
-		if t.Engine == engine && t.Project == project {
+		if t.Project == project {
 			list = append(list, *t)
 		}
 	}
@@ -341,9 +350,9 @@ func (h *Hub) openTasks(engine, project string) []Task {
 }
 
 // runningTasks are the tasks that run on the agents of a project, oldest first.
-func (h *Hub) runningTasks(engine, project string) []Task {
+func (h *Hub) runningTasks(project string) []Task {
 	var list []Task
-	for _, t := range h.openTasks(engine, project) {
+	for _, t := range h.openTasks(project) {
 		if !t.Over() {
 			list = append(list, t)
 		}
@@ -351,21 +360,21 @@ func (h *Hub) runningTasks(engine, project string) []Task {
 	return list
 }
 
-// withTasks puts on each agent what the hub does on it, or the failure nobody dismissed; the latest wins. An agent the engine does
+// withTasks puts on each agent what the hub does on it, or the failure nobody dismissed; the latest wins. An agent the project does
 // not have (yet, or any more) is shown while a task runs on it, and a spawn that failed is shown until it is dismissed: a spawn is one
 // agent from when it was asked for, and a removal does not leave a gap before it ends.
-func (h *Hub) withTasks(user store.User, role rbac.Role, engine, project string, agents []AgentView) []AgentView {
+func (h *Hub) withTasks(user store.User, role rbac.Role, project string, agents []AgentView) []AgentView {
 	index := map[string]int{}
 	for i, a := range agents {
 		index[a.Name] = i
 	}
-	for _, t := range h.openTasks(engine, project) {
+	for _, t := range h.openTasks(project) {
 		i, ok := index[t.Agent]
 		if !ok {
 			if t.Over() && t.Verb != VerbSpawn {
 				continue // it failed on an agent that is gone since: the activity has it
 			}
-			agents = append(agents, AgentView{Agent: engines.Agent{Name: t.Agent, Template: t.Template, Actor: t.Actor},
+			agents = append(agents, AgentView{Agent: links.Agent{Name: t.Agent, Template: t.Template, Actor: t.Actor},
 				CanOperate: rbac.Can(user.Subject(), role, rbac.Operate, t.Actor)})
 			i = len(agents) - 1
 			index[t.Agent] = i
@@ -378,8 +387,8 @@ func (h *Hub) withTasks(user store.User, role rbac.Role, engine, project string,
 
 // DismissTask takes an ended task off its agent, for a failure somebody read; it stays in the project's activity. Who may is who may
 // operate the agent. A task that runs cannot be: it ends on its own.
-func (h *Hub) DismissTask(ctx context.Context, user store.User, engine, project, id string) error {
-	if _, err := h.access(ctx, user, engine, project); err != nil {
+func (h *Hub) DismissTask(ctx context.Context, user store.User, project, id string) error {
+	if _, err := h.access(ctx, user, project); err != nil {
 		return err
 	}
 	h.tasks.mu.Lock()
@@ -390,21 +399,21 @@ func (h *Hub) DismissTask(ctx context.Context, user store.User, engine, project,
 		t = *open
 	}
 	h.tasks.mu.Unlock()
-	if !ok || t.Engine != engine || t.Project != project {
+	if !ok || t.Project != project {
 		return ErrNotFound
 	}
 	if !t.Over() {
 		return ErrTaskRunning
 	}
 	creator := t.Actor
-	if p, ok := h.scannedProject(engine, project); ok {
+	if p, ok := h.knownProject(project); ok {
 		for _, a := range p.Agents {
 			if a.Name == t.Agent {
 				creator = a.Actor
 			}
 		}
 	}
-	if _, err := h.authorize(ctx, user, engine, project, t.Agent, rbac.Operate, creator, "task.dismiss"); err != nil {
+	if _, err := h.authorize(ctx, user, project, t.Agent, rbac.Operate, creator, "task.dismiss"); err != nil {
 		return err
 	}
 	if err := h.store.DismissTask(ctx, id); err != nil && !errors.Is(err, store.ErrNoTask) {
@@ -416,21 +425,32 @@ func (h *Hub) DismissTask(ctx context.Context, user store.User, engine, project,
 	return nil
 }
 
+// forgetTasks drops what is shown of a project that is gone. A task that still runs ends on its own.
+func (h *Hub) forgetTasks(project string) {
+	h.tasks.mu.Lock()
+	defer h.tasks.mu.Unlock()
+	for id, t := range h.tasks.open {
+		if t.Project == project && t.Over() {
+			delete(h.tasks.open, id)
+		}
+	}
+}
+
 // Tasks lists the latest tasks of a project, or of one of its agents, newest first: the project's activity.
-func (h *Hub) Tasks(ctx context.Context, user store.User, engine, project, agent string, limit int) ([]Task, error) {
-	if _, err := h.access(ctx, user, engine, project); err != nil {
+func (h *Hub) Tasks(ctx context.Context, user store.User, project, agent string, limit int) ([]Task, error) {
+	if _, err := h.access(ctx, user, project); err != nil {
 		return nil, err
 	}
-	return h.store.TasksOf(ctx, engine, project, agent, limit)
+	return h.store.TasksOf(ctx, project, agent, limit)
 }
 
 // TaskOf reads one task of a project.
-func (h *Hub) TaskOf(ctx context.Context, user store.User, engine, project, id string) (Task, error) {
-	if _, err := h.access(ctx, user, engine, project); err != nil {
+func (h *Hub) TaskOf(ctx context.Context, user store.User, project, id string) (Task, error) {
+	if _, err := h.access(ctx, user, project); err != nil {
 		return Task{}, err
 	}
 	t, err := h.store.TaskByID(ctx, id)
-	if errors.Is(err, store.ErrNoTask) || err == nil && (t.Engine != engine || t.Project != project) {
+	if errors.Is(err, store.ErrNoTask) || err == nil && t.Project != project {
 		return Task{}, ErrNotFound
 	}
 	return t, err

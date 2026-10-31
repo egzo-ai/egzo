@@ -4,10 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base32"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/egzo-ai/egzo/hub/internal/rbac"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 // A link code is how a project comes to exist on the hub: an operator makes one, and whoever holds it can register one project, as that
@@ -22,6 +27,9 @@ const LinkCodeLife = 15 * time.Minute
 // ErrBadCode is returned for a code that is wrong, expired, used, cancelled, or made by someone who may no longer make one. Why is
 // not said: a code that fails is worth nothing to anyone, whichever it was.
 var ErrBadCode = errors.New("no such link code")
+
+// ErrKeyTaken is returned when another connection registered the same key first. The code is left as it was.
+var ErrKeyTaken = errors.New("the key is registered already")
 
 // LinkCode is a code as it is listed: everything but the code.
 type LinkCode struct {
@@ -92,4 +100,47 @@ func (s *Store) CancelLinkCode(ctx context.Context, id string) error {
 func (s *Store) PurgeLinkCodes(ctx context.Context, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM link_codes WHERE expires_at <= ?`, now.UnixMilli())
 	return err
+}
+
+// RedeemLinkCode spends a code on a link's key, in one transaction: the code goes, and the project is there, approved and owned by whoever
+// made the code. The delete comes first, so of two links that hold one code exactly one finds it. The person who made it must still be
+// allowed to: one who was disabled or is no longer an operator made a code that is worth nothing.
+func (s *Store) RedeemLinkCode(ctx context.Context, code string, r Registration, now time.Time) (Registration, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Registration{}, err
+	}
+	defer tx.Rollback()
+	err = tx.QueryRowContext(ctx, `DELETE FROM link_codes WHERE hash = ? AND expires_at > ? RETURNING created_by`, hashCode(code), now.UnixMilli()).Scan(&r.Owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Registration{}, ErrBadCode
+	}
+	if err != nil {
+		return Registration{}, err
+	}
+	var allowed int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id = ? AND is_operator = 1 AND disabled_at IS NULL`, r.Owner).Scan(&allowed); err != nil {
+		return Registration{}, err
+	}
+	if allowed == 0 {
+		return Registration{}, ErrBadCode
+	}
+	templates, err := json.Marshal(append([]string{}, r.Templates...))
+	if err != nil {
+		return Registration{}, err
+	}
+	r.ID, r.State, r.Created, r.Decided = newID("p", 6), hublink.StateApproved, now, now
+	result, err := tx.ExecContext(ctx, `INSERT INTO projects (id, key, name, host, release, templates, state, owner, created_at, decided_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+		r.ID, r.Key, r.Name, r.Host, r.Release, string(templates), r.State, r.Owner, now.UnixMilli(), now.UnixMilli())
+	if err != nil {
+		return Registration{}, err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return Registration{}, ErrKeyTaken
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO grants (project, user_id, role) VALUES (?, ?, ?)`, r.ID, r.Owner, string(rbac.Owner)); err != nil {
+		return Registration{}, err
+	}
+	return r, tx.Commit()
 }
