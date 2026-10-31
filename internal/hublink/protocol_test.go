@@ -168,6 +168,98 @@ func TestAnotherVersionIsToldWhichSideToUpgrade(t *testing.T) {
 	}
 }
 
+// answering is a link that answers one request, as the verb's handler does.
+func answering(t *testing.T, link *yamux.Session, answer func(Request, *Lines, *yamux.Stream)) {
+	t.Helper()
+	go func() {
+		stream, err := link.AcceptStream()
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		lines := NewLines(stream)
+		var request Request
+		if lines.Read(&request) == nil {
+			answer(request, lines, stream)
+		}
+	}()
+}
+
+func TestAVerbGivesItsStepsAndItsResultAndItsError(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{Hello: Hello{Project: "web"}, session: hub}
+	answering(t, link, func(q Request, lines *Lines, _ *yamux.Stream) {
+		if q.Verb != VerbSpawn || q.Template != "coder" || q.Actor != "user:7" {
+			t.Errorf("request %+v", q)
+		}
+		_ = lines.Write(Reply{Progress: "create container"})
+		_ = lines.Write(Reply{Done: true, Result: []byte(`"coder-1"`)})
+	})
+	var steps []string
+	agent, err := peer.Spawn(context.Background(), "coder", "", "user:7", func(s string) { steps = append(steps, s) })
+	if err != nil || agent != "coder-1" || len(steps) != 1 {
+		t.Fatalf("agent %q, steps %q, err %v", agent, steps, err)
+	}
+
+	answering(t, link, func(_ Request, lines *Lines, _ *yamux.Stream) { _ = lines.Write(Reply{Done: true, Error: "no agent"}) })
+	if err := peer.Stop(context.Background(), "x"); err == nil || err.Error() != "no agent" {
+		t.Errorf("err = %v", err)
+	}
+
+	answering(t, link, func(_ Request, lines *Lines, _ *yamux.Stream) { _ = lines.Write(Reply{Done: true, Gone: true}) })
+	var gone ErrNoProject
+	if _, err := peer.Project(context.Background()); !errors.As(err, &gone) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestAVerbEndsWithItsContext(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub}
+	answering(t, link, func(Request, *Lines, *yamux.Stream) { time.Sleep(time.Minute) })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := peer.Project(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestATerminalCarriesOutputInputAndSizes(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub}
+	got := make(chan string, 1)
+	sizes := make(chan Size, 1)
+	answering(t, link, func(q Request, lines *Lines, stream *yamux.Stream) {
+		_ = lines.Write(Reply{Done: true})
+		_, _ = stream.Write([]byte("the screen"))
+		var in bytes.Buffer
+		err := ReadFrames(lines.Rest(), &in, func(s Size) { sizes <- s })
+		if !errors.Is(err, io.EOF) {
+			t.Errorf("frames: %v", err)
+		}
+		got <- in.String()
+	})
+	input, writer := io.Pipe()
+	resize := make(chan Size, 1)
+	resize <- Size{Cols: 120, Rows: 40}
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- peer.Attach(context.Background(), "coder", Terminal{In: input, Out: &out, Resize: resize})
+	}()
+	if s := <-sizes; s.Cols != 120 {
+		t.Errorf("size %+v", s)
+	}
+	_, _ = writer.Write([]byte("typed"))
+	writer.Close()
+	if text := <-got; text != "typed" {
+		t.Errorf("input %q", text)
+	}
+	if err := <-done; err != nil || out.String() != "the screen" {
+		t.Errorf("output %q, err %v", out.String(), err)
+	}
+}
+
 func TestALongLineIsRefused(t *testing.T) {
 	long := strings.Repeat("x", MaxLine+1) + "\n"
 	var v any
