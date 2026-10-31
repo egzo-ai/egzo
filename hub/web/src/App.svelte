@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import sprite from "./lib/icons.svg?raw";
-  import { app, boot, signOut } from "./lib/app.svelte";
+  import { app, boot, projectName, signOut } from "./lib/app.svelte";
   import { keys, startKeyboard } from "./lib/keyboard.svelte";
   import { nav, navigate, startRouter } from "./lib/router.svelte";
   import { reset, restore, showPage, workspace } from "./lib/workspace.svelte";
@@ -17,6 +17,7 @@
   import ErrorPage from "./pages/ErrorPage.svelte";
   import Home from "./pages/Home.svelte";
   import Project from "./pages/Project.svelte";
+  import Register from "./pages/Register.svelte";
   import Settings from "./pages/Settings.svelte";
   import SignIn from "./pages/SignIn.svelte";
 
@@ -47,12 +48,12 @@
   $effect(() => {
     const r = nav.route;
     document.title =
-      (r.name === "project" ? r.project + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", engines: "Engines", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
+      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "register" ? "Register a project · " : r.name === "settings" ? ({ users: "Users", links: "Links", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
   });
 
   const routeKey = $derived.by(() => {
     const r = nav.route;
-    return r.name === "project" ? `p:${r.engine}/${r.project}` : r.name === "agent" ? `a:${r.engine}/${r.project}/${r.agent}` : r.name;
+    return r.name === "project" ? `p:${r.project}` : r.name === "agent" ? `a:${r.project}/${r.agent}` : r.name;
   });
 
   async function leave() {
@@ -84,8 +85,9 @@
             {@const r = nav.route}
             {#if r.name === "home"}<Home />
             {:else if r.name === "settings"}<Settings tab={r.tab} />
-            {:else if r.name === "project"}<Project engine={r.engine} name={r.project} tab={r.tab} />
-            {:else if r.name === "agent"}<AgentPage engine={r.engine} project={r.project} agent={r.agent} tab={r.tab} />
+            {:else if r.name === "register"}<Register code={r.code} />
+            {:else if r.name === "project"}<Project id={r.project} tab={r.tab} />
+            {:else if r.name === "agent"}<AgentPage project={r.project} agent={r.agent} tab={r.tab} />
             {:else}<ErrorPage error={new Error("There is no such page.")} />{/if}
           {/key}
         </div>

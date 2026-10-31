@@ -1,7 +1,7 @@
 """Browser tests of the hub.
 
-Each test gets its own hub (server/main.go: the real hub code, fake engines and a test login provider), started on free ports, and
-a browser from pytest-playwright. `world(op, ...)` changes what the engines hold while the page is open.
+Each test gets its own hub (server/main.go: the real hub code, fake projects linked to it and a test login provider), started on free
+ports, and a browser from pytest-playwright. `world(op, ...)` changes what the projects hold while the page is open.
 """
 
 import json
@@ -28,8 +28,12 @@ class Hub:
         response.raise_for_status()
         return response.json() if response.content else None
 
-    def calls(self, engine="local"):
-        return self.world("calls", engine=engine)
+    def calls(self, project="web", machine="local"):
+        return self.world("calls", project=project, machine=machine)
+
+    def p(self, project, machine="local"):
+        """The address of a project: it goes by the id the hub gave it."""
+        return "/p/" + self.world("id", project=project, machine=machine)
 
 
 def start(scenario):

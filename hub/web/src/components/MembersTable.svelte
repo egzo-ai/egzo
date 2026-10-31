@@ -5,7 +5,7 @@
   import PersonCell from "./PersonCell.svelte";
   import type { Members, Role } from "../lib/types";
 
-  let { engine, project, data, reload }: { engine: string; project: string; data: Members; reload: () => Promise<void> } = $props();
+  let { project, data, reload }: { project: string; data: Members; reload: () => Promise<void> } = $props();
 
   let chosen = $state<Record<string, Role>>({});
   let addUser = $state("");
@@ -13,7 +13,7 @@
 
   async function apply(user: string, name: string, role: Role | "none", note: string) {
     try {
-      await api.setRole(engine, project, user, role);
+      await api.setRole(project, user, role);
       toast(note);
       await reload();
     } catch (e) {

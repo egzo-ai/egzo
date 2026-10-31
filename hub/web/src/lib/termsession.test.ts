@@ -61,9 +61,9 @@ describe("TermSession", () => {
 
     const b = setup();
     b.socket.onopen!();
-    b.socket.onmessage!({ data: JSON.stringify({ type: "error", message: "engine unreachable" }) });
+    b.socket.onmessage!({ data: JSON.stringify({ type: "error", message: "the link dropped" }) });
     b.socket.onclose!();
-    expect(b.states.at(-1)).toEqual(["error", { message: "engine unreachable" }]);
+    expect(b.states.at(-1)).toEqual(["error", { message: "the link dropped" }]);
 
     const c = setup();
     c.socket.onopen!();

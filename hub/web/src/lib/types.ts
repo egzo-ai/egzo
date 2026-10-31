@@ -33,16 +33,8 @@ export interface SignInOptions {
   redirect?: string;
 }
 
-export interface EngineState {
-  name: string;
-  host?: string; // operators only
-  up: boolean;
-  err?: string;
-}
-
 export interface Session {
   user: User;
-  engines: EngineState[];
   identities: Identity[];
   /** Signs in with a password (the starter account, while local login is on). */
   hasPassword: boolean;
@@ -51,7 +43,7 @@ export interface Session {
   issuer: string;
 }
 
-/** One agent, as the project list and the sidebar know it (from the last scan). */
+/** One agent, as the project list and the sidebar know it (from what its link pushed). */
 export interface AgentBrief {
   name: string;
   template: string;
@@ -70,11 +62,14 @@ export interface Feed {
 }
 
 export interface ProjectBrief {
-  engine: string;
+  id: string;
   name: string;
+  host: string;
   role: Role;
   /** Held as an operator: every project, with no grant. */
   operator: boolean;
+  /** When its link went away; null while it is connected. */
+  offlineSince: string | null;
   feed: Feed;
   up: boolean;
   agents: AgentBrief[];
@@ -82,7 +77,6 @@ export interface ProjectBrief {
 
 export interface ProjectList {
   projects: ProjectBrief[];
-  unreachable: EngineState[];
 }
 
 export interface Agent {
@@ -100,14 +94,14 @@ export interface Agent {
   holder: string;
   /** Hosts the proxy refused the agent in the last hour, and that it has not reached since. */
   denied: number;
-  /** What the hub does on it, or the failure of what it did that nobody dismissed. With no `state`, the engine does not have the
+  /** What the hub does on it, or the failure of what it did that nobody dismissed. With no `state`, the project does not have the
    * agent: a spawn that runs or failed, or a removal that is ending. */
   task?: Task;
 }
 
 export type TaskVerb = "spawn" | "start" | "stop" | "rm";
 
-/** One action of the hub on an engine. `interrupted`: the hub stopped while it ran. */
+/** One action of the hub on a project. `interrupted`: the hub stopped, or the link dropped, while it ran. */
 export interface Task {
   id: string;
   verb: TaskVerb;
@@ -132,11 +126,14 @@ export interface Service {
 }
 
 export interface Project {
-  engine: string;
+  id: string;
   name: string;
+  host: string;
   role: Role;
   /** Held as an operator: every project, with no grant. */
   operator: boolean;
+  /** When its link went away; null while it is connected. */
+  offlineSince: string | null;
   feed: Feed;
   up: boolean;
   templates: string[];
@@ -268,24 +265,21 @@ export interface Network {
   events: NetworkEvent[];
 }
 
-export interface EngineInput {
+/** A registration: a link that presented a key, and what a person decided about it. */
+export interface Link {
+  id: string;
   name: string;
   host: string;
-  sshUser?: string;
-  ca?: string;
-  cert?: string;
-  key?: string;
-  sshKey?: string;
+  release: string;
+  templates: string[];
+  state: "pending" | "approved" | "refused" | "revoked";
+  code?: string;
+  owner?: string;
+  message?: string;
+  createdAt: string;
+  /** When its link went away; null while it is connected. */
+  offlineSince: string | null;
 }
-
-export interface PendingHostKey {
-  name: string;
-  host: string;
-  fingerprint: string;
-  token: string;
-}
-
-export type SaveEngineAnswer = { saved: string } | { pending: PendingHostKey };
 
 /** The control frames of the terminal websocket (text frames; binary frames are the terminal's bytes). */
 export type ControlFrame =

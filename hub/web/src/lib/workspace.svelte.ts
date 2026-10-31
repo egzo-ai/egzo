@@ -5,9 +5,8 @@ import type { TermState } from "./termsession";
 export type Layout = 1 | 2 | 4;
 
 export interface Term {
-  id: string; // "engine:project/agent"
-  engine: string;
-  project: string;
+  id: string; // "project/agent"
+  project: string; // its id
   agent: string;
   state: TermState;
   holder: string;
@@ -22,7 +21,7 @@ export interface Term {
 export const MAX_TERMS = 12;
 const STORE_KEY = "egzo.terminals";
 
-export const termId = (engine: string, project: string, agent: string) => `${engine}:${project}/${agent}`;
+export const termId = (project: string, agent: string) => `${project}/${agent}`;
 
 /** Which terminal sits in each pane: keep the ones already shown, then fill the rest with open terminals that are not. */
 export function fillPanes(ids: string[], panes: string[], layout: Layout): string[] {
@@ -48,7 +47,7 @@ export const workspace = $state({
 
 function persist(): void {
   try {
-    sessionStorage.setItem(STORE_KEY, JSON.stringify(workspace.terms.map((t) => [t.engine, t.project, t.agent])));
+    sessionStorage.setItem(STORE_KEY, JSON.stringify(workspace.terms.map((t) => [t.project, t.agent])));
   } catch {
     /* storage may be unavailable */
   }
@@ -56,18 +55,18 @@ function persist(): void {
 
 export function restore(): void {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(STORE_KEY) ?? "[]") as [string, string, string][];
-    for (const [engine, project, agent] of saved.slice(0, MAX_TERMS)) add(engine, project, agent);
+    const saved = JSON.parse(sessionStorage.getItem(STORE_KEY) ?? "[]") as [string, string][];
+    for (const [project, agent] of saved.slice(0, MAX_TERMS)) add(project, agent);
   } catch {
     /* nothing to restore */
   }
 }
 
-function add(engine: string, project: string, agent: string): Term {
-  const id = termId(engine, project, agent);
+function add(project: string, agent: string): Term {
+  const id = termId(project, agent);
   let term = workspace.terms.find((t) => t.id === id);
   if (!term) {
-    term = { id, engine, project, agent, state: "connecting", holder: "", message: "", unread: false, epoch: 0, takeover: false };
+    term = { id, project, agent, state: "connecting", holder: "", message: "", unread: false, epoch: 0, takeover: false };
     workspace.terms.push(term);
     term = workspace.terms[workspace.terms.length - 1]!; // the reactive proxy
     persist();
@@ -78,10 +77,10 @@ function add(engine: string, project: string, agent: string): Term {
 export const termById = (id: string | null) => workspace.terms.find((t) => t.id === id);
 
 /** Open a terminal (or bring the open one forward) and show it. Returns false when too many are open. */
-export function openTerm(engine: string, project: string, agent: string): boolean {
-  const id = termId(engine, project, agent);
+export function openTerm(project: string, agent: string): boolean {
+  const id = termId(project, agent);
   if (!workspace.terms.some((t) => t.id === id) && workspace.terms.length >= MAX_TERMS) return false;
-  add(engine, project, agent);
+  add(project, agent);
   showTerm(id);
   return true;
 }

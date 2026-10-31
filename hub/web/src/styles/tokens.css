@@ -47,7 +47,7 @@
   --status-stopped-soft: rgb(138 138 138 / 0.12);
   --status-error:        #ff6464;  /* ✕ error / unhealthy / refused */
   --status-error-soft:   rgb(255 100 100 / 0.12);
-  --status-unreachable:  #b99cff;  /* ⌁ engine unreachable (dashed outline) */
+  --status-unreachable:  #b99cff;  /* ⌁ a project offline (dashed outline) */
   --status-unreachable-soft: rgb(185 156 255 / 0.12);
   --status-warn:         #f5d76e;  /* ! stale, project down */
   --status-warn-soft:    rgb(245 215 110 / 0.12);
