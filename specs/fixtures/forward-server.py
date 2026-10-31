@@ -10,6 +10,7 @@ BASE    echoes, then after the client's end of input says how many bytes it read
 BASE+1  says "bye" at once and closes: the server ends the connection
 BASE+2  answers an HTTP Upgrade with 101, then echoes: a WebSocket as a proxy sees one
 BASE+3  never reads or closes, and says how many connections it saw go: a server that ignores the client leaving
+BASE+4  answers at once, half closes, and reads and drops the rest: a server refusing an upload
 """
 
 import hashlib
@@ -54,8 +55,16 @@ class Deaf(socketserver.BaseRequestHandler):
         threading.Event().wait()
 
 
+class Refuse(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.request.sendall(b"HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        self.request.shutdown(socket.SHUT_WR)
+        while self.request.recv(1 << 16):
+            pass
+
+
 base = int(sys.argv[1])
-for offset, handler in enumerate((Echo, Bye, Upgrade, Deaf)):
+for offset, handler in enumerate((Echo, Bye, Upgrade, Deaf, Refuse)):
     server = Server(("127.0.0.1", base + offset), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 print("listening", flush=True)

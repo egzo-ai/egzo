@@ -6,8 +6,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
@@ -128,7 +130,7 @@ func (f forwarder) waitStop(ctx context.Context) error {
 
 // carry is one connection: one exec. A failure ends this connection only: the server may start later.
 func (f forwarder) carry(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	defer hangUp(conn)
 	var said lastWords
 	code, err := f.engine.ExecStream(ctx, f.id, portforward.Command(f.port), engine.Stream{In: conn, Out: conn, Err: &said}, nil)
 	switch {
@@ -138,6 +140,21 @@ func (f forwarder) carry(ctx context.Context, conn net.Conn) {
 	case code != 0:
 		f.report(fmt.Sprintf("%s:%d: %s", f.name, f.port, termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(said))), 200)))
 	}
+}
+
+// hangUpTimeout is how long a connection whose exec ended goes on taking what the client still sends.
+var hangUpTimeout = 5 * time.Second
+
+// hangUp closes a connection as a server does, the answer first. The exec ends with the server's FIN, and a client still sending
+// (a server refused its upload early, and only half closed) would be reset by a close with its bytes unread, which can destroy an
+// answer it has not read yet. What it sends now goes nowhere: an exec's stdout cannot end before the exec does.
+func hangUp(conn net.Conn) {
+	defer conn.Close()
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		_ = tcp.CloseWrite()
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(hangUpTimeout))
+	_, _ = io.Copy(io.Discard, conn)
 }
 
 // lastWords keeps the start of what a command says on stderr: one line, written by a program in the agent's container.
