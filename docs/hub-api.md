@@ -3,7 +3,8 @@
 The web app is a client of this API and nothing else: everything under `/api/v1`, JSON in and out. The shapes are in
 `hub/internal/web/api.go` and, as the front end sees them, `hub/web/src/lib/types.ts`. Times are RFC 3339.
 
-**Authentication.** Two ways in, both ending in the same session cookie (12 hours):
+**Authentication.** Two ways in, both ending in the same session cookie (12 hours; `__Host-egzo_session` over https,
+`egzo_session` over plain http):
 
 - **The starter account's password**: `POST /auth/login` `{username, password}` (outside `/api/v1`) answers `{ok}` and sets the
   cookie. Every failure is 401 `bad_login` "Wrong username or password." After three failures in a row an account waits, longer

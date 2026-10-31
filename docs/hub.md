@@ -51,7 +51,9 @@ shows up within a second or two.
 
 One container, one port, one volume. The hub is meant for a private network (a LAN, Tailscale, a tunnel), not the open internet.
 When a reverse proxy is in front, set `EGZO_PUBLIC_URL` and `EGZO_TRUSTED_PROXIES` so the redirects and cookies use the right
-address and scheme (cookies are `Secure` when the address is https).
+address and scheme. Over https the cookies are `Secure` and named `__Host-egzo_session` and `__Host-egzo_login`, which a browser
+takes from the hub's own host only, so another host of the same site cannot plant one. Over plain http they are `egzo_session` and
+`egzo_login`.
 
 ## Signing in
 

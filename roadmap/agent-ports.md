@@ -1,6 +1,6 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** Draft. Nothing is built. The session cookie fix (below) is needed before previews and is worth doing on its own.
+**Status.** Draft. Built so far: the `__Host-` cookies (below).
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
 itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,
