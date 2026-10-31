@@ -3,7 +3,7 @@
 A project is one `egzo.yaml`. Everything is denied unless the file declares it, so the file reads as a list of what
 agents may use. It has six parts: **secret_key** (what egzo seals its own secrets with), **vaults** (where secrets come
 from), **egress** (what agents may reach), **workspaces** (what they work on), **agents** (the templates) and,
-optionally, **proxy**/**name**.
+optionally, **proxy**/**name**/**hub**.
 
 `egzo project check --resolved` prints the file validated and fully resolved: the quickest way to see what a short
 file expands to. The project name defaults to the directory name (`name:`, `-p` or `EGZO_PROJECT_NAME` override it);
@@ -36,6 +36,26 @@ agents:
 ```
 
 `egzo project up`, then `egzo agent spawn claude --attach` ([managing projects](managing-projects.md)). With one workspace, its directory is the agent's working directory (for a git workspace, the agent's own worktree).
+
+## The hub
+
+`hub:` names the hub this project links to ([managing projects](managing-projects.md#linking-to-a-hub)). A project has one hub, and this
+key is the only place that says so: remove it and run `egzo project up` to unlink.
+
+```yaml
+hub: https://my-egzo.example.org
+```
+
+When the hub's certificate is not from a CA of the system's, name the file of PEM certificates, relative to the project file:
+
+```yaml
+hub:
+  url: https://my-egzo.example.org
+  ca: certs/company-ca.pem
+```
+
+An address is a scheme and a host, with an optional port. Plain `http://` works and `project check` warns: anyone on the way can then pose as the
+hub.
 
 ## The secret key
 

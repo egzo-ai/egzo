@@ -49,26 +49,47 @@ hub: https://my-egzo.example.org
 
 ## Registering
 
-The first `egzo project up` with a `hub:` registers the project, like a device code:
+A signed-in person makes a code, and the project presents it. The link never registers itself: a stranger who reaches the endpoint has no way
+to make the hub store anything.
 
 ```console
 $ egzo project up
 ...
-link: register this project at https://my-egzo.example.org/link/QXRB-7KPM (waiting; Ctrl-C to finish later)
-link: registered as web, owned by alice
+link: not registered: run `egzo project register`
+$ egzo project register
+Link code:
+link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 ```
 
+- A person who may create a project clicks **Link a project** in Settings, Links ("Roles and invites", below). The hub shows a code once. It is 128
+  random bits, starts `egzo-link-` so that secret scanners find one that was committed, is good once, for 15 minutes, can be cancelled, and is kept as a
+  SHA-256 only.
 - The link makes an Ed25519 key pair. The private key stays on the link's volume, sealed with the
   [project secret key](../docs/project-file.md#the-secret-key); the hub keeps the public key with the registration.
-- A person signed in to the hub opens the address, sees the project (its name, the host it runs on, the templates), and approves
-  it. They become the project's owner on the hub. Approving needs the right to create a project ("Roles and invites", below).
-- `up` does not wait for the approval: the project runs without the hub until someone approves, and the link keeps asking.
-  `egzo project check` and `egzo ps` say whether it is linked, pending, refused or unreachable.
+- `egzo project register` asks for the code without echo, or reads it from stdin, and hands it to the link through `engine exec` stdin, like the secret
+  key. There is no flag for it, and it is never in the project file: a file can be committed, and flags reach a shell's history and `ps`.
+- The link puts the code in its proof, covered by the signature, after the protocol check: it cannot be moved to another key. The hub spends the code
+  and makes the project in one transaction, approved, owned by whoever made the code.
+- What the hub does with a connection:
+
+  | Key | Code | Result | Stored |
+  |---|---|---|---|
+  | Unknown | none | `unregistered`, closed | nothing |
+  | Unknown | wrong, expired or used | `unregistered`, closed: one answer, so that a failure says nothing | nothing |
+  | Unknown | good | the code is spent, `approved`, served | the project, an audit entry |
+  | Approved | any | the code is ignored and stays good, `approved`, served | nothing new |
+  | Revoked | any | `revoked`, closed, the code stays good | nothing new |
+  | Forgotten after a revocation | good | an unknown key: a new project with no roles | the project, an audit entry |
+
+- `up` never prompts and never waits: the project runs without the hub until it is registered. A link the hub turned away stops dialing, until
+  `register` or `up` wakes it. `egzo project check` and `egzo ps` say whether it is linked, not registered, revoked or unreachable.
+- There is no preview: the operator does not see the name or the host before the project is in. The short life, the single use, the audit entries and
+  Revoke limit what a leaked code can do, and do not remove it.
 - Each connection afterwards proves the key (a signature over a challenge from the hub). The hub is authenticated by TLS with
   the system's roots, or the CA the project names for it.
 - **Unlinking:** removing `hub:` and running `up`, or `egzo project down`, removes the link and tells the hub, which forgets the
-  project. The hub's operator can also revoke a project; its link is then refused, and `up` says so. A project registered again
-  is a new project on the hub, with no roles.
+  project. The hub's operator can also revoke a project; its link is then refused, and `up` says so. A revoked project cannot unlink: its record stays
+  until an operator forgets it. A project registered again is a new project on the hub, with no roles.
 
 ## The link sidecar
 
@@ -76,6 +97,13 @@ link: registered as web, owned by alice
   reach them except through the engine, like the CLI.
 - It reaches its engine through the engine's socket, mounted by `up`: it is root-equivalent on its host, like the CLI that
   created it, and like the hub's quick start today. Rootless Podman keeps that to the user's account.
+- It runs as the sidecars' user with the socket's group as its primary group. Only the engine's host knows that group and the CLI may
+  be elsewhere, so `up` reads it with a throwaway container that mounts the socket. The socket's path is the one the CLI dials when
+  that is a unix socket, and `/var/run/docker.sock` otherwise.
+- The secret key and any `HTTPS_PROXY` reach it through `engine exec`, on stdin, so they are never in `inspect`, and it holds them in memory.
+- **After a restart, `egzo project up` is required**, and resumes the project with the same key and registration. Whether something runs it
+  unattended is outside egzo: a person, or a host's own boot script. egzo stores nothing to resume by itself. The link has a restart policy so
+  that it is there to say `locked`, but it cannot connect until `up`: the hub shows the project offline.
 - It follows the engine's events and the control sidecar's and the proxy's logs itself (the code of the hub's `docker_feed.go`
   moves here) and pushes what changed: the hub runs nothing on the engine to keep up.
 - **gVisor**: a container under gVisor probably cannot connect to a host unix socket through a bind mount (DESIGN.md, "Control
@@ -92,8 +120,11 @@ link: registered as web, owned by alice
   handshake, and a hub refuses a link it does not speak with a message that says which to upgrade
   ([control-compatibility.md](control-compatibility.md) becomes this). Before 1.0, one version at a time: no ranges, no
   compatibility shims.
-- **The protocol lives in core** (`internal/hublink`: the messages, the link's side), and the hub imports it, so core still never
-  imports the hub. The hub stops importing `stack`, `engine` and their dependencies (compose-go, the Docker client).
+- **The protocol lives in core** (`internal/hublink`: the messages and the hub's side, with no engine in it; `internal/link`: the link's
+  side), and the hub imports `hublink`, so core still never imports the hub. The hub stops importing `stack`, `engine` and their
+  dependencies (compose-go, the Docker client).
+- **Nothing runs before an approval.** The link accepts no stream and pushes no feed until the hub says the project is approved, and stops
+  both the moment that ends. The proof signs the hub's address too, so a hub cannot replay a challenge of another hub to its links.
 - **Reconnecting** with a growing delay, from one second to a minute. A dropped connection ends the terminals and previews that
   ran over it; a task that ran is `interrupted`, as at a hub restart. The project shows as **offline since 14:02** on the hub.
 - **The hub must be reachable by the projects**, which turns its posture around: today it is "meant for a private network".
@@ -162,7 +193,7 @@ no valid owner: the operators see it, and grant a new owner or revoke it.
 
 ## Specs and tests
 
-- Core, specs first: `hub:` in the project file and `check --resolved`; registration (pending, approved, refused, revoked) and
+- Core, specs first: `hub:` in the project file and `check --resolved`; registration (unregistered, approved, revoked) and
   each verb against a small fake hub in `specs/fixtures`; the link reconnecting; nothing listening on the host; the link not
   reachable from an agent; `down` unlinking. On gVisor, what does not work is a
   strict xfail of that platform, as for any unsupported feature.
