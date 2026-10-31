@@ -1,4 +1,4 @@
-// Command egzo-hub is the hub: the web UI over the egzo projects of one or more container engines.
+// Command egzo-hub is the hub: the web UI over the egzo projects that link to it.
 package main
 
 import (
@@ -16,10 +16,8 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/auth"
 	"github.com/egzo-ai/egzo/hub/internal/config"
-	"github.com/egzo-ai/egzo/hub/internal/engines"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/publicurl"
-	"github.com/egzo-ai/egzo/hub/internal/secretbox"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
 	"github.com/egzo-ai/egzo/internal/version"
@@ -42,10 +40,6 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	box, err := secretbox.New(cfg.SecretKey)
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return err
 	}
@@ -54,13 +48,9 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	defer db.Close()
-	registry := engines.NewRegistry(db, box, engines.DockerConnector)
-	defer registry.Close()
-	h := hub.New(db, registry, log)
-	if cfg.LocalEngine != "" {
-		if err := h.SeedEngine(context.Background(), "local", cfg.LocalEngine); err != nil {
-			return err
-		}
+	h := hub.New(db, log, hub.FeedOptions{})
+	if err := h.RecoverTasks(context.Background()); err != nil {
+		return err
 	}
 	urls, err := publicurl.New(cfg.PublicURL, cfg.TrustedProxy)
 	if err != nil {
@@ -82,25 +72,39 @@ func run(log *slog.Logger) error {
 		}
 		log.Info("single sign-on", "issuer", cfg.OIDCIssuer, "redirect", redirect)
 	}
-	app, err := web.New(h, sso, web.Options{SSOName: cfg.OIDCName}, urls, log)
+	app, err := web.New(h, sso, web.Options{SSOName: cfg.OIDCName, LinkURL: cfg.LinkURL, OwnLink: cfg.LinkListen != ""}, urls, log)
 	if err != nil {
 		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go h.Run(ctx, hub.FeedOptions{Fallback: cfg.ScanInterval})
+	go h.Run(ctx)
 
-	server := &http.Server{Addr: cfg.Listen, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	failed := make(chan error, 2)
+	serve := func(addr string, handler http.Handler, what string) *http.Server {
+		server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+		log.Info("egzo-hub listening", "for", what, "addr", addr, "version", version.Version)
+		go func() {
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				failed <- fmt.Errorf("listen: %w", err)
+			}
+		}()
+		return server
+	}
+	servers := []*http.Server{serve(cfg.Listen, app.Handler(), "people")}
+	if cfg.LinkListen != "" {
+		servers = append(servers, serve(cfg.LinkListen, app.LinkHandler(), "links"))
+	}
+	select {
+	case err := <-failed:
+		return err
+	case <-ctx.Done():
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, server := range servers {
 		server.Shutdown(shutdown)
-	}()
-	log.Info("egzo-hub listening", "addr", cfg.Listen, "version", version.Version)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("listen: %w", err)
 	}
 	return nil
 }

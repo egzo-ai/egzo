@@ -1,37 +1,31 @@
 package web_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/egzo-ai/egzo/hub/internal/engines"
-	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
 func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsCountTheirs(t *testing.T) {
-	r := newRig(t, "local")
-	r.fakes["local"].AddProject(project("web", "coder"))
+	r := newRig(t)
+	r.link("web", "coder")
 	a := agent("coder-1", "operator")
 	a.ID = "01JBX7Q0000000000000000000"
-	r.fakes["local"].SetAgent("web", a)
-	feeds, stop := context.WithCancel(context.Background())
-	t.Cleanup(stop)
-	r.hub.StartFeeds(feeds, hub.FeedOptions{Flush: 5 * time.Millisecond, BackoffMin: 5 * time.Millisecond, BackoffMax: 20 * time.Millisecond})
-	r.hub.Scan(ctx)
+	r.fakes["web"].SetAgent(a)
 	start := time.Now().UTC()
-	event := func(n int, e engines.AuditEvent) engines.AuditEvent {
+	event := func(n int, e links.AuditEvent) links.AuditEvent {
 		e.Time, e.Conn, e.Agent, e.Instance, e.Profile, e.Protocol = start.Add(time.Duration(n)*time.Millisecond), "00000000000000c1", "coder-1", a.ID, "default", proxy.HTTPS
 		e.ClaimedAgent, e.Client, e.UserAgent = "coder-1", "10.89.3.2", "curl/8.11.1"
 		return e
 	}
-	r.fakes["local"].AddAudit("web",
-		event(1, engines.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeDeny, Host: "registry.npmjs.org",
+	r.fakes["web"].AddAudit(
+		event(1, links.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeDeny, Host: "registry.npmjs.org",
 			Reason: &proxy.Reason{Code: proxy.CodeNotInProfile, Text: "not allowed by the agent's egress profile"}}),
-		event(2, engines.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeAllow, Mode: proxy.ModeInject, Host: "example.com", Service: "api"}),
-		event(3, engines.AuditEvent{Kind: proxy.KindRequest, Decision: proxy.OutcomeAllow, Host: "example.com", Method: "GET", Path: "/a/b", RawPath: "/a%2Fb",
+		event(2, links.AuditEvent{Kind: proxy.KindConnect, Decision: proxy.OutcomeAllow, Mode: proxy.ModeInject, Host: "example.com", Service: "api"}),
+		event(3, links.AuditEvent{Kind: proxy.KindRequest, Decision: proxy.OutcomeAllow, Host: "example.com", Method: "GET", Path: "/a/b", RawPath: "/a%2Fb",
 			Status: 200, Injected: "api", Substituted: []string{"login"}}),
 	)
 	b := r.browser()
@@ -39,7 +33,7 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	var page json_
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, page = b.get("/e/local/p/web/network"); len(list(page, "denials")) == 1 && len(list(page, "events")) == 3 {
+		if _, page = b.get("/p/" + r.id("web") + "/network"); len(list(page, "denials")) == 1 && len(list(page, "events")) == 3 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -70,21 +64,21 @@ func TestTheNetworkOfAProjectHasItsDenialsGroupedAndItsLatestEventsAndTheAgentsC
 	if e := events[0]; e["claimedAgent"] != "coder-1" || e["client"] != "10.89.3.2" || e["userAgent"] != "curl/8.11.1" {
 		t.Errorf("who and from where = %v", e)
 	}
-	_, one := b.get("/e/local/p/web/network?agent=coder-1")
+	_, one := b.get("/p/" + r.id("web") + "/network?agent=coder-1")
 	if len(list(one, "denials")) != 1 {
 		t.Errorf("one agent's = %v", one)
 	}
-	if code, _ := b.get("/e/local/p/web/network?agent=nobody"); code != 404 {
+	if code, _ := b.get("/p/" + r.id("web") + "/network?agent=nobody"); code != 404 {
 		t.Errorf("an agent that does not exist: %d", code)
 	}
-	_, p := b.get("/e/local/p/web")
+	_, p := b.get("/p/" + r.id("web"))
 	if got := list(p, "agents")[0]["denied"]; got != float64(1) {
 		t.Errorf("the agent's denied hosts = %v", got)
 	}
 
 	other := r.browser()
 	other.signIn("mallory")
-	if code, _ := other.get("/e/local/p/web/network"); code != 404 {
+	if code, _ := other.get("/p/" + r.id("web") + "/network"); code != 404 {
 		t.Errorf("a user with no role: %d", code)
 	}
 }

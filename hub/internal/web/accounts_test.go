@@ -134,16 +134,15 @@ func TestTheAvatarIsFetchedByTheBrowser(t *testing.T) {
 }
 
 func TestADisabledUserIsRefusedLosesTheirSessionsAndTheirTerminals(t *testing.T) {
-	r := newRig(t, "local")
-	r.fakes["local"].AddProject(project("web", "coder"))
-	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
-	r.hub.Scan(ctx)
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
 	op := r.browser()
 	op.signIn("admin")
 	bob := r.browser()
 	bob.signIn("bob")
-	r.store.SetRole(ctx, "local", "web", r.userID("bob"), rbac.Administrator)
-	term, err := bob.dial("/e/local/p/web/a/coder-1/terminal")
+	r.store.SetRole(ctx, r.id("web"), r.userID("bob"), rbac.Administrator)
+	term, err := bob.dial("/p/" + r.id("web") + "/a/coder-1/terminal")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +166,7 @@ func TestADisabledUserIsRefusedLosesTheirSessionsAndTheirTerminals(t *testing.T)
 			t.Errorf("bob = %v", u)
 		}
 	}
-	_, members := op.get("/e/local/p/web/members")
+	_, members := op.get("/p/" + r.id("web") + "/members")
 	for _, c := range list(members, "candidates") {
 		if c["username"] == "bob" {
 			t.Error("a disabled user is offered as a candidate")
@@ -189,13 +188,12 @@ func TestADisabledUserIsRefusedLosesTheirSessionsAndTheirTerminals(t *testing.T)
 }
 
 func TestSigningOutClosesTheTerminalsOfThatSession(t *testing.T) {
-	r := newRig(t, "local")
-	r.fakes["local"].AddProject(project("web", "coder"))
-	r.fakes["local"].SetAgent("web", agent("coder-1", "operator"))
-	r.hub.Scan(ctx)
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
 	b := r.browser()
 	b.signIn("admin")
-	term, err := b.dial("/e/local/p/web/a/coder-1/terminal")
+	term, err := b.dial("/p/" + r.id("web") + "/a/coder-1/terminal")
 	if err != nil {
 		t.Fatal(err)
 	}
