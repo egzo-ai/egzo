@@ -33,6 +33,26 @@ $ egzo agent rm issue-412                         # when the work is pushed
 `agent spawn -m` sends the first message (the task); `--wait` blocks until the agent resolves it and prints the answer,
 which suits scripts. Messages wait in a queue until the harness is ready.
 
+## Opening an agent's dev server
+
+An agent that runs a server in its sandbox (`npm run dev`, `python3 -m http.server`) has no address you can reach: it is on an internal
+network of its own, and nothing is published. `agent port-forward` brings the port to you:
+
+```console
+$ egzo agent port-forward issue-412 3000        # http://127.0.0.1:3000 here reaches port 3000 in the agent
+$ egzo agent port-forward issue-412 8000:3000   # on local port 8000
+$ egzo agent port-forward issue-412 0:3000      # on a local port the system chooses, which it prints
+```
+
+The port shows up on the machine where you run the command: with `DOCKER_HOST=ssh://box` on a laptop, it is on the laptop, and the engine's
+host listens on nothing. Each connection is one exec of `egzo agent forward` in the agent's container, which connects to the container's own
+loopback, so a server bound to `127.0.0.1` works, WebSockets too, and the sandbox does not change. It takes any port, on `127.0.0.1` unless you
+name an address (`0.0.0.0:8000:3000` offers the agent's server to your network).
+
+Ctrl-C ends it, and it ends by itself when the agent stops. A connection to a port where nothing listens closes, and the command says so and
+keeps going, so you can start it before the server. When a client has closed its side, the agent's server has a minute of silence to answer
+or close before the connection is dropped. The agent's image must contain egzo, as for `agent attach`: the harness images do.
+
 ## Editing the file
 
 ```console

@@ -20,12 +20,13 @@ import (
 	"github.com/egzo-ai/egzo/internal/agentclient"
 	"github.com/egzo-ai/egzo/internal/browser"
 	"github.com/egzo-ai/egzo/internal/harness"
+	"github.com/egzo-ai/egzo/internal/portforward"
 	"github.com/egzo-ai/egzo/internal/proxy"
 	sess "github.com/egzo-ai/egzo/internal/session"
 )
 
-// newAgentCommand is the group of commands about agents: the ones you run (spawn, ls, rm, start, stop, attach) and,
-// hidden, the roles that run inside an agent container (run, browser).
+// newAgentCommand is the group of commands about agents: the ones you run (spawn, ls, rm, start, stop, attach, port-forward)
+// and, hidden, the roles that run inside an agent container (run, browser, forward).
 func newAgentCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
@@ -60,9 +61,29 @@ func newAgentCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	forward := &cobra.Command{
+		Use:    "forward PORT",
+		Short:  "Carry one connection to a port of this container's loopback over stdin and stdout",
+		Hidden: true,
+		Long: "Connect to PORT on this container's loopback and copy bytes between it and stdin and stdout. What\n" +
+			"`egzo agent port-forward` runs in the agent's container, once per connection. It takes a port and never an\n" +
+			"address: it reaches nothing but this container.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			port, err := portforward.ParsePort(args[0])
+			if err != nil {
+				return err
+			}
+			if err := portforward.Forward(port, os.Stdin, os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return ExitError{Code: 1}
+			}
+			return nil
+		},
+	}
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
-		newAttachCommand(opts), run, browserCommand, newSSHSetupCommand())
+		newAttachCommand(opts), newPortForwardCommand(opts), run, browserCommand, forward, newSSHSetupCommand())
 	return group(cmd)
 }
 
