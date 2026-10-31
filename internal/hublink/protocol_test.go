@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,9 @@ type handshake struct {
 	protocol int
 	hub      string // the address the link signs
 	key      ed25519.PrivateKey
+	code     string             // the code it presents
+	signed   *string            // the code it signs, when it is not the one it presents
+	signer   ed25519.PrivateKey // who signs, when it is not the key it says it is
 }
 
 // run plays the link's side of a handshake against the hub's, and returns the hub's result and the greeting the link got.
@@ -59,7 +63,14 @@ func (h handshake) run(t *testing.T) (*Peer, Greeting, error) {
 		var greeting Greeting
 		_ = lines.Read(&greeting)
 		if greeting.Refused == "" {
-			_ = lines.Write(Proof{Signature: ed25519.Sign(h.key, Signed(h.hub, greeting.Nonce, public))})
+			signed, signer := h.code, h.key
+			if h.signed != nil {
+				signed = *h.signed
+			}
+			if h.signer != nil {
+				signer = h.signer
+			}
+			_ = lines.Write(Proof{Signature: ed25519.Sign(signer, Signed(h.hub, greeting.Nonce, public, signed)), Code: h.code})
 		}
 		done <- greeting
 	}()
@@ -79,21 +90,235 @@ func newKey(t *testing.T) ed25519.PrivateKey {
 }
 
 func TestAKeyThatSignsTheChallengeIsLetIn(t *testing.T) {
-	peer, greeting, err := handshake{Version, address, newKey(t)}.run(t)
-	if err != nil || peer == nil || peer.Hello.Project != "web" || len(greeting.Nonce) != 32 {
+	peer, greeting, err := handshake{protocol: Version, hub: address, key: newKey(t)}.run(t)
+	if err != nil || peer == nil || peer.Hello.Project != "web" || len(greeting.Nonce) != 32 || peer.Code != "" {
 		t.Fatalf("peer %+v, greeting %+v, err %v", peer, greeting, err)
+	}
+	if peer.control.limit != maxControl {
+		t.Errorf("a link that proved its key may send %d bytes on its control stream", peer.control.limit)
+	}
+}
+
+func TestACodeComesWithTheProofAndIsCoveredByIt(t *testing.T) {
+	peer, _, err := handshake{protocol: Version, hub: address, key: newKey(t), code: "egzo-link-abc"}.run(t)
+	if err != nil || peer.Code != "egzo-link-abc" {
+		t.Fatalf("peer %+v, err %v", peer, err)
+	}
+	other := "egzo-link-another"
+	if _, _, err := (handshake{protocol: Version, hub: address, key: newKey(t), code: "egzo-link-abc", signed: &other}).run(t); err == nil {
+		t.Error("a code that was not signed was taken")
+	}
+	nothing := ""
+	if _, _, err := (handshake{protocol: Version, hub: address, key: newKey(t), code: "egzo-link-abc", signed: &nothing}).run(t); err == nil {
+		t.Error("a code was added to a proof made without one")
+	}
+}
+
+func TestACodeSignedForOneKeyIsNoUseToAnother(t *testing.T) {
+	if _, _, err := (handshake{protocol: Version, hub: address, key: newKey(t), code: "egzo-link-abc", signer: newKey(t)}).run(t); err == nil {
+		t.Fatal("a proof of one key was taken for another")
+	}
+}
+
+func TestWhatIsSignedTellsTheHubFromTheCode(t *testing.T) {
+	nonce, key := []byte("nonce"), make(ed25519.PublicKey, ed25519.PublicKeySize)
+	if bytes.Equal(Signed("https://hub", nonce, key, "0\ncode"), Signed("https://hub\n0\ncode", nonce, key, "")) {
+		t.Error("two different things are signed the same")
+	}
+}
+
+func TestAHelloOfAnyLengthIsNotReadByAStranger(t *testing.T) {
+	link, hub := pair(t)
+	go func() {
+		stream, err := link.OpenStream()
+		if err != nil {
+			return
+		}
+		_, _ = stream.Write(bytes.Repeat([]byte("x"), 2*maxHello))
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := Handshake(ctx, hub, address); err == nil || !strings.Contains(err.Error(), "refusing the stream") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAStrangerWhoSaysNothingGetsTheTimeItWasGiven(t *testing.T) {
+	link, hub := pair(t)
+	go func() { _, _ = link.OpenStream() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	began := time.Now()
+	if _, err := Handshake(ctx, hub, address); err == nil {
+		t.Fatal("a link that said nothing was taken")
+	}
+	if took := time.Since(began); took > 3*time.Second {
+		t.Errorf("it held its slot for %v", took)
+	}
+}
+
+// silence is a control stream that stays open and says nothing, as a link's does.
+type silence struct{}
+
+func (silence) Read([]byte) (int, error)    { select {} }
+func (silence) Write(p []byte) (int, error) { return len(p), nil }
+
+// proved is a hub's Peer of a connection, past the handshake, with the link's end of its control stream.
+func proved(t *testing.T) (*Peer, *yamux.Session, *Lines) {
+	t.Helper()
+	link, hub := pair(t)
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	public := newKey(t).Public().(ed25519.PublicKey)
+	if err := lines.Write(Hello{Protocol: Version}); err != nil { // yamux tells the hub of a stream with its first bytes
+		t.Fatal(err)
+	}
+	accepted, err := hub.AcceptStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := NewLines(accepted)
+	var hello Hello
+	if err := control.Read(&hello); err != nil {
+		t.Fatal(err)
+	}
+	control.limit = maxControl
+	return &Peer{Hello: Hello{Key: public}, session: hub, control: control}, link, lines
+}
+
+func TestALineOverTheControlLimitEndsTheConnection(t *testing.T) {
+	peer, _, lines := proved(t)
+	go peer.Run(context.Background(), Handlers{})
+	if err := lines.Write(Unlink{}); err != nil {
+		t.Fatal(err)
+	}
+	go lines.Write(FeedOpen{Feed: strings.Repeat("x", 2*maxControl)})
+	select {
+	case <-peer.Closed():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection stayed up")
+	}
+}
+
+func TestControlMessagesAreHeldBack(t *testing.T) {
+	controlPause = 30 * time.Millisecond
+	defer func() { controlPause = 100 * time.Millisecond }()
+	peer, _, lines := proved(t)
+	asked := make(chan time.Time, 1)
+	go peer.Run(context.Background(), Handlers{Unlink: func() Verdict {
+		asked <- time.Now()
+		return Verdict{State: StateUnlinked}
+	}})
+	began := time.Now()
+	for range 10 {
+		if err := lines.Write(Unlink{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := lines.Write(Unlink{Unlink: true}); err != nil {
+		t.Fatal(err)
+	}
+	if took := (<-asked).Sub(began); took < 10*controlPause {
+		t.Errorf("11 messages were read in %v", took)
+	}
+}
+
+func TestTheAnswerToAnUnlinkArrivesAndThenTheConnectionEnds(t *testing.T) {
+	peer, _, lines := proved(t)
+	asked := make(chan struct{}, 1)
+	go peer.Run(context.Background(), Handlers{Unlink: func() Verdict {
+		asked <- struct{}{}
+		return Verdict{State: StateUnlinked}
+	}})
+	if err := lines.Write(Unlink{Unlink: true}); err != nil {
+		t.Fatal(err)
+	}
+	<-asked
+	var verdict Verdict
+	if err := lines.Read(&verdict); err != nil || verdict.State != StateUnlinked {
+		t.Fatalf("the link heard %+v, %v", verdict, err)
+	}
+	select {
+	case <-peer.Closed():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection stayed up")
+	}
+}
+
+func TestALinkThatDoesNotHangUpIsClosed(t *testing.T) {
+	peer, _, _ := proved(t)
+	began := time.Now()
+	if err := peer.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(began); took < finishGrace {
+		t.Errorf("it was closed after %v, with no time to hear its verdict", took)
+	}
+	select {
+	case <-peer.Closed():
+	default:
+		t.Error("the connection stayed up")
+	}
+
+	peer, link, _ := proved(t)
+	done := make(chan struct{})
+	go func() { _ = peer.Finish(); close(done) }()
+	link.Close()
+	<-done
+}
+
+func TestAFeedIsPacedInBytesBeforeItIsDecoded(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub, control: NewLines(silence{})}
+	var paced atomic.Int64
+	decoded := make(chan int64, 1)
+	go peer.Run(context.Background(), Handlers{
+		Status: func(StatusLine) {
+			select {
+			case decoded <- paced.Load():
+			default:
+			}
+		},
+		Pace: func(n int) { paced.Add(int64(n)) },
+	})
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+		t.Fatal(err)
+	}
+	var start FeedStart
+	if err := lines.Read(&start); err != nil {
+		t.Fatal(err)
+	}
+	line := StatusLine{Reason: strings.Repeat("x", 2<<20)}
+	if err := lines.Write(line); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-decoded:
+		if got < 2<<20 {
+			t.Errorf("%d bytes were paced before a line of 2 MiB was decoded", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the line never came")
 	}
 }
 
 func TestASignatureForAnotherHubIsRefused(t *testing.T) {
-	if _, _, err := (handshake{Version, "https://evil.example.org", newKey(t)}).run(t); err == nil {
+	if _, _, err := (handshake{protocol: Version, hub: "https://evil.example.org", key: newKey(t)}).run(t); err == nil {
 		t.Fatal("a proof made for another hub was accepted: a hub could log in elsewhere as its links")
 	}
 }
 
 func TestAnotherVersionIsToldWhichSideToUpgrade(t *testing.T) {
 	for protocol, want := range map[int]string{Version + 1: "upgrade the hub", Version - 1: "upgrade the project"} {
-		_, greeting, err := handshake{protocol, address, newKey(t)}.run(t)
+		_, greeting, err := handshake{protocol: protocol, hub: address, key: newKey(t)}.run(t)
 		if err == nil || !strings.Contains(greeting.Refused, want) {
 			t.Errorf("protocol %d: greeting %+v, err %v", protocol, greeting, err)
 		}
@@ -224,7 +449,6 @@ func TestALongPasteIsCutIntoFrames(t *testing.T) {
 
 func TestWhatAHubSaysCannotDriveATerminal(t *testing.T) {
 	cases := []Status{
-		{State: StatePending, Address: "https://evil.example\x1b]0;title\x07"},
 		{State: StateApproved, Hub: "https://hub", Project: "p\x1b[2J", Owner: "o\nlinked to another"},
 		{State: StateRevoked, Hub: "https://hub", Error: "no\u009b31m"},
 		{State: StateUnreachable, Error: "refused\r\x1b[1A"},
@@ -240,7 +464,7 @@ func TestWhatAHubSaysCannotDriveATerminal(t *testing.T) {
 func TestALinkHoldsFewStreamsOpenTowardsTheHub(t *testing.T) {
 	link, hub := pair(t)
 	peer := &Peer{session: hub}
-	peer.control = NewLines(bytes.NewBuffer(nil))
+	peer.control = NewLines(silence{})
 	go peer.Run(context.Background(), Handlers{})
 	var open []*yamux.Stream
 	refused := 0

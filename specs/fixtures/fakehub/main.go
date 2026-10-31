@@ -2,7 +2,7 @@
 // Copyright (C) Neopeak Internet Solutions inc.
 
 // fakehub is a small hub for the specs: core's real hub side of the link protocol, over TLS with a certificate of its own, and a
-// plain control API on loopback where a spec plays the person who approves and the hub that asks.
+// plain control API on loopback where a spec plays the operator and the hub that asks.
 //
 //	fakehub -link 0.0.0.0:0 -control 127.0.0.1:0 -host 172.17.0.1 -ca /path/to/ca.pem
 //
@@ -42,7 +42,6 @@ type registration struct {
 	Host        string
 	Templates   []string
 	State       string
-	Code        string
 	Owner       string
 	ID          string
 	Connections int
@@ -58,15 +57,13 @@ type hub struct {
 	mu    sync.Mutex
 	regs  map[string]*registration // by key
 	gone  []string                 // the projects that asked to be forgotten
+	codes map[string]string        // the link codes that are good, and who made them
 	count int
+	dials int // the proofs it took
 }
 
 func (h *hub) verdict(r *registration) hublink.Verdict {
-	v := hublink.Verdict{State: r.State, Project: r.ID, Owner: r.Owner}
-	if r.State == hublink.StatePending {
-		v.Code, v.Address = r.Code, h.origin+"/link/"+r.Code
-	}
-	return v
+	return hublink.Verdict{State: r.State, Project: r.ID, Owner: r.Owner}
 }
 
 func (h *hub) link(w http.ResponseWriter, r *http.Request) {
@@ -82,18 +79,27 @@ func (h *hub) link(w http.ResponseWriter, r *http.Request) {
 	}
 	key := hex.EncodeToString(peer.Hello.Key)
 	h.mu.Lock()
+	h.dials++
 	reg := h.regs[key]
 	if reg == nil {
-		h.count++
-		reg = &registration{
-			Project: peer.Hello.Project, Key: key, State: hublink.StatePending, Code: fmt.Sprintf("CODE-%04d", h.count),
-			feeds: map[string][]json.RawMessage{},
+		owner, good := h.codes[peer.Code]
+		if !good {
+			h.mu.Unlock()
+			_ = peer.Send(hublink.Verdict{State: hublink.StateUnregistered})
+			return
 		}
+		delete(h.codes, peer.Code)
+		reg = &registration{Project: peer.Hello.Project, Key: key, State: hublink.StateApproved, Owner: owner, ID: "p-" + key[:8], feeds: map[string][]json.RawMessage{}}
 		h.regs[key] = reg
 	}
-	reg.Host, reg.Templates, reg.peer, reg.Online = peer.Hello.Host, peer.Hello.Templates, peer, true
-	reg.Connections++
+	reg.Host, reg.Templates, reg.Connections = peer.Hello.Host, peer.Hello.Templates, reg.Connections+1
 	verdict := h.verdict(reg)
+	if reg.State != hublink.StateApproved {
+		h.mu.Unlock()
+		_ = peer.Send(verdict)
+		return
+	}
+	reg.peer, reg.Online = peer, true
 	h.mu.Unlock()
 	if err := peer.Send(verdict); err != nil {
 		return
@@ -118,6 +124,9 @@ func (h *hub) link(w http.ResponseWriter, r *http.Request) {
 		Unlink: func() hublink.Verdict {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.regs[key] != reg || reg.State != hublink.StateApproved {
+				return h.verdict(reg)
+			}
 			delete(h.regs, key)
 			h.gone = append(h.gone, reg.Project)
 			return hublink.Verdict{State: hublink.StateUnlinked}
@@ -198,10 +207,20 @@ func (h *hub) control() http.Handler {
 		for _, reg := range h.regs {
 			list = append(list, reg)
 		}
-		answer(w, map[string]any{"registrations": list, "forgotten": h.gone})
+		answer(w, map[string]any{"registrations": list, "forgotten": h.gone, "codes": len(h.codes), "dials": h.dials})
 	})
-	mux.HandleFunc("POST /decide", func(w http.ResponseWriter, r *http.Request) {
-		var q struct{ Project, State, Owner string }
+	mux.HandleFunc("POST /code", func(w http.ResponseWriter, r *http.Request) {
+		var q struct{ Owner string }
+		_ = json.NewDecoder(r.Body).Decode(&q)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.count++
+		code := fmt.Sprintf("egzo-link-spec%04d", h.count)
+		h.codes[code] = q.Owner
+		answer(w, code)
+	})
+	mux.HandleFunc("POST /revoke", func(w http.ResponseWriter, r *http.Request) {
+		var q struct{ Project, Message string }
 		_ = json.NewDecoder(r.Body).Decode(&q)
 		reg := h.find(q.Project)
 		if reg == nil {
@@ -209,16 +228,23 @@ func (h *hub) control() http.Handler {
 			return
 		}
 		h.mu.Lock()
-		reg.State, reg.Owner = q.State, q.Owner
-		if q.State == hublink.StateApproved {
-			reg.ID = "p-" + reg.Key[:8]
-		}
+		reg.State = hublink.StateRevoked
 		peer, verdict := reg.peer, h.verdict(reg)
+		verdict.Message = q.Message
 		h.mu.Unlock()
 		if peer != nil {
 			_ = peer.Send(verdict)
+			_ = peer.Close()
 		}
 		answer(w, reg)
+	})
+	mux.HandleFunc("POST /forget", func(w http.ResponseWriter, r *http.Request) {
+		reg := h.find(r.URL.Query().Get("project"))
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if reg != nil {
+			delete(h.regs, reg.Key)
+		}
 	})
 	mux.HandleFunc("POST /verb", func(w http.ResponseWriter, r *http.Request) {
 		var q verbRequest
@@ -237,9 +263,6 @@ func (h *hub) control() http.Handler {
 		limit := 20 * time.Second
 		if q.Verb == hublink.VerbSpawn || q.Verb == hublink.VerbRemove {
 			limit = 2 * time.Minute
-		}
-		if q.Limit > 0 && q.Verb == hublink.VerbProject {
-			limit = time.Duration(q.Limit) * time.Second // a spec that expects no answer
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), limit)
 		defer cancel()
@@ -311,7 +334,7 @@ func main() {
 		log.Fatal(err)
 	}
 	port := links.Addr().(*net.TCPAddr).Port
-	h := &hub{origin: fmt.Sprintf("https://%s:%d", *host, port), regs: map[string]*registration{}}
+	h := &hub{origin: fmt.Sprintf("https://%s:%d", *host, port), regs: map[string]*registration{}, codes: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+hublink.Path, h.link)
 	go func() { log.Fatal(http.Serve(links, mux)) }()

@@ -6,15 +6,20 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/link"
 	"github.com/egzo-ai/egzo/internal/operator"
 	"github.com/egzo-ai/egzo/internal/stack"
@@ -24,6 +29,82 @@ const (
 	linkOperatorSocket = "/run/egzo/link.sock"
 	linkStateDir       = "/var/lib/egzo/link"
 )
+
+// maxLinkCode is more than any code is long: what stdin holds beyond it is not a code.
+const maxLinkCode = 256
+
+// newRegisterCommand is `egzo project register`: the link presents a link code to the hub, once. The code is asked for, or read from stdin,
+// and goes to the link through `engine exec` stdin: there is no flag for it, so it is never in a shell's history or in `ps`.
+func newRegisterCommand(opts *options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "register",
+		Short: "Register the project on its hub with a link code",
+		Long: "An operator of the hub makes a link code (Settings, Links). This command asks for it, or reads it from stdin when\n" +
+			"that is not a terminal, and has the project's link present it, once. From then on the link's key is all it takes.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := commandContext(cmd)
+			defer stop()
+			s, err := openSession(ctx, opts)
+			if err != nil {
+				return err
+			}
+			defer s.close()
+			if s.Resolved.Hub == nil {
+				return errors.New("this project names no hub: add `hub:` to the project file, then run `egzo project up`")
+			}
+			status, err := stack.LinkStatus(ctx, s.engine, s.Resolved.Name, 0)
+			if err != nil {
+				return errors.New("the link is not running: `egzo project up` starts it")
+			}
+			switch status.State {
+			case hublink.StateApproved:
+				return errors.New("this project is registered already: " + status.Text())
+			case hublink.StateLocked, hublink.StateNoEngine:
+				return errors.New(status.Text())
+			}
+			code, err := readLinkCode(cmd)
+			if err != nil {
+				return err
+			}
+			status, err = stack.RegisterLink(ctx, s.engine, s.Resolved.Name, code)
+			if err != nil {
+				return err
+			}
+			switch status.State {
+			case hublink.StateApproved:
+				fmt.Fprintln(cmd.OutOrStdout(), "link: "+status.Text())
+				return nil
+			case hublink.StateUnregistered:
+				return errors.New("the hub did not take this code: it is wrong, expired or used. Ask an operator of the hub for a new one")
+			case hublink.StateRevoked:
+				return errors.New(status.Text() + ": an operator of the hub has to forget this project before it can register again")
+			}
+			return errors.New(status.Text())
+		},
+	}
+}
+
+// readLinkCode asks for the code on a terminal, without showing it, and reads it from stdin otherwise.
+func readLinkCode(cmd *cobra.Command) (string, error) {
+	var code []byte
+	var err error
+	if in, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(in.Fd())) {
+		fmt.Fprint(cmd.ErrOrStderr(), "Link code: ")
+		code, err = term.ReadPassword(int(in.Fd()))
+		fmt.Fprintln(cmd.ErrOrStderr())
+	} else {
+		code, err = io.ReadAll(io.LimitReader(cmd.InOrStdin(), maxLinkCode+1))
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the code: %w", err)
+	}
+	text := strings.TrimSpace(string(code))
+	if text == "" || len(text) > maxLinkCode {
+		return "", errors.New("that is not a link code: an operator of the hub makes one in Settings, Links")
+	}
+	return text, nil
+}
 
 // newLinkCommand is the link sidecar role. It runs inside the egzo image, not on the user's machine.
 func newLinkCommand() *cobra.Command {
@@ -119,10 +200,26 @@ func linkOperator(l *link.Link) http.Handler {
 			http.Error(w, err.Error(), http.StatusConflict)
 		}
 	})
-	mux.HandleFunc("POST /unlink", func(w http.ResponseWriter, r *http.Request) {
-		if err := l.Unlink(r.Context()); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+	mux.HandleFunc("PUT /register", func(w http.ResponseWriter, r *http.Request) {
+		var body stack.LinkRegistration
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&body); err != nil {
+			http.Error(w, "the body is not what `project register` sends", http.StatusBadRequest)
+			return
 		}
+		status, err := l.Register(r.Context(), body.Code)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(status)
+	})
+	mux.HandleFunc("POST /unlink", func(w http.ResponseWriter, r *http.Request) {
+		state, err := l.Unlink(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		fmt.Fprint(w, state)
 	})
 	return mux
 }

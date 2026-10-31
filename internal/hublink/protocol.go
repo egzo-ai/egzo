@@ -31,17 +31,23 @@ const Path = "/link/v1"
 // MaxLine is the longest message either side reads. What the other side says is untrusted.
 const MaxLine = 4 << 20
 
+const (
+	// maxHello is the longest line of the handshake, read from anyone who reaches the endpoint. A Hello names a project and its templates.
+	maxHello = 256 << 10
+	// maxControl is the longest line a link sends on its control stream once it has proved its key: it has one thing left to say.
+	maxControl = 4 << 10
+)
+
 // KeepAlive is how often an idle connection proves it is alive. Reverse proxies cut a silent connection (nginx at 60 seconds), and
 // without it a path that went silent is not noticed at all.
 const KeepAlive = 15 * time.Second
 
 // The states of a registration, as a hub gives them.
 const (
-	StatePending  = "pending"
-	StateApproved = "approved"
-	StateRefused  = "refused"
-	StateRevoked  = "revoked"
-	StateUnlinked = "unlinked" // the hub has forgotten the project, as the link asked
+	StateUnregistered = "unregistered" // the hub does not know this key: `egzo project register` brings a code
+	StateApproved     = "approved"
+	StateRevoked      = "revoked"
+	StateUnlinked     = "unlinked" // the hub has forgotten the project, as the link asked
 )
 
 // The states of a link that are not a registration's.
@@ -58,8 +64,6 @@ type Status struct {
 	State   string
 	Project string `json:",omitempty"` // the hub's id
 	Owner   string `json:",omitempty"`
-	Code    string `json:",omitempty"`
-	Address string `json:",omitempty"`
 	Error   string `json:",omitempty"`
 }
 
@@ -70,13 +74,13 @@ func (s Status) text() string {
 	switch s.State {
 	case StateApproved:
 		return fmt.Sprintf("linked to %s as %s, owned by %s", s.Hub, s.Project, s.Owner)
-	case StatePending:
-		return "pending: register this project at " + s.Address
-	case StateRefused, StateRevoked:
+	case StateUnregistered:
+		return "not registered: run `egzo project register`"
+	case StateRevoked:
 		if s.Error != "" {
-			return fmt.Sprintf("%s by %s: %s", s.State, s.Hub, s.Error)
+			return fmt.Sprintf("revoked by %s: %s", s.Hub, s.Error)
 		}
-		return fmt.Sprintf("%s by %s", s.State, s.Hub)
+		return "revoked by " + s.Hub
 	case StateLocked:
 		if s.Error != "" {
 			return "locked: " + s.Error
@@ -113,7 +117,7 @@ const (
 type Hello struct {
 	Protocol  int
 	Project   string
-	Host      string // the machine the engine runs on, as the engine says: shown to the person who approves
+	Host      string // the machine the engine runs on, as the engine says: shown to operators
 	Release   string // this egzo's version, for people
 	Key       ed25519.PublicKey
 	Templates []string
@@ -126,18 +130,19 @@ type Greeting struct {
 	Refused  string `json:",omitempty"`
 }
 
-// Proof is the link's signature over the challenge.
+// Proof is the link's signature over the challenge. Code is a link code, for a key the hub does not know yet: it comes after the
+// protocol check, and the signature covers it, so it cannot be moved to another key. It is a secret: it is never logged.
 type Proof struct {
 	Signature []byte
+	Code      string `json:",omitempty"`
 }
 
-// Verdict is where a registration stands. The hub sends one after the proof and another each time it changes.
+// Verdict is where a registration stands. The hub sends one after the proof. A link that is not approved hears it and is closed, and an
+// approved one hears another only if it is revoked or unlinked, as the last thing on the connection.
 type Verdict struct {
 	State   string
 	Project string `json:",omitempty"` // the hub's id of the project
 	Owner   string `json:",omitempty"`
-	Code    string `json:",omitempty"` // pending: the device code
-	Address string `json:",omitempty"` // pending: where a person approves it
 	Message string `json:",omitempty"`
 }
 
@@ -185,10 +190,11 @@ type ProjectUpdate struct {
 	Published Published
 }
 
-// Signed is what a link signs: the challenge, for this hub. A hub cannot pass a challenge of another hub on to its links and
-// log in there, because the address is in what is signed.
-func Signed(hub string, nonce []byte, key ed25519.PublicKey) []byte {
-	message := []byte(fmt.Sprintf("egzo link %d\n%s\n", Version, strings.TrimRight(hub, "/")))
+// Signed is what a link signs: the challenge and the link code it presents, if any, for this hub. A hub cannot pass a challenge of
+// another hub on to its links and log in there, because the address is in what is signed, and a code signed for one key is no use to
+// another.
+func Signed(hub string, nonce []byte, key ed25519.PublicKey, code string) []byte {
+	message := []byte(fmt.Sprintf("egzo link %d\n%s\n%d\n%s", Version, strings.TrimRight(hub, "/"), len(code), code))
 	message = append(message, key...)
 	return append(message, nonce...)
 }
@@ -197,21 +203,23 @@ func Signed(hub string, nonce []byte, key ed25519.PublicKey) []byte {
 type Lines struct {
 	reader *bufio.Reader
 	writer io.Writer
+	limit  int
 }
 
 // NewLines wraps a stream.
 func NewLines(stream io.ReadWriter) *Lines {
-	return &Lines{reader: bufio.NewReaderSize(stream, 64<<10), writer: stream}
+	return &Lines{reader: bufio.NewReaderSize(stream, 64<<10), writer: stream, limit: MaxLine}
 }
 
-// Read reads one message into v. A line over MaxLine ends the stream: nothing the protocol sends is that long.
+// Read reads one message into v. A line over the limit, MaxLine unless the stream says less, ends the stream: nothing the protocol sends
+// is that long.
 func (l *Lines) Read(v any) error {
 	var line []byte
 	for {
 		part, err := l.reader.ReadSlice('\n')
 		line = append(line, part...)
-		if len(line) > MaxLine {
-			return fmt.Errorf("a line of over %d bytes: refusing the stream", MaxLine)
+		if len(line) > l.limit {
+			return fmt.Errorf("a line of over %d bytes: refusing the stream", l.limit)
 		}
 		if errors.Is(err, bufio.ErrBufferFull) {
 			continue

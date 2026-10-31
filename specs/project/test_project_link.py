@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""`hub:` in the project file and the link sidecar: a project dials out to its hub, proves its key, waits for a person to approve
-it, and then does what the hub asks with egzo's verbs and nothing else. The hub here is fixtures/fakehub, which is core's real hub
-side of the protocol.
+"""`hub:` in the project file and the link sidecar: a project dials out to its hub and proves its key. An operator makes a link code, the
+project presents it with `egzo project register`, and from then on the link does what the hub asks with egzo's verbs and nothing else. The
+hub here is fixtures/fakehub, which is core's real hub side of the protocol.
 
-The story follows one project: pending, approved, working, dropped, revoked, unlinked."""
+The story follows one project: not registered, registered, working, dropped, revoked, unlinked."""
 
 import base64
 import json
+import time
 
 import pytest
 
@@ -41,6 +42,10 @@ def check(project):
     return project.run("project", "check")
 
 
+def register(project, hub, owner="alice"):
+    return project.ok("project register", input=hub.code(owner) + "\n")
+
+
 def test_the_hub_is_an_address_or_an_address_with_a_ca(project, tmp_path):
     project.write(spec(hub="https://hub.example.org/"))
     assert project.ok("project check --resolved").yaml()["hub"] == {"url": "https://hub.example.org"}
@@ -70,12 +75,9 @@ def test_a_ca_that_is_not_certificates_is_refused(project):
     assert result.returncode != 0 and "hub.ca" in result.stdout
 
 
-def test_up_starts_the_link_prints_the_device_code_and_does_not_wait_for_anyone(linked, fake_hub, engine):
-    registration = eventually(lambda: fake_hub.registration(linked.name))
-    assert registration["State"] == "pending"
-    assert f"register this project at {fake_hub.url}/link/{registration['Code']}" in linked.up_output
-    assert registration["Templates"] == ["web"], "the person who approves sees what the project holds"
-    assert registration["Host"]
+def test_up_starts_the_link_says_it_is_not_registered_and_does_not_wait_for_anyone(linked, fake_hub, engine):
+    assert "link: not registered: run `egzo project register`" in linked.up_output
+    assert fake_hub.registration(linked.name) is None, "a key the hub does not know leaves nothing on it"
 
     linked.ok("agent spawn web early")  # the project runs without the hub
     linked.ok("agent rm --force early")
@@ -102,20 +104,61 @@ def test_the_secret_key_is_never_in_the_links_settings_and_the_key_on_the_volume
     assert sealed.stdout.strip() != "", "the key is on the volume"
 
 
-def test_a_pending_project_answers_no_verb_and_pushes_nothing(linked, fake_hub, engine):
-    assert fake_hub.unanswered(linked.name), "the link does not take a verb until a person approved it"
-    assert fake_hub.feed(linked.name, "project") == []
-    assert "pending" in row(linked, "link")["status"]
+def test_a_project_that_is_not_registered_is_a_warning_and_the_link_stops_dialing(linked, fake_hub):
+    assert "not registered" in row(linked, "link")["status"]
     result = check(linked)
-    assert result.returncode == 0, "waiting for a person is not a failure"
-    assert "warn" in result.stdout and "pending" in result.stdout
+    assert result.returncode == 0, "a project runs without its hub"
+    assert "warn" in result.stdout and "not registered" in result.stdout
+    dials = fake_hub.dials()
+    time.sleep(3)
+    assert fake_hub.dials() == dials, "the hub said no, and asking again changes nothing until a person does something"
 
 
-def test_approved_ps_and_check_say_so(linked, fake_hub):
-    fake_hub.decide(linked.name, "approved", "alice")
+def test_a_bad_code_is_refused_and_says_so_and_can_be_followed_by_a_good_one(linked, fake_hub):
+    result = linked.run("project", "register", input="egzo-link-wrong\n")
+    assert result.returncode != 0 and "did not take this code" in result.stderr
+    assert fake_hub.registration(linked.name) is None
+    assert "not registered" in row(linked, "link")["status"]
+
+
+def test_register_with_no_code_at_all_is_refused_before_anything_is_sent(linked, fake_hub):
+    dials = fake_hub.dials()
+    result = linked.run("project", "register", input="\n")
+    assert result.returncode != 0 and "not a link code" in result.stderr
+    assert fake_hub.dials() == dials
+
+
+def test_register_presents_the_code_once_and_the_project_is_approved(linked, fake_hub):
+    code = fake_hub.code("alice")
+    good = fake_hub.codes()
+    said = linked.ok("project register", input=code + "\n").stdout
+    assert "owned by alice" in said
+    registration = fake_hub.registration(linked.name)
+    assert registration["State"] == "approved"
+    assert registration["Templates"] == ["web"], "the project says what it holds"
+    assert registration["Host"]
+    assert fake_hub.codes() == good - 1, "the code is spent"
+
     assert eventually(lambda: "owned by alice" in row(linked, "link")["status"])
     result = check(linked)
     assert result.returncode == 0 and "owned by alice" in result.stdout
+
+
+def test_register_again_says_so_and_spends_nothing(linked, fake_hub):
+    code = fake_hub.code("bob")
+    good = fake_hub.codes()
+    result = linked.run("project", "register", input=code + "\n")
+    assert result.returncode != 0 and "registered already" in result.stderr
+    assert fake_hub.codes() == good
+    assert fake_hub.registration(linked.name)["Owner"] == "alice"
+
+
+def test_the_code_is_in_no_setting_no_log_and_no_status(linked, fake_hub, engine):
+    link = link_of(engine, linked)
+    assert not [e for e in link.raw["Config"]["Env"] if "egzo-link-" in e]
+    assert "egzo-link-" not in " ".join(link.raw["Config"]["Cmd"] or [])
+    assert "egzo-link-" not in engine.run("logs", link.name).stdout + engine.run("logs", link.name).stderr
+    assert "egzo-link-" not in linked.ok("ps --json").stdout
 
 
 def test_the_hub_asks_and_the_link_does_every_verb(linked, fake_hub, engine):
@@ -188,11 +231,32 @@ def test_up_again_changes_nothing_and_recreating_the_link_keeps_its_key(linked, 
 
 
 def test_revoked_ends_what_the_hub_may_do_and_check_fails(linked, fake_hub):
-    fake_hub.decide(linked.name, "revoked")
+    fake_hub.revoke(linked.name, "the laptop was stolen")
     assert eventually(lambda: "revoked" in row(linked, "link")["status"])
-    assert fake_hub.unanswered(linked.name)
+    assert "the laptop was stolen" in row(linked, "link")["status"]
+    assert fake_hub.registration(linked.name)["Online"] is False, "nothing of a revoked project stays connected"
     result = check(linked)
     assert result.returncode != 0 and "revoked" in result.stdout
+
+
+def test_a_revoked_link_stops_dialing_and_a_code_does_not_help_until_an_operator_forgets_it(linked, fake_hub):
+    dials = fake_hub.dials()
+    time.sleep(3)
+    assert fake_hub.dials() == dials
+    code = fake_hub.code("alice")
+    good = fake_hub.codes()
+    result = linked.run("project", "register", input=code + "\n")
+    assert result.returncode != 0 and "forget this project" in result.stderr
+    assert fake_hub.codes() == good, "a revoked key spends nothing"
+
+    before = fake_hub.registration(linked.name)
+    fake_hub.forget(linked.name)
+    said = linked.ok("project register", input=code + "\n").stdout
+    assert "owned by alice" in said, "the way back for a link that was revoked by mistake"
+    after = fake_hub.registration(linked.name)
+    assert after["Key"] == before["Key"]
+    fake_hub.revoke(linked.name)
+    assert eventually(lambda: "revoked" in row(linked, "link")["status"])
 
 
 def test_removing_hub_from_the_file_unlinks_and_removes_the_link(linked, fake_hub, engine, egzo):
@@ -200,8 +264,9 @@ def test_removing_hub_from_the_file_unlinks_and_removes_the_link(linked, fake_hu
     linked.ok("agent rm --force fromhub")
     linked.write(document_without)
     said = linked.ok("project up").stdout
-    assert "forgotten" in said
-    assert linked.name in fake_hub.forgotten()
+    assert "the hub revoked this project" in said, "and it says what happened, not that the hub forgot it"
+    assert linked.name not in fake_hub.forgotten(), "a revoked project cannot erase its own record"
+    assert fake_hub.registration(linked.name)["State"] == "revoked"
     assert link_of(engine, linked) is None
     assert not engine.volume_exists(f"{linked.name}_link")
     assert engine.run("network", "inspect", f"{linked.name}_link").returncode != 0
@@ -211,19 +276,30 @@ def test_removing_hub_from_the_file_unlinks_and_removes_the_link(linked, fake_hu
 def test_down_tells_the_hub(live_project, engine, egzo, fake_hub):
     live_project.write(document(engine, egzo, fake_hub))
     live_project.ok("project up")
-    assert eventually(lambda: fake_hub.registration(live_project.name))
-    live_project.ok("project down --force")
+    register(live_project, fake_hub)
+    said = live_project.ok("project down --force").stdout
+    assert "forgotten" in said
     assert live_project.name in fake_hub.forgotten()
     assert not engine.containers(live_project.name)
 
 
-def test_a_refused_registration_fails_check(live_project, engine, egzo, fake_hub):
+def test_down_of_a_project_that_was_never_registered_says_so_at_once(live_project, engine, egzo, fake_hub):
     live_project.write(document(engine, egzo, fake_hub))
     live_project.ok("project up")
-    assert eventually(lambda: fake_hub.registration(live_project.name))
-    fake_hub.decide(live_project.name, "refused")
-    assert eventually(lambda: "refused" in row(live_project, "link")["status"])
-    assert check(live_project).returncode != 0
+    began = time.time()
+    said = live_project.ok("project down --force").stdout
+    assert "was not registered" in said and "not told" not in said
+    assert time.time() - began < 60
+    assert live_project.name not in fake_hub.forgotten()
+
+
+def test_register_needs_a_hub_and_a_running_link(project, engine, egzo, fake_hub):
+    project.write(spec(agents={"web": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "cat"})}))
+    result = project.run("project", "register", input="egzo-link-x\n")
+    assert result.returncode != 0 and "names no hub" in result.stderr
+    project.write(document(engine, egzo, fake_hub))
+    result = project.run("project", "register", input="egzo-link-x\n")
+    assert result.returncode != 0 and "project up" in result.stderr
 
 
 def test_a_hub_that_is_away_is_said_and_the_project_keeps_running(live_project, engine, egzo, tmp_path):
@@ -231,7 +307,7 @@ def test_a_hub_that_is_away_is_said_and_the_project_keeps_running(live_project, 
     away = FakeHub(tmp_path / "away", bridge["IPAM"]["Config"][0]["Gateway"])
     live_project.write(document(engine, egzo, away))
     live_project.ok("project up")
-    assert eventually(lambda: away.registration(live_project.name))
+    register(live_project, away)
     away.stop()
     assert eventually(lambda: "unreachable" in row(live_project, "link")["status"])
     result = check(live_project)
@@ -243,6 +319,7 @@ def test_a_hub_that_is_away_is_said_and_the_project_keeps_running(live_project, 
 def test_a_key_sealed_with_another_secret_key_is_refused_and_says_so(live_project, engine, egzo, fake_hub):
     live_project.write(document(engine, egzo, fake_hub))
     live_project.ok("project up")
+    register(live_project, fake_hub)
     other = "b" * 64
     result = live_project.run("project", "up", "--recreate", env={SECRET_KEY_VARIABLE: other})
     assert result.returncode != 0 and "another secret key" in result.stderr
@@ -251,6 +328,7 @@ def test_a_key_sealed_with_another_secret_key_is_refused_and_says_so(live_projec
 def test_rotate_ca_moves_the_links_key_to_the_new_secret_key(live_project, engine, egzo, fake_hub):
     live_project.write(document(engine, egzo, fake_hub))
     live_project.ok("project up")
+    register(live_project, fake_hub)
     key = fake_hub.registration(live_project.name)["Key"]
     other = "b" * 64
     live_project.ok("project rotate-ca", env={SECRET_KEY_VARIABLE: other}, timeout=300)
@@ -268,11 +346,10 @@ def test_after_a_reboot_up_brings_the_project_back_with_the_same_key_and_nobody_
     p = live_project
     p.write(document(engine, egzo, fake_hub))
     p.ok("project up")
-    assert eventually(lambda: fake_hub.registration(p.name))
-    fake_hub.decide(p.name, "approved", "alice")
-    assert eventually(lambda: "owned by alice" in row(p, "link")["status"])
+    register(p, fake_hub)
     p.ok("agent spawn web worker")
     registered = fake_hub.registration(p.name)
+    codes = fake_hub.codes()
 
     assert engine.run("stop", *[c.name for c in engine.containers(p.name)]).returncode == 0  # what a reboot leaves
     assert eventually(lambda: not fake_hub.registration(p.name)["Online"]), "the hub sees it go"
@@ -281,7 +358,7 @@ def test_after_a_reboot_up_brings_the_project_back_with_the_same_key_and_nobody_
     assert eventually(lambda: "owned by alice" in row(p, "link")["status"])
     assert fake_hub.registration(p.name)["Key"] == registered["Key"]
     assert fake_hub.registration(p.name)["ID"] == registered["ID"]
-    assert [r for r in fake_hub.registrations() if r["Project"] == p.name and r["State"] == "pending"] == []
+    assert fake_hub.codes() == codes, "nobody needed one"
 
     assert eventually(lambda: fake_hub.verb(p.name, "project").get("error") is None), "the verbs are back"
     fake_hub.must(p.name, "start", Agent="worker")
@@ -294,7 +371,6 @@ def test_a_link_that_restarted_alone_is_locked_and_says_what_opens_it(live_proje
     p = live_project
     p.write(document(engine, egzo, fake_hub))
     p.ok("project up")
-    assert eventually(lambda: fake_hub.registration(p.name))
     link = f"{p.name}-link-1"
     assert link_of(engine, p).raw["HostConfig"]["RestartPolicy"]["Name"] == "unless-stopped"
     started = engine.inspect(link)["State"]["StartedAt"]
@@ -303,5 +379,7 @@ def test_a_link_that_restarted_alone_is_locked_and_says_what_opens_it(live_proje
     assert eventually(lambda: "locked" in row(p, "link")["status"])
     assert "egzo project up" in row(p, "link")["status"]
     assert "locked" in check(p).stdout
+    result = p.run("project", "register", input=fake_hub.code() + "\n")
+    assert result.returncode != 0 and "locked" in result.stderr, "the link holds no key to present a code with"
     p.ok("project up")
-    assert eventually(lambda: "pending" in row(p, "link")["status"])
+    assert eventually(lambda: "not registered" in row(p, "link")["status"])

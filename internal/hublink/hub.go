@@ -21,7 +21,9 @@ import (
 // Peer is a link, seen from the hub, once it has proved its key. It is the hub's way to everything on the project: its verbs are
 // what the hub's Engine seam calls.
 type Peer struct {
-	Hello   Hello
+	Hello Hello
+	// Code is the link code the link presented, verified as signed by its key. It is a secret, and says nothing until the hub looks it up.
+	Code    string
 	session *yamux.Session
 	control *Lines
 
@@ -29,14 +31,20 @@ type Peer struct {
 }
 
 // Handshake takes the control stream of a session and checks the link's key. Hub is the address links name for this hub. A link
-// of another protocol version is told which side to upgrade, and the error says so too.
+// of another protocol version is told which side to upgrade, and the error says so too. The deadline of ctx is how long it gets: reads on
+// a stream know no context.
 func Handshake(ctx context.Context, session *yamux.Session, hub string) (*Peer, error) {
 	stream, err := session.AcceptStreamWithContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stream.SetDeadline(time.Now().Add(30 * time.Second))
+	deadline, limited := ctx.Deadline()
+	if !limited {
+		deadline = time.Now().Add(30 * time.Second)
+	}
+	stream.SetDeadline(deadline)
 	control := NewLines(stream)
+	control.limit = maxHello
 	var hello Hello
 	if err := control.Read(&hello); err != nil {
 		return nil, err
@@ -62,11 +70,12 @@ func Handshake(ctx context.Context, session *yamux.Session, hub string) (*Peer, 
 	if err := control.Read(&proof); err != nil {
 		return nil, err
 	}
-	if !ed25519.Verify(hello.Key, Signed(hub, nonce, hello.Key), proof.Signature) {
+	if !ed25519.Verify(hello.Key, Signed(hub, nonce, hello.Key, proof.Code), proof.Signature) {
 		return nil, errors.New("the link's signature does not verify")
 	}
 	stream.SetDeadline(time.Time{})
-	return &Peer{Hello: hello, session: session, control: control}, nil
+	control.limit = maxControl
+	return &Peer{Hello: hello, Code: proof.Code, session: session, control: control}, nil
 }
 
 // Send tells the link where its registration stands.
@@ -78,6 +87,20 @@ func (p *Peer) Send(verdict Verdict) error {
 
 // Close ends the connection.
 func (p *Peer) Close() error { return p.session.Close() }
+
+// finishGrace is how long a link gets to hang up once it heard its last verdict.
+var finishGrace = 2 * time.Second
+
+// Finish ends a connection after its last verdict. The link hangs up when it hears one. Closing first would reset a connection with what the
+// link pushed still on its way, and the verdict can go with it, so what it sends goes on being read until then. One that does not hang up
+// is closed all the same.
+func (p *Peer) Finish() error {
+	select {
+	case <-p.session.CloseChan():
+	case <-time.After(finishGrace):
+	}
+	return p.session.Close()
+}
 
 // Closed is closed when the connection has ended, for whatever reason: what a verb or a terminal failed of can be told from what it
 // was refused.
@@ -91,8 +114,11 @@ type Handlers struct {
 	Project func(ProjectUpdate)
 	Status  func(StatusLine)
 	Audit   func(AuditEvent)
-	// Unlink is the link asking to be forgotten; the verdict it returns goes back to the link.
+	// Unlink is the link asking to be forgotten; the verdict it returns goes back to the link, and is the last thing on the connection.
 	Unlink func() Verdict
+	// Pace is called with the bytes read from a feed, before they are looked at, and holds the feed back for as long as it should wait:
+	// what is not read stays on the link's side, by yamux's flow control. nil paces nothing.
+	Pace func(bytes int)
 }
 
 // maxFeeds is how many streams a link may hold open towards the hub: one per feed, and as many again for feeds that are being opened
@@ -124,7 +150,13 @@ func (p *Peer) Run(ctx context.Context, h Handlers) error {
 	}
 }
 
+// controlPause is how long the hub waits between two messages of the control stream. A link has one thing to say on it, once.
+var controlPause = 100 * time.Millisecond
+
+// readControl reads the control stream, for as long as the connection is worth keeping: the stream ending, a line over its limit, and
+// the answer to an Unlink all end the connection. The answer goes first: closing inside h.Unlink would lose it.
 func (p *Peer) readControl(h Handlers) {
+	defer p.Close()
 	for {
 		var message Unlink
 		if err := p.control.Read(&message); err != nil {
@@ -132,11 +164,31 @@ func (p *Peer) readControl(h Handlers) {
 		}
 		if message.Unlink && h.Unlink != nil {
 			_ = p.Send(h.Unlink())
+			_ = p.Finish()
+			return
 		}
+		time.Sleep(controlPause)
 	}
 }
 
+// paced reads a stream and holds its reader back: it counts bytes as they arrive, before anything decodes them.
+type paced struct {
+	net.Conn
+	pace func(int)
+}
+
+func (r paced) Read(b []byte) (int, error) {
+	n, err := r.Conn.Read(b)
+	if n > 0 {
+		r.pace(n)
+	}
+	return n, err
+}
+
 func (p *Peer) feed(stream net.Conn, h Handlers) error {
+	if h.Pace != nil {
+		stream = paced{Conn: stream, pace: h.Pace}
+	}
 	lines := NewLines(stream)
 	var open FeedOpen
 	if err := lines.Read(&open); err != nil {

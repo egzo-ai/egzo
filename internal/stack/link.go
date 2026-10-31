@@ -179,12 +179,30 @@ func unlockLink(ctx context.Context, c *engine.Client, project, secretKey string
 	}
 	line := "link: " + status.Text()
 	switch status.State {
-	case hublink.StateApproved, hublink.StatePending:
+	case hublink.StateApproved, hublink.StateUnregistered:
 		fmt.Fprintln(out, line)
 	default:
 		fmt.Fprintln(warnings, "warning: "+line) // the project runs without the hub
 	}
 	return nil
+}
+
+// LinkRegistration is what `egzo project register` hands the link through stdin, so that the code is never in `inspect`, in `ps` or in a
+// command line.
+type LinkRegistration struct {
+	Code string
+}
+
+// RegisterLink has the link present a code to its hub, and says what the hub answered. A project that was registered already stays as it
+// was.
+func RegisterLink(ctx context.Context, c *engine.Client, project, code string) (hublink.Status, error) {
+	var status hublink.Status
+	body, _ := json.Marshal(LinkRegistration{Code: code})
+	reply, err := linkRequest(ctx, c, project, "PUT", "/register", bytes.NewReader(body))
+	if err != nil {
+		return status, err
+	}
+	return status, json.Unmarshal(reply, &status)
 }
 
 // RekeyLink moves the link's key to another secret key, for `egzo project rotate-ca`.
@@ -201,11 +219,19 @@ func unlink(ctx context.Context, c *engine.Client, observed Observed, out io.Wri
 			continue
 		}
 		project := strings.TrimSuffix(r.Name, "-link-1")
-		if _, err := linkRequest(ctx, c, project, "POST", "/unlink", nil); err != nil {
+		state, err := linkRequest(ctx, c, project, "POST", "/unlink", nil)
+		if err != nil {
 			fmt.Fprintf(out, "warning: the hub was not told: %v\n", err)
 			continue
 		}
-		fmt.Fprintln(out, "link: the hub has forgotten this project")
+		switch string(state) {
+		case hublink.StateUnregistered:
+			fmt.Fprintln(out, "link: this project was not registered on the hub")
+		case hublink.StateRevoked:
+			fmt.Fprintln(out, "link: the hub revoked this project, and keeps that until an operator forgets it")
+		default:
+			fmt.Fprintln(out, "link: the hub has forgotten this project")
+		}
 	}
 }
 

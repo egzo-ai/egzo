@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) Neopeak Internet Solutions inc.
 
-// Package link is the link sidecar: the project's connection to its hub. It dials out, proves its key, and once a person has
-// approved the project on the hub it does what the hub asks, with egzo's verbs and nothing else, on its own engine, and pushes the
+// Package link is the link sidecar: the project's connection to its hub. It dials out and proves its key, and once a link code has
+// registered the project on the hub it does what the hub asks, with egzo's verbs and nothing else, on its own engine, and pushes the
 // project, the agents' status and the proxy's audit trail. Nothing here listens on the network.
 package link
 
@@ -49,6 +49,9 @@ const (
 	dialLimit  = 30 * time.Second
 )
 
+// errTurnedAway ends a connection the hub said no to, by a verdict: it has closed it, and dialing again changes nothing.
+var errTurnedAway = errors.New("the hub turned the link away")
+
 // Link is one project's link.
 type Link struct {
 	options Options
@@ -59,16 +62,24 @@ type Link struct {
 	key     ed25519.PrivateKey
 	proxy   string
 	control *hublink.Lines // the live control stream, for the last word
-	verdict chan hublink.Verdict
-	unlock  chan struct{} // closed once the key is open
-	gone    chan struct{} // closed when the hub has forgotten the project
+	asked   *registering   // the code `egzo project register` brought, until the hub has answered it
+	unlock  chan struct{}  // closed once the key is open
+	wake    chan struct{}  // a link that stopped dialing, or waits to dial again, goes on: holds one
+	gone    chan struct{}  // closed when the hub has forgotten the project
+}
+
+// registering is one `egzo project register`. The code stays in memory, and only until the hub answers: it is never in a Status, a log
+// line or an error.
+type registering struct {
+	code string
+	done chan struct{} // closed when it has an answer
 }
 
 // New makes a link, locked until Unlock.
 func New(options Options) *Link {
 	return &Link{
 		options: options, status: Status{Hub: options.Hub, State: hublink.StateLocked},
-		changed: make(chan struct{}), unlock: make(chan struct{}), gone: make(chan struct{}),
+		changed: make(chan struct{}), unlock: make(chan struct{}), wake: make(chan struct{}, 1), gone: make(chan struct{}),
 	}
 }
 
@@ -144,8 +155,70 @@ func (l *Link) Unlock(secret []byte, proxy string) error {
 	if first {
 		l.setState(hublink.StateConnecting, "")
 		close(l.unlock)
+		return nil
 	}
+	l.again()
 	return nil
+}
+
+// again makes a link that stopped dialing try once more: `up`, or a new code, may have changed what the hub says. What it said last no
+// longer stands, so the status says so until the hub answers.
+func (l *Link) again() {
+	l.set(func(s *Status) {
+		if s.State == hublink.StateUnregistered || s.State == hublink.StateRevoked {
+			*s = Status{Hub: s.Hub, State: hublink.StateConnecting}
+		}
+	})
+	select {
+	case l.wake <- struct{}{}:
+	default:
+	}
+}
+
+// registerWait is how long Register waits for the hub: a dial, a handshake, and its answer.
+var registerWait = dialLimit + 5*time.Second
+
+// Register presents a link code to the hub and returns what it answered. A project that is registered already spends no code.
+func (l *Link) Register(ctx context.Context, code string) (Status, error) {
+	l.mu.Lock()
+	status := l.status
+	switch {
+	case status.State == hublink.StateApproved:
+		l.mu.Unlock()
+		return status, nil
+	case status.State == hublink.StateNoEngine, status.State == hublink.StateLocked:
+		l.mu.Unlock()
+		return status, errors.New(status.Text())
+	case l.asked != nil:
+		l.mu.Unlock()
+		return status, errors.New("another `egzo project register` is running")
+	}
+	asked := &registering{code: code, done: make(chan struct{})}
+	l.asked = asked
+	l.mu.Unlock()
+	defer l.answered(asked)
+	l.again()
+	ctx, cancel := context.WithTimeout(ctx, registerWait)
+	defer cancel()
+	select {
+	case <-asked.done:
+		return l.Status(), nil
+	case <-ctx.Done():
+		return l.Status(), errors.New("the hub did not answer")
+	}
+}
+
+// answered ends a registration: the code is dropped here.
+func (l *Link) answered(asked *registering) {
+	if asked == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.asked == asked {
+		l.asked = nil
+		close(asked.done)
+	}
 }
 
 // Rekey seals the link's key with another secret key: how the link follows `egzo project rotate-ca`. Only a link that holds its key
@@ -217,7 +290,7 @@ func (l *Link) Run(ctx context.Context) error {
 	delay := firstDelay
 	for {
 		began := time.Now()
-		err := l.connect(ctx)
+		err := l.attempt(ctx)
 		select {
 		case <-l.gone:
 			return nil
@@ -226,27 +299,61 @@ func (l *Link) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "the connection to %s: %v\n", l.options.Hub, err)
-			l.setState(hublink.StateUnreachable, err.Error())
+		if errors.Is(err, errTurnedAway) {
+			// Nothing changes by dialing again: a person has to. A hub is not asked once a minute by what it has refused.
+			delay = firstDelay
+			select {
+			case <-l.wake:
+			case <-ctx.Done():
+				return nil
+			}
+			continue
 		}
 		if time.Since(began) > lastDelay {
 			delay = firstDelay // it was connected: this is a new failure
 		}
 		select {
 		case <-time.After(delay + mathrand.N(delay/4)):
+			delay = min(delay*2, lastDelay)
+		case <-l.wake:
+			delay = firstDelay
 		case <-ctx.Done():
 			return nil
 		}
-		delay = min(delay*2, lastDelay)
 	}
 }
 
+func (l *Link) current() *registering {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.asked
+}
+
+// attempt is one connection, with the code `egzo project register` brought if there is one, and says how it ended. A code that did not get
+// an answer is not tried again: the person who gave it hears that the hub cannot be reached. If it was spent all the same, the key is
+// approved the next time the link dials.
+func (l *Link) attempt(ctx context.Context) error {
+	asked := l.current()
+	err := l.connect(ctx, asked)
+	if err != nil && ctx.Err() == nil && !errors.Is(err, errTurnedAway) {
+		fmt.Fprintf(os.Stderr, "the connection to %s: %v\n", l.options.Hub, err)
+		l.setState(hublink.StateUnreachable, err.Error())
+		l.answered(asked)
+	}
+	return err
+}
+
 // connect is one connection, from the dial to its end.
-func (l *Link) connect(ctx context.Context) error {
+func (l *Link) connect(ctx context.Context, asked *registering) error {
 	l.mu.Lock()
 	key, proxy := l.key, l.proxy
 	l.mu.Unlock()
+	code := ""
+	if asked != nil {
+		code = asked.code
+	}
+	// Before the dial: the hub gives a handshake little time, and what an engine answers takes what it takes.
+	hello := l.hello(ctx, key)
 	dialing, cancel := context.WithTimeout(ctx, dialLimit)
 	defer cancel()
 	session, err := hublink.Dialer{Hub: l.options.Hub, CA: l.options.CA, Proxy: proxy}.Dial(dialing)
@@ -260,7 +367,7 @@ func (l *Link) connect(ctx context.Context) error {
 		return err
 	}
 	control := hublink.NewLines(stream)
-	if err := control.Write(l.hello(ctx, key)); err != nil {
+	if err := control.Write(hello); err != nil {
 		return err
 	}
 	var greeting hublink.Greeting
@@ -271,13 +378,11 @@ func (l *Link) connect(ctx context.Context) error {
 		return errors.New(greeting.Refused)
 	}
 	public := key.Public().(ed25519.PublicKey)
-	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public))}); err != nil {
+	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public, code)), Code: code}); err != nil {
 		return err
 	}
 	l.mu.Lock()
 	l.control = control
-	l.verdict = make(chan hublink.Verdict, 1)
-	verdicts := l.verdict
 	l.mu.Unlock()
 	defer func() {
 		l.mu.Lock()
@@ -285,7 +390,8 @@ func (l *Link) connect(ctx context.Context) error {
 		l.mu.Unlock()
 	}()
 
-	// Nothing the hub asks runs and nothing is pushed unless the project is approved, for as long as it is.
+	// Nothing the hub asks runs and nothing is pushed unless the project is approved, for as long as it is. Whatever else the hub says is
+	// the last thing on this connection.
 	var approval atomic.Pointer[context.Context]
 	go l.serve(ctx, session, &approval)
 	var stopServing context.CancelFunc
@@ -311,18 +417,17 @@ func (l *Link) connect(ctx context.Context) error {
 			}
 			return fmt.Errorf("the connection to the hub ended: %w", err)
 		}
-		select {
-		case <-verdicts:
-		default:
-		}
-		verdicts <- verdict
 		l.record(verdict)
+		// An answer to a connection that came without the code says nothing of the code, unless it is one the code would change nothing for.
+		if now := l.current(); now == asked || verdict.State != hublink.StateUnregistered {
+			l.answered(now)
+		}
 		switch {
 		case verdict.State == hublink.StateUnlinked:
 			close(l.gone)
 			return nil
 		case verdict.State != hublink.StateApproved:
-			endServing()
+			return errTurnedAway
 		case stopServing == nil:
 			startServing()
 		}
@@ -342,47 +447,58 @@ func (l *Link) hello(ctx context.Context, key ed25519.PrivateKey) hublink.Hello 
 
 func (l *Link) record(v hublink.Verdict) {
 	l.set(func(s *Status) {
-		*s = Status{Hub: s.Hub, State: v.State, Project: v.Project, Owner: v.Owner, Code: v.Code, Address: v.Address, Error: v.Message}
+		*s = Status{Hub: s.Hub, State: v.State, Project: v.Project, Owner: v.Owner, Error: v.Message}
 	})
 }
 
 // unlinkWait is how long Unlink waits for a connection: long enough for a link between two connections to come back.
 var unlinkWait = 5 * time.Second
 
-// Unlink tells the hub to forget the project and waits for its answer. A connection can end at any moment and come back by itself,
-// so one that is down is waited for. A project the hub cannot be told about stays on the hub until its operator removes it.
-func (l *Link) Unlink(ctx context.Context) error {
+// Unlink tells the hub to forget the project and waits for its answer, which is the state the link ends in: unlinked, or unregistered or
+// revoked for a project the hub had nothing to forget of, and that has no connection to ask on. A connection can end at any moment and come
+// back by itself, so one that is down is waited for. A project the hub cannot be told about stays on the hub until its operator removes it.
+func (l *Link) Unlink(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, unlinkWait)
 	defer cancel()
 	for {
 		l.mu.Lock()
-		control, verdicts, changed := l.control, l.verdict, l.changed
+		state, control, changed := l.status.State, l.control, l.changed
 		l.mu.Unlock()
-		if control != nil && control.Write(hublink.Unlink{Unlink: true}) == nil {
-			return l.awaitUnlinked(verdicts)
+		switch {
+		case state == hublink.StateUnlinked, state == hublink.StateUnregistered, state == hublink.StateRevoked:
+			return state, nil
+		case control != nil && control.Write(hublink.Unlink{Unlink: true}) == nil:
+			return l.awaitUnlinked()
 		}
 		select {
-		case <-l.gone:
-			return nil
 		case <-changed:
 		case <-ctx.Done():
-			return errors.New("the hub is not connected: it still lists this project, and its operator can revoke it")
+			return "", errors.New("the hub is not connected: it still lists this project, and its operator can revoke it")
 		}
 	}
 }
 
-func (l *Link) awaitUnlinked(verdicts <-chan hublink.Verdict) error {
-	timeout := time.After(10 * time.Second)
+// unlinkAnswer is how long the hub gets to answer an Unlink.
+var unlinkAnswer = 10 * time.Second
+
+// awaitUnlinked waits for the end of it. The hub closes the connection as it answers, so an answer can be lost: the link dials again and
+// hears it is not registered, which is the same answer.
+func (l *Link) awaitUnlinked() (string, error) {
+	timeout := time.After(unlinkAnswer)
 	for {
+		l.mu.Lock()
+		state, changed := l.status.State, l.changed
+		l.mu.Unlock()
+		switch state {
+		case hublink.StateUnregistered:
+			return hublink.StateUnlinked, nil
+		case hublink.StateUnlinked, hublink.StateRevoked:
+			return state, nil
+		}
 		select {
-		case verdict := <-verdicts:
-			if verdict.State == hublink.StateUnlinked {
-				return nil
-			}
-		case <-l.gone:
-			return nil
+		case <-changed:
 		case <-timeout:
-			return errors.New("the hub did not answer")
+			return "", errors.New("the hub did not answer")
 		}
 	}
 }

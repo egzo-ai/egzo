@@ -2,7 +2,7 @@
 # Copyright (C) Neopeak Internet Solutions inc.
 
 """A hub for the specs: fixtures/fakehub, core's real hub side of the link protocol. It runs on this machine and listens where
-the engine's containers can reach it, and a spec plays the hub through its control API: approving, refusing, asking verbs."""
+the engine's containers can reach it, and a spec plays the hub through its control API: making link codes, revoking, asking verbs."""
 
 import json
 import re
@@ -54,16 +54,27 @@ class FakeHub:
         found = [r for r in self.registrations() if r["Project"] == project]
         return found[0] if found else None
 
-    def decide(self, project, state, owner=""):
-        self._call("POST", "/decide", {"Project": project, "State": state, "Owner": owner})
+    def dials(self):
+        """How many links have proved a key here."""
+        return self._call("GET", "/registrations")["dials"]
+
+    def codes(self):
+        """How many link codes are still good."""
+        return self._call("GET", "/registrations")["codes"]
+
+    def code(self, owner="alice"):
+        """A link code, as an operator makes one in Settings, Links."""
+        return self._call("POST", "/code", {"Owner": owner})
+
+    def revoke(self, project, message=""):
+        self._call("POST", "/revoke", {"Project": project, "Message": message})
+
+    def forget(self, project):
+        self._call("POST", f"/forget?project={project}")
 
     def verb(self, project, verb, **fields):
         """Ask a verb; returns {"result", "steps", "error"}."""
         return self._call("POST", "/verb", {"Project": project, "Verb": verb, **fields})
-
-    def unanswered(self, project):
-        """A verb nobody answers, because the link serves none: the time runs out. An answer of any kind would be a refusal by the link."""
-        return "deadline exceeded" in (self.verb(project, "project", Limit=3).get("error") or "")
 
     def must(self, project, verb, **fields):
         answer = self.verb(project, verb, **fields)
