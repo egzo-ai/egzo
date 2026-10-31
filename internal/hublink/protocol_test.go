@@ -221,3 +221,18 @@ func TestALongPasteIsCutIntoFrames(t *testing.T) {
 		t.Errorf("%d bytes, err %v", in.Len(), err)
 	}
 }
+
+func TestWhatAHubSaysCannotDriveATerminal(t *testing.T) {
+	cases := []Status{
+		{State: StatePending, Address: "https://evil.example\x1b]0;title\x07"},
+		{State: StateApproved, Hub: "https://hub", Project: "p\x1b[2J", Owner: "o\nlinked to another"},
+		{State: StateRevoked, Hub: "https://hub", Error: "no\u009b31m"},
+		{State: StateUnreachable, Error: "refused\r\x1b[1A"},
+	}
+	for _, status := range cases {
+		text := status.Text()
+		if strings.ContainsAny(text, "\x1b\x07\n\r\u009b") {
+			t.Errorf("%+v says %q", status, text)
+		}
+	}
+}

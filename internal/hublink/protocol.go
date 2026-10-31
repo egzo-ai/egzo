@@ -18,6 +18,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
 // Version is the protocol's version. Before 1.0 a hub speaks one version and a link speaks one: there are no ranges.
@@ -61,8 +63,10 @@ type Status struct {
 	Error   string `json:",omitempty"`
 }
 
-// Text says it in a line, for people.
-func (s Status) Text() string {
+// Text says it in a line, for people. Nearly all of it is what a hub said, which is untrusted, and it goes to a terminal.
+func (s Status) Text() string { return termsafe.Line(s.text()) }
+
+func (s Status) text() string {
 	switch s.State {
 	case StateApproved:
 		return fmt.Sprintf("linked to %s as %s, owned by %s", s.Hub, s.Project, s.Owner)
