@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from hubkit import FakeHub, eventually
+from hubkit import FakeHub, eventually, hub_host
 from support import SECRET_KEY_VARIABLE, agent, spec
 
 
@@ -89,8 +89,13 @@ def test_the_link_has_a_network_of_its_own_the_socket_and_a_sidecars_limits_and_
     host = link.raw["HostConfig"]
     assert list(link.raw["NetworkSettings"]["Networks"]) == [f"{linked.name}_link"]
     assert not link.raw["NetworkSettings"]["Ports"]
-    assert host["ReadonlyRootfs"] and host["CapDrop"] == ["ALL"] and "no-new-privileges" in host["SecurityOpt"]
-    assert link.raw["Config"]["User"].split(":")[0] == "65532", "not root: only the socket's group"
+    dropped = set(host["CapDrop"])  # Podman lists the default capabilities it drops instead of ALL
+    assert host["ReadonlyRootfs"] and ("ALL" in dropped or {"CAP_CHOWN", "CAP_KILL", "CAP_NET_BIND_SERVICE"} <= dropped)
+    assert "no-new-privileges" in host["SecurityOpt"]
+    if engine.rootless:  # root in the container is the user who owns the engine, which is who the socket belongs to
+        assert link.raw["Config"]["User"].split(":")[0] in ("0", "root")
+    else:
+        assert link.raw["Config"]["User"].split(":")[0] == "65532", "not root: only the socket's group"
     assert any(m["Destination"] == "/run/engine.sock" for m in link.raw["Mounts"])
     assert any(m.get("Name") == f"{linked.name}_link" for m in link.raw["Mounts"])
 
@@ -303,8 +308,7 @@ def test_register_needs_a_hub_and_a_running_link(project, engine, egzo, fake_hub
 
 
 def test_a_hub_that_is_away_is_said_and_the_project_keeps_running(live_project, engine, egzo, tmp_path):
-    bridge = json.loads(engine.run("network", "inspect", "bridge").stdout)[0]
-    away = FakeHub(tmp_path / "away", bridge["IPAM"]["Config"][0]["Gateway"])
+    away = FakeHub(tmp_path / "away", hub_host(engine))
     live_project.write(document(engine, egzo, away))
     live_project.ok("project up")
     register(live_project, away)

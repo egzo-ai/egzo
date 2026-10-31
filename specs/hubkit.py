@@ -14,6 +14,15 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 
 
+def hub_host(engine):
+    """The address the engine's containers reach this machine at: the default network's gateway, and for a rootless Podman the name it
+    defines for the host, because there a container has the host's own address (see sshd.py)."""
+    if engine.cli == "podman" and engine.rootless:
+        return engine.run("run", "--rm", "docker.io/library/alpine:3", "sh", "-c", "getent hosts host.containers.internal").stdout.split()[0]
+    network = "podman" if engine.cli == "podman" else "bridge"
+    return json.loads(engine.run("network", "inspect", network).stdout)[0]["IPAM"]["Config"][0]["Gateway"]
+
+
 class FakeHub:
     def __init__(self, directory, gateway):
         directory.mkdir(parents=True, exist_ok=True)
