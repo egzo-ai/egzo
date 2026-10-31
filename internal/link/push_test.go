@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
+	"github.com/egzo-ai/egzo/internal/stack"
 )
 
 func TestAFeedTheHubClosedIsOpenedAgain(t *testing.T) {
@@ -80,16 +81,39 @@ func TestAnAuditEventThatDidNotGoOutIsFollowedAgain(t *testing.T) {
 	}
 }
 
+func TestTemplatesThatCannotBeReadAreTheOnesLastRead(t *testing.T) {
+	var feed projectFeed
+	failure := errors.New("the control sidecar is being recreated")
+	if _, changed := feed.next(Project{Name: "web"}, Published{}, failure); changed {
+		t.Error("an update without templates would make every agent stale")
+	}
+	templates := Published{Templates: map[string]string{"coder": "abc"}}
+	if update, changed := feed.next(Project{Name: "web"}, templates, nil); !changed || update.Published.Templates["coder"] != "abc" {
+		t.Fatalf("got %+v, %v", update, changed)
+	}
+	update, changed := feed.next(Project{Name: "web", Agents: []Agent{{Name: "a"}}}, Published{}, failure)
+	if !changed || update.Published.Templates["coder"] != "abc" {
+		t.Errorf("got %+v, %v", update, changed)
+	}
+}
+
+func TestAProjectWithoutTemplatesYetSaysSo(t *testing.T) {
+	var feed projectFeed
+	if update, changed := feed.next(Project{Name: "web"}, Published{}, stack.ErrNotPublished); !changed || len(update.Published.Templates) != 0 {
+		t.Errorf("got %+v, %v", update, changed)
+	}
+}
+
 func TestAnUpdateThatSaysNothingNewIsNotSent(t *testing.T) {
 	var feed projectFeed
 	templates := Published{Templates: map[string]string{"coder": "abc"}}
-	if _, changed := feed.next(Project{Name: "web"}, templates); !changed {
+	if _, changed := feed.next(Project{Name: "web"}, templates, nil); !changed {
 		t.Fatal("the first update says something")
 	}
-	if _, changed := feed.next(Project{Name: "web"}, templates); changed {
+	if _, changed := feed.next(Project{Name: "web"}, templates, nil); changed {
 		t.Error("the same update again")
 	}
-	if _, changed := feed.next(Project{Name: "web"}, Published{Templates: map[string]string{"coder": "def"}}); !changed {
+	if _, changed := feed.next(Project{Name: "web"}, Published{Templates: map[string]string{"coder": "def"}}, nil); !changed {
 		t.Error("templates published without touching a container went unsaid")
 	}
 }

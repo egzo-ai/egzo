@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
+	"github.com/egzo-ai/egzo/internal/stack"
 )
 
 // settleDelay gathers a burst of engine events (a spawn is several) into one update of the project feed.
@@ -149,10 +150,10 @@ func (l *Link) pushProject(ctx context.Context, lines *hublink.Lines, _ hublink.
 			return
 		}
 		published, err := engine.Published(ctx, name)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, stack.ErrNotPublished) && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "read the templates: %v\n", err)
 		}
-		if update, changed := feed.next(project, published); changed {
+		if update, changed := feed.next(project, published, err); changed {
 			send.note(lines.Write(update))
 		}
 	}
@@ -187,12 +188,24 @@ func (l *Link) pushProject(ctx context.Context, lines *hublink.Lines, _ hublink.
 
 // projectFeed says what the project feed sends next.
 type projectFeed struct {
-	sent []byte
+	published Published
+	known     bool
+	sent      []byte
 }
 
-// next takes a reading of the project and returns the update, and whether it says anything new.
-func (f *projectFeed) next(project Project, published Published) (hublink.ProjectUpdate, bool) {
-	update := hublink.ProjectUpdate{Project: project, Published: published}
+// next takes a reading of the project and returns the update, and whether it says anything new. Templates that cannot be read are
+// the ones last read: to the hub, no templates would make every agent stale, and a control sidecar being recreated is no reason. If
+// none was ever read there is nothing to send yet.
+func (f *projectFeed) next(project Project, published Published, err error) (hublink.ProjectUpdate, bool) {
+	switch {
+	case err == nil:
+		f.published, f.known = published, true
+	case errors.Is(err, stack.ErrNotPublished):
+		f.published, f.known = Published{}, true
+	case !f.known:
+		return hublink.ProjectUpdate{}, false
+	}
+	update := hublink.ProjectUpdate{Project: project, Published: f.published}
 	data, err := json.Marshal(update)
 	if err != nil || bytes.Equal(data, f.sent) {
 		return update, false
