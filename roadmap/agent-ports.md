@@ -168,7 +168,8 @@ preview host, and must not:
 
 ### The web app
 
-A **Previews** panel on the agent page, and on the project page for every agent: each exposed port with its name and address,
+A **Previews** panel for the project's users, admins and owners (a viewer has links, not pages), on the agent page,
+and on the project page for every agent: each exposed port with its name and address,
 **Open**, and **Copy link**. No preview domain configured: the panel says what to set, and shows the `egzo agent port-forward`
 command.
 

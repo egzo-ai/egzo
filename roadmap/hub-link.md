@@ -125,7 +125,7 @@ Changed:
   and the event stream they use are reached through it instead of `engine exec`.
 - `EGZO_SECRET_KEY` keeps what it still protects (the sign-in provider's secret, sessions), or goes if nothing is left.
 
-## Roles and invites (draft)
+## Roles and invites (decided)
 
 **Signing in is not enough: an invite is required.** Today a person who signs in with single sign-on gets an account with no
 access, and waits for a grant. With a company-wide provider that is everyone in the company. Instead, the hub needs an **invite
@@ -140,21 +140,26 @@ system**: a person needs a sign-in **and** a valid invite, and an account withou
 
 Roles are assigned on projects:
 
-- **owner**: can destroy the project (on the hub: unlink it and forget it; `egzo project down` stays the CLI's). Can grant
-  (invite). A project keeps at least one owner; an owner cannot remove or lower themselves.
+- **owner**: can destroy the project, which on the hub is **unlink only**: the hub forgets it and refuses its link. The project
+  keeps running on its machine until someone runs `egzo project down` there; the hub never does. Can grant (invite). A project
+  keeps at least one owner; an owner cannot remove or lower themselves.
 - **admin**: access all agents (operate, attach, logs, network, the audit log), the CLI's included.
 - **user**: can spawn their own agents, operate and attach to them, and view their logs and network.
-- **viewer**: the web proxy only. The project's previews, of every agent; nothing else of the project.
+- **viewer**: the web proxy only: a preview of any agent of the project, opened with its link. The link is not guessable but
+  shareable ([agent-ports.md](agent-ports.md)): the agent or a member hands it over. A viewer sees nothing else of the project,
+  not even a list of its previews.
 
 Flags on users:
 
-- **operator**: manages the hub (users, invites of operators, flags and quotas, revoking any project). Access to everything, or
-  only a "take ownership" that is audited and shows on the project: to be decided.
-- **project quota**: how many projects the person may connect to the hub. 0 cannot create. Operators have no limit. A quota is
-  one field instead of a flag, and caps what one person can attach to the hub.
+- **operator**: oversees the hub and all its resources: every project, its owners, its agents and their state, the links, the
+  users. Manages users, invites, quotas, and revokes any project. To go further (a terminal, logs, a project's network), an
+  operator grants themselves a role on the project, audited and shown on its Members tab like any grant. The starter account
+  `admin` is an operator.
+- **project quota**: how many projects the person may connect to the hub. 0 cannot create. Operators bypass it. It can be
+  over-subscribed: lowering a quota under what a person already has removes nothing, it stops new ones.
 
-A person disabled by an operator loses everything at once, as today; their projects stay, with their other owners, or are
-revoked when they had none.
+A person disabled by an operator loses everything at once, as today. Their projects stay linked, so a project can be left with
+no valid owner: the operators see it, and grant a new owner or revoke it.
 
 ## Specs and tests
 
