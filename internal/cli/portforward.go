@@ -5,10 +5,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -76,7 +78,7 @@ func newPortForwardCommand(opts *options) *cobra.Command {
 				listener.Close()
 			}()
 			for {
-				conn, err := listener.Accept()
+				conn, err := f.accept(ctx, listener)
 				if err != nil {
 					select {
 					case err := <-ended:
@@ -126,6 +128,36 @@ func (f forwarder) waitStop(ctx context.Context) error {
 		}
 		return fmt.Errorf("following agent %q: %w", f.name, err)
 	}
+}
+
+// accept waits for a connection. A machine out of descriptors or memory recovers as connections end, and ending the command would
+// take the ones it carries with it, so accepting pauses instead.
+func (f forwarder) accept(ctx context.Context, listener net.Listener) (net.Conn, error) {
+	var pause time.Duration
+	for {
+		conn, err := listener.Accept()
+		if err == nil || !exhausted(err) {
+			return conn, err
+		}
+		if pause == 0 {
+			f.report(fmt.Sprintf("%s:%d: not accepting for now: %v", f.name, f.port, err))
+		}
+		pause = min(max(2*pause, 5*time.Millisecond), time.Second)
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+			return nil, err
+		}
+	}
+}
+
+func exhausted(err error) bool {
+	for _, reason := range []error{syscall.EMFILE, syscall.ENFILE, syscall.ENOBUFS, syscall.ENOMEM} {
+		if errors.Is(err, reason) {
+			return true
+		}
+	}
+	return false
 }
 
 // carry is one connection: one exec. A failure ends this connection only: the server may start later.
