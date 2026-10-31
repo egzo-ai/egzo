@@ -102,17 +102,32 @@ type Handlers struct {
 	Audit   func(AuditEvent)
 	// Unlink is the link asking to be forgotten; the verdict it returns goes back to the link, and is the last thing on the connection.
 	Unlink func() Verdict
+	// Pace is called with the bytes read from a feed, before they are looked at, and holds the feed back for as long as it should wait:
+	// what is not read stays on the link's side, by yamux's flow control. nil paces nothing.
+	Pace func(bytes int)
 }
+
+// maxFeeds is how many streams a link may hold open towards the hub: one per feed, and as many again for feeds that are being opened
+// again. What a link does is untrusted, and each stream is a goroutine of the hub.
+const maxFeeds = 6
 
 // Run takes what the link sends until the connection ends.
 func (p *Peer) Run(ctx context.Context, h Handlers) error {
 	go p.readControl(h)
+	slots := make(chan struct{}, maxFeeds)
 	for {
 		stream, err := p.session.AcceptStreamWithContext(ctx)
 		if err != nil {
 			return err
 		}
+		select {
+		case slots <- struct{}{}:
+		default:
+			stream.Close()
+			continue
+		}
 		go func() {
+			defer func() { <-slots }()
 			defer stream.Close()
 			if err := p.feed(stream, h); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, yamux.ErrStreamClosed) && !errors.Is(err, yamux.ErrSessionShutdown) {
 				_ = stream.Close()
@@ -141,7 +156,24 @@ func (p *Peer) readControl(h Handlers) {
 	}
 }
 
+// paced reads a stream and holds its reader back: it counts bytes as they arrive, before anything decodes them.
+type paced struct {
+	net.Conn
+	pace func(int)
+}
+
+func (r paced) Read(b []byte) (int, error) {
+	n, err := r.Conn.Read(b)
+	if n > 0 {
+		r.pace(n)
+	}
+	return n, err
+}
+
 func (p *Peer) feed(stream net.Conn, h Handlers) error {
+	if h.Pace != nil {
+		stream = paced{Conn: stream, pace: h.Pace}
+	}
 	lines := NewLines(stream)
 	var open FeedOpen
 	if err := lines.Read(&open); err != nil {

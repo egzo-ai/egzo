@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -225,6 +226,46 @@ func TestControlMessagesAreHeldBack(t *testing.T) {
 	}
 }
 
+func TestAFeedIsPacedInBytesBeforeItIsDecoded(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub, control: NewLines(silence{})}
+	var paced atomic.Int64
+	decoded := make(chan int64, 1)
+	go peer.Run(context.Background(), Handlers{
+		Status: func(StatusLine) {
+			select {
+			case decoded <- paced.Load():
+			default:
+			}
+		},
+		Pace: func(n int) { paced.Add(int64(n)) },
+	})
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+		t.Fatal(err)
+	}
+	var start FeedStart
+	if err := lines.Read(&start); err != nil {
+		t.Fatal(err)
+	}
+	line := StatusLine{Reason: strings.Repeat("x", 2<<20)}
+	if err := lines.Write(line); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-decoded:
+		if got < 2<<20 {
+			t.Errorf("%d bytes were paced before a line of 2 MiB was decoded", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the line never came")
+	}
+}
+
 func TestASignatureForAnotherHubIsRefused(t *testing.T) {
 	if _, _, err := (handshake{protocol: Version, hub: "https://evil.example.org", key: newKey(t)}).run(t); err == nil {
 		t.Fatal("a proof made for another hub was accepted: a hub could log in elsewhere as its links")
@@ -373,6 +414,49 @@ func TestWhatAHubSaysCannotDriveATerminal(t *testing.T) {
 		if strings.ContainsAny(text, "\x1b\x07\n\r\u009b") {
 			t.Errorf("%+v says %q", status, text)
 		}
+	}
+}
+
+func TestALinkHoldsFewStreamsOpenTowardsTheHub(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub}
+	peer.control = NewLines(silence{})
+	go peer.Run(context.Background(), Handlers{})
+	var open []*yamux.Stream
+	refused := 0
+	for range maxFeeds + 3 {
+		stream, err := link.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := NewLines(stream)
+		if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+			t.Fatal(err)
+		}
+		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
+		var start FeedStart
+		if err := lines.Read(&start); err != nil {
+			refused++
+			continue
+		}
+		open = append(open, stream)
+	}
+	if len(open) != maxFeeds || refused != 3 {
+		t.Errorf("%d streams were served and %d refused, want %d and 3", len(open), refused, maxFeeds)
+	}
+	open[0].Close() // a feed that ended leaves room for its next try
+	again, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(again)
+	if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+		t.Fatal(err)
+	}
+	again.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var start FeedStart
+	if err := lines.Read(&start); err != nil {
+		t.Errorf("a feed opened again after one ended: %v", err)
 	}
 }
 
