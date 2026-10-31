@@ -31,6 +31,7 @@ const (
 	workspaceRoot  = "/workspace"
 	controlService = "control"
 	proxyService   = "proxy"
+	linkService    = "link"
 	controlState   = "/state"
 	caPrivateDir   = "/ca-private"
 	caPublicDir    = "/ca-pub"
@@ -39,6 +40,7 @@ const (
 
 	kindControl = "control"
 	kindProxy   = "proxy"
+	kindLink    = "link"
 	kindAgent   = "agent"
 )
 
@@ -72,12 +74,14 @@ type ContainerSpec struct {
 	Env          []string
 	Mounts       []MountSpec
 	Tmpfs        map[string]string
-	Network      string
-	WorkingDir   string
-	Harness      string
-	NanoCPUs     int64
-	Memory       int64
-	Healthcheck  []string
+	// Restart is the engine's restart policy; empty leaves the container down when it stops.
+	Restart     string `json:",omitempty"`
+	Network     string
+	WorkingDir  string
+	Harness     string
+	NanoCPUs    int64
+	Memory      int64
+	Healthcheck []string
 	// PidsLimit caps processes and threads; MemorySwap equals Memory when a memory limit is set, so
 	// swap does not double it.
 	PidsLimit  int64
@@ -99,6 +103,7 @@ type Attachment struct {
 
 // Desired is everything a project should consist of.
 type Desired struct {
+	Link        string // the link sidecar's container, when the project names a hub
 	Networks    []NetworkSpec
 	Volumes     []VolumeSpec
 	Containers  []ContainerSpec
@@ -111,6 +116,8 @@ type Desired struct {
 
 // Inputs are what Desire needs besides the resolved project.
 type Inputs struct {
+	// LinkSocket is the engine's socket, for the link of a project that names a hub.
+	LinkSocket LinkSocket
 	// Image is the all-in-one egzo image that runs every sidecar role.
 	Image string
 	// Tokens maps each instance to the token that identifies it to the proxy and control.
@@ -250,6 +257,15 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		containers = append(containers, proxy)
 		desired.Proxy = proxy.Name
 		desired.Attachments = append(desired.Attachments, Attachment{Container: proxy.Name, Alias: "proxy", Networks: instanceNetworks})
+	}
+
+	if project.Hub != nil {
+		network, volume, link, err := desireLink(project, in, identity(linkService, kindLink))
+		if err != nil {
+			return Desired{}, err
+		}
+		networks, volumes, containers = append(networks, network), append(volumes, volume), append(containers, link)
+		desired.Link = link.Name
 	}
 
 	for i := range networks {

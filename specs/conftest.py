@@ -687,6 +687,17 @@ def shared_project(tmp_path_factory, engine, egzo):
 
 
 @pytest.fixture(scope="module")
+def fake_hub(tmp_path_factory, engine):
+    """A hub the project's link can reach, for a whole module (see hubkit.py)."""
+    from hubkit import FakeHub
+
+    bridge = json.loads(engine.run("network", "inspect", "bridge").stdout)[0]
+    hub = FakeHub(tmp_path_factory.mktemp("hub"), bridge["IPAM"]["Config"][0]["Gateway"])
+    yield hub
+    hub.stop()
+
+
+@pytest.fixture(scope="module")
 def team(shared_project, engine):
     """The shared project, up, with the template `worker` and two instances of it, `coder` and `reviewer` (see agentapi.Team)."""
     from agentapi import Team

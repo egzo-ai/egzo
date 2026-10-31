@@ -14,7 +14,7 @@ import (
 )
 
 // reservedAgents are names egzo gives to its own containers, networks, DNS aliases or directories.
-var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": true}
+var reservedAgents = map[string]bool{"control": true, "proxy": true, "prep": true, "link": true}
 
 // CheckInstanceName reports why name cannot be the name of an instance, or nil. An instance is addressed
 // by its name alone, so the name must be a plain identifier, must not be one of the project's templates
@@ -25,7 +25,7 @@ func CheckInstanceName(name string, templates []string) error {
 		return fmt.Errorf("invalid instance name %q: a name is %s", name, names.IdentifierRule)
 	case reservedAgents[name]:
 		return fmt.Errorf("invalid instance name %q: it is reserved for egzo's own use", name)
-	case name == "control-1" || name == "proxy-1":
+	case name == "control-1" || name == "proxy-1" || name == "link-1":
 		return fmt.Errorf("invalid instance name %q: its container would take the name of a sidecar", name)
 	case name == "egress":
 		return fmt.Errorf("invalid instance name %q: its network would be the proxy's", name)

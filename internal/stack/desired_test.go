@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/api/types/mount"
+
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -483,6 +485,42 @@ func TestCustomAgentsGetNoHomeVolume(t *testing.T) {
 	for _, volume := range d.Volumes {
 		if volume.Name == "proj_review-home" {
 			t.Error("a custom harness image has no egzo home")
+		}
+	}
+}
+
+func TestTheLinkIsDesiredOnlyForAProjectThatNamesAHub(t *testing.T) {
+	inputs := Inputs{Image: "egzo:test", LinkSocket: LinkSocket{Path: "/var/run/docker.sock", Group: "109"}}
+	without, err := Desire(&config.Resolved{Name: "web"}, "/p", inputs)
+	if err != nil || without.Link != "" {
+		t.Fatalf("link %q, err %v", without.Link, err)
+	}
+	with, err := Desire(&config.Resolved{Name: "web", Hub: &config.ResolvedHub{URL: "https://hub.example.org"}}, "/p", inputs)
+	if err != nil || with.Link != "web-link-1" {
+		t.Fatalf("link %q, err %v", with.Link, err)
+	}
+	link := findContainer(t, with, "web-link-1")
+	if link.User != "65532:109" || !link.ReadonlyRootfs || link.Network != "web_link" {
+		t.Errorf("link %+v", link)
+	}
+	for _, network := range with.Networks {
+		if network.Name == "web_link" && network.Internal {
+			t.Error("the link's network has no way out")
+		}
+	}
+	for _, attachment := range with.Attachments {
+		if attachment.Container == link.Name {
+			t.Errorf("the link joined the agents' networks: %+v", attachment)
+		}
+	}
+}
+
+func TestAnObservedLinkGivesBackTheSocketItWasMadeWith(t *testing.T) {
+	defaults := LinkSocket{Path: "/var/run/docker.sock"}
+	for _, want := range []LinkSocket{{Path: "/run/podman/podman.sock", Group: "998"}, {Path: "/run/user/1000/docker.sock"}, {Path: "/var/run/docker.sock", Group: "0"}} {
+		mounts := []mount.Mount{{Target: linkState, Source: "web_link"}, {Target: LinkEngineSocket, Source: want.Path}}
+		if got := linkSocketOf(defaults, linkUser(want), mounts); got != want {
+			t.Errorf("got %+v, want %+v", got, want)
 		}
 	}
 }

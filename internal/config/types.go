@@ -17,6 +17,7 @@ import (
 type File struct {
 	Version    int                  `yaml:"version"`
 	Name       *string              `yaml:"name"`
+	Hub        *Hub                 `yaml:"hub"`
 	SecretKey  string               `yaml:"secret_key"`
 	Vaults     map[string]Vault     `yaml:"vaults"`
 	Proxy      Proxy                `yaml:"proxy"`
@@ -24,6 +25,25 @@ type File struct {
 	Workspaces map[string]Workspace `yaml:"workspaces"`
 	Agents     map[string]Agent     `yaml:"agents"`
 	Control    Control              `yaml:"control"`
+}
+
+// Hub is the hub a project links to: its address, or a mapping that also names the CA of its certificate.
+type Hub struct {
+	URL string `yaml:"url"`
+	CA  string `yaml:"ca,omitempty"`
+}
+
+// UnmarshalYAML accepts an address or a mapping.
+func (h *Hub) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
+		h.URL = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: hub is an address like https://hub.example.org, or an object with url and ca", node.Line)
+	}
+	type plain Hub
+	return node.Decode((*plain)(h))
 }
 
 // Vault is one secret store: a backend. Its secrets are declared where they are used, by their reference

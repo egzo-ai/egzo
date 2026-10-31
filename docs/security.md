@@ -46,6 +46,9 @@ Be clear about these before running agents on something you care about.
 - **What you open with `egzo agent port-forward` is the agent's.** The command reaches into the sandbox through the engine and the agent cannot
   use it to reach out, but the page your browser loads was written by the agent. Open it in a browser profile that is not signed in to anything
   you care about, on a local port no other site of yours uses (cookies ignore ports).
+- **The link holds the engine.** A project that names a [hub](managing-projects.md#linking-to-a-hub) runs a sidecar with the engine's socket
+  mounted: on a rootful engine it is root-equivalent on its host, like the CLI. Agents do not reach it: it is on a network of its own. A hub that
+  is taken over can do what its verbs do on the projects linked to it, which includes attaching to their agents: link only to a hub you trust.
 - **A `build:` Dockerfile is trusted.** `egzo project up` builds it on the engine, outside the egress proxy, as you would by
   hand ([images](images.md#let-egzo-build-it)).
 - **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.

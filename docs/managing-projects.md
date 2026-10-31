@@ -54,6 +54,51 @@ keeps going, so you can start it before the server. When a client has closed its
 or close before the connection is dropped, and ten minutes in all however much it says: a client that left cannot be told from one that only
 ended its input, and a server that keeps talking must not keep the command running in the agent. The agent's image must contain egzo, as for `agent attach`: the harness images do.
 
+## Linking to a hub
+
+A project connects itself to a hub: name it in the file ([`hub:`](project-file.md#the-hub)) and run `up`. A **link** sidecar dials out to the hub
+on one HTTPS connection; nothing on your machine listens, so a laptop or a box behind NAT works.
+
+```console
+$ egzo project up
+...
+link: pending: register this project at https://my-egzo.example.org/link/QXRB-7KPM
+```
+
+Open the address, signed in to the hub, and approve the project. `up` does not wait for that: the project runs without the hub until someone
+approves it. `egzo ps` and `egzo project check` say where it stands:
+
+| State | Means | `project check` |
+|---|---|---|
+| pending | waiting for a person to approve it at the address shown | warns |
+| approved | linked: `linked to ... as ..., owned by ...` | ok |
+| refused, revoked | the hub turned it away; the link does nothing the hub asks | fails |
+| unreachable | the last try failed, and the link keeps trying, from every second up to every minute | warns |
+| locked | the sidecar restarted and has not got the secret key: `egzo project up` brings it | warns |
+
+Until a project is approved, and after it is revoked, the hub can ask it nothing and the link pushes nothing. Once approved, the hub can do what its
+verbs say and no more: spawn from the project's own templates, start, stop and remove instances, attach to their sessions, and read logs, events
+and the published templates. It cannot run a container, mount a path or run a command of its choosing.
+
+- **Behind a company proxy**, set `HTTPS_PROXY` when you run `up`: it is handed to the link, credentials included, and never shows in `inspect`.
+  A proxy that inspects TLS must let WebSockets through (Squid: `http_upgrade_request_protocols websocket allow all`) and the hub's `ca` must name
+  its CA. A link that reports `HTTP 426` is being stopped by such a proxy, or by a reverse proxy in front of the hub without the `Upgrade` and
+  `Connection` headers.
+- **Unlinking:** remove `hub:` and run `up`, or run `project down`. Both tell the hub, which forgets the project, and remove the link's key. A
+  project linked again is a new project on the hub.
+- **The link's key** is an Ed25519 key on its volume, sealed with the [secret key](project-file.md#the-secret-key). It is what the hub knows the
+  project by. `egzo project rotate-ca` moves it to the new secret key while the link runs and holds it; a link that restarted is locked and cannot
+  follow, so it warns, and a change of secret key without the old one means registering again.
+
+## After a restart
+
+After a restart of the machine or the engine, run `egzo project up`. A project does not resume by itself: the proxy holds your credentials and the link
+its key in memory only, and egzo reads secrets from your vault when you run a command. `up` starts the sidecars, reloads the policy and opens the link's
+key. A linked project is back on its hub as it was, with the same key and owner: nobody registers it again. Until then the link waits `locked`, which
+`egzo ps` shows, and the hub shows the project offline. Agents stay stopped until you, or the hub, start them.
+
+How `up` gets run is yours to arrange, by hand or from your own boot script.
+
 ## Editing the file
 
 ```console

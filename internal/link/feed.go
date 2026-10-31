@@ -1,4 +1,7 @@
-package engines
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
+package link
 
 import (
 	"bufio"
@@ -7,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,10 +19,8 @@ import (
 	"github.com/docker/docker/api/types/filters"
 
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
-
-// ErrStreamEnded is returned when an engine's stream ended without being asked to: the container stopped, or the connection dropped.
-var ErrStreamEnded = errors.New("the stream ended")
 
 // statusTail is how many lines of the log are read when the stream opens. The newest status line is among them unless the
 // sidecar said more than this on standard error since: the engines count the lines of both streams before they filter one.
@@ -69,7 +71,7 @@ func parseStatusLine(line []byte) (StatusLine, bool, error) {
 
 // FollowStatus follows the standard output of the project's control sidecar through the engine's log API. Only standard output is
 // asked for: the engines tell the two streams apart whatever the log driver, and the sidecar keeps its status there.
-func (d *Docker) FollowStatus(ctx context.Context, project string, on func(StatusLine)) error {
+func (d *Engine) FollowStatus(ctx context.Context, project string, on func(StatusLine)) error {
 	list, err := d.client.API.ContainerList(ctx, container.ListOptions{Filters: filters.NewArgs(
 		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindControl), filters.Arg("status", "running"))})
 	if err != nil {
@@ -91,7 +93,7 @@ func (d *Docker) FollowStatus(ctx context.Context, project string, on func(Statu
 }
 
 // FollowAudit follows the standard output of the project's proxy, where it writes its audit trail, one JSON event per line.
-func (d *Docker) FollowAudit(ctx context.Context, project string, since time.Time, on func(AuditEvent)) error {
+func (d *Engine) FollowAudit(ctx context.Context, project string, since time.Time, on func(AuditEvent)) error {
 	list, err := d.client.API.ContainerList(ctx, container.ListOptions{Filters: filters.NewArgs(
 		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindProxy), filters.Arg("status", "running"))})
 	if err != nil {
@@ -100,7 +102,7 @@ func (d *Docker) FollowAudit(ctx context.Context, project string, since time.Tim
 	if len(list) == 0 {
 		return ErrNoProject{Name: project}
 	}
-	options := container.LogsOptions{ShowStdout: true, Follow: true, Tail: fmt.Sprint(AuditBacklog)}
+	options := container.LogsOptions{ShowStdout: true, Follow: true, Tail: fmt.Sprint(hublink.AuditBacklog)}
 	if !since.IsZero() {
 		options.Tail, options.Since = "", since.Format(time.RFC3339Nano)
 	}
@@ -114,7 +116,7 @@ func (d *Docker) FollowAudit(ctx context.Context, project string, since time.Tim
 }
 
 // followLines follows the standard output of a container through the engine's log API and calls on for each line.
-func followLines(ctx context.Context, d *Docker, id string, options container.LogsOptions, on func([]byte) error) error {
+func followLines(ctx context.Context, d *Engine, id string, options container.LogsOptions, on func([]byte) error) error {
 	reader, err := d.client.API.ContainerLogs(ctx, id, options)
 	if err != nil {
 		return err
@@ -149,7 +151,7 @@ func followLines(ctx context.Context, d *Docker, id string, options container.Lo
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	return ErrStreamEnded
+	return hublink.ErrStreamEnded
 }
 
 // watched are the container events that can change what the hub lists; the rest (exec, attach, resize) are noise, and the hub
@@ -160,9 +162,22 @@ var watched = map[events.Action]bool{
 }
 
 // Watch follows the engine's event stream, for the containers that belong to an egzo project.
-func (d *Docker) Watch(ctx context.Context, changed func()) error {
-	messages, errs := d.client.API.Events(ctx, events.ListOptions{Filters: filters.NewArgs(
-		filters.Arg("type", string(events.ContainerEventType)), filters.Arg("label", engine.LabelProject))})
+func (d *Engine) Watch(ctx context.Context, changed func()) error {
+	return d.watch(ctx, engine.LabelProject, changed)
+}
+
+// WatchProject follows the engine's event stream for one project's containers.
+func (d *Engine) WatchProject(ctx context.Context, project string, changed func()) error {
+	return d.watch(ctx, engine.LabelProject+"="+project, changed)
+}
+
+// watch calls changed once the stream is asked for, for what happened before it, and for each event. The client opens the stream in
+// the background without saying when it is open, so the stream starts a moment in the past: an event of that gap is seen twice, not
+// lost.
+func (d *Engine) watch(ctx context.Context, label string, changed func()) error {
+	messages, errs := d.client.API.Events(ctx, events.ListOptions{Since: strconv.FormatInt(time.Now().Unix()-1, 10), Filters: filters.NewArgs(
+		filters.Arg("type", string(events.ContainerEventType)), filters.Arg("label", label))})
+	changed()
 	for {
 		select {
 		case <-ctx.Done():
@@ -172,7 +187,7 @@ func (d *Docker) Watch(ctx context.Context, changed func()) error {
 				return nil
 			}
 			if err == nil || errors.Is(err, io.EOF) {
-				return ErrStreamEnded
+				return hublink.ErrStreamEnded
 			}
 			return err
 		case message, ok := <-messages:
@@ -180,7 +195,7 @@ func (d *Docker) Watch(ctx context.Context, changed func()) error {
 				if ctx.Err() != nil {
 					return nil
 				}
-				return ErrStreamEnded
+				return hublink.ErrStreamEnded
 			}
 			if watched[message.Action] || strings.HasPrefix(string(message.Action), "health_status") {
 				changed()

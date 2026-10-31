@@ -151,6 +151,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 	}
 	// No LogConfig: the engine's default logging is the sysadmin's choice (known-issues/container-logging-follows-the-engine-default.md).
 	host.Tmpfs = spec.Tmpfs
+	host.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(spec.Restart)}
 	for _, m := range spec.Mounts {
 		kind := mount.TypeVolume
 		if m.Bind {
@@ -373,6 +374,7 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 			}
 		}
 	}
+	unlink(ctx, c, observed, out)
 	orphans := orphanWorktrees(observed)
 	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
 	// depends on anything, and stopping containers is where the time goes, so do it together.
@@ -463,6 +465,9 @@ func Rows(observed Observed, reported map[string]Report, published *Published) [
 			continue
 		}
 		row := Row{Name: r.Name, Service: r.Service, Kind: r.Kind, State: r.State, Health: r.Health, Actor: r.Actor, Created: r.Created}
+		if r.Kind == kindLink {
+			row.Status = termsafe.Truncate(termsafe.Line(reported[LinkReport].Status), 200)
+		}
 		if r.Kind == kindAgent {
 			row.Name = r.Instance // what every command takes
 			row.ID = r.InstanceID
