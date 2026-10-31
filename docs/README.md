@@ -21,7 +21,7 @@ detail, and the executable specs in `specs/` are the status report.
 
 ## The hub (web UI)
 
-10. [The hub](hub.md): running it, the terminal in the browser, engines, settings
+10. [The hub](hub.md): running it, linking projects, the terminal in the browser, settings
 11. [Hub sign-in and roles](hub-access.md): the starter account, single sign-on, people, roles
 12. [The hub API](hub-api.md): the JSON API the web app talks to
 

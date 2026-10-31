@@ -103,7 +103,7 @@ your choice (journald is common). Two things follow.
   Podman `log_size_max` in `containers.conf`. A new default applies to containers created afterwards: run `egzo project up`
   again after recreating them. `egzo system check` warns when the default is a `json-file` with no limit.
 - **The default must be readable.** egzo reads container logs back: for the git jobs, for `egzo logs`, and for the agents'
-  status that the hub follows. `json-file`, `local` and `journald` work on Docker, `k8s-file` and `journald` on Podman. The
+  status that a project's link follows. `json-file`, `local` and `journald` work on Docker, `k8s-file` and `journald` on Podman. The
   `none` driver, and Podman's `passthrough`, cannot be read, so `egzo system check` fails on them. Docker's remote drivers
   (`syslog`, `gelf`, `fluentd`, `awslogs`, ...) are read through Docker's local cache of them, which works unless it is
   turned off. See `known-issues/container-logging-follows-the-engine-default.md`.

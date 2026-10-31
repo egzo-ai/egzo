@@ -33,8 +33,8 @@ In short:
 - An agent can reach only the proxy and the control sidecar, never another agent and never your network.
 - Messages and status flow through harness hooks and a small MCP tool set (`egzo` tools such as `resolve`, `ask`),
   not through screen scraping.
-- [The hub](hub.md), optional, is a web UI over the projects of one or more engines: what every agent is doing, and their
-  terminals in the browser, for a team with roles. It reads the same containers, so the CLI and the hub see the same thing.
+- [The hub](hub.md), optional, is a web UI over the projects that link to it: what every agent is doing, and their
+  terminals in the browser, for a team with roles. A project dials out to it, so the CLI and the hub see the same thing.
 
 ## Requirements
 
