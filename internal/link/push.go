@@ -4,7 +4,9 @@
 package link
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +22,9 @@ import (
 
 // settleDelay gathers a burst of engine events (a spawn is several) into one update of the project feed.
 const settleDelay = 200 * time.Millisecond
+
+// refreshEvery is how often the project is read without an event: `up` publishing templates touches no container, so no event says so.
+var refreshEvery = time.Minute
 
 // pushFeeds pushes the three feeds until ctx ends. A feed that ends is opened again, and a feed's engine stream that breaks is
 // followed again, with a growing delay: a control sidecar being recreated is an ordinary moment.
@@ -135,43 +140,65 @@ func (s *sticky) failed() error {
 }
 
 func (l *Link) pushProject(ctx context.Context, lines *hublink.Lines, _ hublink.FeedStart) error {
-	engine, project := l.options.Engine, l.options.Project
+	engine, name := l.options.Engine, l.options.Project
 	ctx, send := sending(ctx)
+	var feed projectFeed
 	push := func() {
-		update := hublink.ProjectUpdate{}
-		var err error
-		if update.Project, err = engine.Project(ctx, project); err != nil {
+		project, err := engine.Project(ctx, name)
+		if err != nil {
 			return
 		}
-		if update.Published, err = engine.Published(ctx, project); err != nil && !errors.Is(err, context.Canceled) {
+		published, err := engine.Published(ctx, name)
+		if err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "read the templates: %v\n", err)
 		}
-		send.note(lines.Write(update))
+		if update, changed := feed.next(project, published); changed {
+			send.note(lines.Write(update))
+		}
 	}
-	push()
-	var pending *time.Timer
-	var mu sync.Mutex
-	defer func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if pending != nil {
-			pending.Stop()
+	wake := make(chan struct{}, 1)
+	go func() {
+		refresh := time.NewTicker(refreshEvery)
+		defer refresh.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-refresh.C:
+			case <-wake:
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(settleDelay):
+				}
+			}
+			push()
 		}
 	}()
 	return retry(ctx, send.failed, func() error {
-		return engine.WatchProject(ctx, project, func() {
-			mu.Lock()
-			defer mu.Unlock()
-			if pending == nil {
-				pending = time.AfterFunc(settleDelay, func() {
-					mu.Lock()
-					pending = nil
-					mu.Unlock()
-					push()
-				})
+		return engine.WatchProject(ctx, name, func() {
+			select {
+			case wake <- struct{}{}:
+			default:
 			}
 		})
 	})
+}
+
+// projectFeed says what the project feed sends next.
+type projectFeed struct {
+	sent []byte
+}
+
+// next takes a reading of the project and returns the update, and whether it says anything new.
+func (f *projectFeed) next(project Project, published Published) (hublink.ProjectUpdate, bool) {
+	update := hublink.ProjectUpdate{Project: project, Published: published}
+	data, err := json.Marshal(update)
+	if err != nil || bytes.Equal(data, f.sent) {
+		return update, false
+	}
+	f.sent = data
+	return update, true
 }
 
 func (l *Link) pushStatus(ctx context.Context, lines *hublink.Lines, _ hublink.FeedStart) error {

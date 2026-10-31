@@ -79,3 +79,17 @@ func TestAnAuditEventThatDidNotGoOutIsFollowedAgain(t *testing.T) {
 		t.Errorf("since %v", since)
 	}
 }
+
+func TestAnUpdateThatSaysNothingNewIsNotSent(t *testing.T) {
+	var feed projectFeed
+	templates := Published{Templates: map[string]string{"coder": "abc"}}
+	if _, changed := feed.next(Project{Name: "web"}, templates); !changed {
+		t.Fatal("the first update says something")
+	}
+	if _, changed := feed.next(Project{Name: "web"}, templates); changed {
+		t.Error("the same update again")
+	}
+	if _, changed := feed.next(Project{Name: "web"}, Published{Templates: map[string]string{"coder": "def"}}); !changed {
+		t.Error("templates published without touching a container went unsaid")
+	}
+}
