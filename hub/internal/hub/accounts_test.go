@@ -30,7 +30,7 @@ func (r *rig) count(table string) int {
 func TestWithNoPasswordSetTheStarterAccountGetsOneOnceAndKeepsIt(t *testing.T) {
 	s, _ := store.Open(":memory:")
 	defer s.Close()
-	h := New(s, nil, nil)
+	h := New(s, nil, FeedOptions{})
 	generated, err := h.SetupSignIn(ctx, SignInOptions{LocalLogin: true})
 	if err != nil || len(generated) < 24 {
 		t.Fatalf("first start: %q %v", generated, err)
@@ -92,7 +92,7 @@ func TestEveryFailedPasswordSignInAnswersTheSameAndOnesForAUserAreAudited(t *tes
 			t.Errorf("%s/%s: %v", c.user, c.password, err)
 		}
 	}
-	entries, _ := r.store.AuditOf(ctx, "", "", 10)
+	entries, _ := r.store.AuditOf(ctx, "", 10)
 	refused := 0
 	for _, e := range entries {
 		if e.Action == "user.signin" && !e.Allowed {
@@ -130,7 +130,7 @@ func TestWithLocalLoginOffThereIsNoPasswordAndItsSessionsEnd(t *testing.T) {
 func TestAHubThatNobodyCouldManageDoesNotStartAndALockoutIsReported(t *testing.T) {
 	s, _ := store.Open(":memory:")
 	defer s.Close()
-	h := New(s, nil, nil)
+	h := New(s, nil, FeedOptions{})
 	if _, err := h.SetupSignIn(ctx, SignInOptions{LocalLogin: false, Issuer: testIssuer}); !errors.Is(err, ErrNoOperator) || !strings.Contains(err.Error(), "EGZO_LOCAL_LOGIN=true") {
 		t.Errorf("a fresh hub with local login off: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestLinkUnlinkAndRemoveAreAudited(t *testing.T) {
 	if _, err := r.hub.UnlinkIdentity(ctx, op, identity.ID); err != nil {
 		t.Errorf("unlink with a password left: %v", err)
 	}
-	entries, _ := r.store.AuditOf(ctx, "", "", 20)
+	entries, _ := r.store.AuditOf(ctx, "", 20)
 	var got []string
 	for i := len(entries) - 1; i >= 0; i-- {
 		if strings.HasPrefix(entries[i].Action, "identity.") {
@@ -227,19 +227,18 @@ func TestLinkUnlinkAndRemoveAreAudited(t *testing.T) {
 }
 
 func TestADisabledUserIsNoCandidateAndGetsNoRole(t *testing.T) {
-	r := newRig(t, "local")
-	r.fakes["local"].AddProject(project("web"))
-	r.scan()
+	r := newRig(t)
+	r.link("web")
 	op := r.operator()
 	bob := r.login("bob")
 	r.hub.SetDisabled(ctx, op, bob.ID, true)
-	candidates, _ := r.hub.Candidates(ctx, op, "local", "web")
+	candidates, _ := r.hub.Candidates(ctx, op, r.id("web"))
 	for _, c := range candidates {
 		if c.ID == bob.ID {
 			t.Error("a disabled user is a candidate")
 		}
 	}
-	if err := r.hub.SetRole(ctx, op, "local", "web", bob.ID, "user"); !errors.Is(err, ErrDisabled) {
+	if err := r.hub.SetRole(ctx, op, r.id("web"), bob.ID, "user"); !errors.Is(err, ErrDisabled) {
 		t.Errorf("a role for a disabled user: %v", err)
 	}
 	if err := r.hub.SetOperator(ctx, op, bob.ID, true); !errors.Is(err, ErrDisabled) {

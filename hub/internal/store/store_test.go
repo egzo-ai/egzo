@@ -2,14 +2,17 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 func open(t *testing.T) *Store {
@@ -164,7 +167,7 @@ func TestDisablingEndsTheSessionsAndNeverAppliesToAnOperator(t *testing.T) {
 	s := open(t)
 	op, _ := s.EnsureStarter(ctx)
 	u := login(t, s, "u")
-	s.SetRole(ctx, "local", "web", u.ID, rbac.User)
+	s.SetRole(ctx, registered(t, s, "web"), u.ID, rbac.User)
 	token, _ := s.NewSession(ctx, u.ID, MethodIdentity, "", time.Hour)
 	changed, ended, err := s.SetDisabled(ctx, u.ID, true)
 	if err != nil || !changed || len(ended) != 1 || ended[0] != HashToken(token) {
@@ -354,21 +357,22 @@ func TestSessionsOfAFormerIssuerAndPasswordSessionsEndInBulk(t *testing.T) {
 func TestRolesAreGrantedReplacedAndRemoved(t *testing.T) {
 	s := open(t)
 	u := login(t, s, "a")
-	if role, _ := s.Role(ctx, "local", "web", u.ID); role != rbac.None {
+	web := registered(t, s, "web")
+	if role, _ := s.Role(ctx, web, u.ID); role != rbac.None {
 		t.Fatalf("role before any grant = %q", role)
 	}
-	s.SetRole(ctx, "local", "web", u.ID, rbac.User)
-	s.SetRole(ctx, "local", "web", u.ID, rbac.Administrator)
-	if role, _ := s.Role(ctx, "local", "web", u.ID); role != rbac.Administrator {
+	s.SetRole(ctx, web, u.ID, rbac.User)
+	s.SetRole(ctx, web, u.ID, rbac.Administrator)
+	if role, _ := s.Role(ctx, web, u.ID); role != rbac.Administrator {
 		t.Errorf("role = %q", role)
 	}
-	if role, _ := s.Role(ctx, "other", "web", u.ID); role != rbac.None {
-		t.Errorf("a grant on one engine leaked to another: %q", role)
+	if role, _ := s.Role(ctx, registered(t, s, "web"), u.ID); role != rbac.None {
+		t.Errorf("a grant on one project leaked to another of the same name: %q", role)
 	}
-	if err := s.SetRole(ctx, "local", "web", u.ID, "boss"); err == nil {
+	if err := s.SetRole(ctx, web, u.ID, "boss"); err == nil {
 		t.Error("an invalid role was stored")
 	}
-	s.SetRole(ctx, "local", "web", u.ID, rbac.None)
+	s.SetRole(ctx, web, u.ID, rbac.None)
 	if grants, _ := s.GrantsOf(ctx, u.ID); len(grants) != 0 {
 		t.Errorf("grants after removal: %+v", grants)
 	}
@@ -399,34 +403,12 @@ func TestSessionsExpireAndStoreOnlyAHash(t *testing.T) {
 	}
 }
 
-func TestEnginesAreStoredAndTheirGrantsGoWithThem(t *testing.T) {
-	s := open(t)
-	u := login(t, s, "a")
-	s.PutEngine(ctx, EngineRow{Name: "lab", Host: "ssh://me@lab", Credentials: []byte("sealed")})
-	s.PutEngine(ctx, EngineRow{Name: "lab", Host: "ssh://me@lab2", HostKey: "SHA256:abc", Credentials: []byte("sealed2")})
-	e, err := s.Engine(ctx, "lab")
-	if err != nil || e.Host != "ssh://me@lab2" || e.HostKey != "SHA256:abc" || string(e.Credentials) != "sealed2" {
-		t.Fatalf("engine = %+v, %v", e, err)
-	}
-	s.SetRole(ctx, "lab", "web", u.ID, rbac.Owner)
-	s.SetRole(ctx, "local", "web", u.ID, rbac.Owner)
-	if err := s.DeleteEngine(ctx, "lab"); err != nil {
-		t.Fatal(err)
-	}
-	if grants, _ := s.GrantsOf(ctx, u.ID); len(grants) != 1 || grants[0].Engine != "local" {
-		t.Errorf("grants = %+v", grants)
-	}
-	if err := s.DeleteEngine(ctx, "lab"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("deleting twice: %v", err)
-	}
-}
-
 func TestTheAuditLogIsKeptPerProjectNewestFirst(t *testing.T) {
 	s := open(t)
-	s.Audit(ctx, AuditEntry{Actor: "user:u1", Action: "agent.stop", Engine: "local", Project: "web", Agent: "coder-1", Allowed: true})
-	s.Audit(ctx, AuditEntry{Actor: "user:u2", Action: "agent.rm", Engine: "local", Project: "web", Agent: "coder-1", Allowed: false, Detail: "not allowed"})
-	s.Audit(ctx, AuditEntry{Actor: "user:u2", Action: "agent.rm", Engine: "local", Project: "other"})
-	entries, err := s.AuditOf(ctx, "local", "web", 10)
+	s.Audit(ctx, AuditEntry{Actor: "user:u1", Action: "agent.stop", Project: "web", Agent: "coder-1", Allowed: true})
+	s.Audit(ctx, AuditEntry{Actor: "user:u2", Action: "agent.rm", Project: "web", Agent: "coder-1", Allowed: false, Detail: "not allowed"})
+	s.Audit(ctx, AuditEntry{Actor: "user:u2", Action: "agent.rm", Project: "other"})
+	entries, err := s.AuditOf(ctx, "web", 10)
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("entries = %+v, %v", entries, err)
 	}
@@ -437,9 +419,10 @@ func TestTheAuditLogIsKeptPerProjectNewestFirst(t *testing.T) {
 
 func TestWrongCredentialsAreGroupedByTheNameClaimedAndKeepTheLatestClient(t *testing.T) {
 	s := open(t)
+	web := registered(t, s, "web")
 	at := time.Now().Truncate(time.Millisecond)
 	attempt := func(claimed, client string, n int) Denial {
-		return Denial{Engine: "local", Project: "web", ClaimedAgent: claimed, Client: client, UserAgent: "curl/8.11.1", Protocol: "https",
+		return Denial{Project: web, ClaimedAgent: claimed, Client: client, UserAgent: "curl/8.11.1", Protocol: "https",
 			Host: "example.com", Code: "credentials", Event: "connect", Decision: "deny", Count: 1, First: at.Add(time.Duration(n) * time.Second),
 			Last: at.Add(time.Duration(n) * time.Second)}
 	}
@@ -449,7 +432,7 @@ func TestWrongCredentialsAreGroupedByTheNameClaimedAndKeepTheLatestClient(t *tes
 	if err := s.RecordDenials(ctx, []Denial{attempt("coder-1", "10.0.0.4", 2)}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.Denials(ctx, "local", "web")
+	got, _ := s.Denials(ctx, web)
 	if len(got) != 2 || got[0].ClaimedAgent != "coder-1" || got[0].Count != 2 || got[0].Client != "10.0.0.4" || got[0].UserAgent != "curl/8.11.1" ||
 		got[1].ClaimedAgent != "coder-2" || got[1].Agent != "" {
 		t.Fatalf("groups = %+v", got)
@@ -458,8 +441,9 @@ func TestWrongCredentialsAreGroupedByTheNameClaimedAndKeepTheLatestClient(t *tes
 
 func TestDenialsGroupAndAreBoundedAndAFixHoldsUntilTheNextOne(t *testing.T) {
 	s := open(t)
+	web := registered(t, s, "web")
 	at := time.Now().Truncate(time.Millisecond)
-	group := Denial{Engine: "local", Project: "web", Instance: "01JBX7Q0000000000000000000", Protocol: "https", Host: "evil.example",
+	group := Denial{Project: web, Instance: "01JBX7Q0000000000000000000", Protocol: "https", Host: "evil.example",
 		Code: "not-in-profile", Event: "connect", Decision: "deny", Agent: "coder-1", Actor: "user:alice", Profile: "default", Count: 2, First: at, Last: at}
 	if err := s.RecordDenials(ctx, []Denial{group}); err != nil {
 		t.Fatal(err)
@@ -469,22 +453,22 @@ func TestDenialsGroupAndAreBoundedAndAFixHoldsUntilTheNextOne(t *testing.T) {
 	if err := s.RecordDenials(ctx, []Denial{later}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.Denials(ctx, "local", "web")
+	got, _ := s.Denials(ctx, web)
 	if len(got) != 1 || got[0].Count != 3 || !got[0].First.Equal(at) || !got[0].Last.Equal(at.Add(time.Second)) || got[0].Actor != "user:alice" || got[0].Text != "again" {
 		t.Fatalf("group = %+v", got)
 	}
 
 	// a fix before the last denial does not count; one after it does, until the next denial
-	s.FixDenials(ctx, "local", "web", group.Instance, "https", "evil.example", []string{"connect"}, at.Add(500*time.Millisecond))
-	if got, _ := s.Denials(ctx, "local", "web"); !got[0].Fixed.IsZero() {
+	s.FixDenials(ctx, web, group.Instance, "https", "evil.example", []string{"connect"}, at.Add(500*time.Millisecond))
+	if got, _ := s.Denials(ctx, web); !got[0].Fixed.IsZero() {
 		t.Error("fixed by an allow older than the last denial")
 	}
-	s.FixDenials(ctx, "local", "web", group.Instance, "https", "evil.example", []string{"connect"}, at.Add(2*time.Second))
-	if got, _ := s.Denials(ctx, "local", "web"); !got[0].Fixed.Equal(at.Add(2 * time.Second)) {
+	s.FixDenials(ctx, web, group.Instance, "https", "evil.example", []string{"connect"}, at.Add(2*time.Second))
+	if got, _ := s.Denials(ctx, web); !got[0].Fixed.Equal(at.Add(2 * time.Second)) {
 		t.Errorf("not fixed: %+v", got[0])
 	}
 	s.RecordDenials(ctx, []Denial{later})
-	if got, _ := s.Denials(ctx, "local", "web"); !got[0].Fixed.IsZero() {
+	if got, _ := s.Denials(ctx, web); !got[0].Fixed.IsZero() {
 		t.Error("a denial after the fix leaves it fixed")
 	}
 
@@ -497,39 +481,156 @@ func TestDenialsGroupAndAreBoundedAndAFixHoldsUntilTheNextOne(t *testing.T) {
 		many = append(many, d)
 	}
 	s.RecordDenials(ctx, many)
-	got, _ = s.Denials(ctx, "local", "web")
+	got, _ = s.Denials(ctx, web)
 	if len(got) != MaxDenials || got[0].Host != fmt.Sprintf("h%03d.example", MaxDenials+9) {
 		t.Errorf("%d groups, newest %s", len(got), got[0].Host)
 	}
 	if err := s.PurgeDenials(ctx, at.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.Denials(ctx, "local", "web"); len(got) != MaxDenials-60+10 {
+	if got, _ := s.Denials(ctx, web); len(got) != MaxDenials-60+10 {
 		t.Errorf("after the purge: %d", len(got))
 	}
 }
 
-func TestTheAuditCursorOnlyMovesForwardAndGoesWithItsEngine(t *testing.T) {
+// registered makes a project that spent a code, for what is keyed by one.
+func registered(t *testing.T, s *Store, name string) string {
+	t.Helper()
+	key := make([]byte, 32)
+	rand.Read(key)
+	u, err := s.UserByName(ctx, "registrar")
+	if errors.Is(err, ErrNotFound) {
+		u = login(t, s, "registrar")
+		_, err = s.SetOperator(ctx, u.ID, true)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, code, err := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.RedeemLinkCode(ctx, code, Registration{Key: key, Name: name, Host: "laptop", Release: "dev", Templates: []string{"coder"}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r.ID
+}
+
+func TestTheAuditCursorOnlyMovesForwardAndGoesWithItsProject(t *testing.T) {
 	s := open(t)
-	if at, err := s.AuditCursor(ctx, "local", "web"); err != nil || !at.IsZero() {
+	web := registered(t, s, "web")
+	if at, err := s.AuditCursor(ctx, web); err != nil || !at.IsZero() {
 		t.Fatalf("a project never read: %v %v", at, err)
 	}
 	at := time.Date(2026, 10, 23, 12, 0, 0, 123456789, time.UTC)
-	s.SetAuditCursor(ctx, "local", "web", at)
-	s.SetAuditCursor(ctx, "local", "web", at.Add(-time.Hour))
-	if got, _ := s.AuditCursor(ctx, "local", "web"); !got.Equal(at) {
+	s.SetAuditCursor(ctx, web, at)
+	s.SetAuditCursor(ctx, web, at.Add(-time.Hour))
+	if got, _ := s.AuditCursor(ctx, web); !got.Equal(at) {
 		t.Errorf("cursor = %v", got)
 	}
-	s.PutEngine(ctx, EngineRow{Name: "local", Host: "unix:///x"})
-	s.RecordDenials(ctx, []Denial{{Engine: "local", Project: "web", Host: "h", Count: 1, First: at, Last: at}})
-	if err := s.DeleteEngine(ctx, "local"); err != nil {
+	s.RecordDenials(ctx, []Denial{{Project: web, Host: "h", Count: 1, First: at, Last: at}})
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.AuditCursor(ctx, "local", "web"); !got.IsZero() {
-		t.Error("the cursor outlived its engine")
+	if got, _ := s.AuditCursor(ctx, web); !got.IsZero() {
+		t.Error("the cursor outlived its project")
 	}
-	if got, _ := s.Denials(ctx, "local", "web"); len(got) != 0 {
-		t.Error("the denials outlived their engine")
+	if got, _ := s.Denials(ctx, web); len(got) != 0 {
+		t.Error("the denials outlived their project")
+	}
+}
+
+func TestACodeMakesAnApprovedProjectOnceAndIsKeptOnlyAsAHash(t *testing.T) {
+	s := open(t)
+	u := operatorNamed(t, s, "a")
+	made, code, err := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^egzo-link-[a-z2-7]{26}$`).MatchString(code) || !made.Expires.After(time.Now().Add(14*time.Minute)) {
+		t.Fatalf("code = %q, %+v", code, made)
+	}
+	var stored int
+	s.db.QueryRow(`SELECT COUNT(*) FROM link_codes WHERE hash = ? OR hash = ?`, []byte(code), code).Scan(&stored)
+	if stored != 0 {
+		t.Error("the code is in the database in clear")
+	}
+	key := make([]byte, 32)
+	r, err := s.RedeemLinkCode(ctx, " "+code+"\n", Registration{Key: key, Name: "web", Host: "laptop", Release: "1.2", Templates: []string{"coder", "reviewer"}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.State != hublink.StateApproved || r.Owner != u.ID || !strings.HasPrefix(r.ID, "p") {
+		t.Fatalf("registration = %+v", r)
+	}
+	if got, err := s.RegistrationByKey(ctx, key); err != nil || got.ID != r.ID || len(got.Templates) != 2 {
+		t.Fatalf("by its key = %+v, %v", got, err)
+	}
+	if role, _ := s.Role(ctx, r.ID, u.ID); role != rbac.Owner {
+		t.Errorf("who made the code holds %q", role)
+	}
+	if _, err := s.RedeemLinkCode(ctx, code, Registration{Key: []byte("another"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("a code used twice: %v", err)
+	}
+	if approved, _ := s.ApprovedProjects(ctx); len(approved) != 1 || approved[0].Owner != u.ID {
+		t.Errorf("approved = %+v", approved)
+	}
+	if revoked, err := s.Revoke(ctx, r.ID, "no"); err != nil || revoked.State != hublink.StateRevoked {
+		t.Errorf("revoke = %+v, %v", revoked, err)
+	}
+	if _, err := s.Revoke(ctx, r.ID, "no"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("revoked twice: %v", err)
+	}
+}
+
+func TestACodeOfAKeyThatIsTakenIsNotSpentAndNothingHalfDoneStays(t *testing.T) {
+	s := open(t)
+	u := operatorNamed(t, s, "a")
+	key := make([]byte, 32)
+	_, first, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	_, second, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if _, err := s.RedeemLinkCode(ctx, first, Registration{Key: key, Name: "web"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemLinkCode(ctx, second, Registration{Key: key, Name: "web"}, time.Now()); !errors.Is(err, ErrKeyTaken) {
+		t.Fatalf("a key registered twice: %v", err)
+	}
+	if codes, _ := s.LinkCodes(ctx, time.Now()); len(codes) != 1 {
+		t.Errorf("codes = %+v", codes)
+	}
+	if projects, _ := s.Registrations(ctx); len(projects) != 1 {
+		t.Errorf("projects = %+v", projects)
+	}
+}
+
+func TestACodeIsWorthNothingOnceExpiredOrItsMakerMayNoLongerMakeOne(t *testing.T) {
+	s := open(t)
+	u := operatorNamed(t, s, "a")
+	keep := operatorNamed(t, s, "b")
+	_, expired, _ := s.CreateLinkCode(ctx, u.ID, time.Now().Add(-LinkCodeLife))
+	if _, err := s.RedeemLinkCode(ctx, expired, Registration{Key: []byte("1"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("an expired code: %v", err)
+	}
+	_, former, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
+	if _, err := s.SetOperator(ctx, u.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemLinkCode(ctx, former, Registration{Key: []byte("2"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("a code of someone who is no longer an operator: %v", err)
+	}
+	made, cancelled, _ := s.CreateLinkCode(ctx, keep.ID, time.Now())
+	if err := s.CancelLinkCode(ctx, made.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemLinkCode(ctx, cancelled, Registration{Key: []byte("3"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
+		t.Errorf("a cancelled code: %v", err)
+	}
+	if err := s.CancelLinkCode(ctx, made.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cancelled twice: %v", err)
+	}
+	if projects, _ := s.Registrations(ctx); len(projects) != 0 {
+		t.Errorf("projects = %+v", projects)
 	}
 }
 
@@ -551,6 +652,23 @@ func TestExpiredCodesArePurgedAndAreNotListed(t *testing.T) {
 	}
 }
 
+func TestAProjectIsForgottenOnlyInTheStateItWasAskedFor(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	if _, err := s.Revoke(ctx, web, "stolen"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unlink of what was revoked: %v", err)
+	}
+	if r, err := s.Registration(ctx, web); err != nil || r.Message != "stolen" {
+		t.Errorf("the revocation = %+v, %v", r, err)
+	}
+	if err := s.ForgetProject(ctx, web, hublink.StateRevoked); err != nil {
+		t.Errorf("an operator forgetting it: %v", err)
+	}
+}
+
 // operatorNamed signs someone in and makes them an operator.
 func operatorNamed(t *testing.T, s *Store, sub string) User {
 	t.Helper()
@@ -559,4 +677,55 @@ func operatorNamed(t *testing.T, s *Store, sub string) User {
 		t.Fatal(err)
 	}
 	return u
+}
+
+func TestAProjectIsOfflineFromWhenItsLinkWentAwayUntilItComesBack(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	r, _ := s.Registration(ctx, web)
+	if !r.Online() {
+		t.Fatal("a project is registered by its link, which is there")
+	}
+	at := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
+	s.Disconnected(ctx, web, at)
+	if r, _ = s.Registration(ctx, web); !r.Offline.Equal(at) {
+		t.Errorf("offline since %v, want %v", r.Offline, at)
+	}
+	// a hub that starts leaves what was offline as it was
+	s.AllOffline(ctx, time.Now())
+	if r, _ = s.Registration(ctx, web); !r.Offline.Equal(at) {
+		t.Errorf("offline since %v, want %v", r.Offline, at)
+	}
+	s.Connected(ctx, web, "web2", "server", "1.3")
+	if r, _ = s.Registration(ctx, web); !r.Online() || r.Name != "web2" || r.Host != "server" || r.Release != "1.3" {
+		t.Errorf("back = %+v", r)
+	}
+	s.AllOffline(ctx, time.Now())
+	if r, _ = s.Registration(ctx, web); r.Online() {
+		t.Error("a hub that started found a link connected")
+	}
+}
+
+func TestForgettingAProjectTakesWhatIsKeyedByIt(t *testing.T) {
+	s := open(t)
+	u := login(t, s, "a")
+	web := registered(t, s, "web")
+	s.SetRole(ctx, web, u.ID, rbac.User)
+	s.AddTask(ctx, Task{Verb: "spawn", Project: web, Agent: "x", Actor: "operator"})
+	s.Audit(ctx, AuditEntry{Actor: "operator", Action: "agent.stop", Project: web})
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); err != nil {
+		t.Fatal(err)
+	}
+	if grants, _ := s.GrantsOf(ctx, u.ID); len(grants) != 0 {
+		t.Errorf("grants = %+v", grants)
+	}
+	if tasks, _ := s.TasksOf(ctx, web, "", 5); len(tasks) != 0 {
+		t.Errorf("tasks = %+v", tasks)
+	}
+	if entries, _ := s.AuditOf(ctx, web, 5); len(entries) != 1 {
+		t.Errorf("the audit log lost what happened: %+v", entries)
+	}
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); !errors.Is(err, ErrNotFound) {
+		t.Errorf("forgetting twice: %v", err)
+	}
 }
