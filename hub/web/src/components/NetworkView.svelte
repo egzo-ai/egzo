@@ -10,14 +10,14 @@
 
   // What the project's proxy recorded, or what it recorded for one agent: the hosts it denied, grouped, with why and how to fix
   // it, then the latest connections. The hub keeps the groups; the events are the latest it heard (roadmap/proxy-audit.md).
-  let { engine, project, agent = "" }: { engine: string; project: string; agent?: string } = $props();
+  let { project, agent = "" }: { project: string; agent?: string } = $props();
 
   let data = $state<Network | null>(null);
   let failure = $state("");
   $effect(() =>
     poll(async () => {
       try {
-        data = await api.network(engine, project, agent);
+        data = await api.network(project, agent);
         failure = "";
       } catch (e) {
         failure = errorText(e);

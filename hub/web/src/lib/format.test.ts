@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { activityKind, activityLabel, ago, duration, initials, taskEnded, taskFailedLabel } from "./format";
+import { activityKind, activityLabel, ago, duration, initials, taskEnded, taskFailedLabel, until } from "./format";
 
 describe("format", () => {
+  it("says how long until", () => {
+    const now = +new Date("2026-10-14T12:00:00Z");
+    expect(until("2026-10-14T12:15:00Z", now)).toBe("in 15 min");
+    expect(until("2026-10-14T12:00:30Z", now)).toBe("in a minute");
+    expect(until("2026-10-14T11:59:00Z", now)).toBe("now");
+  });
+
   it("says how long ago", () => {
     const now = Date.parse("2026-10-14T12:00:00Z");
     expect(ago("2026-10-14T11:59:40Z", now)).toBe("just now");

@@ -51,7 +51,7 @@ export function explain(d: Pick<Denial, "code" | "host" | "profile" | "protocol"
     case "placeholder":
       return { title: "placeholder not swapped", why: d.text || "A placeholder could not be swapped in the request.", fix: "Send the request uncompressed and under 1 MiB, so the proxy can swap the placeholder." };
     case "dial":
-      return { title: "unreachable", why: d.text || `${d.host} did not answer.`, fix: "Check the host name; the host may be down, or not reachable from the engine's network." };
+      return { title: "unreachable", why: d.text || `${d.host} did not answer.`, fix: "Check the host name; the host may be down, or not reachable from the project's machine." };
     case "tls-handshake":
       return { title: "CA not trusted", why: "The client's TLS handshake with the proxy failed: it does not trust the project CA.", fix: "Make the tool trust the project CA (SSL_CERT_FILE, NODE_EXTRA_CA_CERTS; Chromium needs certutil), or it pins its certificate. See docs/troubleshooting.md." };
     case "upstream":
