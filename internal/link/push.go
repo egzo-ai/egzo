@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os"
 	"sync"
@@ -20,44 +21,66 @@ import (
 // settleDelay gathers a burst of engine events (a spawn is several) into one update of the project feed.
 const settleDelay = 200 * time.Millisecond
 
-// pushFeeds pushes the three feeds until ctx ends. A feed's engine stream that breaks is followed again with a growing delay: a
-// control sidecar being recreated is an ordinary moment.
+// pushFeeds pushes the three feeds until ctx ends. A feed that ends is opened again, and a feed's engine stream that breaks is
+// followed again, with a growing delay: a control sidecar being recreated is an ordinary moment.
 func (l *Link) pushFeeds(ctx context.Context, session *yamux.Session) {
 	var wg sync.WaitGroup
-	for feed, push := range map[string]func(context.Context, *hublink.Lines, hublink.FeedStart) error{
-		hublink.FeedProject: l.pushProject, hublink.FeedStatus: l.pushStatus, hublink.FeedAudit: l.pushAudit,
-	} {
+	for feed, push := range map[string]pusher{hublink.FeedProject: l.pushProject, hublink.FeedStatus: l.pushStatus, hublink.FeedAudit: l.pushAudit} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			stream, err := session.OpenStream()
-			if err != nil {
-				return
-			}
-			defer stream.Close()
-			finished := make(chan struct{})
-			defer close(finished)
-			go func() {
-				select {
-				case <-ctx.Done():
-					stream.SetDeadline(time.Now())
-				case <-finished:
-				}
-			}()
-			lines := hublink.NewLines(stream)
-			if err := lines.Write(hublink.FeedOpen{Feed: feed}); err != nil {
-				return
-			}
-			var start hublink.FeedStart
-			if err := lines.Read(&start); err != nil {
-				return
-			}
-			if err := push(ctx, lines, start); err != nil && ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "feed %s: %v\n", feed, err)
-			}
+			keepFeed(ctx, session, feed, push)
 		}()
 	}
 	wg.Wait()
+}
+
+type pusher func(context.Context, *hublink.Lines, hublink.FeedStart) error
+
+// keepFeed keeps one feed open until ctx ends.
+func keepFeed(ctx context.Context, session *yamux.Session, feed string, push pusher) {
+	_ = retry(ctx, func() error { return nil }, func() error {
+		if err := openFeed(ctx, session, feed, push); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "feed %s: %v\n", feed, err)
+		}
+		return nil
+	})
+}
+
+// openFeed is one stream of a feed, from its opening to its end.
+func openFeed(ctx context.Context, session *yamux.Session, feed string, push pusher) error {
+	stream, err := session.OpenStream()
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		stream.SetDeadline(time.Now())
+	}()
+	lines := hublink.NewLines(stream)
+	if err := lines.Write(hublink.FeedOpen{Feed: feed}); err != nil {
+		return err
+	}
+	var start hublink.FeedStart
+	if err := lines.Read(&start); err != nil {
+		return err
+	}
+	ended := make(chan struct{})
+	go func() { // the hub says nothing on a feed after its start: the only thing to read is its end, which no write notices
+		defer close(ended)
+		_, _ = io.Copy(io.Discard, lines.Rest())
+		cancel()
+	}()
+	err = push(ctx, lines, start)
+	select {
+	case <-ended:
+		return errors.New("the hub closed it")
+	default:
+		return err
+	}
 }
 
 // retry runs follow again each time it ends, until ctx ends or sending fails.
@@ -81,10 +104,17 @@ func retry(ctx context.Context, sendFailed func() error, follow func() error) er
 	}
 }
 
-// sticky remembers the first failure to send.
+// sticky remembers the first failure to send, and ends the context what is followed runs in: nothing more can reach the hub.
 type sticky struct {
-	mu  sync.Mutex
-	err error
+	mu     sync.Mutex
+	err    error
+	cancel context.CancelFunc
+}
+
+// sending is a context that a failure to send ends, and what notes the failure.
+func sending(ctx context.Context) (context.Context, *sticky) {
+	ctx, cancel := context.WithCancel(ctx)
+	return ctx, &sticky{cancel: cancel}
 }
 
 func (s *sticky) note(err error) {
@@ -94,6 +124,7 @@ func (s *sticky) note(err error) {
 		if s.err == nil {
 			s.err = err
 		}
+		s.cancel()
 	}
 }
 
@@ -105,7 +136,7 @@ func (s *sticky) failed() error {
 
 func (l *Link) pushProject(ctx context.Context, lines *hublink.Lines, _ hublink.FeedStart) error {
 	engine, project := l.options.Engine, l.options.Project
-	var send sticky
+	ctx, send := sending(ctx)
 	push := func() {
 		update := hublink.ProjectUpdate{}
 		var err error
@@ -144,19 +175,28 @@ func (l *Link) pushProject(ctx context.Context, lines *hublink.Lines, _ hublink.
 }
 
 func (l *Link) pushStatus(ctx context.Context, lines *hublink.Lines, _ hublink.FeedStart) error {
-	var send sticky
+	ctx, send := sending(ctx)
 	return retry(ctx, send.failed, func() error {
 		return l.options.Engine.FollowStatus(ctx, l.options.Project, func(line StatusLine) { send.note(lines.Write(line)) })
 	})
 }
 
 func (l *Link) pushAudit(ctx context.Context, lines *hublink.Lines, start hublink.FeedStart) error {
-	var send sticky
+	ctx, send := sending(ctx)
 	since := start.Since
+	deliver := sendAudit(lines, send, &since)
 	return retry(ctx, send.failed, func() error {
-		return l.options.Engine.FollowAudit(ctx, l.options.Project, since, func(event AuditEvent) {
-			since = event.Time
-			send.note(lines.Write(event))
-		})
+		return l.options.Engine.FollowAudit(ctx, l.options.Project, since, deliver)
 	})
+}
+
+// sendAudit sends an event and moves since past it: only past one that went out, or following again would skip it.
+func sendAudit(lines *hublink.Lines, send *sticky, since *time.Time) func(AuditEvent) {
+	return func(event AuditEvent) {
+		if err := lines.Write(event); err != nil {
+			send.note(err)
+			return
+		}
+		*since = event.Time
+	}
 }
