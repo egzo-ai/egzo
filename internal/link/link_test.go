@@ -200,6 +200,31 @@ func TestAKeySealedWithAnotherSecretKeyIsRefusedAndKept(t *testing.T) {
 	}
 }
 
+func TestRekeyMovesTheKeyToTheNewSecretKey(t *testing.T) {
+	dir := t.TempDir()
+	secret := func(c string) []byte { return []byte(strings.Repeat(c, 32)) }
+	l := New(Options{Project: "web", Hub: "https://hub", Dir: dir, Engine: &Engine{}})
+	if err := l.Unlock(secret("a"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Rekey(secret("b")); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := loadKey(dir, keysOf(t, "b"))
+	if err != nil || !moved.Equal(l.key) {
+		t.Fatalf("the key did not move: %v", err)
+	}
+	if _, err := loadKey(dir, keysOf(t, "a")); !strings.Contains(fmt.Sprint(err), "another secret key") {
+		t.Errorf("the old secret key still opens it: %v", err)
+	}
+}
+
+func TestALinkThatRestartedCannotRekey(t *testing.T) {
+	if err := New(Options{Project: "web", Hub: "https://hub", Dir: t.TempDir()}).Rekey([]byte(strings.Repeat("b", 32))); err == nil || !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestTheWrongSecretKeyDoesNotLockALinkThatHoldsItsKey(t *testing.T) {
 	dir := t.TempDir()
 	l := New(Options{Project: "web", Hub: "https://hub", Dir: dir, Engine: &Engine{}})

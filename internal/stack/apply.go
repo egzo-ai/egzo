@@ -151,6 +151,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 	}
 	// No LogConfig: the engine's default logging is the sysadmin's choice (known-issues/container-logging-follows-the-engine-default.md).
 	host.Tmpfs = spec.Tmpfs
+	host.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(spec.Restart)}
 	for _, m := range spec.Mounts {
 		kind := mount.TypeVolume
 		if m.Bind {

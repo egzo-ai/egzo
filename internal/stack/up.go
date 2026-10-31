@@ -95,7 +95,10 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 
 	fresh := map[string]bool{} // resources created by this run: nothing can be stored in them yet
 	inputs := Inputs{Image: opts.Image, User: AgentUser(c), HarnessPrefix: opts.HarnessPrefix, Instances: observed.InstanceNames()}
-	if project.Hub != nil {
+	switch {
+	case project.Hub != nil && opts.DryRun:
+		inputs.LinkSocket = observedLinkSocket(ctx, c, project.Name)
+	case project.Hub != nil:
 		if inputs.LinkSocket, err = FindLinkSocket(ctx, c, opts.Image); err != nil {
 			return err
 		}

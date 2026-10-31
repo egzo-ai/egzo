@@ -221,6 +221,22 @@ func (l *Link) answered(asked *registering) {
 	}
 }
 
+// Rekey seals the link's key with another secret key: how the link follows `egzo project rotate-ca`. Only a link that holds its key
+// can: one that restarted has only the sealed file, and needs the old secret key first.
+func (l *Link) Rekey(secret []byte) error {
+	l.mu.Lock()
+	key := l.key
+	l.mu.Unlock()
+	if key == nil {
+		return errors.New("the link is locked: run `egzo project up` with the old secret key, then rotate again")
+	}
+	keys, err := seal.New(secret, l.options.Project)
+	if err != nil {
+		return err
+	}
+	return storeKey(l.options.Dir, keys, key)
+}
+
 // storeKey replaces the sealed key in one step: a link that dies half way keeps the one it had.
 func storeKey(dir string, keys *seal.Keys, key ed25519.PrivateKey) error {
 	sealed, err := keys.Seal(seal.UseLink, key.Seed())
