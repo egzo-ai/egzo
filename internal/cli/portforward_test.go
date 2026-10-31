@@ -4,8 +4,12 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -68,5 +72,56 @@ func TestHangingUpDoesNotWaitForeverForAQuietClient(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("still waiting")
+	}
+}
+
+// failingListener answers Accept with these errors, then ends.
+type failingListener struct {
+	net.Listener
+	errors []error
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	if len(l.errors) == 0 {
+		return nil, net.ErrClosed
+	}
+	err := l.errors[0]
+	l.errors = l.errors[1:]
+	return nil, err
+}
+
+func TestRunningOutOfDescriptorsPausesAccepting(t *testing.T) {
+	var said []string
+	f := forwarder{name: "web", port: 3000, report: func(line string) { said = append(said, line) }}
+	emfile := &net.OpError{Op: "accept", Err: syscall.EMFILE}
+	listener := &failingListener{errors: []error{emfile, emfile, &net.OpError{Op: "accept", Err: syscall.ENFILE}}}
+	if _, err := f.accept(context.Background(), listener); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("got %v", err)
+	}
+	if len(listener.errors) != 0 {
+		t.Errorf("gave up with %d errors to go", len(listener.errors))
+	}
+	if len(said) != 1 || !strings.Contains(said[0], "web:3000") {
+		t.Errorf("said %q", said)
+	}
+}
+
+func TestAnotherErrorEndsAccepting(t *testing.T) {
+	f := forwarder{report: func(string) { t.Error("nothing to say") }}
+	if _, err := f.accept(context.Background(), &failingListener{errors: []error{syscall.EINVAL}}); !errors.Is(err, syscall.EINVAL) {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestACancelledContextEndsThePause(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := forwarder{report: func(string) {}}
+	emfile := make([]error, 1000)
+	for i := range emfile {
+		emfile[i] = syscall.EMFILE
+	}
+	if _, err := f.accept(ctx, &failingListener{errors: emfile}); !errors.Is(err, syscall.EMFILE) {
+		t.Errorf("got %v", err)
 	}
 }
