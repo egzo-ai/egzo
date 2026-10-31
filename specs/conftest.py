@@ -689,10 +689,9 @@ def shared_project(tmp_path_factory, engine, egzo):
 @pytest.fixture(scope="module")
 def fake_hub(tmp_path_factory, engine):
     """A hub the project's link can reach, for a whole module (see hubkit.py)."""
-    from hubkit import FakeHub
+    from hubkit import FakeHub, hub_host
 
-    bridge = json.loads(engine.run("network", "inspect", "bridge").stdout)[0]
-    hub = FakeHub(tmp_path_factory.mktemp("hub"), bridge["IPAM"]["Config"][0]["Gateway"])
+    hub = FakeHub(tmp_path_factory.mktemp("hub"), hub_host(engine))
     yield hub
     hub.stop()
 
