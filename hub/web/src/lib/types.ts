@@ -41,6 +41,8 @@ export interface Session {
   /** What single sign-on is called; "" without it. */
   sso: string;
   issuer: string;
+  /** The address projects name in `hub:`. */
+  hub: string;
 }
 
 /** One agent, as the project list and the sidebar know it (from what its link pushed). */
