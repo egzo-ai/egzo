@@ -1,8 +1,8 @@
 # Roadmap: a project links itself to a hub
 
-**Status.** Core and the hub are built (steps 2 and 3 of the [order of work](#order-of-work)): the hub no longer connects to engines. Until roles
-and invites land, only operators make link codes. Previews (step 4), roles and invites (step 5) and the rewrite of
-[messaging-adapters.md](messaging-adapters.md) and [discovery.md](discovery.md) are open.
+**Status.** Core, the hub, and roles and invites are built (steps 2, 3 and 5 of the [order of work](#order-of-work)): the hub no longer connects to
+engines. Previews (step 4), which the viewer role waits for, and the rewrite of [messaging-adapters.md](messaging-adapters.md) and
+[discovery.md](discovery.md) are open.
 
 ## Why
 
@@ -157,6 +157,17 @@ Changed:
   checked against that address, never one taken from a request.
 
 ## Roles and invites (decided)
+
+Built, as [hub-access.md](../docs/hub-access.md) describes. What the text below left open:
+
+- An invite lives 7 days. A link code that finds its maker's quota used up is refused and stays good, like one of a key already registered.
+- An owner's unlink forgets the project outright, so its key is unknown and the link hears it is not registered. Revoke, which keeps the record and refuses
+  the key, stays the operators'.
+- An operator with no role sees the project page and its Members, and nothing else: not the timeline, the tasks or the spec either. They grant themselves a
+  role, and can make somebody the owner only of a project with none: for anything else they are an owner first.
+- A viewer's role is not shown to them: the project is not found, as for a stranger.
+- What a quota counts is who connected a project, not who owns it now.
+- A local account signs in with `EGZO_LOCAL_LOGIN` on, and there is no password reset.
 
 **Signing in is not enough: an invite is required.** Today a person who signs in with single sign-on gets an account with no
 access, and waits for a grant. With a company-wide provider that is everyone in the company. Instead, the hub needs an **invite

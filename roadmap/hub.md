@@ -35,21 +35,19 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
 
 - **OIDC through Dex**, bundled as a compose service. The hub only speaks OIDC to it; the user plugs their provider
   (GitHub first) into Dex with Dex's own documentation. No provider code in the hub.
-- A user is created on the first successful login and has access to nothing.
-- **The very first user is an operator.** An operator holds **every project as its owner, without a grant** (see
-  [hub-settings.md](hub-settings.md)); operators make and remove other operators, and the last one stays. That is the only
-  special case; every other check is a normal RBAC check.
-- To be invited, a user must already exist: they log in, see nothing, and an owner grants them a role.
+- An account takes an invite; signing in is not enough ([hub-access.md](../docs/hub-access.md)).
+- **Operators** oversee every project and grant themselves a role to go further; operators make and remove other operators, and the last one stays.
 
 ## Permissions (RBAC)
 
 - Resources: **projects and agents** only. Roles are granted per project. An agent has a creator field (the `actor` label that spawn already writes). Agents spawned
-  from the CLI belong to the operators (special case).
+  from the CLI are the admins'.
 - Roles:
+  - **viewer**: the web proxy only.
   - **user**: spawn, start, stop, attach and delete their own agents.
-  - **administrator**: the same on every agent of the project.
-  - **owner**: administrator, plus granting and removing roles. Destroying a project (`project down`) is not a hub action, by design: the CLI does it.
-- An owner cannot remove themselves or drop their own permissions. An owner can remove other owners.
+  - **admin**: the same on every agent of the project.
+  - **owner**: admin, plus granting and removing roles, and unlinking. Destroying a project (`project down`) is not a hub action, by design: the CLI does it.
+- An owner cannot remove themselves or drop their own permissions. An owner can remove other owners. A project keeps a valid owner.
 - Chat from Discord needs no fourth permission: in a channel an agent was added to, any registered user with a role on
   the project may talk to it (see "Who decides what" in [messaging-adapters.md](messaging-adapters.md)). It is not shown in the web UI.
 
@@ -111,7 +109,7 @@ and attach leave no trace in core: the hub writes its own audit log for them, wi
 
 - Roles are the hub's alone; no users or roles in YAML. Messaging is not in the web UI.
 - Web UI: one flat project list with the host each project says it runs on; URLs carry the id of its registration.
-- The first login is an operator, with no claim code. Operators hold every project without a grant.
+- `admin`, the starter account, is the first operator ([hub-login.md](hub-login.md)). Operators oversee every project, and go further with a role.
 - Hub code lives in `hub/`, a separate Go module; hub imports core, never the reverse; hub and adapters are
   unit-tested, not spec-driven (see "Code layout and rules").
 
@@ -120,15 +118,14 @@ and attach leave no trace in core: the hub writes its own audit log for them, wi
 In `hub/`, with the decisions above unless listed under "Not yet".
 
 - The model: a separate module, projects that link themselves, observe and operate only, secrets never read, roles in the hub's database.
-- Login through OIDC (Dex in the compose stack); the first login is an operator, and operators hold every project without a
-  grant. Roles user / administrator / owner per project, "own agents" by the `actor` label, an owner cannot
+- Login through OIDC (Dex in the compose stack), with an invite for anyone new; operators oversee every project. Roles viewer / user / admin / owner per project, "own agents" by the `actor` label, an owner cannot
   remove or lower themselves. Every operation is audited, allowed or refused.
-- Projects that link ([hub-link.md](hub-link.md)): the link endpoint, registrations made with an operator's link code, projects by id, offline since a
+- Projects that link ([hub-link.md](hub-link.md)): the link endpoint, registrations made with a link code, projects by id, offline since a
   time, tasks interrupted when a link drops. What the link pushes replaces every listing and every log followed through an engine, and a
   running agent whose status cannot be read is **running**, never "starting". See `docs/hub.md`, "How the hub keeps up".
 - Monitoring agents' internet access ([proxy-audit.md](proxy-audit.md)): the link pushes each proxy's audit trail, and the hub groups what was
   denied by instance, host and reason in its database, says why and how to fix it, and marks a group fixed when the agent gets through.
-- Settings for operators ([hub-settings.md](hub-settings.md)): Links, and Users, where an operator makes or removes other
+- Settings for operators ([hub-settings.md](hub-settings.md)): Links, Invites, and Users, where an operator makes or removes other
   operators; the last one cannot be removed.
 - The web UI, a Svelte app on a JSON API ([web-ui-spa.md](web-ui-spa.md)): projects, project page (agents, spawn, start / stop / remove, services, timeline, network, spec, audit log, members), agent page
   (status, timeline, network, logs), and terminals: several at once, in a sidebar, held by one person each with presence and take-over. No
@@ -153,6 +150,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
   the templates once per five minutes. Following the event stream the way the status is followed (a second line type on the
   sidecar's standard output, or a stream of its own) would remove the last periodic command.
-- **Hub settings, later parts** (a hub-level audit view, removing users, a richer users list, break-glass operator): see [hub-settings.md](hub-settings.md).
+- **Hub settings, later parts** (a hub-level audit view, removing users, a richer users list): see [hub-settings.md](hub-settings.md).
 - **Incompatible controls** (the rest of it: a version the hub can compare): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

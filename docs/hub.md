@@ -17,7 +17,7 @@ asked and how it went. Whoever asked gets a toast when the agent is not on their
 ![Two agents' terminals side by side in the hub: one waiting on a question, one answering](../assets/hub-terminals.png)
 
 It does not create or change projects: the project file and the `egzo` CLI stay the only way to do that (`egzo project up`,
-secrets, recreate). This page is how to run it; [sign-in and roles](hub-access.md) is who may do what, and [the hub
+secrets, recreate). This page is how to run it; [access](hub-access.md) is who may do what, and [the hub
 API](hub-api.md) is what the web app talks to. The design and its reasons are in [roadmap/hub.md](../roadmap/hub.md).
 
 ## Quick start
@@ -40,7 +40,7 @@ docker compose logs hub         # the password of the starter account, admin, pr
 [`hub/.env.example`](../hub/.env.example). Set `EGZO_HUB_VERSION` in `.env` to a release (`0.9.0`) to pin the image; the default is `latest`.
 
 Open that address and sign in as `admin` with that password ([the starter account](hub-access.md#the-starter-account)). `admin` is an
-operator, who holds every project on the hub. Then link a project, on the same machine or any other that reaches the hub, by adding the
+operator, who may connect projects and [invite people](hub-access.md#invites). Then link a project, on the same machine or any other that reaches the hub, by adding the
 address to its file:
 
 ```yaml
@@ -65,19 +65,20 @@ linked them. [Linking to a hub](managing-projects.md#linking-to-a-hub) is the pr
 Each project is a **registration**: an id from the hub, the name the project gives, and the host it says it runs on. Two projects called
 `web` on two machines are two projects, and addresses carry the id (`/p/p1a2b3c4d5e6/a/coder-1`).
 
-A project registers with a **link code**. **Only an operator makes one**, until invites let others
-([roadmap](../roadmap/hub-link.md#roles-and-invites-decided)): **Link a project** in Settings, Links shows it once, with the commands to run.
+A project registers with a **link code**. An operator makes one, and so does anybody with room in their
+[project quota](hub-access.md#project-quotas): **Link a project** in Settings, Links shows it once, with the commands to run.
 The project presents it with `egzo project register`, and is then approved, owned by whoever made the code, with no further step. From then on
 its key is all it takes.
 
 - A code registers one project, for 15 minutes, and can be cancelled until then. The hub keeps only its hash, and it is 128 random bits.
 - **Whoever holds a live code gets in**, and nobody sees the project's name or host first. Hand a code over as you would a password. The audit
   log says who made it, and which project used it.
-- A code made by someone who was disabled, or who is no longer an operator, is worth nothing.
+- A code made by someone who was disabled is worth nothing, and one that finds its maker's quota used up is refused until there is room.
 - A link with neither a known key nor a good code hears it is not registered, and is closed. The hub stores nothing for it and keeps no
   connection: reaching the endpoint gets a stranger nothing.
 
-**Settings, Links** lists every registration and the codes still good, for operators. **Revoke** takes a project off the hub: what runs over
+**Settings, Links** lists every registration and its owners, and the codes still good, for operators; a person with a quota sees their own codes
+there. An owner can [unlink](hub-access.md#roles) their project from its Members tab. **Revoke** takes a project off the hub: what runs over
 its link ends and its link is refused from then on, while the project keeps running on its machine. **Forget** removes a project that was
 revoked, so a new code can register it again, as a new project with no roles. Removing `hub:` and running `up`, or `egzo project down`, has the
 hub forget a project that is linked too, with its roles, tasks and network history; the audit log stays. A project that was revoked cannot do
@@ -119,7 +120,7 @@ only, so another host of the same site cannot plant one. Over plain http they ar
 ## Signing in
 
 `admin`, the starter account, signs in with a password. For a team, connect your OpenID Connect provider (Keycloak, Authentik,
-Google, Entra ID...): people sign in there, and an owner gives each a role on a project. See [sign-in and roles](hub-access.md).
+Google, Entra ID...): people sign in there, with an invite, which is how anyone gets an account. See [access](hub-access.md).
 
 ## The terminal
 
@@ -162,7 +163,7 @@ sidebar) says what the proxy refused, why, and how to fix it. An agent that was 
   credentials proved it; a connection with wrong ones shows the name it claimed, marked with `?`. Filters keep the refused ones,
   a host or an agent.
 
-A user sees the network of the agents they may operate; administrators see every agent's, and the refusals the proxy could not
+A user sees the network of the agents they may operate; admins see every agent's, and the refusals the proxy could not
 tie to an agent (wrong credentials). An agent whose name comes back is another instance and starts with an empty history.
 
 The denials are kept in the hub's database for 30 days after they were last seen, at most 500 per project. The connections are

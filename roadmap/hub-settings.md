@@ -1,7 +1,8 @@
 # Roadmap: hub settings, with engines and users
 
 **Status.** The first slice is built (see "What was built"); "Later" is open; removing a user was replaced by disabling one
-in [hub-login.md](hub-login.md). Before it, the hub had one operator, set at the
+in [hub-login.md](hub-login.md). **The bypass below is gone:** an operator oversees every project and grants themselves a role, see
+[hub-access.md](../docs/hub-access.md#operators), and "Engines" went with the engines. Before it, the hub had one operator, set at the
 first login, and no way to change that; engines were the operator's page and there was no list of users.
 
 The need: a hub-level **Settings** area, outside any project, with two views:
@@ -30,10 +31,9 @@ The need: a hub-level **Settings** area, outside any project, with two views:
 
 ## Later
 
-- **Break-glass.** The operator's OIDC identity can be lost (provider account deleted, email changed), and then nobody can become
-  operator. A start-up setting such as `EGZO_OPERATOR_IDENTITY`, or a hub subcommand, would close it. Not now: the hub is early, the fix
-  is a one-line edit of the database (`users.is_operator`), and a break-glass needs its own documentation and care. Write the edit
-  down in the operator docs in step 3 so that the way out exists on paper.
+- **Break-glass.** Settled by [hub-login.md](hub-login.md): `EGZO_LOCAL_LOGIN=true` and `EGZO_ADMIN_PASSWORD`, and a restart, bring `admin` back as an
+  operator, so no setting of its own is needed. With operators no longer owning everything, what comes back is oversight: `admin` reaches a project's
+  terminals by granting itself a role, on the record.
 - **A hub-level audit view.** Step 3 writes the entries; showing them (a log under Settings, or the project table with an empty
   project) is separate.
 - **Remove a user.** Replaced by disabling a user, in [hub-login.md](hub-login.md) ("Disabling users"): the audit log, messages and agent labels name people by username, so the row is never deleted.
@@ -57,4 +57,4 @@ The need: a hub-level **Settings** area, outside any project, with two views:
   `operator.revoke` (refusals too) have no engine and no project. A change that changes nothing is not audited.
 - **Settings.** An operator-only Settings entry in the sidebar, with Engines (moved; `/engines` and `/settings` land on
   `/settings/engines`) and Users. Keys: `g e`, `g u`; both are in the command menu.
-- The recovery from a lost operator sign-in is written in `docs/hub-access.md`; the break-glass setting is not built.
+- The recovery from a lost operator sign-in is written in `docs/hub-access.md`.

@@ -48,7 +48,7 @@ Be clear about these before running agents on something you care about.
 - **The link holds the engine.** A project that names a [hub](managing-projects.md#linking-to-a-hub) runs a sidecar with the engine's socket
   mounted: on a rootful engine it is root-equivalent on its host, like the CLI. Agents do not reach it: it is on a network of its own. A hub that
   is taken over can do what its verbs do on the projects linked to it, which includes attaching to their agents: link only to a hub you trust. A
-  project registers with a single-use [link code](hub.md#linking-a-project) that an operator makes, so nobody who merely reaches the link endpoint can
+  project registers with a single-use [link code](hub.md#linking-a-project) that a person allowed to connect a project makes, so nobody who merely reaches the link endpoint can
   put anything on a hub, and whoever holds a live code can: treat one as a password.
 - **A `build:` Dockerfile is trusted.** `egzo project up` builds it on the engine, outside the egress proxy, as you would by
   hand ([images](images.md#let-egzo-build-it)).
