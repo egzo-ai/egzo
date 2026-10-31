@@ -4,7 +4,7 @@
   import type { Task } from "../lib/types";
   import Pill from "./Pill.svelte";
 
-  let { engine, project, tasks, agentColumn = true }: { engine: string; project: string; tasks: Task[]; agentColumn?: boolean } = $props();
+  let { project, tasks, agentColumn = true }: { project: string; tasks: Task[]; agentColumn?: boolean } = $props();
 
   const verbs: Record<string, string> = { spawn: "spawn", start: "start", stop: "stop", rm: "remove" };
 </script>
@@ -18,7 +18,7 @@
           <td title={stamp(t.startedAt)}>{ago(t.startedAt)}</td>
           <td>{t.creator}</td>
           <td>{verbs[t.verb] ?? t.verb}{#if t.template} <span class="muted">{t.template}</span>{/if}</td>
-          {#if agentColumn}<td><a href={href.agent(engine, project, t.agent)}>{t.agent}</a></td>{/if}
+          {#if agentColumn}<td><a href={href.agent(project, t.agent)}>{t.agent}</a></td>{/if}
           <td>
             {#if t.state === "running"}<Pill kind="starting" label={taskDoing(t.verb)} />
             {:else if t.state === "done"}<Pill kind="done" label="done" />

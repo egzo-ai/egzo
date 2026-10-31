@@ -1,22 +1,20 @@
 <script lang="ts">
-  import { app, multiEngine, signOut, toggleTheme } from "../lib/app.svelte";
+  import { app, projectName, toggleTheme } from "../lib/app.svelte";
   import { taskDoing } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
   import { closeTerm, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
   import Avatar from "./Avatar.svelte";
-  import EngineBadge from "./EngineBadge.svelte";
   import Icon from "./Icon.svelte";
   import Logo from "./Logo.svelte";
 
   let { onsignout }: { onsignout: () => void } = $props();
 
-  const multi = $derived(multiEngine());
   const onPage = $derived(workspace.active === null);
   const route = $derived(nav.route);
-  const down = $derived(app.engines.filter((e) => !e.up).length);
+  const offline = $derived(app.projects.filter((p) => p.offlineSince).length);
 
   function agentOf(t: Term) {
-    return app.projects.find((p) => p.engine === t.engine && p.name === t.project)?.agents.find((a) => a.name === t.agent);
+    return app.projects.find((p) => p.id === t.project)?.agents.find((a) => a.name === t.agent);
   }
 
   /** The state shown for a terminal: a connection that is gone because the agent stopped says so. */
@@ -48,10 +46,10 @@
   function label(t: Term): string {
     const a = agentOf(t);
     const s = shownState(t);
-    return `${t.agent}, ${t.project}${multi ? " on " + t.engine : ""}, ${stateText[s]}${s === "connected" && a && a.activity !== "unknown" ? ", " + a.activity : ""}${t.unread ? ", new output" : ""}`;
+    return `${t.agent}, ${projectName(t.project)}, ${stateText[s]}${s === "connected" && a && a.activity !== "unknown" ? ", " + a.activity : ""}${t.unread ? ", new output" : ""}`;
   }
 
-  const waitingIn = (engine: string, project: string) => app.projects.find((p) => p.engine === engine && p.name === project)?.agents.filter((a) => a.waiting).length ?? 0;
+  const waitingIn = (id: string) => app.projects.find((p) => p.id === id)?.agents.filter((a) => a.waiting).length ?? 0;
   const totalWaiting = $derived(app.projects.reduce((n, p) => n + p.agents.filter((a) => a.waiting).length, 0));
 
   function termKey(e: KeyboardEvent, t: Term) {
@@ -67,7 +65,7 @@
 
   const sections = $derived.by(() => {
     if (route.name !== "project" && route.name !== "agent") return null;
-    const p = app.projects.find((x) => x.engine === route.engine && x.name === route.project);
+    const p = app.projects.find((x) => x.id === route.project);
     if (!p) return null;
     const admin = p.role === "administrator" || p.role === "owner";
     return {
@@ -111,7 +109,7 @@
           class="term-item"
           aria-selected={sel}
           aria-label={label(t)}
-          title="{t.engine}:{t.project}/{t.agent}"
+          title="{projectName(t.project)}/{t.agent}"
           data-tab={t.id}
           data-unread={t.unread && !sel ? "" : undefined}
           data-visible={workspace.active !== null && workspace.panes.includes(t.id) && !sel ? "" : undefined}
@@ -134,7 +132,7 @@
             <span class="n">{i + 1}</span>
             <button class="x" aria-label="Close {t.agent}" onclick={(e) => { e.stopPropagation(); closeTerm(t.id); }}><Icon name="x" size="sm" /></button>
           </span>
-          <span class="where">{t.project}{multi ? " · " + t.engine : ""}</span>
+          <span class="where">{projectName(t.project)}</span>
           <span class="what" data-t={wt}>{w}</span>
         </div>
       {:else}
@@ -153,27 +151,26 @@
         <span class="ic"><Icon name="list" size="sm" /></span><span class="nm">All projects</span>
         <span class="end">{#if totalWaiting}<span class="qcount" title="{totalWaiting} waiting for an answer">{totalWaiting}?</span>{/if}</span>
       </a>
-      {#each app.projects as p (p.engine + "/" + p.name)}
-        {@const current = (route.name === "project" || route.name === "agent") && route.engine === p.engine && route.project === p.name}
-        {@const q = waitingIn(p.engine, p.name)}
-        <a class="nav-item proj" href={href.project(p.engine, p.name)} title="{p.engine}:{p.name}" onclick={showPage}>
+      {#each app.projects as p (p.id)}
+        {@const current = (route.name === "project" || route.name === "agent") && route.project === p.id}
+        {@const q = waitingIn(p.id)}
+        <a class="nav-item proj" href={href.project(p.id)} title="{p.name} on {p.host}" onclick={showPage}>
           <span class="ic"><Icon name={current ? "chev-d" : "chev-r"} size="sm" /></span><span class="ini" aria-hidden="true">{p.name.slice(0, 2)}</span>
           <span class="nm">{p.name}</span>
           <span class="end">
             {#if q}<span class="qcount" title="{q} waiting for an answer">{q}?</span>{/if}
-            {#if !p.up}<span class="pill" data-s="warn" style="height:16px;font-size:10px">down</span>{/if}
-            {#if multi}<EngineBadge name={p.engine} />{/if}
+            {#if p.offlineSince}<span class="pill" data-s="unreachable" style="height:16px;font-size:10px">offline</span>{:else if !p.up}<span class="pill" data-s="warn" style="height:16px;font-size:10px">down</span>{/if}
           </span>
         </a>
         {#if current && sections}
           <div class="nav-sub">
             {#each sections.list as [tab, name, count]}
-              <a class="nav-item" href={href.project(p.engine, p.name, tab)} aria-current={onPage && route.name === "project" && route.tab === tab ? "page" : undefined} onclick={showPage}>
+              <a class="nav-item" href={href.project(p.id, tab)} aria-current={onPage && route.name === "project" && route.tab === tab ? "page" : undefined} onclick={showPage}>
                 <span class="nm">{name}</span><span class="end"><span class="n">{count ?? ""}</span></span>
               </a>
             {/each}
             {#if route.name === "agent"}
-              <a class="nav-item" href={href.agent(p.engine, p.name, route.agent)} aria-current={onPage ? "page" : undefined} onclick={showPage}><span class="nm">↳ {route.agent}</span></a>
+              <a class="nav-item" href={href.agent(p.id, route.agent)} aria-current={onPage ? "page" : undefined} onclick={showPage}><span class="nm">↳ {route.agent}</span></a>
             {/if}
           </div>
         {/if}
@@ -183,15 +180,10 @@
 
   <div class="side-foot">
     {#if app.user?.isOperator}
-      <a class="health" href={href.settings()} data-down={down ? "" : undefined} aria-current={onPage && route.name === "settings" ? "page" : undefined} aria-label={down ? `Settings: ${down} of ${app.engines.length} engines unreachable` : "Settings"} onclick={showPage}>
-        <Icon name="engine" size="sm" /><span class="t">Settings</span>
-        {#if down}<span class="warn hide-rail">⌁ {down} down</span>{/if}
+      <a class="health" href={href.settings()} data-down={offline ? "" : undefined} aria-current={onPage && route.name === "settings" ? "page" : undefined} aria-label={offline ? `Settings: ${offline} of ${app.projects.length} projects offline` : "Settings"} onclick={showPage}>
+        <Icon name="server" size="sm" /><span class="t">Settings</span>
+        {#if offline}<span class="warn hide-rail">⌁ {offline} offline</span>{/if}
       </a>
-    {:else if multi}
-      <div class="health" data-down={down ? "" : undefined}>
-        <Icon name="engine" size="sm" /><span class="t">Engines&nbsp;<span class="muted">{app.engines.length - down}/{app.engines.length}</span></span>
-        {#if down}<span class="warn hide-rail">⌁ {down} down</span>{/if}
-      </div>
     {/if}
     <div class="row">
       <a class="me" data-testid="signed-in-as" href={href.account()} title="Your account" onclick={showPage}>

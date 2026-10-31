@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { app, multiEngine, toggleTheme } from "../lib/app.svelte";
+  import { app, toggleTheme } from "../lib/app.svelte";
   import { href, navigate } from "../lib/router.svelte";
   import { cycleLayout, openTerm, showPage, workspace } from "../lib/workspace.svelte";
   import { toast } from "../lib/app.svelte";
@@ -13,22 +13,21 @@
 
   const items = $derived.by(() => {
     const out: Item[] = [];
-    const multi = multiEngine();
     out.push({ group: "Go to", label: "All projects", run: () => { showPage(); navigate(href.home()); } });
     if (app.user?.isOperator) {
-      out.push({ group: "Go to", label: "Engines", run: () => { showPage(); navigate(href.engines()); } });
+      out.push({ group: "Go to", label: "Links", run: () => { showPage(); navigate(href.links()); } });
       out.push({ group: "Go to", label: "Users", run: () => { showPage(); navigate(href.users()); } });
     }
     out.push({ group: "Go to", label: "Your account", run: () => { showPage(); navigate(href.account()); } });
     for (const p of app.projects) {
-      out.push({ group: "Projects", label: p.name, hint: multi ? p.engine : "", run: () => { showPage(); navigate(href.project(p.engine, p.name)); } });
+      out.push({ group: "Projects", label: p.name, hint: p.host, run: () => { showPage(); navigate(href.project(p.id)); } });
       for (const a of p.agents) {
         out.push({
-          group: "Agents", label: `${p.name}/${a.name}`, hint: (multi ? p.engine + " · " : "") + (a.running ? "attach" : "stopped"),
+          group: "Agents", label: `${p.name}/${a.name}`, hint: p.host + " · " + (a.running ? "attach" : "stopped"),
           run: () => {
-            if (a.running && openTerm(p.engine, p.name, a.name)) return;
+            if (a.running && openTerm(p.id, a.name)) return;
             if (a.running) toast("Too many terminals are open. Close one first.", "error");
-            else { showPage(); navigate(href.agent(p.engine, p.name, a.name)); }
+            else { showPage(); navigate(href.agent(p.id, a.name)); }
           },
         });
       }

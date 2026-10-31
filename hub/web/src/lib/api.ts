@@ -1,6 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, EngineInput, EngineState, Members, Network, Project, ProjectList, SaveEngineAnswer, Session, SignInOptions, Task, TimelineEvent,
-  UserRow,
+  AgentAnswer, AuditEntry, Link, LinkCode, Members, Network, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -44,8 +43,8 @@ async function request<T>(method: string, path: string, body?: unknown, prefix =
 }
 
 const enc = encodeURIComponent;
-const project = (engine: string, name: string) => `/e/${enc(engine)}/p/${enc(name)}`;
-const agent = (engine: string, p: string, a: string) => `${project(engine, p)}/a/${enc(a)}`;
+const project = (id: string) => `/p/${enc(id)}`;
+const agent = (id: string, a: string) => `${project(id)}/a/${enc(a)}`;
 
 export const api = {
   session: () => request<Session>("GET", "/session"),
@@ -57,45 +56,50 @@ export const api = {
   unlink: (identity: string) => request<{ ok: true }>("DELETE", `/me/identities/${enc(identity)}`),
   projects: () => request<ProjectList>("GET", "/projects"),
 
-  engines: () => request<{ engines: EngineState[] }>("GET", "/engines").then((r) => r.engines),
-  saveEngine: (input: EngineInput) => request<SaveEngineAnswer>("POST", "/engines", input),
-  confirmEngine: (token: string) => request<SaveEngineAnswer>("POST", "/engines/confirm", { token }),
-  removeEngine: (name: string) => request<{ removed: string }>("DELETE", `/engines/${enc(name)}`),
+  /** Every registration, whatever its state: operators. */
+  links: () => request<{ links: Link[] }>("GET", "/links").then((r) => r.links),
+  revokeLink: (id: string, message: string) => request<{ ok: true }>("POST", `/links/${enc(id)}/revoke`, { message }),
+  forgetLink: (id: string) => request<{ ok: true }>("DELETE", `/links/${enc(id)}`),
+  /** Makes a code that registers one project. The answer is the only time the code is seen: operators. */
+  createLinkCode: () => request<NewLinkCode>("POST", "/links/codes"),
+  /** The codes that are still good, without their values: operators. */
+  linkCodes: () => request<{ codes: LinkCode[] }>("GET", "/links/codes").then((r) => r.codes),
+  cancelLinkCode: (id: string) => request<{ ok: true }>("DELETE", `/links/codes/${enc(id)}`),
 
   users: () => request<{ users: UserRow[]; me: string }>("GET", "/users"),
   setOperator: (id: string, isOperator: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { isOperator }),
   setDisabled: (id: string, disabled: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { disabled }),
   removeIdentity: (user: string, identity: string) => request<{ ok: true }>("DELETE", `/users/${enc(user)}/identities/${enc(identity)}`),
 
-  project: (engine: string, name: string) => request<Project>("GET", project(engine, name)),
-  events: (engine: string, name: string, agentName = "", limit = 40) =>
-    request<{ events: TimelineEvent[] }>("GET", `${project(engine, name)}/events?limit=${limit}${agentName ? "&agent=" + enc(agentName) : ""}`).then((r) => r.events),
+  project: (id: string) => request<Project>("GET", project(id)),
+  events: (id: string, agentName = "", limit = 40) =>
+    request<{ events: TimelineEvent[] }>("GET", `${project(id)}/events?limit=${limit}${agentName ? "&agent=" + enc(agentName) : ""}`).then((r) => r.events),
   /** Answered at once: the hub runs the spawn as a task, and the agent is in the project from then on. */
-  spawn: (engine: string, name: string, template: string, agentName: string) =>
-    request<{ task: Task }>("POST", `${project(engine, name)}/spawn`, { template, name: agentName }).then((r) => r.task),
+  spawn: (id: string, template: string, agentName: string) =>
+    request<{ task: Task }>("POST", `${project(id)}/spawn`, { template, name: agentName }).then((r) => r.task),
   /** The project's activity, or one agent's: the latest tasks, newest first. */
-  tasks: (engine: string, name: string, agentName = "") =>
-    request<{ tasks: Task[] }>("GET", `${project(engine, name)}/tasks${agentName ? "?agent=" + enc(agentName) : ""}`).then((r) => r.tasks),
-  task: (engine: string, name: string, id: string) => request<{ task: Task }>("GET", `${project(engine, name)}/tasks/${enc(id)}`).then((r) => r.task),
+  tasks: (id: string, agentName = "") =>
+    request<{ tasks: Task[] }>("GET", `${project(id)}/tasks${agentName ? "?agent=" + enc(agentName) : ""}`).then((r) => r.tasks),
+  task: (id: string, task: string) => request<{ task: Task }>("GET", `${project(id)}/tasks/${enc(task)}`).then((r) => r.task),
   /** Takes an ended task off its agent. */
-  dismissTask: (engine: string, name: string, id: string) => request<{ ok: true }>("DELETE", `${project(engine, name)}/tasks/${enc(id)}`),
-  spec: (engine: string, name: string) => request<{ text: string }>("GET", `${project(engine, name)}/spec`).then((r) => r.text),
-  members: (engine: string, name: string) => request<Members>("GET", `${project(engine, name)}/members`),
-  setRole: (engine: string, name: string, user: string, role: string) =>
-    request<{ ok: true }>("POST", `${project(engine, name)}/members`, { user, role }),
-  audit: (engine: string, name: string) => request<{ entries: AuditEntry[] }>("GET", `${project(engine, name)}/audit`).then((r) => r.entries),
-  network: (engine: string, name: string, agentName = "") =>
-    request<Network>("GET", `${project(engine, name)}/network${agentName ? "?agent=" + enc(agentName) : ""}`),
+  dismissTask: (id: string, task: string) => request<{ ok: true }>("DELETE", `${project(id)}/tasks/${enc(task)}`),
+  spec: (id: string) => request<{ text: string }>("GET", `${project(id)}/spec`).then((r) => r.text),
+  members: (id: string) => request<Members>("GET", `${project(id)}/members`),
+  setRole: (id: string, user: string, role: string) =>
+    request<{ ok: true }>("POST", `${project(id)}/members`, { user, role }),
+  audit: (id: string) => request<{ entries: AuditEntry[] }>("GET", `${project(id)}/audit`).then((r) => r.entries),
+  network: (id: string, agentName = "") =>
+    request<Network>("GET", `${project(id)}/network${agentName ? "?agent=" + enc(agentName) : ""}`),
 
-  agent: (engine: string, p: string, a: string) => request<AgentAnswer>("GET", agent(engine, p, a)),
+  agent: (id: string, a: string) => request<AgentAnswer>("GET", agent(id, a)),
   /** Answered at once: the hub runs it as a task, shown on the agent. */
-  operate: (engine: string, p: string, a: string, verb: "start" | "stop" | "rm") =>
-    request<{ task: Task }>("POST", `${agent(engine, p, a)}/${verb}`).then((r) => r.task),
-  logs: (engine: string, p: string, a: string) => request<{ text: string }>("GET", `${agent(engine, p, a)}/logs`).then((r) => r.text),
+  operate: (id: string, a: string, verb: "start" | "stop" | "rm") =>
+    request<{ task: Task }>("POST", `${agent(id, a)}/${verb}`).then((r) => r.task),
+  logs: (id: string, a: string) => request<{ text: string }>("GET", `${agent(id, a)}/logs`).then((r) => r.text),
 };
 
 /** The websocket address of an agent's terminal. */
-export function terminalURL(engine: string, p: string, a: string, takeover: boolean): string {
+export function terminalURL(id: string, a: string, takeover: boolean): string {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
-  return `${scheme}${location.host}/api/v1${agent(engine, p, a)}/terminal${takeover ? "?takeover=1" : ""}`;
+  return `${scheme}${location.host}/api/v1${agent(id, a)}/terminal${takeover ? "?takeover=1" : ""}`;
 }

@@ -53,14 +53,14 @@
         ? {
             title: `Make ${u.username} an operator?`,
             lines: [
-              `${u.username} will manage the engines and the users, and hold every project on every engine: other people's agents and terminals included.`,
+              `${u.username} will manage the links and the users, and hold every project: other people's agents and terminals included.`,
               "Everything they do stays in the audit log under their name.",
             ],
             confirm: "Make operator", tone: "normal",
           }
         : {
             title: `Remove operator from ${u.username}?`,
-            lines: [`${u.username} stops managing the engines and the users, and stops holding every project.`, "They keep any role they were given on a project, and lose the rest."],
+            lines: [`${u.username} stops managing the links and the users, and stops holding every project.`, "They keep any role they were given on a project, and lose the rest."],
             confirm: "Remove operator",
           },
     );
@@ -97,7 +97,7 @@
   <ErrorPage error={failure} />
 {:else}
   <div style="display:grid;gap:var(--space-4)">
-    <p class="dim" style="margin:0">Everybody who has signed in. An operator manages the engines and the users and holds every project; everyone else holds what a project owner gave them. Roles on a project are managed on its Members tab.</p>
+    <p class="dim" style="margin:0">Everybody who has signed in. An operator manages the links and the users and holds every project; everyone else holds what a project owner gave them. Roles on a project are managed on its Members tab.</p>
     {#if disabled}
       <label class="check"><input type="checkbox" bind:checked={showDisabled} /> Show disabled users ({disabled})</label>
     {/if}

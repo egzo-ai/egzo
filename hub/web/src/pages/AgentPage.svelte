@@ -1,13 +1,12 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, errorText, multiEngine, toast } from "../lib/app.svelte";
+  import { app, errorText, toast } from "../lib/app.svelte";
   import { operate } from "../lib/agentops";
   import { activityKind, activityLabel, ago, initials, stamp, taskDoing, taskFailedLabel } from "../lib/format";
   import { poll } from "../lib/live";
   import { href, navigate, type AgentTab } from "../lib/router.svelte";
   import type { AgentAnswer, Task, TimelineEvent } from "../lib/types";
   import { openTerm, termId, workspace } from "../lib/workspace.svelte";
-  import EngineBadge from "../components/EngineBadge.svelte";
   import Icon from "../components/Icon.svelte";
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
@@ -15,7 +14,7 @@
   import Timeline from "../components/Timeline.svelte";
   import ErrorPage from "./ErrorPage.svelte";
 
-  let { engine, project, agent, tab }: { engine: string; project: string; agent: string; tab: AgentTab } = $props();
+  let { project, agent, tab }: { project: string; agent: string; tab: AgentTab } = $props();
 
   let data = $state<AgentAnswer | null>(null);
   let failure = $state<unknown>(null);
@@ -23,18 +22,18 @@
   let logs = $state<string | null>(null);
   let activity = $state<Task[] | null>(null);
 
-  const multi = $derived(multiEngine());
   const a = $derived(data?.agent);
-  // the engine does not have the agent while it is being made, or once a spawn failed: it has a task and no state
+  // the project does not have the agent while it is being made, or once a spawn failed: it has a task and no state
   const made = $derived(!!a?.state);
   const busy = $derived(a?.task?.state === "running");
-  const isOpen = $derived(workspace.terms.some((t) => t.id === termId(engine, project, agent)));
+  const offline = $derived(!!data?.project.offlineSince);
+  const isOpen = $derived(workspace.terms.some((t) => t.id === termId(project, agent)));
 
   // The agent itself comes from what the hub already holds, so it is read often. The timeline is read from the control sidecar, which
   // runs a command in it, so it is read slowly and only when it is on the screen.
   $effect(() => poll(async () => {
     try {
-      data = await api.agent(engine, project, agent);
+      data = await api.agent(project, agent);
       failure = null;
     } catch (e) {
       if (!data) failure = e;
@@ -42,41 +41,41 @@
     }
   }));
   $effect(() => {
-    if (tab !== "overview") return;
+    if (tab !== "overview" || offline) return;
     return poll(async () => {
-      events = await api.events(engine, project, agent, 40);
+      events = await api.events(project, agent, 40);
     }, 15000);
   });
   $effect(() => {
     if (tab !== "activity") return;
     return poll(async () => {
-      activity = await api.tasks(engine, project, agent);
+      activity = await api.tasks(project, agent);
     }, 5000);
   });
   $effect(() => {
-    if (tab === "logs") void api.logs(engine, project, agent).then((t) => (logs = t)).catch((e) => toast(errorText(e), "error"));
+    if (tab === "logs") void api.logs(project, agent).then((t) => (logs = t)).catch((e) => toast(errorText(e), "error"));
   });
 
   // a removal goes on in the project's list, where the agent says it is being removed until it is gone
   async function act(verb: "start" | "stop" | "rm") {
-    if (!(await operate(engine, project, agent, verb))) return;
-    if (verb === "rm") navigate(href.project(engine, project));
-    else data = await api.agent(engine, project, agent);
+    if (!(await operate(project, agent, verb))) return;
+    if (verb === "rm") navigate(href.project(project));
+    else data = await api.agent(project, agent);
   }
 
   async function dismiss() {
     if (!a?.task) return;
     try {
-      await api.dismissTask(engine, project, a.task.id);
-      if (made) data = await api.agent(engine, project, agent);
-      else navigate(href.project(engine, project));
+      await api.dismissTask(project, a.task.id);
+      if (made) data = await api.agent(project, agent);
+      else navigate(href.project(project));
     } catch (e) {
       toast(errorText(e), "error");
     }
   }
 
   function attach() {
-    if (!openTerm(engine, project, agent)) toast("Too many terminals are open. Close one first.", "error");
+    if (!openTerm(project, agent)) toast("Too many terminals are open. Close one first.", "error");
   }
 </script>
 
@@ -84,18 +83,18 @@
   <ErrorPage error={failure} />
 {:else if data && a}
   <div class="page">
-    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(engine, project)}>{project}</a> /{#if multi} <EngineBadge name={engine} />{/if}</nav>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(project)}>{data.project.name}</a> /</nav>
     <div class="phead">
       <h1 class="h-page">{a.name}</h1>
       {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />{/if}
       {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
       {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting">waiting for an answer</span>{/if}
       {#if a.stale}<span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}
-      {#if a.denied}<a class="pill" data-s="error" href={href.agent(engine, project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}
+      {#if a.denied}<a class="pill" data-s="error" href={href.agent(project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}
       <span class="grow"></span>
       <span class="btn-group">
-        {#if a.canOperate && a.running}<button class="btn" data-variant="primary" data-key="a" aria-label={isOpen ? "Go to terminal" : "Attach"} aria-keyshortcuts="a" disabled={busy} onclick={attach}><Icon name="attach" />{isOpen ? "Go to terminal" : "Attach"} <span class="kbd">a</span></button>{/if}
-        {#if a.canOperate && made}
+        {#if a.canOperate && a.running && !offline}<button class="btn" data-variant="primary" data-key="a" aria-label={isOpen ? "Go to terminal" : "Attach"} aria-keyshortcuts="a" disabled={busy} onclick={attach}><Icon name="attach" />{isOpen ? "Go to terminal" : "Attach"} <span class="kbd">a</span></button>{/if}
+        {#if a.canOperate && made && !offline}
           {#if a.running}<button class="btn" disabled={busy} onclick={() => act("stop")}><Icon name="stop" />Stop</button>
           {:else}<button class="btn" disabled={busy} onclick={() => act("start")}><Icon name="play" />Start</button>{/if}
           <button class="btn" data-variant="danger" disabled={busy} onclick={() => act("rm")}><Icon name="trash" />Remove</button>
@@ -120,7 +119,9 @@
     <section class="termcard" aria-label="Terminal">
       <div class="grow">
         <b>Terminal</b><br />
-        {#if !made}
+        {#if offline}
+          <span class="muted">The project is offline: its link is not connected. The agent's session goes on without the hub.</span>
+        {:else if !made}
           <span class="muted">{busy ? "The agent is being made. Its terminal opens here when it is ready." : "The agent was not made."}</span>
         {:else if a.canOperate && a.running}
           <span class="muted">One person holds the terminal at a time; opening it while somebody else does offers to take it over. Detach with <span class="kbd">Ctrl</span> <span class="kbd">]</span> then <span class="kbd">d</span>.</span>
@@ -136,15 +137,15 @@
     </section>
 
     <div class="tabs" role="tablist">
-      <a class="tab" role="tab" href={href.agent(engine, project, agent)} aria-selected={tab === "overview"}>Timeline</a>
-      <a class="tab" role="tab" href={href.agent(engine, project, agent, "activity")} aria-selected={tab === "activity"}>Activity</a>
-      <a class="tab" role="tab" href={href.agent(engine, project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
-      <a class="tab" role="tab" href={href.agent(engine, project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
+      <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={tab === "overview"}>Timeline</a>
+      <a class="tab" role="tab" href={href.agent(project, agent, "activity")} aria-selected={tab === "activity"}>Activity</a>
+      <a class="tab" role="tab" href={href.agent(project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
+      <a class="tab" role="tab" href={href.agent(project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
     </div>
 
     {#if tab === "overview"}
       <div class="twocol">
-        <Timeline {events} />
+        {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
         <section class="panel">
           <header><h2 class="h-section">Details</h2></header>
           <div class="pad">
@@ -158,9 +159,9 @@
         </section>
       </div>
     {:else if tab === "activity"}
-      {#if activity}<TaskTable {engine} {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
+      {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}
-      <NetworkView {engine} {project} {agent} />
+      <NetworkView {project} {agent} />
     {:else if logs === null}
       <p class="muted">Loading…</p>
     {:else}
