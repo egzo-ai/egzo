@@ -27,6 +27,12 @@ type hostileEngine struct {
 	handlers map[string]http.HandlerFunc
 }
 
+const (
+	kindAgent   = "agent"
+	kindControl = "control"
+	kindProxy   = "proxy"
+)
+
 func newHostileEngine(t *testing.T) *hostileEngine {
 	return &hostileEngine{t: t, handlers: map[string]http.HandlerFunc{}}
 }

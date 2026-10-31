@@ -5,7 +5,6 @@ go 1.27.3
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-oidc/v3 v3.21.0
-	github.com/docker/docker v28.5.2+incompatible
 	github.com/egzo-ai/egzo v0.0.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	golang.org/x/crypto v0.58.0
@@ -23,6 +22,7 @@ require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
+	github.com/docker/docker v28.5.2+incompatible // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
