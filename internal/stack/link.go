@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/mount"
+
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/hublink"
@@ -40,10 +42,7 @@ type LinkSocket struct {
 // machine. So a throwaway container mounts the socket and reads its group. A socket that is not at the path fails here, before
 // anything is changed.
 func FindLinkSocket(ctx context.Context, c *engine.Client, image string) (LinkSocket, error) {
-	socket := LinkSocket{Path: defaultSocket}
-	if host := c.API.DaemonHost(); strings.HasPrefix(host, "unix://") {
-		socket.Path = strings.TrimPrefix(host, "unix://")
-	}
+	socket := LinkSocket{Path: socketPath(c)}
 	if c.IsRootless() {
 		return socket, nil // the invoking user owns the socket, and is root in the container's namespace
 	}
@@ -62,6 +61,37 @@ func FindLinkSocket(ctx context.Context, c *engine.Client, image string) (LinkSo
 	}
 	socket.Group = strings.TrimSpace(out)
 	return socket, nil
+}
+
+func socketPath(c *engine.Client) string {
+	if host := c.API.DaemonHost(); strings.HasPrefix(host, "unix://") {
+		return strings.TrimPrefix(host, "unix://")
+	}
+	return defaultSocket
+}
+
+// observedLinkSocket is what the running link was given. A dry run changes nothing, so it asks no container, and compares what
+// exists with itself: a link that is not there yet would be created whatever its socket is.
+func observedLinkSocket(ctx context.Context, c *engine.Client, project string) LinkSocket {
+	socket := LinkSocket{Path: socketPath(c)}
+	inspected, err := c.API.ContainerInspect(ctx, project+"-link-1")
+	if err != nil {
+		return socket
+	}
+	return linkSocketOf(socket, inspected.Config.User, inspected.HostConfig.Mounts)
+}
+
+// linkSocketOf reads a link's user and mounts, the reverse of linkUser and desireLink.
+func linkSocketOf(socket LinkSocket, user string, mounts []mount.Mount) LinkSocket {
+	if _, group, ok := strings.Cut(user, ":"); ok && user != "0:0" {
+		socket.Group = group
+	}
+	for _, m := range mounts {
+		if m.Target == LinkEngineSocket {
+			socket.Path = m.Source
+		}
+	}
+	return socket
 }
 
 // linkUser is who the link runs as: the sidecars' unprivileged user, in the group of the socket. Primary, not supplementary: that

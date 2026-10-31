@@ -55,6 +55,14 @@ def test_a_hub_that_is_not_an_address_is_refused(project, wrong):
     assert result.returncode != 0 and "hub" in result.stdout
 
 
+def test_a_dry_run_of_a_linked_project_runs_nothing(project, engine, egzo, fake_hub):
+    project.write(document(engine, egzo, fake_hub))
+    absent = "egzo-spec-absent:never-built"
+    result = project.run("project", "up", "--dry-run", env={"EGZO_IMAGE": absent})
+    assert result.returncode == 1 and "would create" in result.stdout, "exit 1: there are changes to make, and it could say which"
+    assert "not up to date" in project.run("project", "check", env={"EGZO_IMAGE": absent}).stdout
+
+
 def test_a_ca_that_is_not_certificates_is_refused(project):
     (project.root / "ca.pem").write_text("not a certificate")
     project.write(spec(hub={"url": "https://hub.example.org", "ca": "ca.pem"}))
@@ -172,7 +180,7 @@ def test_a_dropped_connection_comes_back_by_itself(linked, fake_hub):
 def test_up_again_changes_nothing_and_recreating_the_link_keeps_its_key(linked, fake_hub):
     key = fake_hub.registration(linked.name)["Key"]
     assert "nothing to do" in linked.ok("project up").stdout
-    assert linked.ok("project up --dry-run").returncode == 0
+    assert "nothing to do" in linked.ok("project up --dry-run").stdout, "a dry run sees the link as it is"
     linked.ok("project up --recreate")
     assert eventually(lambda: fake_hub.registration(linked.name)["Online"])
     assert fake_hub.registration(linked.name)["Key"] == key
