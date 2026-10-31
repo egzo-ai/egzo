@@ -54,8 +54,16 @@ type Link struct {
 	changed chan struct{} // closed and replaced when the status changes
 	key     ed25519.PrivateKey
 	proxy   string
+	asked   *registering  // the code `egzo project register` brought, until the hub has answered it
 	unlock  chan struct{} // closed once the key is open
 	wake    chan struct{} // a link that stopped dialing, or waits to dial again, goes on: holds one
+}
+
+// registering is one `egzo project register`. The code stays in memory, and only until the hub answers: it is never in a Status, a log
+// line or an error.
+type registering struct {
+	code string
+	done chan struct{} // closed when it has an answer
 }
 
 // New makes a link, locked until Unlock.
@@ -158,6 +166,52 @@ func (l *Link) again() {
 	}
 }
 
+// registerWait is how long Register waits for the hub: a dial, a handshake, and its answer.
+var registerWait = dialLimit + 5*time.Second
+
+// Register presents a link code to the hub and returns what it answered. A project that is registered already spends no code.
+func (l *Link) Register(ctx context.Context, code string) (Status, error) {
+	l.mu.Lock()
+	status := l.status
+	switch {
+	case status.State == hublink.StateApproved:
+		l.mu.Unlock()
+		return status, nil
+	case status.State == hublink.StateNoEngine, status.State == hublink.StateLocked:
+		l.mu.Unlock()
+		return status, errors.New(status.Text())
+	case l.asked != nil:
+		l.mu.Unlock()
+		return status, errors.New("another `egzo project register` is running")
+	}
+	asked := &registering{code: code, done: make(chan struct{})}
+	l.asked = asked
+	l.mu.Unlock()
+	defer l.answered(asked)
+	l.again()
+	ctx, cancel := context.WithTimeout(ctx, registerWait)
+	defer cancel()
+	select {
+	case <-asked.done:
+		return l.Status(), nil
+	case <-ctx.Done():
+		return l.Status(), errors.New("the hub did not answer")
+	}
+}
+
+// answered ends a registration: the code is dropped here.
+func (l *Link) answered(asked *registering) {
+	if asked == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.asked == asked {
+		l.asked = nil
+		close(asked.done)
+	}
+}
+
 // storeKey replaces the sealed key in one step: a link that dies half way keeps the one it had.
 func storeKey(dir string, keys *seal.Keys, key ed25519.PrivateKey) error {
 	sealed, err := keys.Seal(seal.UseLink, key.Seed())
@@ -239,21 +293,35 @@ func (l *Link) Run(ctx context.Context) error {
 	}
 }
 
-// attempt is one connection, and says how it ended.
+func (l *Link) current() *registering {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.asked
+}
+
+// attempt is one connection, with the code `egzo project register` brought if there is one, and says how it ended. A code that did not get
+// an answer is not tried again: the person who gave it hears that the hub cannot be reached. If it was spent all the same, the key is
+// approved the next time the link dials.
 func (l *Link) attempt(ctx context.Context) error {
-	err := l.connect(ctx)
+	asked := l.current()
+	err := l.connect(ctx, asked)
 	if err != nil && ctx.Err() == nil && !errors.Is(err, errTurnedAway) {
 		fmt.Fprintf(os.Stderr, "the connection to %s: %v\n", l.options.Hub, err)
 		l.setState(hublink.StateUnreachable, err.Error())
+		l.answered(asked)
 	}
 	return err
 }
 
 // connect is one connection, from the dial to its end.
-func (l *Link) connect(ctx context.Context) error {
+func (l *Link) connect(ctx context.Context, asked *registering) error {
 	l.mu.Lock()
 	key, proxy := l.key, l.proxy
 	l.mu.Unlock()
+	code := ""
+	if asked != nil {
+		code = asked.code
+	}
 	// Before the dial: the hub gives a handshake little time, and what an engine answers takes what it takes.
 	hello := l.hello(ctx, key)
 	dialing, cancel := context.WithTimeout(ctx, dialLimit)
@@ -280,7 +348,7 @@ func (l *Link) connect(ctx context.Context) error {
 		return errors.New(greeting.Refused)
 	}
 	public := key.Public().(ed25519.PublicKey)
-	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public, ""))}); err != nil {
+	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public, code)), Code: code}); err != nil {
 		return err
 	}
 	for {
@@ -292,6 +360,10 @@ func (l *Link) connect(ctx context.Context) error {
 			return fmt.Errorf("the connection to the hub ended: %w", err)
 		}
 		l.record(verdict)
+		// An answer to a connection that came without the code says nothing of the code, unless it is one the code would change nothing for.
+		if now := l.current(); now == asked || verdict.State != hublink.StateUnregistered {
+			l.answered(now)
+		}
 		if verdict.State != hublink.StateApproved {
 			return errTurnedAway
 		}

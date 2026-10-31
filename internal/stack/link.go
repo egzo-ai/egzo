@@ -27,6 +27,9 @@ const (
 	defaultSocket    = "/var/run/docker.sock"
 )
 
+// LinkReport is the key of the link's line in what Rows is given to report: not a name an instance can have.
+const LinkReport = "the link"
+
 // LinkSocket is the engine's socket as the link gets it: its path on the engine's host, and the group that may open it.
 type LinkSocket struct {
 	Path  string
@@ -155,4 +158,22 @@ func unlockLink(ctx context.Context, c *engine.Client, project, secretKey string
 		fmt.Fprintln(warnings, "warning: "+line) // the project runs without the hub
 	}
 	return nil
+}
+
+// LinkRegistration is what `egzo project register` hands the link through stdin, so that the code is never in `inspect`, in `ps` or in a
+// command line.
+type LinkRegistration struct {
+	Code string
+}
+
+// RegisterLink has the link present a code to its hub, and says what the hub answered. A project that was registered already stays as it
+// was.
+func RegisterLink(ctx context.Context, c *engine.Client, project, code string) (hublink.Status, error) {
+	var status hublink.Status
+	body, _ := json.Marshal(LinkRegistration{Code: code})
+	reply, err := linkRequest(ctx, c, project, "PUT", "/register", bytes.NewReader(body))
+	if err != nil {
+		return status, err
+	}
+	return status, json.Unmarshal(reply, &status)
 }

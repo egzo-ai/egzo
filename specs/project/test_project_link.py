@@ -8,9 +8,12 @@ hub here is fixtures/fakehub, which is core's real hub side of the protocol.
 The story follows one project: not registered, registered, working, dropped, revoked, unlinked."""
 
 import base64
+import json
+import time
 
 import pytest
 
+from hubkit import eventually
 from support import agent, spec
 
 
@@ -29,6 +32,14 @@ def linked(shared_project, engine, egzo, fake_hub):
 def link_of(engine, project):
     found = [c for c in engine.containers(project.name) if c.name == f"{project.name}-link-1"]
     return found[0] if found else None
+
+
+def row(project, name):
+    return [r for r in json.loads(project.ok("ps --json").stdout) if r["service"] == name][0]
+
+
+def check(project):
+    return project.run("project", "check")
 
 
 def test_the_hub_is_an_address_or_an_address_with_a_ca(project, tmp_path):
@@ -79,3 +90,69 @@ def test_the_secret_key_is_never_in_the_links_settings_and_the_key_on_the_volume
     assert sealed.returncode == 0
     assert len(base64.b64decode(sealed.stdout)) > 32, "more than a bare Ed25519 seed: a sealed record"
     assert sealed.stdout.strip() != "", "the key is on the volume"
+
+
+def test_a_project_that_is_not_registered_is_a_warning_and_the_link_stops_dialing(linked, fake_hub):
+    assert "not registered" in row(linked, "link")["status"]
+    result = check(linked)
+    assert result.returncode == 0, "a project runs without its hub"
+    assert "warn" in result.stdout and "not registered" in result.stdout
+    dials = fake_hub.dials()
+    time.sleep(3)
+    assert fake_hub.dials() == dials, "the hub said no, and asking again changes nothing until a person does something"
+
+
+def test_a_bad_code_is_refused_and_says_so_and_can_be_followed_by_a_good_one(linked, fake_hub):
+    result = linked.run("project", "register", input="egzo-link-wrong\n")
+    assert result.returncode != 0 and "did not take this code" in result.stderr
+    assert fake_hub.registration(linked.name) is None
+    assert "not registered" in row(linked, "link")["status"]
+
+
+def test_register_with_no_code_at_all_is_refused_before_anything_is_sent(linked, fake_hub):
+    dials = fake_hub.dials()
+    result = linked.run("project", "register", input="\n")
+    assert result.returncode != 0 and "not a link code" in result.stderr
+    assert fake_hub.dials() == dials
+
+
+def test_register_presents_the_code_once_and_the_project_is_approved(linked, fake_hub):
+    code = fake_hub.code("alice")
+    good = fake_hub.codes()
+    said = linked.ok("project register", input=code + "\n").stdout
+    assert "owned by alice" in said
+    registration = fake_hub.registration(linked.name)
+    assert registration["State"] == "approved"
+    assert registration["Templates"] == ["web"], "the project says what it holds"
+    assert registration["Host"]
+    assert fake_hub.codes() == good - 1, "the code is spent"
+
+    assert eventually(lambda: "owned by alice" in row(linked, "link")["status"])
+    result = check(linked)
+    assert result.returncode == 0 and "owned by alice" in result.stdout
+
+
+def test_register_again_says_so_and_spends_nothing(linked, fake_hub):
+    code = fake_hub.code("bob")
+    good = fake_hub.codes()
+    result = linked.run("project", "register", input=code + "\n")
+    assert result.returncode != 0 and "registered already" in result.stderr
+    assert fake_hub.codes() == good
+    assert fake_hub.registration(linked.name)["Owner"] == "alice"
+
+
+def test_the_code_is_in_no_setting_no_log_and_no_status(linked, fake_hub, engine):
+    link = link_of(engine, linked)
+    assert not [e for e in link.raw["Config"]["Env"] if "egzo-link-" in e]
+    assert "egzo-link-" not in " ".join(link.raw["Config"]["Cmd"] or [])
+    assert "egzo-link-" not in engine.run("logs", link.name).stdout + engine.run("logs", link.name).stderr
+    assert "egzo-link-" not in linked.ok("ps --json").stdout
+
+
+def test_register_needs_a_hub_and_a_running_link(project, engine, egzo, fake_hub):
+    project.write(spec(agents={"web": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "cat"})}))
+    result = project.run("project", "register", input="egzo-link-x\n")
+    assert result.returncode != 0 and "names no hub" in result.stderr
+    project.write(document(engine, egzo, fake_hub))
+    result = project.run("project", "register", input="egzo-link-x\n")
+    assert result.returncode != 0 and "project up" in result.stderr
