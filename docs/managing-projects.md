@@ -51,7 +51,8 @@ name an address (`0.0.0.0:8000:3000` offers the agent's server to your network).
 
 Ctrl-C ends it, and it ends by itself when the agent stops. A connection to a port where nothing listens closes, and the command says so and
 keeps going, so you can start it before the server. When a client has closed its side, the agent's server has a minute of silence to answer
-or close before the connection is dropped. The agent's image must contain egzo, as for `agent attach`: the harness images do.
+or close before the connection is dropped, and ten minutes in all however much it says: a client that left cannot be told from one that only
+ended its input, and a server that keeps talking must not keep the command running in the agent. The agent's image must contain egzo, as for `agent attach`: the harness images do.
 
 ## Editing the file
 

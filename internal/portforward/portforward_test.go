@@ -134,3 +134,32 @@ func TestAServerStillTalkingAfterTheEndOfInputIsNotCutOff(t *testing.T) {
 		t.Errorf("got %d bytes, %v", out.Len(), err)
 	}
 }
+
+func TestAServerThatNeverStopsTalkingIsLeftAtTheLimit(t *testing.T) {
+	drainLimit = 100 * time.Millisecond
+	defer func() { drainLimit = 10 * time.Minute }()
+	listener, port := listen(t, "tcp4", "127.0.0.1:0")
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			if _, err := conn.Write([]byte("tick")); err != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- Forward(port, strings.NewReader(""), io.Discard) }() // no write fails: the engine reads a gone client's stdout
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("still running")
+	}
+}
