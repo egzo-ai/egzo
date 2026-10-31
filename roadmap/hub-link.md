@@ -86,9 +86,8 @@ link: registered as web, owned by alice
 
 ## The connection
 
-- **A WebSocket carrying a stream multiplexer** (yamux or similar, chosen in the spike): it passes reverse proxies and company
-  proxies that an HTTP/2 stream to a backend does not. One stream per verb, per terminal and per preview connection; the feeds
-  have one each.
+- **A WebSocket carrying yamux** ([chosen in the spike](#spike-results)): it passes reverse proxies and company proxies that an
+  HTTP/2 stream to a backend does not. One stream per verb, per terminal and per preview connection; the feeds have one each.
 - **A versioned protocol.** Link and hub are separate releases on separate machines: the protocol says its version at the
   handshake, and a hub refuses a link it does not speak with a message that says which to upgrade
   ([control-compatibility.md](control-compatibility.md) becomes this). Before 1.0, one version at a time: no ranges, no
@@ -172,13 +171,76 @@ no valid owner: the operators see it, and grant a new owner or revoke it.
 
 ## Order of work
 
-1. **Spikes**: the link as a sidecar with the engine's socket on Docker, rootless Podman and gVisor; a WebSocket with a
-   multiplexer through a company HTTP proxy and through Caddy and nginx in front of the hub.
+1. **Spikes**: the link as a sidecar with the engine's socket, and a WebSocket with a multiplexer through a company HTTP proxy
+   and through Caddy and nginx in front of the hub. Done on Docker ([results](#spike-results)); rootless Podman and gVisor are
+   later spikes.
 2. **Core**: `hub:`, the `link` role, registration, the protocol with the verbs and streams, the pushed feeds, with specs.
 3. **The hub**: the link endpoint, the seam over the link, registration pages, projects by id; then remove the engines and
    everything listed above.
 4. **Previews** ([agent-ports.md](agent-ports.md)) over the link.
 5. **Roles and invites**: invites, the viewer role, the project quota, operators.
+
+## Spike results
+
+Run on 2026-10-31 on Docker 29.1.3 with runc. The clients and proxies ran in containers on one machine.
+
+### The link as a sidecar
+
+A probe in a container with the socket mounted and a sidecar's settings (`--cap-drop ALL`, `no-new-privileges`, read-only root,
+a tmpfs on `/tmp`, a network of its own) did everything the link needs: list, an internal network, create and start a container,
+follow events and logs, exec with stdin and stdout (8 MiB through `cat`), stop and remove, and outbound HTTPS.
+
+- **The sidecar user cannot open the socket as it is.** `65532:65532` is refused (`660 root:docker`). `65532:<socket gid>` and
+  `--group-add <socket gid>` both work: the link keeps a non-root user and needs the socket's group.
+- **For step 2:** `up` must learn the socket's group and its path on the engine's host. A CLI on another machine cannot `stat` it.
+  Not tried yet.
+
+### The connection
+
+The client dialled through `HTTPS_PROXY`, and the hub's side and the link's side both opened streams.
+
+| In the way | Result |
+|---|---|
+| Caddy | passes, no configuration |
+| nginx with `Upgrade` and `Connection` headers | passes |
+| nginx with a plain `proxy_pass` | refused: 426 |
+| Squid, CONNECT | passes |
+| Squid, CONNECT with Basic auth | passes with the credentials in `HTTPS_PROXY`; 407 without |
+| Squid, TLS inspection (default) | refused: 426 |
+| Squid, TLS inspection with `http_upgrade_request_protocols websocket allow all` | passes |
+
+The client skipped certificate checks here, so trusting an inspecting proxy's CA is untested. NTLM and Kerberos proxies are too.
+
+| | yamux 0.1.2 | smux 1.5.58 |
+|---|---|---|
+| 200 streams opened by the hub, through Caddy | 597 ms | 372 ms |
+| half-close | `Close` | `CloseWrite` |
+| throughput through Caddy | 456 MB/s | 517 MB/s |
+| round trip beside a bulk download, 30 ms and 50 Mbit (p50, p99) | 30 ms, 171 ms | 30 ms, 170 ms |
+| a stalled stream | stops at its window, others unaffected | the same |
+| silent path noticed, keep-alive 15 s | 17 s | 52 s |
+| licence | MPL-2.0 | MIT |
+
+**yamux is the choice.** The two perform alike. yamux noticed a dead path sooner with no tuning beyond the interval (smux's timeout
+was set to 30 s and could be lowered), and half-close, which `egzo agent forward` needs, is its plain `Close`.
+
+What the link must do, whichever multiplexer:
+
+- **Keep-alive is required.** Without it nginx cut an idle connection at its default 60 s, and a silent path was not noticed in
+  120 s. Use 15 s.
+- **Explain a 426**: it means something between the link and the hub dropped the upgrade, usually a reverse proxy without the
+  headers, or an inspecting proxy. The docs carry the nginx lines.
+- **Take the proxy from the environment**, credentials included: `up` must hand `HTTPS_PROXY` to the link.
+- Use HTTP/1.1 for the upgrade, no WebSocket compression, and no read limit on the WebSocket: yamux frames its own data.
+
+### Left for the later spikes
+
+Partial notes, not conclusions:
+
+- **Rootless Podman**: `65532:65532` is refused and root in the container worked. Events and log following returned nothing on the
+  test machine under `journald`, from the host too, and worked with the file backends.
+- **gVisor**: a container under default `runsc` could not connect to the mounted socket. With `--host-uds=open` it did, with the
+  socket's group as the primary gid (`--group-add` was not enough). Outbound from a user-defined network failed: open.
 
 ## Open questions
 
