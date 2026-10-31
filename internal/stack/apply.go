@@ -373,6 +373,7 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 			}
 		}
 	}
+	unlink(ctx, c, observed, out)
 	orphans := orphanWorktrees(observed)
 	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
 	// depends on anything, and stopping containers is where the time goes, so do it together.

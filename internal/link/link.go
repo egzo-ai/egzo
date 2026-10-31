@@ -61,9 +61,11 @@ type Link struct {
 	changed chan struct{} // closed and replaced when the status changes
 	key     ed25519.PrivateKey
 	proxy   string
-	asked   *registering  // the code `egzo project register` brought, until the hub has answered it
-	unlock  chan struct{} // closed once the key is open
-	wake    chan struct{} // a link that stopped dialing, or waits to dial again, goes on: holds one
+	control *hublink.Lines // the live control stream, for the last word
+	asked   *registering   // the code `egzo project register` brought, until the hub has answered it
+	unlock  chan struct{}  // closed once the key is open
+	wake    chan struct{}  // a link that stopped dialing, or waits to dial again, goes on: holds one
+	gone    chan struct{}  // closed when the hub has forgotten the project
 }
 
 // registering is one `egzo project register`. The code stays in memory, and only until the hub answers: it is never in a Status, a log
@@ -77,7 +79,7 @@ type registering struct {
 func New(options Options) *Link {
 	return &Link{
 		options: options, status: Status{Hub: options.Hub, State: hublink.StateLocked},
-		changed: make(chan struct{}), unlock: make(chan struct{}), wake: make(chan struct{}, 1),
+		changed: make(chan struct{}), unlock: make(chan struct{}), wake: make(chan struct{}, 1), gone: make(chan struct{}),
 	}
 }
 
@@ -273,6 +275,11 @@ func (l *Link) Run(ctx context.Context) error {
 	for {
 		began := time.Now()
 		err := l.attempt(ctx)
+		select {
+		case <-l.gone:
+			return nil
+		default:
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -358,6 +365,15 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public, code)), Code: code}); err != nil {
 		return err
 	}
+	l.mu.Lock()
+	l.control = control
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.control = nil
+		l.mu.Unlock()
+	}()
+
 	// Nothing the hub asks runs and nothing is pushed unless the project is approved, for as long as it is. Whatever else the hub says is
 	// the last thing on this connection.
 	var approval atomic.Pointer[context.Context]
@@ -391,6 +407,9 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 			l.answered(now)
 		}
 		switch {
+		case verdict.State == hublink.StateUnlinked:
+			close(l.gone)
+			return nil
 		case verdict.State != hublink.StateApproved:
 			return errTurnedAway
 		case stopServing == nil:
@@ -414,6 +433,58 @@ func (l *Link) record(v hublink.Verdict) {
 	l.set(func(s *Status) {
 		*s = Status{Hub: s.Hub, State: v.State, Project: v.Project, Owner: v.Owner, Error: v.Message}
 	})
+}
+
+// unlinkWait is how long Unlink waits for a connection: long enough for a link between two connections to come back.
+var unlinkWait = 5 * time.Second
+
+// Unlink tells the hub to forget the project and waits for its answer, which is the state the link ends in: unlinked, or unregistered or
+// revoked for a project the hub had nothing to forget of, and that has no connection to ask on. A connection can end at any moment and come
+// back by itself, so one that is down is waited for. A project the hub cannot be told about stays on the hub until its operator removes it.
+func (l *Link) Unlink(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, unlinkWait)
+	defer cancel()
+	for {
+		l.mu.Lock()
+		state, control, changed := l.status.State, l.control, l.changed
+		l.mu.Unlock()
+		switch {
+		case state == hublink.StateUnlinked, state == hublink.StateUnregistered, state == hublink.StateRevoked:
+			return state, nil
+		case control != nil && control.Write(hublink.Unlink{Unlink: true}) == nil:
+			return l.awaitUnlinked()
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return "", errors.New("the hub is not connected: it still lists this project, and its operator can revoke it")
+		}
+	}
+}
+
+// unlinkAnswer is how long the hub gets to answer an Unlink.
+var unlinkAnswer = 10 * time.Second
+
+// awaitUnlinked waits for the end of it. The hub closes the connection as it answers, so an answer can be lost: the link dials again and
+// hears it is not registered, which is the same answer.
+func (l *Link) awaitUnlinked() (string, error) {
+	timeout := time.After(unlinkAnswer)
+	for {
+		l.mu.Lock()
+		state, changed := l.status.State, l.changed
+		l.mu.Unlock()
+		switch state {
+		case hublink.StateUnregistered:
+			return hublink.StateUnlinked, nil
+		case hublink.StateUnlinked, hublink.StateRevoked:
+			return state, nil
+		}
+		select {
+		case <-changed:
+		case <-timeout:
+			return "", errors.New("the hub did not answer")
+		}
+	}
 }
 
 // ignoreFor is how long a stream that came without an approval is held before it is closed.

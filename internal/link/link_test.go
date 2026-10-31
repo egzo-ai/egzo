@@ -30,6 +30,12 @@ type broken struct{}
 func (broken) Read([]byte) (int, error)  { return 0, io.EOF }
 func (broken) Write([]byte) (int, error) { return 0, errors.New("session shutdown") }
 
+// notes is a control stream that takes what the link writes and never answers.
+type notes struct{}
+
+func (notes) Read([]byte) (int, error)    { select {} }
+func (notes) Write(p []byte) (int, error) { return len(p), nil }
+
 // heard is a control stream that collects what the link writes.
 type heard struct{ said chan string }
 
@@ -37,6 +43,84 @@ func (h heard) Read([]byte) (int, error) { select {} }
 func (h heard) Write(p []byte) (int, error) {
 	h.said <- string(p)
 	return len(p), nil
+}
+
+func TestUnlinkWaitsForAConnectionThatIsComingBack(t *testing.T) {
+	l := New(Options{Project: "web", Hub: "https://hub"})
+	l.control = hublink.NewLines(broken{})
+	result := make(chan error, 1)
+	go func() {
+		state, err := l.Unlink(context.Background())
+		if err == nil && state != hublink.StateUnlinked {
+			err = errors.New("it ended " + state)
+		}
+		result <- err
+	}()
+	time.Sleep(20 * time.Millisecond) // the session is down: the write failed, and it waits
+
+	stream := heard{said: make(chan string, 1)}
+	l.mu.Lock()
+	l.control = hublink.NewLines(stream)
+	l.mu.Unlock()
+	l.record(hublink.Verdict{State: hublink.StateApproved}) // a new connection's first verdict
+
+	var message hublink.Unlink
+	if err := json.Unmarshal([]byte(<-stream.said), &message); err != nil || !message.Unlink {
+		t.Fatalf("the link said %+v, %v", message, err)
+	}
+	l.record(hublink.Verdict{State: hublink.StateUnlinked})
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnlinkOfAProjectTheHubTurnedAwayEndsAtOnce(t *testing.T) {
+	for _, state := range []string{hublink.StateRevoked, hublink.StateUnregistered} {
+		l := New(Options{Project: "web", Hub: "https://hub"})
+		l.record(hublink.Verdict{State: state})
+		began := time.Now()
+		got, err := l.Unlink(context.Background())
+		if err != nil || got != state || time.Since(began) > time.Second {
+			t.Errorf("%s: %q, %v, after %v", state, got, err, time.Since(began))
+		}
+	}
+}
+
+func TestAnUnlinkThatTheHubRevokedOrWhoseAnswerWasLostEndsTooAndSaysWhich(t *testing.T) {
+	for heard, want := range map[string]string{hublink.StateRevoked: hublink.StateRevoked, hublink.StateUnregistered: hublink.StateUnlinked} {
+		l := New(Options{Project: "web", Hub: "https://hub"})
+		l.record(hublink.Verdict{State: hublink.StateApproved})
+		stream := notes{}
+		l.mu.Lock()
+		l.control = hublink.NewLines(stream)
+		l.mu.Unlock()
+		result := make(chan string, 1)
+		go func() {
+			state, _ := l.Unlink(context.Background())
+			result <- state
+		}()
+		time.Sleep(10 * time.Millisecond)
+		l.record(hublink.Verdict{State: heard})
+		select {
+		case got := <-result:
+			if got != want {
+				t.Errorf("after %s: %q", heard, got)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("after %s it kept waiting", heard)
+		}
+	}
+}
+
+func TestAnUnlinkNobodyAnswersGivesUp(t *testing.T) {
+	unlinkAnswer = 20 * time.Millisecond
+	defer func() { unlinkAnswer = 10 * time.Second }()
+	l := New(Options{Project: "web", Hub: "https://hub"})
+	l.record(hublink.Verdict{State: hublink.StateApproved})
+	l.control = hublink.NewLines(notes{})
+	if _, err := l.Unlink(context.Background()); err == nil || !strings.Contains(err.Error(), "did not answer") {
+		t.Fatalf("err = %v", err)
+	}
 }
 
 func TestRegisterOfALinkThatIsLockedOrRegisteredSendsNoCode(t *testing.T) {
@@ -64,6 +148,15 @@ func TestACodeIsDroppedWhenTheHubDoesNotAnswer(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprintf("%+v", l.Status()), "egzo-link-x") {
 		t.Error("the status shows the code")
+	}
+}
+
+func TestUnlinkGivesUpOnAHubThatStaysAway(t *testing.T) {
+	unlinkWait = 20 * time.Millisecond
+	defer func() { unlinkWait = 5 * time.Second }()
+	_, err := New(Options{Project: "web", Hub: "https://hub"}).Unlink(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

@@ -177,3 +177,39 @@ func RegisterLink(ctx context.Context, c *engine.Client, project, code string) (
 	}
 	return status, json.Unmarshal(reply, &status)
 }
+
+// unlink tells the hub to forget the project, through the link, when the link runs. Never fatal: the project is going either way.
+func unlink(ctx context.Context, c *engine.Client, observed Observed, out io.Writer) {
+	for _, r := range observed.Resources {
+		if r.Type != "container" || r.Kind != kindLink || r.State != "running" {
+			continue
+		}
+		project := strings.TrimSuffix(r.Name, "-link-1")
+		state, err := linkRequest(ctx, c, project, "POST", "/unlink", nil)
+		if err != nil {
+			fmt.Fprintf(out, "warning: the hub was not told: %v\n", err)
+			continue
+		}
+		switch string(state) {
+		case hublink.StateUnregistered:
+			fmt.Fprintln(out, "link: this project was not registered on the hub")
+		case hublink.StateRevoked:
+			fmt.Fprintln(out, "link: the hub revoked this project, and keeps that until an operator forgets it")
+		default:
+			fmt.Fprintln(out, "link: the hub has forgotten this project")
+		}
+	}
+}
+
+// removeLinkVolume removes the link's key when `hub:` is gone: a project linked again is a new project on the hub.
+func removeLinkVolume(ctx context.Context, c *engine.Client, observed Observed, out io.Writer) error {
+	for _, r := range observed.Resources {
+		if r.Type == "volume" && r.Kind == kindLink {
+			fmt.Fprintf(out, "remove volume %s\n", r.Name)
+			if err := c.API.VolumeRemove(ctx, r.Name, true); err != nil {
+				return fmt.Errorf("remove volume %s: %w", r.Name, err)
+			}
+		}
+	}
+	return nil
+}

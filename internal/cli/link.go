@@ -203,5 +203,13 @@ func linkOperator(l *link.Link) http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(status)
 	})
+	mux.HandleFunc("POST /unlink", func(w http.ResponseWriter, r *http.Request) {
+		state, err := l.Unlink(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		fmt.Fprint(w, state)
+	})
 	return mux
 }
