@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egzo-ai/egzo/hub/internal/auth"
-	"github.com/egzo-ai/egzo/hub/internal/engines"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
@@ -73,9 +72,13 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusConflict, "busy", fmt.Sprintf("%s is being %s by %s. Wait for it to end.", t.Agent, beingDone[t.Verb], s.namer(r.Context()).actor(t.Actor)))
 	case errors.Is(err, hub.ErrNotDisabled):
 		s.apiFail(w, http.StatusConflict, "conflict", "Only a disabled user's account can be removed. Disable the user first.")
+	case errors.Is(err, hub.ErrNotTurnedAway):
+		s.apiFail(w, http.StatusConflict, "conflict", "Only a project that was refused or revoked can be forgotten. Revoke it first.")
+	case errors.As(err, new(hub.OfflineError)):
+		s.apiFail(w, http.StatusConflict, "offline", "The project is offline: its link is not connected. Run egzo project up on its machine.")
 	default:
 		s.log.Error("request", "path", r.URL.Path, "err", err)
-		s.apiFail(w, http.StatusBadGateway, "engine_error", err.Error())
+		s.apiFail(w, http.StatusBadGateway, "link_error", err.Error())
 	}
 }
 
@@ -165,13 +168,6 @@ func (s *Server) identitiesOf(list []store.Identity) []identityJSON {
 	return out
 }
 
-type engineJSON struct {
-	Name string `json:"name"`
-	Host string `json:"host,omitempty"` // operators only
-	Up   bool   `json:"up"`
-	Err  string `json:"err,omitempty"`
-}
-
 type agentJSON struct {
 	Name       string    `json:"name"`
 	Template   string    `json:"template"`
@@ -187,11 +183,11 @@ type agentJSON struct {
 	Holder     string    `json:"holder"`
 	Denied     int       `json:"denied"` // hosts the proxy refused it in the last hour, not reached since
 	// Task is what the hub does on the agent, or the failure of what it did that nobody dismissed. An agent with a task and no state
-	// is one the engine does not have: a spawn that runs or failed, or a removal that is ending.
+	// is one the project does not have: a spawn that runs or failed, or a removal that is ending.
 	Task *taskJSON `json:"task,omitempty"`
 }
 
-// feedJSON says how far the agents' activity can be trusted: live, connecting, stale or unavailable, and why.
+// feedJSON says how far the agents' activity can be trusted: live, connecting, stale, unavailable or offline, and why.
 type feedJSON struct {
 	State   string `json:"state"`
 	Message string `json:"message,omitempty"`
@@ -206,10 +202,12 @@ type serviceJSON struct {
 }
 
 type projectJSON struct {
-	Engine    string        `json:"engine"`
+	ID        string        `json:"id"`
 	Name      string        `json:"name"`
+	Host      string        `json:"host"`
 	Role      rbac.Role     `json:"role"`
 	Operator  bool          `json:"operator"` // held as an operator, without a grant
+	Offline   *time.Time    `json:"offlineSince"`
 	Feed      feedJSON      `json:"feed"`
 	Up        bool          `json:"up"`
 	Templates []string      `json:"templates"`
@@ -222,7 +220,8 @@ type projectJSON struct {
 	Ignored []string `json:"ignored,omitempty"`
 }
 
-// taskJSON is one action of the hub on an engine: state running, done, failed or interrupted (the hub stopped while it ran).
+// taskJSON is one action of the hub on a project: state running, done, failed or interrupted (the hub stopped, or the link dropped, while
+// it ran).
 type taskJSON struct {
 	ID        string     `json:"id"`
 	Verb      string     `json:"verb"` // spawn, start, stop or rm
@@ -262,8 +261,16 @@ func taskViewOf(t *hub.TaskView, n namer) *taskJSON {
 	return &j
 }
 
+// offlineOf is when a project went offline, for an answer: null while it is connected.
+func offlineOf(at time.Time) *time.Time {
+	if at.IsZero() {
+		return nil
+	}
+	return &at
+}
+
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
-	p := projectJSON{Engine: v.Engine, Name: v.Project.Name, Role: v.Role, Operator: v.Operator, Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
+	p := projectJSON{ID: v.ID, Name: v.Project.Name, Host: v.Host, Role: v.Role, Operator: v.Operator, Offline: offlineOf(v.Offline), Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
 		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
 	if p.Templates == nil {
 		p.Templates = []string{}
@@ -283,11 +290,6 @@ func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 // --- session -----------------------------------------------------------------------------------------------------------------
 
 func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User) {
-	views, _ := s.hub.Engines(r.Context())
-	list := make([]engineJSON, 0, len(views))
-	for _, v := range views {
-		list = append(list, engineJSON{Name: v.Name, Up: v.Up, Err: v.Err})
-	}
 	identities, err := s.hub.Store().Identities(r.Context(), user.ID)
 	if err != nil {
 		s.problem(w, r, err)
@@ -298,8 +300,8 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 	if s.auth != nil {
 		sso = s.opts.SSOName
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "engines": list, "identities": s.identitiesOf(identities),
-		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer})
+	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "identities": s.identitiesOf(identities),
+		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer, "hub": s.opts.LinkURL})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -324,10 +326,9 @@ func (s *Server) unlink(w http.ResponseWriter, r *http.Request, user store.User)
 
 // --- projects ----------------------------------------------------------------------------------------------------------------
 
-// projects lists what the user may see from the last scan, with each agent's activity: it feeds the home page and the sidebar and
-// calls no engine.
+// projects lists what the user may see, with each agent's activity: it feeds the home page and the sidebar and asks no link anything.
 func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.User) {
-	refs, down, err := s.hub.Projects(r.Context(), user)
+	refs, err := s.hub.Projects(r.Context(), user)
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -342,20 +343,21 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Task     string `json:"task,omitempty"` // the verb of the task that runs on it
 	}
 	type project struct {
-		Engine   string    `json:"engine"`
-		Name     string    `json:"name"`
-		Role     rbac.Role `json:"role"`
-		Operator bool      `json:"operator"`
-		Feed     feedJSON  `json:"feed"`
-		Up       bool      `json:"up"`
-		Agents   []agent   `json:"agents"`
+		ID       string     `json:"id"`
+		Name     string     `json:"name"`
+		Host     string     `json:"host"`
+		Role     rbac.Role  `json:"role"`
+		Operator bool       `json:"operator"`
+		Offline  *time.Time `json:"offlineSince"`
+		Feed     feedJSON   `json:"feed"`
+		Up       bool       `json:"up"`
+		Agents   []agent    `json:"agents"`
 	}
 	out := struct {
-		Projects    []project    `json:"projects"`
-		Unreachable []engineJSON `json:"unreachable"`
-	}{Projects: []project{}, Unreachable: []engineJSON{}}
+		Projects []project `json:"projects"`
+	}{Projects: []project{}}
 	for _, ref := range refs {
-		p := project{Engine: ref.Engine, Name: ref.Project.Name, Role: ref.Role, Operator: ref.Operator, Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
+		p := project{ID: ref.ID, Name: ref.Project.Name, Host: ref.Host, Role: ref.Role, Operator: ref.Operator, Offline: offlineOf(ref.Offline), Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
 		running := map[string]string{}
 		for _, t := range ref.Tasks {
 			running[t.Agent] = t.Verb
@@ -366,14 +368,11 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		}
 		out.Projects = append(out.Projects, p)
 	}
-	for _, e := range down {
-		out.Unreachable = append(out.Unreachable, engineJSON{Name: e.Name, Up: false, Err: e.Err})
-	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) project(w http.ResponseWriter, r *http.Request, user store.User) {
-	view, err := s.hub.Project(r.Context(), user, r.PathValue("engine"), r.PathValue("project"))
+	view, err := s.hub.Project(r.Context(), user, r.PathValue("project"))
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -382,8 +381,7 @@ func (s *Server) project(w http.ResponseWriter, r *http.Request, user store.User
 }
 
 func (s *Server) agent(w http.ResponseWriter, r *http.Request, user store.User) {
-	engine, project, name := r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent")
-	view, agent, err := s.hub.Agent(r.Context(), user, engine, project, name)
+	view, agent, err := s.hub.Agent(r.Context(), user, r.PathValue("project"), r.PathValue("agent"))
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -408,7 +406,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request, user store.User)
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 200 {
 		limit = v
 	}
-	events, err := s.hub.Events(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.URL.Query().Get("agent"), limit)
+	events, err := s.hub.Events(r.Context(), user, r.PathValue("project"), r.URL.Query().Get("agent"), limit)
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -416,7 +414,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request, user store.User)
 	writeJSON(w, http.StatusOK, map[string]any{"events": s.eventRows(events, s.namer(r.Context()))})
 }
 
-func (s *Server) eventRows(events []engines.Event, n namer) []eventJSON {
+func (s *Server) eventRows(events []links.Event, n namer) []eventJSON {
 	rows := make([]eventJSON, 0, len(events))
 	for i := len(events) - 1; i >= 0; i-- { // newest first
 		e := events[i]
@@ -431,7 +429,7 @@ func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) 
 	if !decode(w, r, &body) {
 		return
 	}
-	t, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
+	t, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -441,12 +439,12 @@ func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) 
 
 // operate starts, stops or removes an agent: answered at once, like spawn.
 func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User) {
-	engine, project, agent, verb := r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent"), r.PathValue("verb")
+	project, agent, verb := r.PathValue("project"), r.PathValue("agent"), r.PathValue("verb")
 	if verb != hub.VerbStart && verb != hub.VerbStop && verb != hub.VerbRm {
 		s.apiFail(w, http.StatusNotFound, "not_found", "There is nothing here.")
 		return
 	}
-	t, err := s.hub.StartOperation(r.Context(), user, verb, engine, project, agent)
+	t, err := s.hub.StartOperation(r.Context(), user, verb, project, agent)
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -456,7 +454,7 @@ func (s *Server) operate(w http.ResponseWriter, r *http.Request, user store.User
 
 // tasks is the project's activity, or one agent's: the latest tasks, newest first.
 func (s *Server) tasks(w http.ResponseWriter, r *http.Request, user store.User) {
-	list, err := s.hub.Tasks(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.URL.Query().Get("agent"), 100)
+	list, err := s.hub.Tasks(r.Context(), user, r.PathValue("project"), r.URL.Query().Get("agent"), 100)
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -471,7 +469,7 @@ func (s *Server) tasks(w http.ResponseWriter, r *http.Request, user store.User) 
 
 // task is one task, which whoever asked for it follows until it ends.
 func (s *Server) task(w http.ResponseWriter, r *http.Request, user store.User) {
-	t, err := s.hub.TaskOf(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("id"))
+	t, err := s.hub.TaskOf(r.Context(), user, r.PathValue("project"), r.PathValue("id"))
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -481,7 +479,7 @@ func (s *Server) task(w http.ResponseWriter, r *http.Request, user store.User) {
 
 // dismissTask takes an ended task off its agent.
 func (s *Server) dismissTask(w http.ResponseWriter, r *http.Request, user store.User) {
-	if err := s.hub.DismissTask(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("id")); err != nil {
+	if err := s.hub.DismissTask(r.Context(), user, r.PathValue("project"), r.PathValue("id")); err != nil {
 		s.problem(w, r, err)
 		return
 	}
@@ -549,7 +547,7 @@ type denialJSON struct {
 // network answers what the project's proxy recorded, or what it recorded for one agent with ?agent=: the groups of denials, the
 // most recently seen first, and the latest events, newest first.
 func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User) {
-	view, err := s.hub.Network(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.URL.Query().Get("agent"))
+	view, err := s.hub.Network(r.Context(), user, r.PathValue("project"), r.URL.Query().Get("agent"))
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -585,7 +583,7 @@ func (s *Server) network(w http.ResponseWriter, r *http.Request, user store.User
 }
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request, user store.User) {
-	out, err := s.hub.Logs(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent"), 400)
+	out, err := s.hub.Logs(r.Context(), user, r.PathValue("project"), r.PathValue("agent"), 400)
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -594,7 +592,7 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request, user store.User) {
 }
 
 func (s *Server) spec(w http.ResponseWriter, r *http.Request, user store.User) {
-	spec, err := s.hub.Spec(r.Context(), user, r.PathValue("engine"), r.PathValue("project"))
+	spec, err := s.hub.Spec(r.Context(), user, r.PathValue("project"))
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -605,13 +603,13 @@ func (s *Server) spec(w http.ResponseWriter, r *http.Request, user store.User) {
 // --- members and audit -------------------------------------------------------------------------------------------------------
 
 func (s *Server) members(w http.ResponseWriter, r *http.Request, user store.User) {
-	engine, project := r.PathValue("engine"), r.PathValue("project")
-	members, err := s.hub.Members(r.Context(), user, engine, project)
+	project := r.PathValue("project")
+	members, err := s.hub.Members(r.Context(), user, project)
 	if err != nil {
 		s.problem(w, r, err)
 		return
 	}
-	candidates, _ := s.hub.Candidates(r.Context(), user, engine, project)
+	candidates, _ := s.hub.Candidates(r.Context(), user, project)
 	type member struct {
 		User     userJSON  `json:"user"`
 		Role     rbac.Role `json:"role"`
@@ -644,7 +642,7 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request, user store.User
 	if body.Role == "none" {
 		role = rbac.None
 	}
-	err := s.hub.SetRole(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), body.User, role)
+	err := s.hub.SetRole(r.Context(), user, r.PathValue("project"), body.User, role)
 	if errors.Is(err, hub.ErrForbidden) && body.User == user.ID {
 		s.apiFail(w, http.StatusForbidden, "forbidden", "An owner cannot remove or lower themselves.")
 		return
@@ -657,7 +655,7 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request, user store.User
 }
 
 func (s *Server) audit(w http.ResponseWriter, r *http.Request, user store.User) {
-	entries, err := s.hub.Audit(r.Context(), user, r.PathValue("engine"), r.PathValue("project"), 100)
+	entries, err := s.hub.Audit(r.Context(), user, r.PathValue("project"), 100)
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -780,7 +778,7 @@ func (s *Server) removeIdentity(w http.ResponseWriter, r *http.Request, user sto
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// --- engines -----------------------------------------------------------------------------------------------------------------
+// --- operators -------------------------------------------------------------------------------------------------------------------
 
 func (s *Server) operatorOnly(next authedHandler) authedHandler {
 	return func(w http.ResponseWriter, r *http.Request, user store.User) {
@@ -790,101 +788,4 @@ func (s *Server) operatorOnly(next authedHandler) authedHandler {
 		}
 		next(w, r, user)
 	}
-}
-
-func (s *Server) listEngines(w http.ResponseWriter, r *http.Request, _ store.User) {
-	views, err := s.hub.Engines(r.Context())
-	if err != nil {
-		s.problem(w, r, err)
-		return
-	}
-	list := make([]engineJSON, 0, len(views))
-	for _, v := range views {
-		list = append(list, engineJSON{Name: v.Name, Host: v.Host, Up: v.Up, Err: v.Err})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"engines": list})
-}
-
-// pendingEngine is an ssh engine waiting for its host key to be confirmed. What the operator typed stays here, in memory, for a
-// few minutes: the private key never goes back to the browser.
-type pendingEngine struct {
-	Input       hub.EngineInput
-	Fingerprint string
-	expires     time.Time
-}
-
-func (s *Server) keepPending(in hub.EngineInput, fingerprint string) string {
-	token := auth.Random()
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	now := time.Now()
-	for k, p := range s.pending {
-		if now.After(p.expires) {
-			delete(s.pending, k)
-		}
-	}
-	s.pending[token] = &pendingEngine{Input: in, Fingerprint: fingerprint, expires: now.Add(10 * time.Minute)}
-	return token
-}
-
-func (s *Server) takePending(token string) *pendingEngine {
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	p := s.pending[token]
-	delete(s.pending, token)
-	if p == nil || time.Now().After(p.expires) {
-		return nil
-	}
-	return p
-}
-
-func (s *Server) saveEngine(w http.ResponseWriter, r *http.Request, user store.User) {
-	var body struct {
-		Name, Host, SSHUser   string
-		CA, Cert, Key, SSHKey string
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	s.saveAndReport(w, r, user, hub.EngineInput{Name: body.Name, Host: body.Host, SSHUser: body.SSHUser, CA: body.CA, Cert: body.Cert, Key: body.Key, SSHKey: body.SSHKey})
-}
-
-// confirmEngine pins the host key the operator was shown and saves the engine.
-func (s *Server) confirmEngine(w http.ResponseWriter, r *http.Request, user store.User) {
-	var body struct{ Token string }
-	if !decode(w, r, &body) {
-		return
-	}
-	p := s.takePending(body.Token)
-	if p == nil {
-		s.apiFail(w, http.StatusGone, "expired", "That confirmation expired. Add the engine again.")
-		return
-	}
-	in := p.Input
-	in.PinHostKey = p.Fingerprint
-	s.saveAndReport(w, r, user, in)
-}
-
-func (s *Server) saveAndReport(w http.ResponseWriter, r *http.Request, user store.User, in hub.EngineInput) {
-	err := s.hub.SaveEngine(r.Context(), user, in)
-	var pending *hub.HostKeyPending
-	switch {
-	case errors.As(err, &pending):
-		token := s.keepPending(in, pending.Fingerprint)
-		writeJSON(w, http.StatusOK, map[string]any{"pending": map[string]string{"name": in.Name, "host": in.Host, "fingerprint": pending.Fingerprint, "token": token}})
-	case errors.Is(err, hub.ErrForbidden):
-		s.problem(w, r, err)
-	case err != nil:
-		s.apiFail(w, http.StatusUnprocessableEntity, "invalid", err.Error())
-	default:
-		writeJSON(w, http.StatusOK, map[string]string{"saved": in.Name})
-	}
-}
-
-func (s *Server) removeEngine(w http.ResponseWriter, r *http.Request, user store.User) {
-	if err := s.hub.RemoveEngine(r.Context(), user, r.PathValue("name")); err != nil {
-		s.problem(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"removed": r.PathValue("name")})
 }
