@@ -149,6 +149,44 @@ def test_the_code_is_in_no_setting_no_log_and_no_status(linked, fake_hub, engine
     assert "egzo-link-" not in linked.ok("ps --json").stdout
 
 
+def test_the_hub_asks_and_the_link_does_every_verb(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    assert hub.must(p, "published")["Templates"].keys() == {"web"}
+    answer = hub.verb(p, "spawn", Template="web", Name="fromhub", Actor="user:7")
+    assert answer["result"] == "fromhub" and answer["steps"], "progress comes as `egzo spawn` prints it"
+    assert any(r["name"] == "fromhub" and r["actor"] == "user:7" for r in json.loads(linked.ok("ps --json").stdout))
+
+    project = hub.must(p, "project")
+    assert project["Name"] == p and [a["Name"] for a in project["Agents"]] == ["fromhub"]
+
+    hub.must(p, "stop", Agent="fromhub")
+    assert [a["State"] for a in hub.must(p, "project")["Agents"]] != ["running"]
+    hub.must(p, "start", Agent="fromhub")
+    assert [a["State"] for a in hub.must(p, "project")["Agents"]] == ["running"]
+
+    assert "web" in hub.must(p, "spec")
+    assert isinstance(hub.must(p, "logs", Container="control", Tail=5), str)
+    assert isinstance(hub.must(p, "events", Limit=5), (list, type(None)))
+
+
+def test_a_terminal_goes_through_the_link_both_ways(linked, fake_hub):
+    output = fake_hub.must(linked.name, "attach", Agent="fromhub", Input="through the link\n", Seconds=3)
+    assert "through the link" in output
+
+
+def test_the_hub_can_ask_nothing_else(linked, fake_hub):
+    assert "no verb" in fake_hub.verb(linked.name, "exec")["error"]
+    assert "no agent" in fake_hub.verb(linked.name, "stop", Agent="nobody")["error"]
+
+
+def test_an_agent_cannot_reach_the_link(linked, engine):
+    link = link_of(engine, linked)
+    address = list(link.raw["NetworkSettings"]["Networks"].values())[0]["IPAddress"]
+    container = engine.instance(linked.name, "fromhub")
+    assert f"{linked.name}_link" not in container.raw["NetworkSettings"]["Networks"]
+    assert engine.exec(container.name, "ping", "-c", "1", "-W", "2", address).returncode != 0
+
+
 def test_register_needs_a_hub_and_a_running_link(project, engine, egzo, fake_hub):
     project.write(spec(agents={"web": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "cat"})}))
     result = project.run("project", "register", input="egzo-link-x\n")
