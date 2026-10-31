@@ -3,37 +3,26 @@ package hub
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"sync"
 	"time"
 
-	"github.com/egzo-ai/egzo/hub/internal/engines"
+	"github.com/egzo-ai/egzo/hub/internal/links"
+	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
-// The hub learns what the agents are doing, and when containers change, from streams the engines push, never by asking on a timer:
+// The hub learns what the agents are doing, and what changed, from what each project's link pushes, never by asking on a timer:
 //
-//   - a status follower per project reads the control sidecar's standard output through the engine's log API (core writes a status
-//     line on every change and a heartbeat every interval). It keeps the latest line, and is what Projects and Project show.
-//   - an audit follower per project reads the proxy's audit trail the same way (network.go).
-//   - an event watcher per engine reads the engine's event stream, and a change of containers makes the hub list that engine again.
-//     The timed rescan that remains is a fallback for an event that was missed.
+//   - the project feed: the whole project, each time it changed. The hub keeps the last one, and pages show that (links.go).
+//   - the status feed: a line on every change and a heartbeat every interval, from the control sidecar's log. The latest line is what
+//     Projects and Project show.
+//   - the audit feed: the proxy's trail, kept for the Network view (network.go).
 //
-// Both streams are retried with a growing delay when they break. See roadmap/hub.md and known-issues/container-logging-follows-the-engine-default.md.
+// A link opens them again when they break; the hub only follows. See roadmap/hub-link.md.
 
-// FeedOptions tune the streams; the zero value is the production setting.
+// FeedOptions tune the feeds; the zero value is the production setting.
 type FeedOptions struct {
-	// Fallback is how often an engine is listed again whatever the events said, in case one was missed (60 seconds).
-	Fallback time.Duration
-	// Fast is how often an engine whose event stream is not working is listed (5 seconds): without events, listing is all there is.
-	Fast time.Duration
-	// BackoffMin and BackoffMax bound the delay before a broken stream is opened again (1 second, 1 minute).
-	BackoffMin, BackoffMax time.Duration
-	// Silent is how long a follower waits for the first status line before saying the sidecar writes none (90 seconds).
+	// Silent is how long the hub waits for the first status line before saying the sidecar writes none (90 seconds).
 	Silent time.Duration
-	// Debounce is how long events are gathered before the engine is listed again (250 milliseconds).
-	Debounce time.Duration
-	// Healthy is how long a stream must have run for its delay to start over (30 seconds).
-	Healthy time.Duration
 	// Grace is what is added to three heartbeats before a quiet sidecar is called stale (10 seconds); negative for none.
 	Grace time.Duration
 	// Flush is how often what an audit follower heard is written to the database (1 second).
@@ -41,19 +30,12 @@ type FeedOptions struct {
 }
 
 func (o FeedOptions) withDefaults() FeedOptions {
-	def := func(d *time.Duration, v time.Duration) {
-		if *d <= 0 {
-			*d = v
-		}
+	if o.Silent <= 0 {
+		o.Silent = 90 * time.Second
 	}
-	def(&o.Fallback, 60*time.Second)
-	def(&o.Fast, 5*time.Second)
-	def(&o.BackoffMin, time.Second)
-	def(&o.BackoffMax, time.Minute)
-	def(&o.Silent, 90*time.Second)
-	def(&o.Debounce, 250*time.Millisecond)
-	def(&o.Healthy, 30*time.Second)
-	def(&o.Flush, time.Second)
+	if o.Flush <= 0 {
+		o.Flush = time.Second
+	}
 	if o.Grace == 0 {
 		o.Grace = 10 * time.Second
 	} else if o.Grace < 0 {
@@ -72,8 +54,10 @@ const (
 	FeedConnecting FeedState = "connecting"
 	// FeedStale: it was heard from, and has gone quiet for longer than a heartbeat allows.
 	FeedStale FeedState = "stale"
-	// FeedUnavailable: nothing can be read: the log cannot be followed, or the sidecar writes no status (it is older than this hub).
+	// FeedUnavailable: nothing can be read: the sidecar is not running, or writes no status (it is older than this hub).
 	FeedUnavailable FeedState = "unavailable"
+	// FeedOffline: the project's link is not connected.
+	FeedOffline FeedState = "offline"
 )
 
 // Feed is the state of a project's status, and why.
@@ -85,231 +69,72 @@ type Feed struct {
 // ActivityUnknown is what a running agent is doing when the feed cannot say.
 const ActivityUnknown = "unknown"
 
-type projectKey struct{ engine, project string }
-
-// follower is one status follower and what it has heard.
+// follower is what the status feed of a connected project has said.
 type follower struct {
-	cancel    context.CancelFunc
-	controlID string // the sidecar container it follows: another one is another follower
-
-	// what it heard, guarded by the manager's lock
-	since     time.Time // when it was started, and the last time it connected
-	connected bool
-	err       string
-	lastLine  time.Time // when the newest line was written, by the hub's clock
-	interval  time.Duration
-	agents    map[string]engines.AgentStatus
+	since    time.Time // when the connection began
+	lastLine time.Time // when the newest line was written, by the hub's clock
+	interval time.Duration
+	agents   map[string]links.AgentStatus
 }
 
-// engineWatch is one event watcher.
-type engineWatch struct {
-	cancel  context.CancelFunc
-	healthy bool
-}
-
-// feedManager owns the followers and the watchers.
+// feedManager holds what the feeds said, by project id.
 type feedManager struct {
 	hub *Hub
-	ctx context.Context
 	opt FeedOptions
 
 	mu        sync.Mutex
-	followers map[projectKey]*follower
-	audits    map[projectKey]*auditFollower
-	watches   map[string]*engineWatch
-	dirty     map[string]bool
-	wake      chan struct{}
-	scannedAt map[string]time.Time
+	followers map[string]*follower
+	audits    map[string]*auditFollower
 }
 
-func newFeedManager(h *Hub, ctx context.Context, opt FeedOptions) *feedManager {
-	return &feedManager{hub: h, ctx: ctx, opt: opt.withDefaults(), followers: map[projectKey]*follower{}, audits: map[projectKey]*auditFollower{},
-		watches: map[string]*engineWatch{},
-		dirty:   map[string]bool{}, wake: make(chan struct{}, 1), scannedAt: map[string]time.Time{}}
+func newFeedManager(h *Hub, opt FeedOptions) *feedManager {
+	return &feedManager{hub: h, opt: opt.withDefaults(), followers: map[string]*follower{}, audits: map[string]*auditFollower{}}
 }
 
-// StartFeeds turns on the streams: from now on every scan starts and stops the followers and watchers it needs. Run does this;
-// tests that scan by hand call it, and before it the hub shows what the engines list.
-func (h *Hub) StartFeeds(ctx context.Context, opt FeedOptions) {
-	h.mu.Lock()
-	h.feeds = newFeedManager(h, ctx, opt)
-	h.mu.Unlock()
+// connected readies the followers of a connection that is served.
+func (m *feedManager) connected(c *connection) {
+	m.mu.Lock()
+	m.followers[c.project] = &follower{since: time.Now(), agents: map[string]links.AgentStatus{}}
+	m.mu.Unlock()
+	m.startAudit(c)
 }
 
-func (h *Hub) feedManager() *feedManager {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.feeds
-}
-
-// --- delay between attempts --------------------------------------------------------------------------------------------------
-
-// backoff is the delay before a broken stream is opened again: it doubles up to a limit, with some jitter so that many streams that
-// broke together do not come back together.
-type backoff struct {
-	min, max, next time.Duration
-}
-
-func newBackoff(min, max time.Duration) *backoff { return &backoff{min: min, max: max, next: min} }
-
-func (b *backoff) reset() { b.next = b.min }
-
-func (b *backoff) wait() time.Duration {
-	d := b.next
-	b.next *= 2
-	if b.next > b.max {
-		b.next = b.max
-	}
-	return d - d/5 + time.Duration(rand.Int64N(int64(d/5)*2+1))
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}
-
-// --- reconciling with what a scan found -----------------------------------------------------------------------------------------
-
-// reconcile starts the followers and watchers the last scan calls for, and stops the rest. It runs after every scan.
-func (m *feedManager) reconcile(scanned map[string]*engineScan, engineNames []string) {
-	known := map[string]bool{}
-	for _, name := range engineNames {
-		known[name] = true
-	}
+// disconnected is the end of what a project's feeds say. The audit follower stays: what it heard is shown while the project is offline.
+func (m *feedManager) disconnected(c *connection) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.ctx.Err() != nil {
-		return
-	}
-	for name := range known {
-		if m.watches[name] == nil {
-			m.startWatch(name)
-		}
-	}
-	for name, w := range m.watches {
-		if !known[name] {
-			w.cancel()
-			delete(m.watches, name)
-			delete(m.scannedAt, name)
-		}
-	}
-
-	wanted := map[projectKey]string{}  // the projects whose control sidecar runs, and its container
-	proxies := map[projectKey]string{} // the projects whose proxy runs, and its container
-	for name, scan := range scanned {
-		if scan == nil || scan.err != nil {
-			continue // an engine that does not answer is not a place to open streams
-		}
-		m.scannedAt[name] = scan.at
-		for _, p := range scan.projects {
-			for _, s := range p.Services {
-				if s.Name == "control" && s.State == "running" {
-					wanted[projectKey{name, p.Name}] = s.ID
-				}
-				if s.Name == "proxy" && s.State == "running" {
-					proxies[projectKey{name, p.Name}] = s.ID
-				}
-			}
-		}
-	}
-	for key, f := range m.followers {
-		if id, ok := wanted[key]; !ok || id != f.controlID {
-			f.cancel()
-			delete(m.followers, key)
-		}
-	}
-	for key, id := range wanted {
-		if m.followers[key] == nil {
-			m.startFollower(key, id)
-		}
-	}
-	for key, f := range m.audits {
-		if id, ok := proxies[key]; !ok || id != f.proxyID {
-			f.cancel()
-			delete(m.audits, key)
-		}
-	}
-	for key, id := range proxies {
-		if m.audits[key] == nil {
-			m.startAudit(key, id)
-		}
+	delete(m.followers, c.project)
+	if f := m.audits[c.project]; f != nil {
+		f.connected = false
 	}
 }
 
-func (m *feedManager) startFollower(key projectKey, controlID string) {
-	ctx, cancel := context.WithCancel(m.ctx)
-	f := &follower{cancel: cancel, controlID: controlID, since: time.Now(), agents: map[string]engines.AgentStatus{}}
-	m.followers[key] = f
-	go m.follow(ctx, key, f)
+// forget drops all that is held of a project that is gone.
+func (m *feedManager) forget(project string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.followers, project)
+	delete(m.audits, project)
 }
 
-func (m *feedManager) startWatch(name string) {
-	ctx, cancel := context.WithCancel(m.ctx)
-	w := &engineWatch{cancel: cancel}
-	m.watches[name] = w
-	go m.watch(ctx, name, w)
-}
-
-// --- the status follower ----------------------------------------------------------------------------------------------------------
-
-func (m *feedManager) follow(ctx context.Context, key projectKey, f *follower) {
-	delay := newBackoff(m.opt.BackoffMin, m.opt.BackoffMax)
-	for ctx.Err() == nil {
-		started := time.Now()
-		m.mu.Lock()
-		f.since, f.connected = started, true
-		m.mu.Unlock()
-
-		var err error
-		eng, getErr := m.hub.registry.Get(ctx, key.engine)
-		if getErr != nil {
-			err = getErr
-		} else {
-			err = eng.FollowStatus(ctx, key.project, func(line engines.StatusLine) {
-				delay.reset()
-				m.apply(f, line, time.Since(started) < 2*time.Second)
-			})
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if err == nil {
-			err = engines.ErrStreamEnded
-		}
-		if time.Since(started) >= m.opt.Healthy {
-			delay.reset()
-		}
-		m.mu.Lock()
-		f.connected, f.err = false, err.Error()
-		m.mu.Unlock()
-		m.hub.log.Debug("status stream ended", "engine", key.engine, "project", key.project, "err", err)
-		if !sleep(ctx, delay.wait()) {
-			return
-		}
-	}
-}
-
-// apply keeps what a status line says. A line that came with the log's replay at the start is as old as it was written, and
-// it is not allowed to make a silent sidecar look alive.
-func (m *feedManager) apply(f *follower, line engines.StatusLine, replay bool) {
+// status keeps what a status line says. A line that came with the log's replay at the start is as old as it was written, and it is not
+// allowed to make a silent sidecar look alive.
+func (m *feedManager) status(project string, line links.StatusLine) {
 	now := time.Now()
-	age := time.Duration(0)
-	if replay && !line.Time.IsZero() && now.After(line.Time) {
-		age = now.Sub(line.Time)
-	}
-	agents := make(map[string]engines.AgentStatus, len(line.Agents))
+	agents := make(map[string]links.AgentStatus, len(line.Agents))
 	for _, a := range line.Agents {
 		agents[a.Agent] = a
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	f.err = ""
+	f := m.followers[project]
+	if f == nil {
+		return
+	}
+	age := time.Duration(0)
+	if now.Sub(f.since) < 2*time.Second && !line.Time.IsZero() && now.After(line.Time) {
+		age = now.Sub(line.Time)
+	}
 	f.lastLine = now.Add(-age)
 	f.interval = line.Interval
 	f.agents = agents
@@ -318,10 +143,7 @@ func (m *feedManager) apply(f *follower, line engines.StatusLine, replay bool) {
 // state says how far a follower can be trusted at a moment.
 func (m *feedManager) state(f *follower, now time.Time) Feed {
 	if f.lastLine.IsZero() {
-		switch {
-		case f.err != "":
-			return Feed{FeedUnavailable, "the status log of the control sidecar cannot be followed: " + f.err}
-		case now.Sub(f.since) > m.opt.Silent:
+		if now.Sub(f.since) > m.opt.Silent {
 			return Feed{FeedUnavailable, "the control sidecar writes no status: it is older than this hub (run egzo project up again), or its log cannot be read"}
 		}
 		return Feed{FeedConnecting, "waiting for the control sidecar's first status line"}
@@ -331,30 +153,41 @@ func (m *feedManager) state(f *follower, now time.Time) Feed {
 		interval = 30 * time.Second
 	}
 	if age := now.Sub(f.lastLine); age > 3*interval+m.opt.Grace {
-		msg := fmt.Sprintf("no status from the control sidecar for %s", age.Round(time.Second))
-		if f.err != "" {
-			msg += ": " + f.err
-		}
-		return Feed{FeedStale, msg}
+		return Feed{FeedStale, fmt.Sprintf("no status from the control sidecar for %s", age.Round(time.Second))}
 	}
 	return Feed{FeedLive, ""}
 }
 
-// overlay returns the agents of a project with what the feed says they are doing, and the state of the feed. It never changes
-// what it is given. Without feeds started the agents are returned as they are.
-func (h *Hub) overlay(engine string, p engines.Project) (engines.Project, Feed) {
-	m := h.feedManager()
-	if m == nil {
-		return p, Feed{State: FeedLive}
+// controlRunning says what the project's sidecars say of the control sidecar. A project not heard of yet is not one that has none.
+func controlRunning(p links.Project, known bool) bool {
+	if !known {
+		return true
 	}
+	for _, s := range p.Services {
+		if s.Name == "control" {
+			return s.State == "running"
+		}
+	}
+	return false
+}
+
+// overlay returns the agents of a project with what the feed says they are doing, and the state of the feed. It never changes what it is
+// given.
+func (h *Hub) overlay(reg store.Registration, p links.Project) (links.Project, Feed) {
+	_, known := h.knownProject(reg.ID)
+	m := h.feeds
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	f := m.followers[projectKey{engine, p.Name}]
-	feed := Feed{FeedUnavailable, "the project's control sidecar is not running"}
-	if f != nil {
+	f := m.followers[reg.ID]
+	feed := Feed{FeedOffline, ""}
+	switch {
+	case f == nil:
+	case !controlRunning(p, known):
+		feed = Feed{FeedUnavailable, "the project's control sidecar is not running"}
+	default:
 		feed = m.state(f, time.Now())
 	}
-	agents := make([]engines.Agent, len(p.Agents))
+	agents := make([]links.Agent, len(p.Agents))
 	for i, a := range p.Agents {
 		agents[i] = a
 		switch {
@@ -377,128 +210,20 @@ func (h *Hub) overlay(engine string, p engines.Project) (engines.Project, Feed) 
 	return p, feed
 }
 
-// --- the event watcher --------------------------------------------------------------------------------------------------------------
-
-func (m *feedManager) watch(ctx context.Context, name string, w *engineWatch) {
-	delay := newBackoff(m.opt.BackoffMin, m.opt.BackoffMax)
-	for ctx.Err() == nil {
-		started := time.Now()
-		var err error
-		eng, getErr := m.hub.registry.Get(ctx, name)
-		if getErr != nil {
-			err = getErr
-		} else {
-			m.setHealthy(w, true)
-			// events may have been missed while the stream was down
-			m.markDirty(name)
-			err = eng.Watch(ctx, func() { delay.reset(); m.markDirty(name) })
-		}
-		m.setHealthy(w, false)
-		if ctx.Err() != nil {
-			return
-		}
-		if err == nil {
-			err = engines.ErrStreamEnded
-		}
-		if time.Since(started) >= m.opt.Healthy {
-			delay.reset()
-		}
-		m.hub.log.Debug("event stream ended", "engine", name, "err", err)
-		if !sleep(ctx, delay.wait()) {
-			return
-		}
-	}
-}
-
-func (m *feedManager) setHealthy(w *engineWatch, healthy bool) {
-	m.mu.Lock()
-	w.healthy = healthy
-	m.mu.Unlock()
-}
-
-// markDirty says an engine changed and has to be listed again.
-func (m *feedManager) markDirty(engine string) {
-	m.mu.Lock()
-	m.dirty[engine] = true
-	m.mu.Unlock()
-	select {
-	case m.wake <- struct{}{}:
-	default:
-	}
-}
-
-// takeDirty returns the engines to list again for what the events said.
-func (m *feedManager) takeDirty() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var names []string
-	for name := range m.dirty {
-		names = append(names, name)
-	}
-	m.dirty = map[string]bool{}
-	return names
-}
-
-// due returns the engines that must be listed now whatever the events said: one that was not listed for a Fallback, and one whose
-// events are not arriving, which is listed on a short timer because that is all there is.
-func (m *feedManager) due(now time.Time) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var names []string
-	for name, w := range m.watches {
-		last := m.scannedAt[name]
-		switch {
-		case last.IsZero(), now.Sub(last) >= m.opt.Fallback, !w.healthy && now.Sub(last) >= m.opt.Fast:
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-// Run is discovery and the streams, after the tasks that ran when the hub stopped are marked interrupted: it lists every engine, then lists one again when its events say something changed, or when it
-// has not been listed for a while, and keeps the status followers and event watchers in step with what it finds. It returns when
-// ctx ends.
-func (h *Hub) Run(ctx context.Context, opt FeedOptions) {
-	if err := h.RecoverTasks(ctx); err != nil {
-		h.log.Warn("read the tasks", "err", err)
-	}
-	h.StartFeeds(ctx, opt)
-	m := h.feedManager()
-	scan := func(names []string) {
-		listing, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		var err error
-		if names == nil {
-			err = h.Scan(listing)
-		} else {
-			err = h.scanEngines(listing, names)
-		}
-		if err != nil && ctx.Err() == nil {
-			h.log.Warn("scan failed", "err", err)
-		}
-		_ = h.store.PurgeSessions(listing)
-		_ = h.store.PurgeDenials(listing, time.Now().Add(-denialRetention))
-		_ = h.store.PurgeTasks(listing, time.Now().Add(-taskRetention))
-	}
-	scan(nil)
-	tick := time.NewTicker(m.opt.Fast)
+// Run keeps the database tidy until ctx ends. The links do the rest: they dial, and they push.
+func (h *Hub) Run(ctx context.Context) {
+	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for {
+		now := time.Now()
+		_ = h.store.PurgeSessions(ctx)
+		_ = h.store.PurgeDenials(ctx, now.Add(-denialRetention))
+		_ = h.store.PurgeTasks(ctx, now.Add(-taskRetention))
+		_ = h.store.PurgeLinkCodes(ctx, now)
 		select {
 		case <-ctx.Done():
 			return
-		case <-m.wake:
-			// let the events of one change come in together
-			if !sleep(ctx, m.opt.Debounce) {
-				return
-			}
-			if names := m.takeDirty(); len(names) > 0 {
-				scan(names)
-			}
-		case now := <-tick.C:
-			if names := m.due(now); len(names) > 0 {
-				scan(names)
-			}
+		case <-tick.C:
 		}
 	}
 }
