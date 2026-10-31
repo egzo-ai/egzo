@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,8 +163,21 @@ var watched = map[events.Action]bool{
 
 // Watch follows the engine's event stream, for the containers that belong to an egzo project.
 func (d *Engine) Watch(ctx context.Context, changed func()) error {
-	messages, errs := d.client.API.Events(ctx, events.ListOptions{Filters: filters.NewArgs(
-		filters.Arg("type", string(events.ContainerEventType)), filters.Arg("label", engine.LabelProject))})
+	return d.watch(ctx, engine.LabelProject, changed)
+}
+
+// WatchProject follows the engine's event stream for one project's containers.
+func (d *Engine) WatchProject(ctx context.Context, project string, changed func()) error {
+	return d.watch(ctx, engine.LabelProject+"="+project, changed)
+}
+
+// watch calls changed once the stream is asked for, for what happened before it, and for each event. The client opens the stream in
+// the background without saying when it is open, so the stream starts a moment in the past: an event of that gap is seen twice, not
+// lost.
+func (d *Engine) watch(ctx context.Context, label string, changed func()) error {
+	messages, errs := d.client.API.Events(ctx, events.ListOptions{Since: strconv.FormatInt(time.Now().Unix()-1, 10), Filters: filters.NewArgs(
+		filters.Arg("type", string(events.ContainerEventType)), filters.Arg("label", label))})
+	changed()
 	for {
 		select {
 		case <-ctx.Done():

@@ -358,7 +358,7 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 	if err := control.Write(hublink.Proof{Signature: ed25519.Sign(key, hublink.Signed(l.options.Hub, greeting.Nonce, public, code)), Code: code}); err != nil {
 		return err
 	}
-	// Nothing the hub asks runs unless the project is approved, for as long as it is. Whatever else the hub says is
+	// Nothing the hub asks runs and nothing is pushed unless the project is approved, for as long as it is. Whatever else the hub says is
 	// the last thing on this connection.
 	var approval atomic.Pointer[context.Context]
 	go l.serve(ctx, session, &approval)
@@ -367,6 +367,7 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 		serving, cancel := context.WithCancel(ctx)
 		stopServing = cancel
 		approval.Store(&serving)
+		go l.pushFeeds(serving, session)
 	}
 	endServing := func() {
 		if stopServing != nil {
