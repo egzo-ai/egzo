@@ -153,11 +153,9 @@ preview host, and must not:
   on; the rest (the app's own cookies, `Authorization`) is the app's.
 - The audit log records who opened which preview (once per ticket, not per request).
 
-**Who may view a preview: to be decided.** Whoever may operate the agent is the floor. Previews are often for someone who should
-not get a terminal on the agent (a reviewer, a client), so this likely needs a new project role that may view previews and
-nothing else (**viewer**, or **external**: they see the project's previews, not its agents, terminals, network or spec). An
-external person then needs a hub account: single sign-on, or a local account the hub does not have yet
-([hub-access.md](../docs/hub-access.md) has only `admin`). Decide with the role.
+**Who may view a preview:** every role on the project, for every agent's previews: an agent exposes a port on purpose. The
+**viewer** role gets previews and nothing else; a person from outside gets it, and an account, through an invite
+([hub-link.md](hub-link.md), "Roles and invites").
 
 ### The proxy
 
@@ -203,13 +201,12 @@ service with the DNS-01 recipe, commented out.
 4. Hub: `DialPort` on the seam (the link and the fake), `hub/internal/preview` (hosts, the sign-in redirects, tickets, proxy,
    limits), `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`, the Previews panel. Unit tests with the fake engine, a Playwright
    test, and `make hub-stack` with a linked project exposing `python3 -m http.server`, through Caddy (its internal CA).
-5. The viewer role, once decided.
+5. The viewer role and invites ([hub-link.md](hub-link.md)).
 6. Docs: `docs/hub.md` (previews, the certificate recipes, the separate domain), `docs/security.md` (agent code served to
    people's browsers, and why it gets its own origin).
 
 ## Open questions
 
-- Who may view a preview, and the role for it (viewer, external); how an external person gets an account.
 - Whether a person may also open a port the agent did not expose, from the hub (the CLI's `port-forward` can).
 
 ## Alternatives considered

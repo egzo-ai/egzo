@@ -61,8 +61,7 @@ link: registered as web, owned by alice
 - The link makes an Ed25519 key pair. The private key stays on the link's volume, sealed with the
   [project secret key](../docs/project-file.md#the-secret-key); the hub keeps the public key with the registration.
 - A person signed in to the hub opens the address, sees the project (its name, the host it runs on, the templates), and approves
-  it. They become the project's owner on the hub. **Who may approve is to be decided**, with the review of the roles below: some
-  privilege on the hub, not every account.
+  it. They become the project's owner on the hub. Approving needs the right to create a project ("Roles and invites", below).
 - `up` does not wait for the approval: the project runs without the hub until someone approves, and the link keeps asking.
   `egzo project check` and `egzo ps` say whether it is linked, pending, refused or unreachable.
 - Each connection afterwards proves the key (a signature over a challenge from the hub). The hub is authenticated by TLS with
@@ -120,11 +119,42 @@ Changed:
   (`/p/<id>/a/coder-1`). Two projects named `web` on two machines are two projects.
 - **The `Engine` seam stays** and gets one implementation: the link. Tasks, terminals with take-over, the Network tab, Activity and
   the audit log keep their logic; what they call goes over the connection.
-- **Roles are reviewed**: who may approve a registration, and the **viewer** role that previews need ([agent-ports.md](agent-ports.md)).
+- **Roles and invites** replace today's roles and the operators' implicit ownership (below).
 - **The quick start**: the hub without the socket, and a project on the same machine linking to it.
 - [messaging-adapters.md](messaging-adapters.md) and [discovery.md](discovery.md) are rewritten for the link: the operator API
   and the event stream they use are reached through it instead of `engine exec`.
 - `EGZO_SECRET_KEY` keeps what it still protects (the sign-in provider's secret, sessions), or goes if nothing is left.
+
+## Roles and invites (draft)
+
+**Signing in is not enough: an invite is required.** Today a person who signs in with single sign-on gets an account with no
+access, and waits for a grant. With a company-wide provider that is everyone in the company. Instead, the hub needs an **invite
+system**: a person needs a sign-in **and** a valid invite, and an account without one is refused.
+
+- An invite is a link with a one-time code: single use, expiring, revocable. It carries what it grants: a role on a project (sent
+  by the project's owner), or the flags below (sent by an operator).
+- It is redeemed by whoever signs in with it, by password or single sign-on. Nothing is matched by email
+  ([hub-access.md](../docs/hub-access.md)).
+- A person from outside (the viewer of a preview) needs an account: the invite is also how they get one, so the hub needs local
+  accounts made from an invite, not only `admin` and single sign-on.
+
+Roles are assigned on projects:
+
+- **owner**: can destroy the project (on the hub: unlink it and forget it; `egzo project down` stays the CLI's). Can grant
+  (invite). A project keeps at least one owner; an owner cannot remove or lower themselves.
+- **admin**: access all agents (operate, attach, logs, network, the audit log), the CLI's included.
+- **user**: can spawn their own agents, operate and attach to them, and view their logs and network.
+- **viewer**: the web proxy only. The project's previews, of every agent; nothing else of the project.
+
+Flags on users:
+
+- **operator**: manages the hub (users, invites of operators, flags and quotas, revoking any project). Access to everything, or
+  only a "take ownership" that is audited and shows on the project: to be decided.
+- **project quota**: how many projects the person may connect to the hub. 0 cannot create. Operators have no limit. A quota is
+  one field instead of a flag, and caps what one person can attach to the hub.
+
+A person disabled by an operator loses everything at once, as today; their projects stay, with their other owners, or are
+revoked when they had none.
 
 ## Specs and tests
 
@@ -143,11 +173,10 @@ Changed:
 3. **The hub**: the link endpoint, the seam over the link, registration pages, projects by id; then remove the engines and
    everything listed above.
 4. **Previews** ([agent-ports.md](agent-ports.md)) over the link.
-5. **Roles**: approving registrations, the viewer role.
+5. **Roles and invites**: invites, the viewer role, the project quota, operators.
 
 ## Open questions
 
-- Who may approve a registration (with the roles review).
 - Narrowing what the hub may do from the project file (`hub: { url: ..., allow: [attach, previews] }`): a later idea.
 - What the hub shows of a project that is offline: its last known state, marked as such, or nothing but its name.
 
