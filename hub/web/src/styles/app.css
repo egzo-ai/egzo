@@ -5,7 +5,6 @@
 details { border: 1px solid var(--border); border-radius: var(--radius-2); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-3); }
 details > summary { cursor: pointer; font-size: var(--text-xs); color: var(--text-2); }
 details[open] > summary { margin-bottom: var(--space-3); }
-.chip[data-down] { border-style: dashed; }
 .statusline .q { color: var(--status-waiting); }
 .side-head .close-nav { display: none; }
 body { overflow: hidden; }

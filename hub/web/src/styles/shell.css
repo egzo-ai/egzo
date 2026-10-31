@@ -36,7 +36,6 @@ html, body { height: 100%; }
 .app[data-rail] .nav-item.proj .ini { display: grid; place-items: center; width: 24px; height: 20px; font-size: var(--text-2xs); text-transform: uppercase; border: 1px solid var(--border-strong); border-radius: var(--radius-1); color: var(--text-2); }
 .nav-item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nav-item .end { display: flex; gap: var(--space-1); align-items: center; }
-.nav-item .end .engine { height: 16px; }
 .nav-item .n { font-size: var(--text-2xs); color: var(--text-3); }
 .nav-sub { display: grid; gap: 1px; padding-left: 24px; margin: 1px 0 var(--space-1); }
 .nav-sub .nav-item { grid-template-columns: minmax(0, 1fr) auto; min-height: 24px; font-size: var(--text-xs); padding: 2px var(--space-2); }
