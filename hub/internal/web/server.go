@@ -1,5 +1,5 @@
-// Package web is the hub's HTTP side: login, the JSON API under /api/v1, the terminal websocket, and the single-page app (built in
-// hub/web, embedded here) that is served for every address that is not the API.
+// Package web is the hub's HTTP side: login, the JSON API under /api/v1, the terminal websocket, the link endpoint, and the single-page
+// app (built in hub/web, embedded here) that is served for every address that is not the API.
 package web
 
 import (
@@ -23,6 +23,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/publicurl"
 	"github.com/egzo-ai/egzo/hub/internal/store"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 //go:embed all:dist
@@ -38,6 +39,11 @@ type Authenticator interface {
 type Options struct {
 	// SSOName is what the single sign-on button says ("SSO" when empty).
 	SSOName string
+	// LinkURL is the address projects name in `hub:`, which is what their proof is for (EGZO_LINK_URL). It is never taken from a request:
+	// a hub that a link trusts could pass its challenge on, and name itself.
+	LinkURL string
+	// OwnLink says the link endpoint has a listener of its own (LinkHandler), and is not on the UI's.
+	OwnLink bool
 }
 
 // Server is the hub's web application.
@@ -50,9 +56,7 @@ type Server struct {
 	static  fs.FS
 	session time.Duration
 	limit   *throttle
-
-	pendingMu sync.Mutex
-	pending   map[string]*pendingEngine
+	greeted chan struct{} // links in their handshake, when anyone may be one
 
 	termMu    sync.Mutex
 	terminals map[string]map[*int]context.CancelFunc // open terminals by the hash of the session that opened them
@@ -75,7 +79,7 @@ func New(h *hub.Hub, a Authenticator, opts Options, urls *publicurl.Resolver, lo
 		opts.SSOName = "SSO"
 	}
 	s := &Server{hub: h, auth: a, opts: opts, urls: urls, log: log, session: 12 * time.Hour, limit: newThrottle(),
-		pending: map[string]*pendingEngine{}, terminals: map[string]map[*int]context.CancelFunc{}}
+		greeted: make(chan struct{}, maxHandshakes), terminals: map[string]map[*int]context.CancelFunc{}}
 	var err error
 	if s.static, err = fs.Sub(distFiles, "dist"); err != nil {
 		return nil, err
@@ -101,15 +105,17 @@ func (s *Server) Handler() http.Handler {
 	api("POST "+apiPrefix+"/me/link", s.linkStart)
 	api("DELETE "+apiPrefix+"/me/identities/{id}", s.unlink)
 	api("GET "+apiPrefix+"/projects", s.projects)
-	api("GET "+apiPrefix+"/engines", s.operatorOnly(s.listEngines))
-	api("POST "+apiPrefix+"/engines", s.operatorOnly(s.saveEngine))
-	api("POST "+apiPrefix+"/engines/confirm", s.operatorOnly(s.confirmEngine))
-	api("DELETE "+apiPrefix+"/engines/{name}", s.operatorOnly(s.removeEngine))
+	api("GET "+apiPrefix+"/links", s.operatorOnly(s.listLinks))
+	api("POST "+apiPrefix+"/links/codes", s.operatorOnly(s.createLinkCode))
+	api("GET "+apiPrefix+"/links/codes", s.operatorOnly(s.listLinkCodes))
+	api("DELETE "+apiPrefix+"/links/codes/{id}", s.operatorOnly(s.cancelLinkCode))
+	api("POST "+apiPrefix+"/links/{id}/revoke", s.operatorOnly(s.revokeLink))
+	api("DELETE "+apiPrefix+"/links/{id}", s.operatorOnly(s.forgetLink))
 	api("GET "+apiPrefix+"/users", s.operatorOnly(s.listUsers))
 	api("PUT "+apiPrefix+"/users/{id}", s.operatorOnly(s.updateUser))
 	api("DELETE "+apiPrefix+"/users/{id}/identities/{identity}", s.operatorOnly(s.removeIdentity))
 
-	const project = apiPrefix + "/e/{engine}/p/{project}"
+	const project = apiPrefix + "/p/{project}"
 	api("GET "+project, s.project)
 	api("GET "+project+"/events", s.events)
 	api("POST "+project+"/spawn", s.spawn)
@@ -125,6 +131,9 @@ func (s *Server) Handler() http.Handler {
 	api("POST "+project+"/a/{agent}/{verb}", s.operate)
 	api("GET "+project+"/a/{agent}/logs", s.logs)
 	api("GET "+project+"/a/{agent}/terminal", s.terminal)
+	if !s.opts.OwnLink {
+		mux.HandleFunc("GET "+hublink.Path, s.link)
+	}
 	app := s.appHandler()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -137,6 +146,15 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 	return s.sameOrigin(s.jsonOnly(securityHeaders(mux)))
+}
+
+// LinkHandler is the link endpoint alone, for a listener of its own: all that has to be reachable by the projects. It serves registered
+// keys and links that present a code, and no page of the hub.
+func (s *Server) LinkHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })
+	mux.HandleFunc("GET "+hublink.Path, s.link)
+	return mux
 }
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -166,7 +184,7 @@ func (s *Server) sameOrigin(next http.Handler) http.Handler {
 }
 
 // appHandler serves the built app: a file of it when the address names one, and index.html for every other address, so the app's own
-// routes (/e/lab/p/web, /engines) survive a reload. Built files carry a hash in their name and may be cached for good.
+// routes (/p/p1a2b3c4d5e6, /settings/links) survive a reload. Built files carry a hash in their name and may be cached for good.
 func (s *Server) appHandler() http.Handler {
 	files := http.FileServerFS(s.static)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
