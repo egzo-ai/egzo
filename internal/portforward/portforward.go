@@ -28,6 +28,12 @@ const dialTimeout = 5 * time.Second
 // command running in the agent for ever.
 var drainTimeout = time.Minute
 
+// drainLimit is how long the way back stays open once the client has ended its input, however much the server says. A client that
+// is gone is noticed by nobody here: the engine keeps reading the command's stdout after the attach is dropped, so a server that
+// keeps talking (an event stream, a tail) would otherwise keep the command, and its connection, for ever. The price is that a client
+// that really only ended its side gets at most this long of answer.
+var drainLimit = 10 * time.Minute
+
 // Command is the command that forwards one connection, run in the agent's container.
 func Command(port int) []string {
 	return []string{"egzo", "agent", "forward", strconv.Itoa(port)}
@@ -127,20 +133,22 @@ func unreachable(err error) bool {
 }
 
 // Forward copies bytes between in and out and a port of this machine's loopback, until the server closes. The end of in shuts down
-// the socket's write side and leaves the way back open, for as long as the server has something to say (drainTimeout).
+// the socket's write side and leaves the way back open, for as long as the server has something to say (drainTimeout), up to
+// drainLimit.
 func Forward(port int, in io.Reader, out io.Writer) error {
 	conn, err := dial(port)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	drain := drainTimeout
+	drain, limit := drainTimeout, drainLimit
 	var inputEnded atomic.Bool
 	go func() {
 		_, _ = io.Copy(conn, in)
 		_ = conn.CloseWrite()
 		inputEnded.Store(true)
 		_ = conn.SetReadDeadline(time.Now().Add(drain))
+		time.AfterFunc(limit, func() { _ = conn.Close() })
 	}()
 	buffer := make([]byte, 32<<10)
 	for {
@@ -155,7 +163,7 @@ func Forward(port int, in io.Reader, out io.Writer) error {
 		}
 		if err != nil {
 			var timeout net.Error
-			if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.As(err, &timeout) && timeout.Timeout() {
+			if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed) || errors.As(err, &timeout) && timeout.Timeout() {
 				return nil
 			}
 			return err
