@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -250,15 +251,18 @@ func (l *Link) connect(ctx context.Context) error {
 	}()
 
 	// Nothing the hub asks runs and nothing is pushed unless the project is approved, for as long as it is.
+	var approval atomic.Pointer[context.Context]
+	go l.serve(ctx, session, &approval)
 	var stopServing context.CancelFunc
 	startServing := func() {
 		serving, cancel := context.WithCancel(ctx)
 		stopServing = cancel
-		go l.serve(serving, session)
+		approval.Store(&serving)
 		go l.pushFeeds(serving, session)
 	}
 	endServing := func() {
 		if stopServing != nil {
+			approval.Store(nil)
 			stopServing()
 			stopServing = nil
 		}
@@ -348,34 +352,52 @@ func (l *Link) awaitUnlinked(verdicts <-chan hublink.Verdict) error {
 	}
 }
 
-// serve answers the streams the hub opens, until the approval ends.
-func (l *Link) serve(ctx context.Context, session *yamux.Session) {
+// ignoreFor is how long a stream that came without an approval is held before it is closed.
+var ignoreFor = time.Minute
+
+// serve takes the streams the hub opens for as long as the session lasts, and answers those that come while the project is approved.
+// Streams must always be taken: yamux would queue the others, run them when an approval comes, long after their caller gave up, and
+// the hub would close a healthy session over a stream left unaccepted.
+func (l *Link) serve(ctx context.Context, session *yamux.Session, approval *atomic.Pointer[context.Context]) {
 	for {
 		stream, err := session.AcceptStreamWithContext(ctx)
 		if err != nil {
 			return
 		}
+		approved := approval.Load()
+		if approved == nil {
+			go ignore(stream)
+			continue
+		}
+		serving := *approved
 		go func() {
 			defer stream.Close()
 			finished := make(chan struct{})
 			defer close(finished)
 			go func() { // a verb running when the approval ends is cut
 				select {
-				case <-ctx.Done():
+				case <-serving.Done():
 					stream.SetDeadline(time.Now())
 				case <-finished:
 				}
 			}()
-			l.answer(ctx, stream)
+			l.answer(serving, stream)
 		}()
 	}
+}
+
+// ignore says nothing to a stream and drops what comes on it: a project that is not approved does not answer, not even to refuse.
+func ignore(stream net.Conn) {
+	defer stream.Close()
+	stream.SetDeadline(time.Now().Add(ignoreFor))
+	_, _ = io.Copy(io.Discard, stream)
 }
 
 // answer runs one verb.
 func (l *Link) answer(ctx context.Context, stream net.Conn) {
 	lines := hublink.NewLines(stream)
 	var request hublink.Request
-	if err := lines.Read(&request); err != nil {
+	if err := lines.Read(&request); err != nil || ctx.Err() != nil {
 		return
 	}
 	engine, project := l.options.Engine, l.options.Project

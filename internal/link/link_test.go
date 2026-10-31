@@ -9,11 +9,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/yamux"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/seal"
@@ -104,5 +108,79 @@ func TestAKeySealedWithAnotherSecretKeyIsRefusedAndKept(t *testing.T) {
 	after, _ := os.ReadFile(filepath.Join(dir, keyFile))
 	if !bytes.Equal(before, after) {
 		t.Error("a wrong key changed the volume")
+	}
+}
+
+// sessions is the two ends of a connection: the hub's and the link's.
+func sessions(t *testing.T) (hub, link *yamux.Session) {
+	t.Helper()
+	a, b := net.Pipe()
+	config := yamux.DefaultConfig()
+	config.LogOutput = io.Discard
+	hub, err := yamux.Server(a, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err = yamux.Client(b, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { hub.Close(); link.Close() })
+	return hub, link
+}
+
+// ask opens a stream and sends a verb.
+func ask(t *testing.T, hub *yamux.Session, verb string) (*yamux.Stream, *hublink.Lines) {
+	t.Helper()
+	stream, err := hub.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := hublink.NewLines(stream)
+	if err := lines.Write(hublink.Request{Verb: verb}); err != nil {
+		t.Fatal(err)
+	}
+	return stream, lines
+}
+
+func TestAVerbThatCameWithoutAnApprovalNeverRuns(t *testing.T) {
+	hub, session := sessions(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var approval atomic.Pointer[context.Context]
+	go New(Options{Project: "web", Hub: "https://hub"}).serve(ctx, session, &approval)
+
+	stale, staleLines := ask(t, hub, "stale")
+	stale.SetDeadline(time.Now().Add(100 * time.Millisecond))
+	var reply hublink.Reply
+	if err := staleLines.Read(&reply); !errors.Is(err, yamux.ErrTimeout) {
+		t.Fatalf("a project that is not approved said %+v, %v", reply, err)
+	}
+
+	approval.Store(&ctx)
+	stale.SetDeadline(time.Now().Add(100 * time.Millisecond))
+	if err := staleLines.Read(&reply); !errors.Is(err, yamux.ErrTimeout) {
+		t.Fatalf("the verb from before the approval ran: %+v, %v", reply, err)
+	}
+	stream, lines := ask(t, hub, "fresh")
+	stream.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := lines.Read(&reply); err != nil || !strings.Contains(reply.Error, `no verb "fresh"`) {
+		t.Fatalf("an approved project said %+v, %v", reply, err)
+	}
+}
+
+func TestAStreamLeftWithoutAnApprovalIsClosed(t *testing.T) {
+	ignoreFor = 20 * time.Millisecond
+	defer func() { ignoreFor = time.Minute }()
+	hub, session := sessions(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var approval atomic.Pointer[context.Context]
+	go New(Options{Project: "web", Hub: "https://hub"}).serve(ctx, session, &approval)
+	stream, lines := ask(t, hub, "project")
+	stream.SetDeadline(time.Now().Add(5 * time.Second))
+	var reply hublink.Reply
+	if err := lines.Read(&reply); !errors.Is(err, io.EOF) {
+		t.Errorf("got %+v, %v", reply, err)
 	}
 }
