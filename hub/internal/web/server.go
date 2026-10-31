@@ -57,6 +57,7 @@ type Server struct {
 	session time.Duration
 	limit   *throttle
 	greeted chan struct{} // links in their handshake, when anyone may be one
+	gate    *linkGate     // what one address may try on the link endpoint
 
 	termMu    sync.Mutex
 	terminals map[string]map[*int]context.CancelFunc // open terminals by the hash of the session that opened them
@@ -79,7 +80,7 @@ func New(h *hub.Hub, a Authenticator, opts Options, urls *publicurl.Resolver, lo
 		opts.SSOName = "SSO"
 	}
 	s := &Server{hub: h, auth: a, opts: opts, urls: urls, log: log, session: 12 * time.Hour, limit: newThrottle(),
-		greeted: make(chan struct{}, maxHandshakes), terminals: map[string]map[*int]context.CancelFunc{}}
+		greeted: make(chan struct{}, maxHandshakes), gate: newLinkGate(), terminals: map[string]map[*int]context.CancelFunc{}}
 	var err error
 	if s.static, err = fs.Sub(distFiles, "dist"); err != nil {
 		return nil, err

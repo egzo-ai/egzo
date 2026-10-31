@@ -434,6 +434,21 @@ func TestAProofIsForTheConfiguredAddressWhateverTheRequestSays(t *testing.T) {
 	r.state(l, hublink.StateUnreachable)
 }
 
+func TestAnAddressThatKeepsFailingIsToldToWait(t *testing.T) {
+	r := newRig(t)
+	for range 20 {
+		stranger(t, r.linkURL, "egzo-link-wrong")
+	}
+	time.Sleep(100 * time.Millisecond) // the stranger hears its verdict before the hub has counted it
+	session, err := hublink.Dialer{Hub: r.linkURL}.Dial(ctx)
+	if err == nil {
+		session.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("after 20 failures: %v", err)
+	}
+}
+
 func TestTheLinkEndpointAloneServesLinksAndNoPage(t *testing.T) {
 	r := newRig(t)
 	server := httptest.NewServer(r.app.LinkHandler())
