@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -52,6 +52,22 @@ CREATE TABLE IF NOT EXISTS user_identities (
 	UNIQUE (issuer, subject),
 	UNIQUE (user_id, issuer)
 );
+-- A project is a registration: a link that presented a key and a link code (projects.go). Its id is what everything else is keyed by.
+CREATE TABLE IF NOT EXISTS projects (
+	id TEXT PRIMARY KEY,
+	key BLOB NOT NULL UNIQUE,             -- the link's public key, which is how the hub knows it
+	name TEXT NOT NULL,                   -- as the link says: two projects may have the same one
+	host TEXT NOT NULL DEFAULT '',        -- the machine it says it runs on
+	release TEXT NOT NULL DEFAULT '',     -- the egzo it says it runs
+	templates TEXT NOT NULL DEFAULT '[]', -- JSON, what it said when it registered
+	state TEXT NOT NULL,                  -- approved or revoked
+	owner TEXT REFERENCES users(id) ON DELETE SET NULL, -- who made the code it came with
+	message TEXT NOT NULL DEFAULT '',     -- why it was revoked
+	created_at INTEGER NOT NULL,
+	decided_at INTEGER,
+	offline_since INTEGER                 -- Unix milliseconds; null while its link is connected
+);
+CREATE INDEX IF NOT EXISTS projects_state ON projects (state, created_at);
 CREATE TABLE IF NOT EXISTS grants (
 	engine TEXT NOT NULL,
 	project TEXT NOT NULL,
