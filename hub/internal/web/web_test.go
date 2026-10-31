@@ -12,28 +12,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/auth"
-	"github.com/egzo-ai/egzo/hub/internal/engines"
-	"github.com/egzo-ai/egzo/hub/internal/engines/fake"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/links"
+	"github.com/egzo-ai/egzo/hub/internal/links/fake"
 	"github.com/egzo-ai/egzo/hub/internal/oidctest"
 	"github.com/egzo-ai/egzo/hub/internal/publicurl"
-	"github.com/egzo-ai/egzo/hub/internal/secretbox"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 type rig struct {
+	dials    atomic.Int64 // how many times the link endpoint was reached
 	t        *testing.T
 	server   *httptest.Server
+	app      *web.Server
+	linkURL  string
 	provider *httptest.Server
 	hub      *hub.Hub
 	store    *store.Store
-	fakes    map[string]*fake.Engine
+	fakes    map[string]*fake.Engine // the projects that linked, by name
 	oidc     *oidctest.Provider
 	signIn   hub.SignInOptions
 	public   string // EGZO_PUBLIC_URL
@@ -43,35 +47,21 @@ var ctx = context.Background()
 
 const adminPassword = "admin-password"
 
-func newRig(t *testing.T, engineNames ...string) *rig {
+func newRig(t *testing.T) *rig {
 	t.Helper()
-	return newRigWith(t, nil, engineNames...)
+	return newRigWith(t, nil)
 }
 
 // newRigWith builds a rig whose sign-in settings options change first.
-func newRigWith(t *testing.T, options []func(*rig), engineNames ...string) *rig {
+func newRigWith(t *testing.T, options []func(*rig)) *rig {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	box, _ := secretbox.New("0123456789abcdef-secret")
 	r := &rig{t: t, store: s, fakes: map[string]*fake.Engine{}}
-	registry := engines.NewRegistry(s, box, func(_ context.Context, cfg engines.Config) (engines.Engine, error) {
-		f, ok := r.fakes[cfg.Name]
-		if !ok {
-			f = fake.New()
-			r.fakes[cfg.Name] = f
-		}
-		return f, nil
-	})
-	registry.SetProbe(func(context.Context, engines.Config) (string, error) { return "SHA256:probed-key", nil })
-	r.hub = hub.New(s, registry, nil)
-	for _, name := range engineNames {
-		r.fakes[name] = fake.New()
-		s.PutEngine(ctx, store.EngineRow{Name: name, Host: "unix:///" + name})
-	}
+	r.hub = hub.New(s, nil, hub.FeedOptions{Flush: 5 * time.Millisecond, Silent: 150 * time.Millisecond})
 	provider := oidctest.New("", "hub", "secret")
 	r.provider = httptest.NewServer(provider.Handler())
 	provider.Issuer = r.provider.URL
@@ -89,13 +79,22 @@ func newRigWith(t *testing.T, options []func(*rig), engineNames ...string) *rig 
 	if r.signIn.Issuer != "" {
 		sso = auth.New(auth.Config{Issuer: r.provider.URL, ClientID: "hub", ClientSecret: "secret"})
 	}
-	app, err := web.New(r.hub, sso, web.Options{SSOName: "Corp"}, urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	// the server first: a link's proof is for the address it is reached at
+	var handler http.Handler
+	r.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if q.URL.Path == hublink.Path {
+			r.dials.Add(1)
+		}
+		handler.ServeHTTP(w, q)
+	}))
+	t.Cleanup(r.server.Close)
+	r.linkURL = r.server.URL
+	app, err := web.New(r.hub, sso, web.Options{SSOName: "Corp", LinkURL: r.linkURL}, urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	app.UseApp(fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>egzo hub</title>")}, "assets/app-1234.js": {Data: []byte("//js")}})
-	r.server = httptest.NewServer(app.Handler())
-	t.Cleanup(r.server.Close)
+	r.app, handler = app, app.Handler()
 	return r
 }
 
@@ -266,10 +265,59 @@ func (r *rig) userID(name string) string {
 	return ""
 }
 
-func project(name string, templates ...string) engines.Project {
-	return engines.Project{Name: name, Templates: templates}
+// link makes a project that registered with a code.
+func (r *rig) link(name string, templates ...string) *fake.Engine {
+	r.t.Helper()
+	return r.adopt(fake.New(name, "laptop", templates...))
 }
 
-func agent(name, actor string) engines.Agent {
-	return engines.Agent{Name: name, Template: "coder", State: "running", Activity: "idle", Actor: actor, Status: "reading the code", Created: time.Now()}
+// adopt registers a project a test has prepared.
+func (r *rig) adopt(f *fake.Engine) *fake.Engine {
+	r.t.Helper()
+	go r.hub.Link(ctx, f.Hello(), r.code(), f.Connect())
+	r.t.Cleanup(f.Drop)
+	r.waitFor("the link to be held", func() bool { return len(f.Verdicts()) > 0 && f.Running() })
+	r.waitFor("the link to hear it", f.Served)
+	r.fakes[f.Hello().Project] = f
+	return f
+}
+
+// code makes a link code, as the starter account.
+func (r *rig) code() string {
+	r.t.Helper()
+	admin, err := r.store.UserByName(ctx, store.StarterUsername)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	_, code, err := r.hub.CreateLinkCode(ctx, admin)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return code
+}
+
+func (r *rig) waitFor(what string, check func() bool) {
+	r.t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	r.t.Fatalf("never: %s", what)
+}
+
+// id is the id of a project that linked.
+func (r *rig) id(name string) string {
+	r.t.Helper()
+	reg, err := r.store.RegistrationByKey(ctx, r.fakes[name].Hello().Key)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return reg.ID
+}
+
+func agent(name, actor string) links.Agent {
+	return links.Agent{Name: name, Template: "coder", State: "running", Activity: "idle", Actor: actor, Status: "reading the code", Created: time.Now()}
 }
