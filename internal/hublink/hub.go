@@ -88,6 +88,20 @@ func (p *Peer) Send(verdict Verdict) error {
 // Close ends the connection.
 func (p *Peer) Close() error { return p.session.Close() }
 
+// finishGrace is how long a link gets to hang up once it heard its last verdict.
+var finishGrace = 2 * time.Second
+
+// Finish ends a connection after its last verdict. The link hangs up when it hears one. Closing first would reset a connection with what the
+// link pushed still on its way, and the verdict can go with it, so what it sends goes on being read until then. One that does not hang up
+// is closed all the same.
+func (p *Peer) Finish() error {
+	select {
+	case <-p.session.CloseChan():
+	case <-time.After(finishGrace):
+	}
+	return p.session.Close()
+}
+
 // Closed is closed when the connection has ended, for whatever reason: what a verb or a terminal failed of can be told from what it
 // was refused.
 func (p *Peer) Closed() <-chan struct{} { return p.session.CloseChan() }
@@ -140,7 +154,7 @@ func (p *Peer) Run(ctx context.Context, h Handlers) error {
 var controlPause = 100 * time.Millisecond
 
 // readControl reads the control stream, for as long as the connection is worth keeping: the stream ending, a line over its limit, and
-// the answer to an Unlink all end the connection.
+// the answer to an Unlink all end the connection. The answer goes first: closing inside h.Unlink would lose it.
 func (p *Peer) readControl(h Handlers) {
 	defer p.Close()
 	for {
@@ -150,6 +164,7 @@ func (p *Peer) readControl(h Handlers) {
 		}
 		if message.Unlink && h.Unlink != nil {
 			_ = p.Send(h.Unlink())
+			_ = p.Finish()
 			return
 		}
 		time.Sleep(controlPause)
