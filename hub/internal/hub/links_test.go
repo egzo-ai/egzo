@@ -38,7 +38,7 @@ func (r *rig) nothingStored(codes int) {
 	if len(r.hub.conns) != 0 {
 		r.t.Errorf("%d connections are held", len(r.hub.conns))
 	}
-	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != codes {
+	if got, _ := r.store.LinkCodes(ctx, "", time.Now()); len(got) != codes {
 		r.t.Errorf("%d codes are left, want %d", len(got), codes)
 	}
 }
@@ -120,19 +120,16 @@ func TestAGoodCodeMakesAnApprovedProjectOwnedByWhoeverMadeIt(t *testing.T) {
 	if len(entries) != 1 || entries[0].Action != "project.register" || !entries[0].Allowed || entries[0].Actor != rbac.Actor(op.ID) {
 		t.Errorf("audit = %+v", entries)
 	}
-	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 0 {
+	if got, _ := r.store.LinkCodes(ctx, "", time.Now()); len(got) != 0 {
 		t.Errorf("the code is still good: %+v", got)
 	}
 }
 
-func TestOnlyAnOperatorMakesListsAndCancelsCodesAndEachLeavesATrace(t *testing.T) {
+func TestCodesAreOfWhoMayConnectAProjectAndEachLeavesATrace(t *testing.T) {
 	r := newRig(t)
 	alice, op := r.login("alice"), r.operator()
-	if _, _, err := r.hub.CreateLinkCode(ctx, alice); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user making a code: %v", err)
-	}
-	if _, err := r.hub.LinkCodes(ctx, alice); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user listing codes: %v", err)
+	if _, _, err := r.hub.CreateLinkCode(ctx, alice); !errors.Is(err, ErrOverQuota) {
+		t.Errorf("a user with no quota making a code: %v", err)
 	}
 	made, code, err := r.hub.CreateLinkCode(ctx, op)
 	if err != nil {
@@ -141,8 +138,11 @@ func TestOnlyAnOperatorMakesListsAndCancelsCodesAndEachLeavesATrace(t *testing.T
 	if !regexp.MustCompile(`^egzo-link-[a-z2-7]{26}$`).MatchString(code) || time.Until(made.Expires) > 15*time.Minute || time.Until(made.Expires) < 14*time.Minute {
 		t.Errorf("code = %q, %+v", code, made)
 	}
-	if err := r.hub.CancelLinkCode(ctx, alice, made.ID); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user cancelling: %v", err)
+	if err := r.hub.CancelLinkCode(ctx, alice, made.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a user cancelling somebody else's: %v", err)
+	}
+	if got, _ := r.hub.LinkCodes(ctx, alice); len(got) != 0 {
+		t.Errorf("a user lists somebody else's: %+v", got)
 	}
 	listed, err := r.hub.LinkCodes(ctx, op)
 	if err != nil || len(listed) != 1 || listed[0].ID != made.ID || listed[0].CreatorName != "admin" {
@@ -181,7 +181,7 @@ func TestAnApprovedKeyIgnoresACodeAndDoesNotSpendIt(t *testing.T) {
 	if verdict := last(f); verdict.State != hublink.StateApproved || verdict.Project != id {
 		t.Errorf("the link was told %+v", verdict)
 	}
-	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 1 {
+	if got, _ := r.store.LinkCodes(ctx, "", time.Now()); len(got) != 1 {
 		t.Errorf("the code was spent: %+v", got)
 	}
 }
@@ -201,7 +201,7 @@ func TestARevokedKeyIsRefusedKeepsItsCodeAndComesBackNewOnceForgotten(t *testing
 	if verdict := last(f); verdict.State != hublink.StateRevoked || verdict.Message != "the laptop was stolen" {
 		t.Errorf("the link was told %+v", verdict)
 	}
-	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 1 {
+	if got, _ := r.store.LinkCodes(ctx, "", time.Now()); len(got) != 1 {
 		t.Errorf("the code was spent: %+v", got)
 	}
 	if err := r.hub.Forget(ctx, op, id); err != nil {
@@ -257,7 +257,7 @@ func TestTwoConnectionsOfOneNewKeySpendOneCode(t *testing.T) {
 	if !errors.Is(err, store.ErrKeyTaken) {
 		t.Fatalf("a key redeemed twice: %+v, %v", reg, err)
 	}
-	if got, _ := r.store.LinkCodes(ctx, time.Now()); len(got) != 1 {
+	if got, _ := r.store.LinkCodes(ctx, "", time.Now()); len(got) != 1 {
 		t.Errorf("the code of the loser was spent: %+v", got)
 	}
 }
@@ -312,7 +312,7 @@ func TestTheOwnerStaysOwnerWhenTheyStopBeingAnOperator(t *testing.T) {
 	}
 	alice, _ = r.store.User(ctx, alice.ID)
 	view, err := r.hub.Project(ctx, alice, reg.ID)
-	if err != nil || view.Role != rbac.Owner || view.Operator {
+	if err != nil || view.Role != rbac.Owner {
 		t.Errorf("the owner's view = %+v, %v", view, err)
 	}
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, projectName, toggleTheme } from "../lib/app.svelte";
+  import { app, projectName, seesLinks, toggleTheme } from "../lib/app.svelte";
   import { taskDoing } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
   import { closeTerm, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
@@ -67,17 +67,15 @@
     if (route.name !== "project" && route.name !== "agent") return null;
     const p = app.projects.find((x) => x.id === route.project);
     if (!p) return null;
-    const admin = p.role === "administrator" || p.role === "owner";
+    const admin = p.role === "admin" || p.role === "owner";
     return {
       project: p,
       list: [
         ["agents", "Agents", p.agents.length],
         ["services", "Services", null],
-        ["timeline", "Timeline", null],
-        ["network", "Network", null],
-        ["spec", "Spec", null],
+        ...(p.role === "overseer" ? [] : [["timeline", "Timeline", null], ["network", "Network", null], ["spec", "Spec", null]]),
         ...(admin ? [["audit", "Audit log", null]] : []),
-        ...(p.role === "owner" ? [["members", "Members", null]] : []),
+        ...(p.role === "owner" || app.user?.isOperator ? [["members", "Members", null]] : []),
       ] as [import("../lib/router.svelte").ProjectTab, string, number | null][],
     };
   });
@@ -179,7 +177,7 @@
   </div>
 
   <div class="side-foot">
-    {#if app.user?.isOperator}
+    {#if seesLinks()}
       <a class="health" href={href.settings()} data-down={offline ? "" : undefined} aria-current={onPage && route.name === "settings" ? "page" : undefined} aria-label={offline ? `Settings: ${offline} of ${app.projects.length} projects offline` : "Settings"} onclick={showPage}>
         <Icon name="server" size="sm" /><span class="t">Settings</span>
         {#if offline}<span class="warn hide-rail">⌁ {offline} offline</span>{/if}

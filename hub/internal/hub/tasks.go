@@ -438,7 +438,7 @@ func (h *Hub) forgetTasks(project string) {
 
 // Tasks lists the latest tasks of a project, or of one of its agents, newest first: the project's activity.
 func (h *Hub) Tasks(ctx context.Context, user store.User, project, agent string, limit int) ([]Task, error) {
-	if _, err := h.access(ctx, user, project); err != nil {
+	if _, err := h.inspect(ctx, user, project); err != nil {
 		return nil, err
 	}
 	return h.store.TasksOf(ctx, project, agent, limit)
@@ -446,7 +446,7 @@ func (h *Hub) Tasks(ctx context.Context, user store.User, project, agent string,
 
 // TaskOf reads one task of a project.
 func (h *Hub) TaskOf(ctx context.Context, user store.User, project, id string) (Task, error) {
-	if _, err := h.access(ctx, user, project); err != nil {
+	if _, err := h.inspect(ctx, user, project); err != nil {
 		return Task{}, err
 	}
 	t, err := h.store.TaskByID(ctx, id)

@@ -49,8 +49,22 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusNotFound, "not_found", "There is nothing here, or you have no access to it.")
 	case errors.Is(err, hub.ErrForbidden):
 		s.apiFail(w, http.StatusForbidden, "forbidden", "You are not allowed to do that.")
-	case errors.Is(err, hub.ErrOperatorAccess):
-		s.apiFail(w, http.StatusForbidden, "forbidden", "An operator holds every project. Change that under Settings, Users, not as a role.")
+	case errors.Is(err, hub.ErrLastOwner):
+		s.apiFail(w, http.StatusConflict, "conflict", "A project keeps at least one owner. Make somebody else an owner first.")
+	case errors.Is(err, hub.ErrOverQuota):
+		s.apiFail(w, http.StatusConflict, "over_quota", "You have as many projects as your quota allows. An operator can raise it.")
+	case errors.Is(err, hub.ErrBadQuota):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "A quota is zero or more.")
+	case errors.Is(err, hub.ErrBadRole):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "That is not a role.")
+	case errors.Is(err, hub.ErrBadInvite):
+		s.apiFail(w, http.StatusNotFound, "bad_invite", inviteGone)
+	case errors.Is(err, hub.ErrUsernameTaken):
+		s.apiFail(w, http.StatusConflict, "conflict", "That username is taken. Pick another.")
+	case errors.Is(err, hub.ErrBadUsername), errors.Is(err, hub.ErrWeakPassword):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", capitalize(err.Error())+".")
+	case errors.Is(err, hub.ErrNoLocalLogin):
+		s.apiFail(w, http.StatusNotFound, "not_found", "Signing in with a password is turned off.")
 	case errors.Is(err, hub.ErrLastOperator):
 		s.apiFail(w, http.StatusConflict, "conflict", "The last operator cannot be removed. Make somebody else an operator first.")
 	case errors.Is(err, hub.ErrCannotDisable):
@@ -132,11 +146,12 @@ type userJSON struct {
 	Picture       string `json:"picture"`
 	IsOperator    bool   `json:"isOperator"`
 	Disabled      bool   `json:"disabled"`
+	ProjectQuota  int    `json:"projectQuota"`
 }
 
 func userOf(u store.User) userJSON {
 	return userJSON{ID: u.ID, Username: u.Username, Name: u.Name, Email: u.Email, EmailVerified: u.EmailVerified, Picture: safePicture(u.Picture),
-		IsOperator: u.IsOperator, Disabled: u.Disabled()}
+		IsOperator: u.IsOperator, Disabled: u.Disabled(), ProjectQuota: u.ProjectQuota}
 }
 
 // safePicture keeps an avatar address only when it is https: the browser fetches it, never the hub (which could be made to
@@ -202,20 +217,22 @@ type serviceJSON struct {
 }
 
 type projectJSON struct {
-	ID        string        `json:"id"`
-	Name      string        `json:"name"`
-	Host      string        `json:"host"`
-	Role      rbac.Role     `json:"role"`
-	Operator  bool          `json:"operator"` // held as an operator, without a grant
-	Offline   *time.Time    `json:"offlineSince"`
-	Feed      feedJSON      `json:"feed"`
-	Up        bool          `json:"up"`
-	Templates []string      `json:"templates"`
-	Services  []serviceJSON `json:"services"`
-	Agents    []agentJSON   `json:"agents"`
-	CanSpawn  bool          `json:"canSpawn"`
-	CanManage bool          `json:"canManage"`
-	CanAudit  bool          `json:"canAudit"`
+	ID         string        `json:"id"`
+	Name       string        `json:"name"`
+	Host       string        `json:"host"`
+	Role       rbac.Role     `json:"role"` // overseer: an operator with no role on it
+	Ownerless  bool          `json:"ownerless,omitempty"`
+	Offline    *time.Time    `json:"offlineSince"`
+	Feed       feedJSON      `json:"feed"`
+	Up         bool          `json:"up"`
+	Templates  []string      `json:"templates"`
+	Services   []serviceJSON `json:"services"`
+	Agents     []agentJSON   `json:"agents"`
+	CanSpawn   bool          `json:"canSpawn"`
+	CanManage  bool          `json:"canManage"`
+	CanUnlink  bool          `json:"canUnlink"`
+	CanMembers bool          `json:"canMembers"`
+	CanAudit   bool          `json:"canAudit"`
 	// Ignored is what claims the project with labels egzo never writes, for whoever may audit it.
 	Ignored []string `json:"ignored,omitempty"`
 }
@@ -270,8 +287,8 @@ func offlineOf(at time.Time) *time.Time {
 }
 
 func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
-	p := projectJSON{ID: v.ID, Name: v.Project.Name, Host: v.Host, Role: v.Role, Operator: v.Operator, Offline: offlineOf(v.Offline), Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
-		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanAudit: v.Role.AtLeast(rbac.Administrator)}
+	p := projectJSON{ID: v.ID, Name: v.Project.Name, Host: v.Host, Role: v.Role, Ownerless: v.Ownerless, Offline: offlineOf(v.Offline), Feed: feedOf(v.Feed), Up: v.Project.Up, Templates: v.Project.Templates,
+		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanUnlink: v.CanUnlink, CanMembers: v.CanMembers, CanAudit: v.Role.AtLeast(rbac.Admin)}
 	if p.Templates == nil {
 		p.Templates = []string{}
 	}
@@ -295,13 +312,19 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 		s.problem(w, r, err)
 		return
 	}
+	connected, err := s.hub.Store().ConnectedProjects(r.Context(), user.ID)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
 	signIn := s.hub.SignIn()
 	sso := ""
 	if s.auth != nil {
 		sso = s.opts.SSOName
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "identities": s.identitiesOf(identities),
-		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer, "hub": s.opts.LinkURL})
+		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer, "hub": s.opts.LinkURL,
+		"canLink": user.IsOperator || connected < user.ProjectQuota, "connectedProjects": connected})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -343,21 +366,21 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Task     string `json:"task,omitempty"` // the verb of the task that runs on it
 	}
 	type project struct {
-		ID       string     `json:"id"`
-		Name     string     `json:"name"`
-		Host     string     `json:"host"`
-		Role     rbac.Role  `json:"role"`
-		Operator bool       `json:"operator"`
-		Offline  *time.Time `json:"offlineSince"`
-		Feed     feedJSON   `json:"feed"`
-		Up       bool       `json:"up"`
-		Agents   []agent    `json:"agents"`
+		ID        string     `json:"id"`
+		Name      string     `json:"name"`
+		Host      string     `json:"host"`
+		Role      rbac.Role  `json:"role"`
+		Ownerless bool       `json:"ownerless,omitempty"`
+		Offline   *time.Time `json:"offlineSince"`
+		Feed      feedJSON   `json:"feed"`
+		Up        bool       `json:"up"`
+		Agents    []agent    `json:"agents"`
 	}
 	out := struct {
 		Projects []project `json:"projects"`
 	}{Projects: []project{}}
 	for _, ref := range refs {
-		p := project{ID: ref.ID, Name: ref.Project.Name, Host: ref.Host, Role: ref.Role, Operator: ref.Operator, Offline: offlineOf(ref.Offline), Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
+		p := project{ID: ref.ID, Name: ref.Project.Name, Host: ref.Host, Role: ref.Role, Ownerless: ref.Ownerless, Offline: offlineOf(ref.Offline), Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
 		running := map[string]string{}
 		for _, t := range ref.Tasks {
 			running[t.Agent] = t.Verb
@@ -611,9 +634,8 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request, user store.User
 	}
 	candidates, _ := s.hub.Candidates(r.Context(), user, project)
 	type member struct {
-		User     userJSON  `json:"user"`
-		Role     rbac.Role `json:"role"`
-		Operator bool      `json:"operator"` // holds the project as an operator: not a role, cannot be changed here
+		User userJSON  `json:"user"`
+		Role rbac.Role `json:"role"`
 	}
 	out := struct {
 		Members    []member    `json:"members"`
@@ -622,7 +644,7 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request, user store.User
 		Me         string      `json:"me"`
 	}{Members: []member{}, Candidates: []userJSON{}, Roles: rbac.Roles, Me: user.ID}
 	for _, m := range members {
-		out.Members = append(out.Members, member{User: userOf(m.User), Role: m.Role, Operator: m.Operator})
+		out.Members = append(out.Members, member{User: userOf(m.User), Role: m.Role})
 	}
 	for _, c := range candidates {
 		out.Candidates = append(out.Candidates, userOf(c))
@@ -690,8 +712,8 @@ func (s *Server) namer(ctx context.Context) namer {
 
 func (n namer) actor(actor string) string {
 	switch {
-	case actor == "" || actor == rbac.Operator:
-		return "operator (CLI)"
+	case actor == "" || actor == rbac.CLI:
+		return "the CLI"
 	case actor == "hub":
 		return "the hub"
 	}
@@ -712,6 +734,7 @@ type userRowJSON struct {
 	LastLoginAt *time.Time     `json:"lastLoginAt"`
 	HasPassword bool           `json:"hasPassword"`
 	Identities  []identityJSON `json:"identities"`
+	Projects    int            `json:"projects"` // the projects they connected, which their quota is measured against
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.User) {
@@ -732,7 +755,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.Us
 	local := s.hub.SignIn().LocalLogin
 	rows := make([]userRowJSON, 0, len(users))
 	for _, u := range users {
-		row := userRowJSON{userJSON: userOf(u), CreatedAt: u.CreatedAt, HasPassword: u.HasPassword && local, Identities: s.identitiesOf(byUser[u.ID])}
+		row := userRowJSON{userJSON: userOf(u.User), CreatedAt: u.CreatedAt, HasPassword: u.HasPassword && local, Identities: s.identitiesOf(byUser[u.ID]), Projects: u.Projects}
 		if !u.LastLoginAt.IsZero() {
 			row.LastLoginAt = &u.LastLoginAt
 		}
@@ -741,23 +764,34 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.Us
 	writeJSON(w, http.StatusOK, map[string]any{"users": rows, "me": user.ID})
 }
 
-// updateUser makes a user an operator or takes it away ({"isOperator"}), or disables or enables them ({"disabled"}).
+// updateUser makes a user an operator or takes it away ({"isOperator"}), disables or enables them ({"disabled"}), or sets their quota
+// ({"projectQuota"}): one at a time.
 func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, user store.User) {
 	var body struct {
-		IsOperator *bool `json:"isOperator"`
-		Disabled   *bool `json:"disabled"`
+		IsOperator   *bool `json:"isOperator"`
+		Disabled     *bool `json:"disabled"`
+		ProjectQuota *int  `json:"projectQuota"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if (body.IsOperator == nil) == (body.Disabled == nil) {
-		s.apiFail(w, http.StatusBadRequest, "bad_request", "Say isOperator or disabled: true or false.")
+	said := 0
+	for _, given := range []bool{body.IsOperator != nil, body.Disabled != nil, body.ProjectQuota != nil} {
+		if given {
+			said++
+		}
+	}
+	if said != 1 {
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "Say one of isOperator, disabled or projectQuota.")
 		return
 	}
 	var err error
-	if body.IsOperator != nil {
+	switch {
+	case body.IsOperator != nil:
 		err = s.hub.SetOperator(r.Context(), user, r.PathValue("id"), *body.IsOperator)
-	} else {
+	case body.ProjectQuota != nil:
+		err = s.hub.SetProjectQuota(r.Context(), user, r.PathValue("id"), *body.ProjectQuota)
+	default:
 		var ended []string
 		ended, err = s.hub.SetDisabled(r.Context(), user, r.PathValue("id"), *body.Disabled)
 		s.endTerminals(ended)

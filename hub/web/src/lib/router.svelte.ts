@@ -5,12 +5,13 @@ export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "act
 
 export type AgentTab = "overview" | "activity" | "network" | "logs";
 
-export type SettingsTab = "links" | "users" | "account";
-export const settingsTabs: SettingsTab[] = ["links", "users", "account"];
+export type SettingsTab = "links" | "invites" | "users" | "account";
+export const settingsTabs: SettingsTab[] = ["links", "invites", "users", "account"];
 
 export type Route =
   | { name: "home" }
   | { name: "login" }
+  | { name: "invite" }
   | { name: "settings"; tab: SettingsTab }
   | { name: "project"; project: string; tab: ProjectTab }
   | { name: "agent"; project: string; agent: string; tab: AgentTab }
@@ -28,6 +29,7 @@ export function parse(pathname: string): Route {
   const parts = pathname.split("/").filter(Boolean).map(dec);
   if (parts.length === 0) return { name: "home" };
   if (parts[0] === "login" && parts.length === 1) return { name: "login" };
+  if (parts[0] === "invite" && parts.length === 1) return { name: "invite" };
   // /settings alone lands on the first tab
   if (parts[0] === "settings" && parts.length === 1) return { name: "settings", tab: "links" };
   if (parts[0] === "settings" && parts.length === 2 && (settingsTabs as string[]).includes(parts[1]!)) return { name: "settings", tab: parts[1] as SettingsTab };
@@ -50,6 +52,7 @@ export const href = {
   home: () => "/",
   settings: (tab: SettingsTab = "links") => `/settings/${tab}`,
   links: () => "/settings/links",
+  invites: () => "/settings/invites",
   users: () => "/settings/users",
   account: () => "/settings/account",
   project: (project: string, tab: ProjectTab = "agents") => `/p/${enc(project)}${tab === "agents" ? "" : "/" + tab}`,

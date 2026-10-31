@@ -40,8 +40,10 @@
       else throw e;
     }
   }));
+  // an operator with no role on the project sees the agent and its state, and no further
+  const overseeing = $derived(data?.project.role === "overseer");
   $effect(() => {
-    if (tab !== "overview" || offline) return;
+    if (tab !== "overview" || offline || overseeing || !data) return;
     return poll(async () => {
       events = await api.events(project, agent, 40);
     }, 15000);
@@ -136,14 +138,18 @@
       {/if}
     </section>
 
+    {#if overseeing}
+      <p class="muted" data-testid="overseeing">Its timeline, logs and network take a role on the project: give yourself one on its <a href={href.project(project, "members")}>Members</a> tab.</p>
+    {:else}
     <div class="tabs" role="tablist">
       <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={tab === "overview"}>Timeline</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "activity")} aria-selected={tab === "activity"}>Activity</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
     </div>
+    {/if}
 
-    {#if tab === "overview"}
+    {#if tab === "overview" && !overseeing}
       <div class="twocol">
         {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
         <section class="panel">
@@ -158,10 +164,12 @@
           </div>
         </section>
       </div>
-    {:else if tab === "activity"}
+    {:else if tab === "activity" && !overseeing}
       {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
-    {:else if tab === "network"}
+    {:else if tab === "network" && !overseeing}
       <NetworkView {project} {agent} />
+    {:else if overseeing}
+      <!-- said above the tabs -->
     {:else if logs === null}
       <p class="muted">Loading…</p>
     {:else}

@@ -101,13 +101,14 @@ func newRigWith(t *testing.T, options []func(*rig)) *rig {
 // browser is an http client with cookies, as a person's browser; it sends the Origin header a real one sends on a form.
 type browser struct {
 	t      *testing.T
+	rig    *rig
 	client *http.Client
 	base   string
 }
 
 func (r *rig) browser() *browser {
 	jar, _ := cookiejar.New(nil)
-	return &browser{t: r.t, base: r.server.URL, client: &http.Client{Jar: jar, Timeout: 10 * time.Second}}
+	return &browser{t: r.t, rig: r, base: r.server.URL, client: &http.Client{Jar: jar, Timeout: 10 * time.Second}}
 }
 
 // json is one JSON object, as the front end receives it.
@@ -182,7 +183,8 @@ func list(m json_, key string) []map[string]any {
 	return out
 }
 
-// signIn signs in as user: "admin" with the starter account's password, anybody else through single sign-on.
+// signIn signs in as user: "admin" with the starter account's password, anybody else through single sign-on, with an invite when the hub
+// does not know them yet.
 func (b *browser) signIn(user string) {
 	b.t.Helper()
 	if user == "admin" {
@@ -191,9 +193,40 @@ func (b *browser) signIn(user string) {
 		}
 		return
 	}
-	if final := b.sso(b.base+"/login/start", user); final.Path != "/" {
+	start := b.base + "/login/start"
+	if _, err := b.rig.store.UserByName(ctx, user); err != nil {
+		start = b.ssoAddress(b.rig.invite(store.Invite{}))
+	}
+	if final := b.sso(start, user); final.Path != "/" {
 		b.t.Fatalf("the sign-in ended on %s", final)
 	}
+}
+
+// ssoAddress starts a sign-in with an invite, and returns where the hub sends the browser.
+func (b *browser) ssoAddress(code string) string {
+	b.t.Helper()
+	status, out := b.post("/invites/sso", json_{"code": code})
+	if status != 200 {
+		b.t.Fatalf("invite sign-in = %d %v", status, out)
+	}
+	return out["url"].(string)
+}
+
+// invite makes the code of an invite directly: an operator's for what is not about a project, the project's owner's otherwise.
+func (r *rig) invite(i store.Invite) string {
+	r.t.Helper()
+	if i.CreatedBy == "" {
+		admin, err := r.store.UserByName(ctx, "admin")
+		if err != nil {
+			r.t.Fatal(err)
+		}
+		i.CreatedBy = admin.ID
+	}
+	_, code, err := r.store.CreateInvite(ctx, i, time.Now())
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return code
 }
 
 // password posts the sign-in form, as the sign-in page does.

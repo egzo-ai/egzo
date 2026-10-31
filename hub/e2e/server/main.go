@@ -238,9 +238,22 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 				}
 			}
 			if !granted {
-				http.Error(rw, "nobody called "+c.User+" has signed in yet", http.StatusNotFound)
+				http.Error(rw, "nobody called "+c.User+" is on the hub yet", http.StatusNotFound)
 				return
 			}
+		case "invite": // a code of an invite to the hub, as an operator would hand it over
+			admin, err := db.UserByName(ctx, store.StarterUsername)
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, code, err := w.hub.InviteToHub(ctx, admin, false, 0)
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(rw).Encode(map[string]string{"code": code})
+			return
 		case "set-agent":
 			actor := c.Actor
 			if actor == "" {

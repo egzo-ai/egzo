@@ -81,14 +81,16 @@ ADMIN_PASSWORD = "e2e-admin-password"  # what the test server sets for the start
 
 
 def sign_in(page, server, name):
-    """Sign in as `name`: "admin" with the starter account's password, anybody else through the test provider."""
-    page.goto(server.url + "/login")
+    """Sign in as `name`: "admin" with the starter account's password, anybody else through the test provider, with an invite of the operator's:
+    nobody gets an account without one, and one who has an account just accepts it."""
     if name == "admin":
+        page.goto(server.url + "/login")
         page.get_by_label("Username").fill("admin")
         page.get_by_label("Password").fill(ADMIN_PASSWORD)
         page.get_by_role("button", name="Sign in", exact=True).click()
     else:
-        page.get_by_role("link", name="Sign in with Test login").click()
+        page.goto(server.url + "/invite#" + server.world("invite")["code"])
+        page.get_by_role("button", name="Continue with Test login").click()
         page.get_by_label("Who are you?").fill(name)
         page.get_by_role("button", name="Sign in").click()
     expect(page.get_by_test_id("signed-in-as")).to_contain_text(name)

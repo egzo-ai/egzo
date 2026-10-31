@@ -1,13 +1,14 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, errorText, toast } from "../lib/app.svelte";
+  import { app, errorText, refreshProjects, toast } from "../lib/app.svelte";
   import { operate } from "../lib/agentops";
+  import { ask } from "../lib/confirm.svelte";
   import { activityKind, activityLabel, ago, initials, stamp, taskDoing, taskFailedLabel } from "../lib/format";
   import { poll } from "../lib/live";
   import { suggestName } from "../lib/names";
   import { href, nav, navigate, type ProjectTab } from "../lib/router.svelte";
   import { followTask, onScreen } from "../lib/tasks";
-  import type { AuditEntry, Members, Project, Task, TimelineEvent } from "../lib/types";
+  import type { AuditEntry, Invite, Members, Project, Task, TimelineEvent } from "../lib/types";
   import { openTerm, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
   import Icon from "../components/Icon.svelte";
@@ -29,6 +30,7 @@
   let spec = $state<string | null>(null);
   let audit = $state<AuditEntry[] | null>(null);
   let members = $state<Members | null>(null);
+  let invites = $state<Invite[]>([]);
   let activity = $state<Task[] | null>(null);
   let spawning = $state(false);
   let spawnForm = $state({ template: "", name: "", suggested: "" });
@@ -59,7 +61,7 @@
     audit = await api.audit(id);
   }
   async function loadMembers() {
-    members = await api.members(id);
+    [members, invites] = await Promise.all([api.members(id), project?.canManage ? api.projectInvites(id) : Promise.resolve([])]);
   }
   async function loadActivity() {
     activity = await api.tasks(id);
@@ -76,9 +78,10 @@
   const running = $derived(agents.filter((a) => a.running).length);
   const waiting = $derived(agents.filter((a) => a.waiting).length);
   const tabs = $derived.by(() => {
-    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null], ["timeline", "Timeline", null], ["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]];
+    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null]];
+    if (project?.role !== "overseer") list.push(["timeline", "Timeline", null], ["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
-    if (project?.canManage) list.push(["members", "Members", null]);
+    if (project?.canMembers) list.push(["members", "Members", null]);
     return list;
   });
 
@@ -137,6 +140,24 @@
     if (await operate(id, agent, verb)) await loadProject();
   }
 
+  async function unlink() {
+    if (!project) return;
+    const ok = await ask({
+      title: `Unlink ${project.name}?`,
+      lines: ["The hub forgets it, with everyone's role on it. A new link code brings it back as a new project.", `It keeps running on ${project.host || "its machine"}: only egzo project down, there, stops it.`],
+      confirm: "Unlink", typed: project.name,
+    });
+    if (!ok) return;
+    try {
+      await api.unlinkProject(id);
+      toast(`Unlinked ${project.name}`);
+      await refreshProjects();
+      navigate(href.home());
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  }
+
   function attach(agent: string) {
     if (!openTerm(id, agent)) toast("Too many terminals are open. Close one first.", "error");
   }
@@ -150,7 +171,7 @@
     <div class="phead">
       <h1 class="h-page">{project.name}</h1>
       <span class="muted" data-testid="host">{project.host}</span>
-      {#if project.operator}<span class="badge" title="You hold every project as an operator">operator</span>{:else}<span class="badge" title="your role">{project.role}</span>{/if}
+      {#if project.role === "overseer"}<span class="badge" title="You oversee it as an operator, with no role on it">operator</span>{:else}<span class="badge" title="your role">{project.role}</span>{/if}{#if project.ownerless} <span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
       <span class="grow"></span>
       {#if project.canSpawn}<button class="btn" data-variant="primary" data-key="s" aria-label="Spawn agent" aria-keyshortcuts="s" onclick={openSpawn} disabled={!project.up}>Spawn agent <span class="kbd">s</span></button>{/if}
     </div>
@@ -247,7 +268,16 @@
     {:else if tab === "audit"}
       {#if audit}<AuditTable entries={audit} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "members"}
-      {#if members}<MembersTable project={id} data={members} reload={loadMembers} />{:else}<p class="muted">Loading…</p>{/if}
+      {#if members}<MembersTable {project} data={members} invites={invites} reload={loadMembers} />{:else}<p class="muted">Loading…</p>{/if}
+      {#if project.canUnlink}
+        <section class="panel" aria-labelledby="unlink">
+          <header><h2 class="h-section" id="unlink">Unlink</h2></header>
+          <div class="pad" style="display:grid;gap:var(--space-3)">
+            <p class="muted" style="margin:0">The hub forgets the project: everyone loses their role, and its terminals end. The project keeps running on {project.host || "its machine"}, until somebody runs <code>egzo project down</code> there.</p>
+            <div class="btn-group"><button class="btn" data-variant="danger" onclick={unlink}>Unlink {project.name}</button></div>
+          </div>
+        </section>
+      {/if}
     {/if}
   </div>
 

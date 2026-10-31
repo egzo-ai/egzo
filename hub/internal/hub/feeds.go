@@ -220,6 +220,7 @@ func (h *Hub) Run(ctx context.Context) {
 		_ = h.store.PurgeDenials(ctx, now.Add(-denialRetention))
 		_ = h.store.PurgeTasks(ctx, now.Add(-taskRetention))
 		_ = h.store.PurgeLinkCodes(ctx, now)
+		_ = h.store.PurgeInvites(ctx, now)
 		select {
 		case <-ctx.Done():
 			return

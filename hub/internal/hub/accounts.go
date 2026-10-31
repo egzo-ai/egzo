@@ -20,6 +20,8 @@ var (
 	ErrBadLogin = errors.New("wrong username or password")
 	// ErrSignInRefused is the answer to a single sign-on of a disabled user. It gives no reason.
 	ErrSignInRefused = errors.New("sign-in refused")
+	// ErrNoInvite is the answer to a single sign-on of a person the hub does not know, who came without an invite.
+	ErrNoInvite = store.ErrNoInvite
 	// ErrNoLocalLogin is returned for a password sign-in while local login is off.
 	ErrNoLocalLogin = errors.New("signing in with a password is turned off")
 	// ErrNoOperator stops the start of a hub that nobody could manage.
@@ -161,24 +163,31 @@ func (h *Hub) PasswordLogin(ctx context.Context, username, password string) (sto
 	return user, nil
 }
 
-// IdentityLogin signs in with an identity the provider vouched for. A new identity makes a new user with no access; a disabled
-// user's is refused (ErrSignInRefused), with nothing refreshed and no user made. identityID is the identity, for the session.
-func (h *Hub) IdentityLogin(ctx context.Context, issuer, subject string, p store.Profile) (user store.User, identityID string, err error) {
+// IdentityLogin signs in with an identity the provider vouched for. A disabled user's is refused (ErrSignInRefused), with nothing refreshed
+// and no user made. A new identity needs a good invite, which is spent on a new user: without one the answer is ErrNoInvite or ErrBadInvite and
+// nothing is written, so that a company-wide provider does not fill the hub with everyone in the company. A person the hub knows signs in and
+// their invite is not spent: unspent says so, and it is theirs to accept. identityID is the identity, for the session.
+func (h *Hub) IdentityLogin(ctx context.Context, issuer, subject string, p store.Profile, invite string) (user store.User, identityID string, unspent bool, err error) {
 	if h.signIn.Issuer == "" || issuer != h.signIn.Issuer {
-		return store.User{}, "", fmt.Errorf("the identity is from %q, not the configured issuer %q", issuer, h.signIn.Issuer)
+		return store.User{}, "", false, fmt.Errorf("the identity is from %q, not the configured issuer %q", issuer, h.signIn.Issuer)
 	}
-	user, identityID, created, err := h.store.LoginIdentity(ctx, issuer, subject, p)
+	user, identityID, spent, created, err := h.store.LoginIdentity(ctx, issuer, subject, p, invite)
 	if errors.Is(err, store.ErrDisabled) {
 		_ = h.store.Audit(ctx, store.AuditEntry{Actor: "hub", Action: "user.signin", Detail: fmt.Sprintf("refused: a disabled user, at %s as %s", issuer, subject)})
-		return store.User{}, "", ErrSignInRefused
+		return store.User{}, "", false, ErrSignInRefused
+	}
+	if errors.Is(err, store.ErrNoInvite) || errors.Is(err, store.ErrBadInvite) {
+		h.log.Info("single sign-on refused: no invite", "issuer", issuer, "subject", subject)
+		return store.User{}, "", false, err
 	}
 	if err != nil {
-		return store.User{}, "", err
+		return store.User{}, "", false, err
 	}
 	if created {
 		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: fmt.Sprintf("%s, at %s", user.Username, issuer), Allowed: true})
+		h.auditRedeemed(ctx, user, spent)
 	}
-	return user, identityID, nil
+	return user, identityID, invite != "" && !created, nil
 }
 
 // LinkIdentity adds an identity, which the user just proved control of at the provider, to the user.

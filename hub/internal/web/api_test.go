@@ -42,7 +42,7 @@ func TestTheAppIsServedForItsOwnAddressesAndTheAPIAnswersJSONWhenSignedOut(t *te
 	}
 }
 
-func TestTheStarterAccountIsAnOperatorWhoHoldsEveryProject(t *testing.T) {
+func TestTheStarterAccountIsAnOperator(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")
 	b := r.browser()
@@ -53,7 +53,7 @@ func TestTheStarterAccountIsAnOperatorWhoHoldsEveryProject(t *testing.T) {
 	}
 	_, projects := b.get("/projects")
 	got := list(projects, "projects")
-	if len(got) != 1 || got[0]["name"] != "web" || got[0]["id"] != r.id("web") || got[0]["host"] != "laptop" || got[0]["role"] != "owner" || got[0]["operator"] != true {
+	if len(got) != 1 || got[0]["name"] != "web" || got[0]["id"] != r.id("web") || got[0]["host"] != "laptop" || got[0]["role"] != "owner" {
 		t.Errorf("projects = %v", projects)
 	}
 	if grants, _ := r.store.GrantsOf(ctx, r.userID("admin")); len(grants) != 1 {
@@ -94,7 +94,7 @@ func TestAProjectOffersOnlyWhatTheRoleAllows(t *testing.T) {
 		t.Errorf("owner view = %v", owner)
 	}
 	a := list(owner, "agents")[0]
-	if a["canOperate"] != true || a["status"] != "reading the code" || a["creator"] != "operator (CLI)" {
+	if a["canOperate"] != true || a["status"] != "reading the code" || a["creator"] != "the CLI" {
 		t.Errorf("owner's agent = %v", a)
 	}
 	_, user := alice.get("/p/" + r.id("web"))
@@ -343,13 +343,13 @@ func TestMembersCanBeAddedChangedAndRemovedByAnOwner(t *testing.T) {
 		t.Fatalf("members = %v", m)
 	}
 	// the operator is listed, as owner, marked: their access is not a role
-	if rows := list(m, "members"); len(rows) != 1 || at(rows[0], "user", "username") != "admin" || rows[0]["role"] != "owner" || rows[0]["operator"] != true {
+	if rows := list(m, "members"); len(rows) != 1 || at(rows[0], "user", "username") != "admin" || rows[0]["role"] != "owner" {
 		t.Errorf("members = %v", rows)
 	}
-	if code, _ := root.post("/p/"+r.id("web")+"/members", json_{"user": uid, "role": "administrator"}); code != 200 {
+	if code, _ := root.post("/p/"+r.id("web")+"/members", json_{"user": uid, "role": "admin"}); code != 200 {
 		t.Errorf("grant = %d", code)
 	}
-	if role, _ := r.store.Role(ctx, r.id("web"), uid); role != rbac.Administrator {
+	if role, _ := r.store.Role(ctx, r.id("web"), uid); role != rbac.Admin {
 		t.Errorf("role = %q", role)
 	}
 	if code, _ := alice.get("/p/" + r.id("web") + "/audit"); code != 200 {
@@ -362,13 +362,12 @@ func TestMembersCanBeAddedChangedAndRemovedByAnOwner(t *testing.T) {
 	if code, out := alice.post("/p/"+r.id("web")+"/members", json_{"user": uid, "role": "none"}); code != 403 || !strings.Contains(out["message"].(string), "cannot remove or lower themselves") {
 		t.Errorf("an owner removing themselves = %d %v", code, out)
 	}
-	// an operator's access is not a role, whoever asks and whatever the role
-	for _, who := range []*browser{root, alice} {
-		for _, role := range []string{"none", "user", "owner"} {
-			if code, out := who.post("/p/"+r.id("web")+"/members", json_{"user": r.userID("admin"), "role": role}); code != 403 || !strings.Contains(out["message"].(string), "operator holds every project") {
-				t.Errorf("setting the operator to %s = %d %v", role, code, out)
-			}
-		}
+	// the operator made the code, so they own it like anybody else, and a co-owner can change that
+	if code, out := alice.post("/p/"+r.id("web")+"/members", json_{"user": r.userID("admin"), "role": "user"}); code != 200 {
+		t.Errorf("an owner setting an operator's role = %d %v", code, out)
+	}
+	if code, out := alice.post("/p/"+r.id("web")+"/members", json_{"user": r.userID("admin"), "role": "owner"}); code != 200 {
+		t.Errorf("an owner giving it back = %d %v", code, out)
 	}
 	root.post("/p/"+r.id("web")+"/members", json_{"user": uid, "role": "none"})
 	if code, _ := alice.get("/p/" + r.id("web")); code != 404 {
@@ -544,7 +543,7 @@ func TestTheTerminalBridgesTheBrowserToTheAgent(t *testing.T) {
 	// a second person is told it is in use, and may take it over
 	alice := r.browser()
 	alice.signIn("alice")
-	r.store.SetRole(ctx, r.id("web"), r.userID("alice"), rbac.Administrator)
+	r.store.SetRole(ctx, r.id("web"), r.userID("alice"), rbac.Admin)
 	busy, err := alice.dial(path)
 	if err != nil {
 		t.Fatal(err)

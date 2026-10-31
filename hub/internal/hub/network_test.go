@@ -158,7 +158,7 @@ func TestAUserSeesTheNetworkOfTheAgentsTheyMayOperateAndAnAdministratorAllOfIt(t
 	alice, bob, carol := r.login("alice"), r.login("bob"), r.login("carol")
 	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
 	r.store.SetRole(ctx, r.id("web"), bob.ID, rbac.User)
-	r.store.SetRole(ctx, r.id("web"), carol.ID, rbac.Administrator)
+	r.store.SetRole(ctx, r.id("web"), carol.ID, rbac.Admin)
 	r.hub.Spawn(ctx, alice, r.id("web"), "coder", "coder-1")
 	a := trailOf(r.agentNamed("web", "coder-1"))
 	stranger := &trail{agent: "ghost", at: a.at} // wrong credentials: the proxy cannot tell who it is

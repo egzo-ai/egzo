@@ -1,5 +1,5 @@
 // The keyboard of the whole app: the leader chord (inside a terminal and out), and single-key shortcuts on pages.
-import { app, toast } from "./app.svelte";
+import { app, seesLinks, toast } from "./app.svelte";
 import { Leader, type LeaderAction } from "./leader";
 import { href, nav, navigate } from "./router.svelte";
 import { sendTo } from "./registry";
@@ -57,7 +57,8 @@ function pageKey(e: KeyboardEvent): boolean {
   if (goPending && Date.now() - goPending < 1500) {
     goPending = 0;
     if (e.key === "p") { navigate(href.home()); return true; }
-    if (e.key === "l" && app.user?.isOperator) { navigate(href.links()); return true; }
+    if (e.key === "l" && seesLinks()) { navigate(href.links()); return true; }
+    if (e.key === "i" && app.user?.isOperator) { navigate(href.invites()); return true; }
     if (e.key === "u" && app.user?.isOperator) { navigate(href.users()); return true; }
     return false;
   }

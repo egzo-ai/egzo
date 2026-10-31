@@ -32,11 +32,25 @@ const issuer = "https://idp.example.com"
 // login signs in at the test issuer as sub, with a profile named after it.
 func login(t *testing.T, s *Store, sub string) User {
 	t.Helper()
-	u, _, _, err := s.LoginIdentity(ctx, issuer, sub, Profile{Email: sub + "@example.com", Name: sub, PreferredUsername: sub})
+	u, _, _, _, err := s.LoginIdentity(ctx, issuer, sub, Profile{Email: sub + "@example.com", Name: sub, PreferredUsername: sub}, invited(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// invited is a code that lets one new person in, with nothing else.
+func invited(t *testing.T, s *Store) string {
+	t.Helper()
+	admin, err := s.EnsureStarter(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, code, err := s.CreateInvite(ctx, Invite{CreatedBy: admin.ID}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
 }
 
 func count(t *testing.T, s *Store, table string) int {
@@ -66,11 +80,11 @@ func TestADatabaseOfAnotherVersionIsRefusedAndANewOneIsMade(t *testing.T) {
 
 func TestANewIdentityMakesAUserWithNoAccessAndAReturningOneFindsThem(t *testing.T) {
 	s := open(t)
-	u, identity, created, err := s.LoginIdentity(ctx, issuer, "s1", Profile{Email: "alex@corp.com", Name: "Alex", PreferredUsername: "alex@corp.com"})
+	u, identity, _, created, err := s.LoginIdentity(ctx, issuer, "s1", Profile{Email: "alex@corp.com", Name: "Alex", PreferredUsername: "alex@corp.com"}, invited(t, s))
 	if err != nil || !created || u.IsOperator || u.Username != "alex" || identity == "" {
 		t.Fatalf("first sign-in: %+v %q created=%v %v", u, identity, created, err)
 	}
-	again, identity2, created, _ := s.LoginIdentity(ctx, issuer, "s1", Profile{Email: "alex@new.com", Name: "Alex B", PreferredUsername: "alexb"})
+	again, identity2, _, created, _ := s.LoginIdentity(ctx, issuer, "s1", Profile{Email: "alex@new.com", Name: "Alex B", PreferredUsername: "alexb"}, "")
 	if created || again.ID != u.ID || identity2 != identity {
 		t.Fatalf("a returning sign-in made %+v (created=%v)", again, created)
 	}
@@ -80,15 +94,15 @@ func TestANewIdentityMakesAUserWithNoAccessAndAReturningOneFindsThem(t *testing.
 	if other := login(t, s, "s2"); other.ID == u.ID {
 		t.Error("another subject found the same user")
 	}
-	if u3, _, created, _ := s.LoginIdentity(ctx, "https://other.example.com", "s1", Profile{}); !created || u3.ID == u.ID {
+	if u3, _, _, created, _ := s.LoginIdentity(ctx, "https://other.example.com", "s1", Profile{}, invited(t, s)); !created || u3.ID == u.ID {
 		t.Error("the same subject at another issuer found the same user")
 	}
 }
 
 func TestNothingIsMatchedByEmail(t *testing.T) {
 	s := open(t)
-	a, _, _, _ := s.LoginIdentity(ctx, issuer, "a", Profile{Email: "same@corp.com", EmailVerified: true})
-	b, _, created, _ := s.LoginIdentity(ctx, issuer, "b", Profile{Email: "same@corp.com", EmailVerified: true})
+	a, _, _, _, _ := s.LoginIdentity(ctx, issuer, "a", Profile{Email: "same@corp.com", EmailVerified: true}, invited(t, s))
+	b, _, _, created, _ := s.LoginIdentity(ctx, issuer, "b", Profile{Email: "same@corp.com", EmailVerified: true}, invited(t, s))
 	if !created || a.ID == b.ID || b.Username != "same-2" {
 		t.Errorf("two subjects with one email: %+v %+v", a, b)
 	}
@@ -101,7 +115,7 @@ func TestADisabledUserIsRefusedAndNoNewUserIsMadeNorAnythingRefreshed(t *testing
 		t.Fatal(err)
 	}
 	users, identities := count(t, s, "users"), count(t, s, "user_identities")
-	_, _, _, err := s.LoginIdentity(ctx, issuer, "bob", Profile{Email: "changed@example.com"})
+	_, _, _, _, err := s.LoginIdentity(ctx, issuer, "bob", Profile{Email: "changed@example.com"}, "")
 	if !errors.Is(err, ErrDisabled) {
 		t.Fatalf("a disabled user signed in: %v", err)
 	}
@@ -195,7 +209,11 @@ func TestDisablingEndsTheSessionsAndNeverAppliesToAnOperator(t *testing.T) {
 
 func TestUsersComeBackInTheOrderTheyWereMade(t *testing.T) {
 	s := open(t)
-	var want []string
+	admin, err := s.EnsureStarter(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{admin.ID}
 	for i := 0; i < 12; i++ { // within the same second, whatever their ids sort like
 		want = append(want, login(t, s, string(rune('a'+i))).ID)
 	}
@@ -236,7 +254,7 @@ func TestLinkingAddsAnIdentityAndNeverMovesOne(t *testing.T) {
 	if _, err := s.LinkIdentity(ctx, admin.ID, "https://next.example.com", "admin-next", Profile{}); err != nil {
 		t.Errorf("an identity at another issuer: %v", err)
 	}
-	u, _, created, _ := s.LoginIdentity(ctx, issuer, "admin-sub", Profile{})
+	u, _, _, created, _ := s.LoginIdentity(ctx, issuer, "admin-sub", Profile{}, "")
 	if created || u.ID != admin.ID {
 		t.Errorf("the linked identity signs in as %+v", u)
 	}
@@ -362,8 +380,8 @@ func TestRolesAreGrantedReplacedAndRemoved(t *testing.T) {
 		t.Fatalf("role before any grant = %q", role)
 	}
 	s.SetRole(ctx, web, u.ID, rbac.User)
-	s.SetRole(ctx, web, u.ID, rbac.Administrator)
-	if role, _ := s.Role(ctx, web, u.ID); role != rbac.Administrator {
+	s.SetRole(ctx, web, u.ID, rbac.Admin)
+	if role, _ := s.Role(ctx, web, u.ID); role != rbac.Admin {
 		t.Errorf("role = %q", role)
 	}
 	if role, _ := s.Role(ctx, registered(t, s, "web"), u.ID); role != rbac.None {
@@ -596,7 +614,7 @@ func TestACodeOfAKeyThatIsTakenIsNotSpentAndNothingHalfDoneStays(t *testing.T) {
 	if _, err := s.RedeemLinkCode(ctx, second, Registration{Key: key, Name: "web"}, time.Now()); !errors.Is(err, ErrKeyTaken) {
 		t.Fatalf("a key registered twice: %v", err)
 	}
-	if codes, _ := s.LinkCodes(ctx, time.Now()); len(codes) != 1 {
+	if codes, _ := s.LinkCodes(ctx, "", time.Now()); len(codes) != 1 {
 		t.Errorf("codes = %+v", codes)
 	}
 	if projects, _ := s.Registrations(ctx); len(projects) != 1 {
@@ -616,17 +634,23 @@ func TestACodeIsWorthNothingOnceExpiredOrItsMakerMayNoLongerMakeOne(t *testing.T
 	if _, err := s.SetOperator(ctx, u.ID, false); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RedeemLinkCode(ctx, former, Registration{Key: []byte("2"), Name: "web"}, time.Now()); !errors.Is(err, ErrOverQuota) {
+		t.Errorf("a code of someone who is no longer an operator and has no quota: %v", err)
+	}
+	if _, _, err := s.SetDisabled(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.RedeemLinkCode(ctx, former, Registration{Key: []byte("2"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
-		t.Errorf("a code of someone who is no longer an operator: %v", err)
+		t.Errorf("a code of someone who was disabled: %v", err)
 	}
 	made, cancelled, _ := s.CreateLinkCode(ctx, keep.ID, time.Now())
-	if err := s.CancelLinkCode(ctx, made.ID); err != nil {
+	if err := s.CancelLinkCode(ctx, made.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RedeemLinkCode(ctx, cancelled, Registration{Key: []byte("3"), Name: "web"}, time.Now()); !errors.Is(err, ErrBadCode) {
 		t.Errorf("a cancelled code: %v", err)
 	}
-	if err := s.CancelLinkCode(ctx, made.ID); !errors.Is(err, ErrNotFound) {
+	if err := s.CancelLinkCode(ctx, made.ID, ""); !errors.Is(err, ErrNotFound) {
 		t.Errorf("cancelled twice: %v", err)
 	}
 	if projects, _ := s.Registrations(ctx); len(projects) != 0 {
@@ -639,7 +663,7 @@ func TestExpiredCodesArePurgedAndAreNotListed(t *testing.T) {
 	u := operatorNamed(t, s, "a")
 	s.CreateLinkCode(ctx, u.ID, time.Now().Add(-time.Hour))
 	live, _, _ := s.CreateLinkCode(ctx, u.ID, time.Now())
-	if codes, _ := s.LinkCodes(ctx, time.Now()); len(codes) != 1 || codes[0].ID != live.ID {
+	if codes, _ := s.LinkCodes(ctx, "", time.Now()); len(codes) != 1 || codes[0].ID != live.ID {
 		t.Errorf("codes = %+v", codes)
 	}
 	if err := s.PurgeLinkCodes(ctx, time.Now()); err != nil {
@@ -727,5 +751,99 @@ func TestForgettingAProjectTakesWhatIsKeyedByIt(t *testing.T) {
 	}
 	if err := s.ForgetProject(ctx, web, hublink.StateApproved); !errors.Is(err, ErrNotFound) {
 		t.Errorf("forgetting twice: %v", err)
+	}
+}
+
+func TestAQuotaGatesRegisteringAndOperatorsAreNotHeldToOne(t *testing.T) {
+	s := open(t)
+	alice := login(t, s, "alice")
+	if changed, err := s.SetProjectQuota(ctx, alice.ID, 1); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	if changed, _ := s.SetProjectQuota(ctx, alice.ID, 1); changed {
+		t.Error("the same quota changed something")
+	}
+	_, first, _ := s.CreateLinkCode(ctx, alice.ID, time.Now())
+	_, second, _ := s.CreateLinkCode(ctx, alice.ID, time.Now())
+	web, err := s.RedeemLinkCode(ctx, first, Registration{Key: []byte("1"), Name: "web"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.RedeemLinkCode(ctx, second, Registration{Key: []byte("2"), Name: "api"}, time.Now())
+	if !errors.Is(err, ErrOverQuota) || r.Owner != alice.ID {
+		t.Fatalf("over the quota: %+v %v", r, err)
+	}
+	if codes, _ := s.LinkCodes(ctx, alice.ID, time.Now()); len(codes) != 1 {
+		t.Errorf("a code that was turned away over quota went: %+v", codes)
+	}
+	// over-subscribed: lowering it removes nothing
+	s.SetProjectQuota(ctx, alice.ID, 0)
+	if _, err := s.Registration(ctx, web.ID); err != nil {
+		t.Errorf("lowering the quota removed a project: %v", err)
+	}
+	// a revoked project is off the hub, and leaves room
+	s.SetProjectQuota(ctx, alice.ID, 1)
+	if _, err := s.Revoke(ctx, web.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.ConnectedProjects(ctx, alice.ID); n != 0 {
+		t.Errorf("connected = %d", n)
+	}
+	if _, err := s.RedeemLinkCode(ctx, second, Registration{Key: []byte("2"), Name: "api"}, time.Now()); err != nil {
+		t.Errorf("the code came back good once there was room: %v", err)
+	}
+	op := operatorNamed(t, s, "op")
+	_, code, _ := s.CreateLinkCode(ctx, op.ID, time.Now())
+	if _, err := s.RedeemLinkCode(ctx, code, Registration{Key: []byte("3"), Name: "data"}, time.Now()); err != nil {
+		t.Errorf("an operator with no quota: %v", err)
+	}
+}
+
+func TestLinkCodesAreListedAndCancelledByWhoMadeThem(t *testing.T) {
+	s := open(t)
+	alice, bob := login(t, s, "alice"), login(t, s, "bob")
+	mine, _, _ := s.CreateLinkCode(ctx, alice.ID, time.Now())
+	theirs, _, _ := s.CreateLinkCode(ctx, bob.ID, time.Now())
+	if codes, _ := s.LinkCodes(ctx, alice.ID, time.Now()); len(codes) != 1 || codes[0].ID != mine.ID {
+		t.Errorf("alice lists %+v", codes)
+	}
+	if codes, _ := s.LinkCodes(ctx, "", time.Now()); len(codes) != 2 {
+		t.Errorf("everyone's: %+v", codes)
+	}
+	if err := s.CancelLinkCode(ctx, theirs.ID, alice.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cancelling somebody else's: %v", err)
+	}
+}
+
+func TestTheLastValidOwnerStaysOneInOneTransaction(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	alice, bob := login(t, s, "alice"), login(t, s, "bob")
+	if err := s.SetRole(ctx, web, alice.ID, rbac.Owner); err != nil {
+		t.Fatal(err)
+	}
+	registrar, _ := s.UserByName(ctx, "registrar")
+	if err := s.SetRole(ctx, web, registrar.ID, rbac.None); err != nil {
+		t.Fatal(err)
+	}
+	s.SetRole(ctx, web, bob.ID, rbac.Owner)
+	if err := s.SetRole(ctx, web, alice.ID, rbac.User); err != nil {
+		t.Errorf("one of two owners: %v", err)
+	}
+	if err := s.SetRole(ctx, web, bob.ID, rbac.None); !errors.Is(err, ErrLastOwner) {
+		t.Errorf("the last owner: %v", err)
+	}
+	// a person who cannot sign in answers for nothing: bob can go if carol is there, and carol counts only while enabled
+	carol := login(t, s, "carol")
+	s.SetRole(ctx, web, carol.ID, rbac.Owner)
+	s.SetDisabled(ctx, carol.ID, true)
+	if err := s.SetRole(ctx, web, bob.ID, rbac.None); !errors.Is(err, ErrLastOwner) {
+		t.Errorf("bob is the last valid owner: %v", err)
+	}
+	if err := s.SetRole(ctx, web, carol.ID, rbac.None); err != nil {
+		t.Errorf("a disabled owner: %v", err)
+	}
+	if owners, _ := s.ValidOwners(ctx); len(owners[web]) != 1 || owners[web][0] != bob.Username {
+		t.Errorf("owners = %v", owners)
 	}
 }

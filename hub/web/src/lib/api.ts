@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, Link, LinkCode, Members, Network, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
+  AgentAnswer, AuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -60,16 +60,29 @@ export const api = {
   links: () => request<{ links: Link[] }>("GET", "/links").then((r) => r.links),
   revokeLink: (id: string, message: string) => request<{ ok: true }>("POST", `/links/${enc(id)}/revoke`, { message }),
   forgetLink: (id: string) => request<{ ok: true }>("DELETE", `/links/${enc(id)}`),
-  /** Makes a code that registers one project. The answer is the only time the code is seen: operators. */
+  /** Makes a code that registers one project. The answer is the only time the code is seen. */
   createLinkCode: () => request<NewLinkCode>("POST", "/links/codes"),
-  /** The codes that are still good, without their values: operators. */
+  /** The codes that are still good, without their values: everyone's for an operator, one's own otherwise. */
   linkCodes: () => request<{ codes: LinkCode[] }>("GET", "/links/codes").then((r) => r.codes),
   cancelLinkCode: (id: string) => request<{ ok: true }>("DELETE", `/links/codes/${enc(id)}`),
 
   users: () => request<{ users: UserRow[]; me: string }>("GET", "/users"),
   setOperator: (id: string, isOperator: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { isOperator }),
   setDisabled: (id: string, disabled: boolean) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { disabled }),
+  setProjectQuota: (id: string, projectQuota: number) => request<{ ok: true }>("PUT", `/users/${enc(id)}`, { projectQuota }),
   removeIdentity: (user: string, identity: string) => request<{ ok: true }>("DELETE", `/users/${enc(user)}/identities/${enc(identity)}`),
+
+  /** Every invite that is still good: operators. */
+  invites: () => request<{ invites: Invite[] }>("GET", "/invites").then((r) => r.invites),
+  /** An invite to the flags. The answer is the only time its link is seen: operators. */
+  createInvite: (operator: boolean, projectQuota: number) => request<NewInvite>("POST", "/invites", { operator, projectQuota }),
+  revokeInvite: (id: string) => request<{ ok: true }>("DELETE", `/invites/${enc(id)}`),
+  // the code goes in a body: a code in an address ends up in the logs of whatever is in the way
+  peekInvite: (code: string) => request<InvitePreview>("POST", "/invites/peek", { code }),
+  acceptInvite: (code: string) => request<{ invite: Invite }>("POST", "/invites/accept", { code }).then((r) => r.invite),
+  registerInvite: (code: string, username: string, password: string) => request<{ ok: true }>("POST", "/invites/register", { code, username, password }),
+  /** Starts a sign-in at the login provider with a code; the answer is where to send the browser. */
+  inviteSSO: (code: string) => request<{ url: string }>("POST", "/invites/sso", { code }),
 
   project: (id: string) => request<Project>("GET", project(id)),
   events: (id: string, agentName = "", limit = 40) =>
@@ -87,6 +100,10 @@ export const api = {
   members: (id: string) => request<Members>("GET", `${project(id)}/members`),
   setRole: (id: string, user: string, role: string) =>
     request<{ ok: true }>("POST", `${project(id)}/members`, { user, role }),
+  projectInvites: (id: string) => request<{ invites: Invite[] }>("GET", `${project(id)}/invites`).then((r) => r.invites),
+  createProjectInvite: (id: string, role: string) => request<NewInvite>("POST", `${project(id)}/invites`, { role }),
+  /** The hub forgets the project; it keeps running on its machine. */
+  unlinkProject: (id: string) => request<{ ok: true }>("POST", `${project(id)}/unlink`),
   audit: (id: string) => request<{ entries: AuditEntry[] }>("GET", `${project(id)}/audit`).then((r) => r.entries),
   network: (id: string, agentName = "") =>
     request<Network>("GET", `${project(id)}/network${agentName ? "?agent=" + enc(agentName) : ""}`),

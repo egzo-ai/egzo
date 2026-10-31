@@ -107,14 +107,21 @@ func (s *Server) Handler() http.Handler {
 	api("DELETE "+apiPrefix+"/me/identities/{id}", s.unlink)
 	api("GET "+apiPrefix+"/projects", s.projects)
 	api("GET "+apiPrefix+"/links", s.operatorOnly(s.listLinks))
-	api("POST "+apiPrefix+"/links/codes", s.operatorOnly(s.createLinkCode))
-	api("GET "+apiPrefix+"/links/codes", s.operatorOnly(s.listLinkCodes))
-	api("DELETE "+apiPrefix+"/links/codes/{id}", s.operatorOnly(s.cancelLinkCode))
+	api("POST "+apiPrefix+"/links/codes", s.createLinkCode)
+	api("GET "+apiPrefix+"/links/codes", s.listLinkCodes)
+	api("DELETE "+apiPrefix+"/links/codes/{id}", s.cancelLinkCode)
 	api("POST "+apiPrefix+"/links/{id}/revoke", s.operatorOnly(s.revokeLink))
 	api("DELETE "+apiPrefix+"/links/{id}", s.operatorOnly(s.forgetLink))
 	api("GET "+apiPrefix+"/users", s.operatorOnly(s.listUsers))
 	api("PUT "+apiPrefix+"/users/{id}", s.operatorOnly(s.updateUser))
 	api("DELETE "+apiPrefix+"/users/{id}/identities/{identity}", s.operatorOnly(s.removeIdentity))
+	api("GET "+apiPrefix+"/invites", s.operatorOnly(s.listInvites))
+	api("POST "+apiPrefix+"/invites", s.operatorOnly(s.createHubInvite))
+	api("DELETE "+apiPrefix+"/invites/{id}", s.revokeInvite)
+	mux.HandleFunc("POST "+apiPrefix+"/invites/peek", s.peekInvite)
+	mux.HandleFunc("POST "+apiPrefix+"/invites/register", s.registerInvite)
+	mux.HandleFunc("POST "+apiPrefix+"/invites/sso", s.inviteSSO)
+	api("POST "+apiPrefix+"/invites/accept", s.acceptInvite)
 
 	const project = apiPrefix + "/p/{project}"
 	api("GET "+project, s.project)
@@ -126,6 +133,9 @@ func (s *Server) Handler() http.Handler {
 	api("GET "+project+"/spec", s.spec)
 	api("GET "+project+"/members", s.members)
 	api("POST "+project+"/members", s.setRole)
+	api("GET "+project+"/invites", s.projectInvites)
+	api("POST "+project+"/invites", s.createProjectInvite)
+	api("POST "+project+"/unlink", s.unlinkProject)
 	api("GET "+project+"/audit", s.audit)
 	api("GET "+project+"/network", s.network)
 	api("GET "+project+"/a/{agent}", s.agent)
@@ -293,13 +303,13 @@ func (s *Server) passwordLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // loginState is what the login cookie keeps between the redirect to the provider and the callback. link is the user an identity
-// is being linked to; empty for a sign-in.
+// is being linked to; empty for a sign-in. invite is the code a sign-in came with: the cookie is HttpOnly, and goes with the callback.
 type loginState struct {
-	state, nonce, verifier, next, link string
+	state, nonce, verifier, next, link, invite string
 }
 
 func (l loginState) encode() string {
-	parts := []string{l.state, l.nonce, l.verifier, l.next, l.link}
+	parts := []string{l.state, l.nonce, l.verifier, l.next, l.link, l.invite}
 	for i := range parts {
 		parts[i] = url.QueryEscape(parts[i])
 	}
@@ -308,18 +318,18 @@ func (l loginState) encode() string {
 
 func decodeLoginState(v string) (loginState, bool) {
 	parts := strings.Split(v, "|")
-	if len(parts) != 5 {
+	if len(parts) != 6 {
 		return loginState{}, false
 	}
 	for i := range parts {
 		parts[i], _ = url.QueryUnescape(parts[i])
 	}
-	return loginState{state: parts[0], nonce: parts[1], verifier: parts[2], next: parts[3], link: parts[4]}, true
+	return loginState{state: parts[0], nonce: parts[1], verifier: parts[2], next: parts[3], link: parts[4], invite: parts[5]}, true
 }
 
 // providerURL is where to send the browser to sign in at the provider (or link an account there), with the login cookie set.
-func (s *Server) providerURL(w http.ResponseWriter, r *http.Request, next, link string) (string, error) {
-	l := loginState{state: auth.Random(), nonce: auth.Random(), verifier: auth.NewVerifier(), next: safeNext(next), link: link}
+func (s *Server) providerURL(w http.ResponseWriter, r *http.Request, next, link, invite string) (string, error) {
+	l := loginState{state: auth.Random(), nonce: auth.Random(), verifier: auth.NewVerifier(), next: safeNext(next), link: link, invite: invite}
 	target, err := s.auth.AuthCodeURL(r.Context(), s.urls.Base(r)+"/auth/callback", l.state, l.nonce, l.verifier)
 	if err != nil {
 		return "", err
@@ -333,7 +343,7 @@ func (s *Server) loginStart(w http.ResponseWriter, r *http.Request) {
 		s.loginFail(w, r, "Single sign-on is not configured.")
 		return
 	}
-	target, err := s.providerURL(w, r, r.URL.Query().Get("next"), "")
+	target, err := s.providerURL(w, r, r.URL.Query().Get("next"), "", "")
 	if err != nil {
 		s.log.Error("login", "err", err)
 		s.loginFail(w, r, err.Error())
@@ -349,7 +359,7 @@ func (s *Server) linkStart(w http.ResponseWriter, r *http.Request, user store.Us
 		s.apiFail(w, http.StatusNotFound, "not_found", "Single sign-on is not configured.")
 		return
 	}
-	target, err := s.providerURL(w, r, "/settings/account", user.ID)
+	target, err := s.providerURL(w, r, "/settings/account", user.ID, "")
 	if err != nil {
 		s.problem(w, r, err)
 		return
@@ -394,8 +404,15 @@ func (s *Server) loginCallback(w http.ResponseWriter, r *http.Request) {
 		s.linkCallback(w, r, l, claims, profile, fail)
 		return
 	}
-	user, identityID, err := s.hub.IdentityLogin(r.Context(), claims.Issuer, claims.Subject, profile)
-	if err != nil {
+	user, identityID, unspent, err := s.hub.IdentityLogin(r.Context(), claims.Issuer, claims.Subject, profile, l.invite)
+	switch {
+	case errors.Is(err, hub.ErrNoInvite):
+		fail(w, r, "An account on this hub takes an invite. Ask a project's owner or an operator for one, and open its link.")
+		return
+	case errors.Is(err, hub.ErrBadInvite):
+		fail(w, r, inviteGone)
+		return
+	case err != nil:
 		fail(w, r, capitalize(err.Error())+".")
 		return
 	}
@@ -405,6 +422,12 @@ func (s *Server) loginCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, s.cookie(r, sessionCookie, token, s.session))
+	if unspent {
+		if _, err := s.hub.AcceptInvite(r.Context(), user, l.invite); err != nil {
+			http.Redirect(w, r, "/?invite="+url.QueryEscape(inviteGone), http.StatusSeeOther)
+			return
+		}
+	}
 	http.Redirect(w, r, safeNext(l.next), http.StatusSeeOther)
 }
 
