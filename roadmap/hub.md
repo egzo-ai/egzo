@@ -123,7 +123,7 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 - Login through OIDC (Dex in the compose stack); the first login is an operator, and operators hold every project without a
   grant. Roles user / administrator / owner per project, "own agents" by the `actor` label, an owner cannot
   remove or lower themselves. Every operation is audited, allowed or refused.
-- Projects that link ([hub-link.md](hub-link.md)): the link endpoint, registrations approved by operators, projects by id, offline since a
+- Projects that link ([hub-link.md](hub-link.md)): the link endpoint, registrations made with an operator's link code, projects by id, offline since a
   time, tasks interrupted when a link drops. What the link pushes replaces every listing and every log followed through an engine, and a
   running agent whose status cannot be read is **running**, never "starting". See `docs/hub.md`, "How the hub keeps up".
 - Monitoring agents' internet access ([proxy-audit.md](proxy-audit.md)): the link pushes each proxy's audit trail, and the hub groups what was

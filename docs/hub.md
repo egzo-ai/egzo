@@ -50,11 +50,12 @@ hub: http://192.168.1.20:8080
 ```console
 $ egzo project up
 ...
-link: pending: register this project at http://192.168.1.20:8080/link/QXRB-7KPM
+link: not registered: run `egzo project register`
 ```
 
-Open the address and approve the project. See [Linking a project](#linking-a-project). Over plain `http://` anyone on the way can pose as
-the hub, and `project check` warns: use https for anything but a trial.
+In the hub, open **Settings, Links** and click **Link a project**. Run `egzo project register` and paste the code it shows. See
+[Linking a project](#linking-a-project). Over plain `http://` anyone on the way can pose as the hub and read the code, and `project check`
+warns: use https for anything but a trial.
 
 ## Linking a project
 
@@ -62,15 +63,25 @@ A project connects itself: nothing has to reach it, so a laptop or a box behind 
 linked them. [Linking to a hub](managing-projects.md#linking-to-a-hub) is the project's side.
 
 Each project is a **registration**: an id from the hub, the name the project gives, and the host it says it runs on. Two projects called
-`web` on two machines are two projects, and addresses carry the id (`/p/p1a2b3c4d5e6/a/coder-1`). The first connection of a key waits for a
-person at `/link/<code>`, which shows what the project says of itself. **Only an operator approves or refuses it**, until invites let others
-([roadmap](../roadmap/hub-link.md#roles-and-invites-decided)). Whoever approves becomes its owner. Up to 200 projects wait at once; one that
-waits with nobody connected is dropped after a day.
+`web` on two machines are two projects, and addresses carry the id (`/p/p1a2b3c4d5e6/a/coder-1`).
 
-**Settings, Links** lists every registration, for operators. **Revoke** takes a project off the hub: what runs over its link ends and its
-link is refused from then on, while the project keeps running on its machine. **Forget** removes a project that was refused or revoked, so its
-link can ask again, as a new project with no roles. Removing `hub:` and running `up`, or `egzo project down`, has the hub forget the
-project too, with its roles, tasks and network history; the audit log stays.
+A project registers with a **link code**. **Only an operator makes one**, until invites let others
+([roadmap](../roadmap/hub-link.md#roles-and-invites-decided)): **Link a project** in Settings, Links shows it once, with the commands to run.
+The project presents it with `egzo project register`, and is then approved, owned by whoever made the code, with no further step. From then on
+its key is all it takes.
+
+- A code registers one project, for 15 minutes, and can be cancelled until then. The hub keeps only its hash, and it is 128 random bits.
+- **Whoever holds a live code gets in**, and nobody sees the project's name or host first. Hand a code over as you would a password. The audit
+  log says who made it, and which project used it.
+- A code made by someone who was disabled, or who is no longer an operator, is worth nothing.
+- A link with neither a known key nor a good code hears it is not registered, and is closed. The hub stores nothing for it and keeps no
+  connection: reaching the endpoint gets a stranger nothing.
+
+**Settings, Links** lists every registration and the codes still good, for operators. **Revoke** takes a project off the hub: what runs over
+its link ends and its link is refused from then on, while the project keeps running on its machine. **Forget** removes a project that was
+revoked, so a new code can register it again, as a new project with no roles. Removing `hub:` and running `up`, or `egzo project down`, has the
+hub forget a project that is linked too, with its roles, tasks and network history; the audit log stays. A project that was revoked cannot do
+that for itself: only an operator can forget it.
 
 **A project offline.** When its link goes away, the project shows as **offline since** that time, with what the hub last heard of it, until
 the link dials again. Nothing can be done on it meanwhile. The terminals that ran over the link end, while the agents' sessions go on, and a
@@ -81,9 +92,13 @@ is offline shows only its name and host until it connects, since what it pushed 
 
 The UI is meant for a private network (a LAN, Tailscale, a tunnel), not the open internet. Projects must reach the hub too, which can be from
 anywhere, but only the link endpoint has to be reachable for that: `EGZO_LINK_LISTEN` gives it a listener of its own, which serves registered
-keys and pending registrations and no page of the hub, and `EGZO_LINK_URL` says the address projects name for it. Publish that port in
+keys and links that present a code and no page of the hub, and `EGZO_LINK_URL` says the address projects name for it. Publish that port in
 `compose.yaml`, on its own host name, and keep the UI where it is. A link proves its key for that exact address, so `hub:` in the project file
 must say what the hub is told (a link that does not is logged as refused, saying which address it should name).
+
+One address may have 8 handshakes going at once and 20 failed attempts a minute (a proof that does not verify, an unknown key, a bad code), then
+it hears `429` until the minute is over. Projects that are registered and connected count for nothing, so many of them behind one NAT are fine.
+Behind a reverse proxy, set `EGZO_TRUSTED_PROXIES` or every project counts as the proxy's address.
 
 When a reverse proxy is in front, set `EGZO_PUBLIC_URL` and `EGZO_TRUSTED_PROXIES` so the redirects and cookies use the right address and
 scheme. The link is a long WebSocket: Caddy passes it as it is, and nginx needs the upgrade, or the link reports `HTTP 426`:

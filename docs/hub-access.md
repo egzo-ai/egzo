@@ -92,10 +92,10 @@ A role is held on one project. Roles live in the hub's database; the project fil
 | administrator | the same on every agent of the project; read the audit log and the logs |
 | owner | an administrator who also grants and removes roles. An owner cannot remove or lower themselves |
 
-**Operators** are hub-level, not a role. An operator manages the links and the users, approves the projects that ask to link, and holds
-**every project as its owner**, without a grant: a project is theirs as soon as it is approved. That includes other people's agents and
-terminals, so make somebody an operator only when you would give them what the linked projects' verbs allow. Whoever approves a project
-gets a real owner role on it, which stays if they stop being an operator. Operators appear on every project's
+**Operators** are hub-level, not a role. An operator manages the links and the users, makes the link codes that register projects, and holds
+**every project as its owner**, without a grant: a project is theirs as soon as it is registered. That includes other people's agents and
+terminals, so make somebody an operator only when you would give them what the linked projects' verbs allow. Whoever made the code a project
+registered with gets a real owner role on it, which stays if they stop being an operator. Operators appear on every project's
 Members tab, shaded and tagged "operator": their access is not a role and cannot be changed there. Agents started with the CLI
 belong to the operators. Every action, allowed or refused, is in the project's audit log.
 

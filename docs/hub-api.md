@@ -23,7 +23,7 @@ for a project the person has no role on, so its existence is not leaked; and for
 
 | Call | Answer |
 |---|---|
-| `GET /session` | `{user, identities: [identity], hasPassword, sso, issuer}`. A `user` is `{id, username, name, email, emailVerified, picture, isOperator, disabled}`: the username is the hub's; name, email and picture (https only, fetched by the browser) come from the provider, for display. An `identity` is `{id, issuer, email, name, current, lastLoginAt}`; `current` is false for an account of a former provider |
+| `GET /session` | `{user, identities: [identity], hasPassword, sso, issuer, hub}`, `hub` being the address projects name in `hub:`. A `user` is `{id, username, name, email, emailVerified, picture, isOperator, disabled}`: the username is the hub's; name, email and picture (https only, fetched by the browser) come from the provider, for display. An `identity` is `{id, issuer, email, name, current, lastLoginAt}`; `current` is false for an account of a former provider |
 | `POST /logout` | `{ok}`; the session's terminals close |
 | `POST /me/link` | `{url}`: send the browser there to sign in at the provider; the callback links that account to the signed-in user and returns to `/settings/account?linked=1` (or `?error=`). Refused when the account belongs to somebody else, or when the user already has one at that provider |
 | `DELETE /me/identities/{id}` | `{ok}`; the sessions made with it end. 409 `conflict` when it is the last way to sign in |
@@ -43,11 +43,12 @@ for a project the person has no role on, so its existence is not leaked; and for
 | `POST .../a/{agent}/{start,stop,rm}` | `202 {task}`, at once, like a spawn: the agent shows the task while it runs. 409 `busy` while another task runs on the agent, saying which and who asked |
 | `GET .../a/{agent}/logs` | `{text}` |
 | `GET .../a/{agent}/terminal[?takeover=1]` | the terminal websocket (below) |
-| `GET /links` (operator) | `{links: [link]}`: every registration, the newest first. A link is `{id, name, host, release, templates, state, code, owner, message, createdAt, offlineSince}`; `state` is `pending`, `approved`, `refused` or `revoked`, and `offlineSince` is null while it is connected |
+| `GET /links` (operator) | `{links: [link]}`: every registration, the newest first. A link is `{id, name, host, release, templates, state, owner, message, createdAt, offlineSince}`; `state` is `approved` or `revoked`, and `offlineSince` is null while it is connected |
 | `POST /links/{id}/revoke` `{message}` (operator) | `{ok}`: the project leaves the hub, what runs over its link ends, its link is refused and shows `message` |
-| `DELETE /links/{id}` (operator) | `{ok}`: forgets a project that was refused or revoked. 409 `conflict` for one that is not |
-| `GET /register/{code}` (operator) | `{link}`: the project that waits under a device code; 404 once it was decided |
-| `POST /register/{code}` `{approve, message}` (operator) | `{project}` with its id when `approve` is true, whoever approves being its owner; `{ok}` when it is false, `message` being what the link shows |
+| `DELETE /links/{id}` (operator) | `{ok}`: forgets a project that was revoked. 409 `conflict` for one that is not |
+| `POST /links/codes` (operator) | `{id, code, expiresAt, hub}`: a link code, for `egzo project register`. This is the only time `code` is seen. `hub` is the address projects name in `hub:` |
+| `GET /links/codes` (operator) | `{codes: [{id, createdBy, createdAt, expiresAt}]}`: the codes still good, the newest first, without their values |
+| `DELETE /links/codes/{id}` (operator) | `{ok}`: cancels a code. 404 for one that was used, cancelled or has expired |
 | `GET /users` (operator) | `{users: [user + {createdAt, lastLoginAt, hasPassword, identities}], me}`, disabled users included |
 | `PUT /users/{id}` `{isOperator}` or `{disabled}` (operator) | `{ok}`. 409 `conflict` when it would remove the last operator, disable an operator, or make a disabled user an operator; setting the value a person already has changes nothing. Disabling ends the person's sessions and closes their terminals |
 | `DELETE /users/{id}/identities/{identity}` (operator) | `{ok}`: frees an account at a provider from a **disabled** user, so it can be linked to another (409 otherwise) |
