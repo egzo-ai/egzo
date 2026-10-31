@@ -15,14 +15,28 @@ import (
 	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
-// maxHandshakes is how many links may be proving their key at once. Anyone who reaches the endpoint may try, and until the proof is
-// done nothing says who they are.
-const maxHandshakes = 64
+const (
+	// maxHandshakes is how many links may be proving their key at once. Anyone who reaches the endpoint may try, and until the proof is
+	// done nothing says who they are.
+	maxHandshakes = 64
+	// handshakeLimit is how long a link gets to open its control stream and prove its key: three lines. A link asks its engine what to
+	// say before it dials.
+	handshakeLimit = 10 * time.Second
+)
 
 // link takes one link's connection: its WebSocket, its proof, and then the hub holds it until it ends. A proof that does not verify is
-// refused here, so that what reaches the hub is a key somebody holds.
+// refused here, so that what reaches the hub is a key somebody holds. All that a stranger can reach is this, so what one address may
+// try is limited (gate.go); a project that is registered and connected counts for nothing.
 func (s *Server) link(w http.ResponseWriter, r *http.Request) {
 	client := s.urls.ClientIP(r)
+	if !s.gate.enter(client) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "too many attempts from this address: try again", http.StatusTooManyRequests)
+		return
+	}
+	var left sync.Once
+	leave := func() { left.Do(func() { s.gate.leave(client) }) }
+	defer leave()
 	select {
 	case s.greeted <- struct{}{}:
 	default:
@@ -37,17 +51,24 @@ func (s *Server) link(w http.ResponseWriter, r *http.Request) {
 		return // Accept has answered: a 426 to what is not a WebSocket
 	}
 	defer session.Close()
-	peer, err := hublink.Handshake(context.Background(), session, s.opts.LinkURL)
+	proving, cancel := context.WithTimeout(context.Background(), handshakeLimit)
+	defer cancel()
+	peer, err := hublink.Handshake(proving, session, s.opts.LinkURL)
 	if err != nil {
-		s.log.Warn("a link was refused: does its hub: say "+s.opts.LinkURL+"?", "err", err, "from", client)
+		if s.gate.failed(client) {
+			s.log.Warn("a link was refused: does its hub: say "+s.opts.LinkURL+"?", "err", err, "from", client)
+		}
 		return
 	}
 	proved()
+	leave()
 	// the connection is hijacked, and r.Context() knows nothing of its end: Run does
 	err = s.hub.Link(context.Background(), peer.Hello, peer.Code, peer)
 	switch {
 	case errors.Is(err, hub.ErrUnregistered), errors.Is(err, hub.ErrBadCode), errors.Is(err, hub.ErrBadHello):
-		s.log.Info("a link that is not registered was turned away", "err", err, "from", client)
+		if s.gate.failed(client) {
+			s.log.Info("a link that is not registered was turned away", "err", err, "from", client)
+		}
 	case err != nil && !errors.Is(err, context.Canceled):
 		s.log.Debug("a link went away", "project", peer.Hello.Project, "err", err)
 	}
