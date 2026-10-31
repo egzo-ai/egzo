@@ -543,3 +543,33 @@ func TestDependsOnIsNotAKey(t *testing.T) {
 		t.Fatalf("depends_on was accepted or not named: %v", err)
 	}
 }
+
+func TestTheHubIsAnAddressOrAnAddressWithACA(t *testing.T) {
+	dir := t.TempDir()
+	r, warnings, err := resolve(t, dir, "hub: https://hub.example.org/\n")
+	if err != nil || r.Hub == nil || r.Hub.URL != "https://hub.example.org" || len(warnings) != 0 {
+		t.Fatalf("hub %+v, warnings %v, err %v", r.Hub, warnings, err)
+	}
+	r, _, err = resolve(t, dir, "hub:\n  url: https://hub.example.org:8443\n")
+	if err != nil || r.Hub.URL != "https://hub.example.org:8443" {
+		t.Fatalf("hub %+v, err %v", r.Hub, err)
+	}
+	if r, _, _ := resolve(t, dir, "name: web\n"); r.Hub != nil {
+		t.Errorf("a project that names no hub has one: %+v", r.Hub)
+	}
+}
+
+func TestPlainHTTPToAHubWarns(t *testing.T) {
+	_, warnings, err := resolve(t, t.TempDir(), "hub: http://hub.lan:8080\n")
+	if err != nil || len(warnings) != 1 || !strings.Contains(warnings[0], "plain http") {
+		t.Errorf("warnings %v, err %v", warnings, err)
+	}
+}
+
+func TestAHubThatIsNoAddressIsRefused(t *testing.T) {
+	for _, wrong := range []string{"hub.example.org", "ftp://hub.example.org", "https://", "https://u:p@hub.example.org", "https://hub.example.org/x", "https://hub.example.org?a=b"} {
+		if _, _, err := resolve(t, t.TempDir(), "hub: "+wrong+"\n"); err == nil {
+			t.Errorf("%q was accepted", wrong)
+		}
+	}
+}

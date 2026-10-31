@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,8 @@ type Resolved struct {
 	// Secrets maps "vault/name" to where that secret is read from. It is never printed.
 	Secrets map[string]SecretRef `yaml:"-"`
 	Name    string               `yaml:"name"`
+	// Hub is the hub the project links to, when it names one.
+	Hub *ResolvedHub `yaml:"hub,omitempty"`
 	// SecretKey is the reference of the project's secret key, which seals what egzo keeps at rest.
 	SecretKey  string                       `yaml:"secret_key"`
 	Vaults     map[string]ResolvedVault     `yaml:"vaults,omitempty"`
@@ -60,6 +63,12 @@ type SecretRef struct {
 }
 
 // ResolvedProxy is what the file says about the proxy sidecar; nil when it says nothing.
+// ResolvedHub is a hub's address, without a trailing slash, and the path of the CA of its certificate.
+type ResolvedHub struct {
+	URL string `yaml:"url"`
+	CA  string `yaml:"ca,omitempty"`
+}
+
 type ResolvedProxy struct {
 	Image    string    `yaml:"image,omitempty"`
 	Upstream *Upstream `yaml:"upstream,omitempty"`
@@ -173,6 +182,8 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 		Agents:     map[string]ResolvedAgent{},
 		Egress:     egress,
 	}
+	var warnings []string
+	resolved.Hub, warnings = resolveHub(file.Hub, dir, p)
 	if file.Proxy.Image != "" || file.Proxy.Upstream != nil {
 		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image, Upstream: resolveUpstream(file.Proxy.Upstream, dir, p)}
 	}
@@ -192,7 +203,6 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	}
 	sort.Strings(agentNames)
 
-	var warnings []string
 	for _, vault := range resolved.Vaults {
 		sort.Strings(vault.Secrets)
 	}
@@ -419,6 +429,34 @@ func resolveUpstream(upstream *Upstream, dir string, p *problems) *Upstream {
 		resolved.PrivateHosts = append(resolved.PrivateHosts, normalized)
 	}
 	return resolved
+}
+
+// resolveHub checks the hub's address. Plain http is allowed, as the hub allows it for a trial, with a warning: nothing then says the
+// other side is the hub, and what it asks runs on the project.
+func resolveHub(hub *Hub, dir string, p *problems) (*ResolvedHub, []string) {
+	if hub == nil {
+		return nil, nil
+	}
+	parsed, err := url.Parse(hub.URL)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || strings.Trim(parsed.Path, "/") != "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		p.addf("hub: %q is not an address like https://hub.example.org", hub.URL)
+		return nil, nil
+	}
+	resolved := &ResolvedHub{URL: parsed.Scheme + "://" + parsed.Host}
+	if hub.CA != "" {
+		resolved.CA = hub.CA
+		if !filepath.IsAbs(resolved.CA) {
+			resolved.CA = filepath.Join(dir, resolved.CA)
+		}
+		if _, err := ReadUpstreamCA(resolved.CA); err != nil {
+			p.addf("hub.ca: %v", err)
+		}
+	}
+	if parsed.Scheme == "http" {
+		return resolved, []string{fmt.Sprintf("warning: hub: %s is plain http: anyone on the way can pose as the hub, and what the hub asks runs on this project", resolved.URL)}
+	}
+	return resolved, nil
 }
 
 // ReadUpstreamCA reads a file of PEM certificates for the proxy to trust upstream. A private key in it, or anything that
