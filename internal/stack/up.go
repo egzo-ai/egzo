@@ -105,8 +105,16 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		return err
 	}
 	plan := BuildPlan(desired, observed, opts.Recreate)
+	if project.Hub == nil && !opts.DryRun {
+		unlink(ctx, c, observed, out) // before the plan removes the link
+	}
 	if err := Apply(ctx, c, desired, plan, opts.DryRun, out); err != nil {
 		return err
+	}
+	if project.Hub == nil && !opts.DryRun {
+		if err := removeLinkVolume(ctx, c, observed, out); err != nil {
+			return err
+		}
 	}
 	markFresh(fresh, plan)
 	if !opts.DryRun && len(placeholders) > 0 {

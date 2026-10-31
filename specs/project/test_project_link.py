@@ -42,6 +42,10 @@ def check(project):
     return project.run("project", "check")
 
 
+def register(project, hub, owner="alice"):
+    return project.ok("project register", input=hub.code(owner) + "\n")
+
+
 def test_the_hub_is_an_address_or_an_address_with_a_ca(project, tmp_path):
     project.write(spec(hub="https://hub.example.org/"))
     assert project.ok("project check --resolved").yaml()["hub"] == {"url": "https://hub.example.org"}
@@ -199,6 +203,69 @@ def test_an_agent_cannot_reach_the_link(linked, engine):
     container = engine.instance(linked.name, "fromhub")
     assert f"{linked.name}_link" not in container.raw["NetworkSettings"]["Networks"]
     assert engine.exec(container.name, "ping", "-c", "1", "-W", "2", address).returncode != 0
+
+
+def test_revoked_ends_what_the_hub_may_do_and_check_fails(linked, fake_hub):
+    fake_hub.revoke(linked.name, "the laptop was stolen")
+    assert eventually(lambda: "revoked" in row(linked, "link")["status"])
+    assert "the laptop was stolen" in row(linked, "link")["status"]
+    assert fake_hub.registration(linked.name)["Online"] is False, "nothing of a revoked project stays connected"
+    result = check(linked)
+    assert result.returncode != 0 and "revoked" in result.stdout
+
+
+def test_a_revoked_link_stops_dialing_and_a_code_does_not_help_until_an_operator_forgets_it(linked, fake_hub):
+    dials = fake_hub.dials()
+    time.sleep(3)
+    assert fake_hub.dials() == dials
+    code = fake_hub.code("alice")
+    good = fake_hub.codes()
+    result = linked.run("project", "register", input=code + "\n")
+    assert result.returncode != 0 and "forget this project" in result.stderr
+    assert fake_hub.codes() == good, "a revoked key spends nothing"
+
+    before = fake_hub.registration(linked.name)
+    fake_hub.forget(linked.name)
+    said = linked.ok("project register", input=code + "\n").stdout
+    assert "owned by alice" in said, "the way back for a link that was revoked by mistake"
+    after = fake_hub.registration(linked.name)
+    assert after["Key"] == before["Key"]
+    fake_hub.revoke(linked.name)
+    assert eventually(lambda: "revoked" in row(linked, "link")["status"])
+
+
+def test_removing_hub_from_the_file_unlinks_and_removes_the_link(linked, fake_hub, engine, egzo):
+    document_without = spec(agents={"web": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "cat"})})
+    linked.ok("agent rm --force fromhub")
+    linked.write(document_without)
+    said = linked.ok("project up").stdout
+    assert "the hub revoked this project" in said, "and it says what happened, not that the hub forgot it"
+    assert linked.name not in fake_hub.forgotten(), "a revoked project cannot erase its own record"
+    assert fake_hub.registration(linked.name)["State"] == "revoked"
+    assert link_of(engine, linked) is None
+    assert not engine.volume_exists(f"{linked.name}_link")
+    assert engine.run("network", "inspect", f"{linked.name}_link").returncode != 0
+    assert [c for c in engine.containers(linked.name) if c.name.endswith("-control-1")]
+
+
+def test_down_tells_the_hub(live_project, engine, egzo, fake_hub):
+    live_project.write(document(engine, egzo, fake_hub))
+    live_project.ok("project up")
+    register(live_project, fake_hub)
+    said = live_project.ok("project down --force").stdout
+    assert "forgotten" in said
+    assert live_project.name in fake_hub.forgotten()
+    assert not engine.containers(live_project.name)
+
+
+def test_down_of_a_project_that_was_never_registered_says_so_at_once(live_project, engine, egzo, fake_hub):
+    live_project.write(document(engine, egzo, fake_hub))
+    live_project.ok("project up")
+    began = time.time()
+    said = live_project.ok("project down --force").stdout
+    assert "was not registered" in said and "not told" not in said
+    assert time.time() - began < 60
+    assert live_project.name not in fake_hub.forgotten()
 
 
 def test_register_needs_a_hub_and_a_running_link(project, engine, egzo, fake_hub):
