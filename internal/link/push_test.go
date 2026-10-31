@@ -117,3 +117,25 @@ func TestAnUpdateThatSaysNothingNewIsNotSent(t *testing.T) {
 		t.Error("templates published without touching a container went unsaid")
 	}
 }
+
+func TestAProjectCarriesWhatTheHubComparesWith(t *testing.T) {
+	project, err := projectOf("web", stack.Observed{Resources: []stack.Resource{
+		{Type: "container", ID: "c1", Name: "web-control-1", Kind: kindControl, Service: kindControl, State: "running"},
+		{Type: "container", ID: "c2", Name: "web-proxy-1", Kind: kindProxy, Service: kindProxy, State: "running"},
+		{Type: "container", ID: "c3", Name: "web-coder-1", Kind: kindAgent, Service: "coder", Instance: "coder-1", InstanceID: "i1", TemplateHash: "abc", State: "running"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Agents) != 1 || project.Agents[0].TemplateHash != "abc" {
+		t.Errorf("agents = %+v", project.Agents)
+	}
+	for _, service := range project.Services {
+		if want := map[string]string{kindControl: "c1", kindProxy: "c2"}[service.Name]; service.ID != want {
+			t.Errorf("service %+v, want id %s", service, want)
+		}
+	}
+	if len(project.Services) != 2 || !project.Up {
+		t.Errorf("project = %+v", project)
+	}
+}

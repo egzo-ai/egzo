@@ -158,11 +158,25 @@ func (d *Engine) Project(ctx context.Context, name string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
+	return projectOf(name, observed)
+}
+
+func projectOf(name string, observed stack.Observed) (Project, error) {
 	project := Project{Name: name, Ignored: observed.Ignored}
 	rows := stack.Rows(observed, nil, nil)
+	hashes, ids := map[string]string{}, map[string]string{}
 	for _, r := range observed.Resources {
-		if r.Type == "container" && project.Dir == "" {
+		if r.Type != "container" {
+			continue
+		}
+		if project.Dir == "" {
 			project.Dir, project.CreatedBy = r.ProjectDir, ""
+		}
+		switch r.Kind {
+		case kindAgent:
+			hashes[r.Instance] = r.TemplateHash
+		case kindControl, kindProxy:
+			ids[r.Kind] = r.ID
 		}
 	}
 	if len(rows) == 0 {
@@ -173,10 +187,10 @@ func (d *Engine) Project(ctx context.Context, name string) (Project, error) {
 		case kindAgent:
 			project.Agents = append(project.Agents, Agent{
 				Name: row.Name, ID: row.ID, Template: row.Service, State: row.State, Health: row.Health, Activity: activityOf(row.State),
-				Actor: row.Actor, Created: row.Created,
+				Actor: row.Actor, Created: row.Created, TemplateHash: hashes[row.Name],
 			})
 		case kindControl, kindProxy:
-			project.Services = append(project.Services, Service{Name: row.Kind, State: row.State, Health: row.Health})
+			project.Services = append(project.Services, Service{Name: row.Kind, State: row.State, Health: row.Health, ID: ids[row.Kind]})
 		}
 	}
 	project.Up = sidecarsRunning(project.Services)
