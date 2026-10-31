@@ -8,7 +8,9 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -50,6 +52,17 @@ func TestNothingListening(t *testing.T) {
 	var closed ErrNothingListens
 	if err := Forward(port, strings.NewReader(""), io.Discard); !errors.As(err, &closed) || closed.Port != port {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestALoopbackThatCannotBeAskedCountsAsNothingListening(t *testing.T) {
+	for _, reason := range []syscall.Errno{syscall.EAFNOSUPPORT, syscall.EPROTONOSUPPORT, syscall.EADDRNOTAVAIL, syscall.ENETUNREACH, syscall.ECONNREFUSED} {
+		if err := (&net.OpError{Op: "dial", Err: os.NewSyscallError("socket", reason)}); !unreachable(err) {
+			t.Errorf("%v is a failure to report", reason)
+		}
+	}
+	if unreachable(&net.OpError{Op: "dial", Err: os.NewSyscallError("socket", syscall.EMFILE)}) {
+		t.Error("a machine out of descriptors is not a closed port")
 	}
 }
 

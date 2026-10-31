@@ -127,9 +127,14 @@ func dial(port int) (*net.TCPConn, error) {
 	return nil, ErrNothingListens{Port: port}
 }
 
-// unreachable reports a refusal, or a container without that loopback address.
+// unreachable reports a refusal, or a container without that loopback address or that address family at all.
 func unreachable(err error) bool {
-	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EADDRNOTAVAIL) || errors.Is(err, syscall.ENETUNREACH)
+	for _, reason := range []error{syscall.ECONNREFUSED, syscall.EADDRNOTAVAIL, syscall.ENETUNREACH, syscall.EAFNOSUPPORT, syscall.EPROTONOSUPPORT} {
+		if errors.Is(err, reason) {
+			return true
+		}
+	}
+	return false
 }
 
 // Forward copies bytes between in and out and a port of this machine's loopback, until the server closes. The end of in shuts down
