@@ -77,8 +77,12 @@ func (r *Resolver) Base(req *http.Request) string {
 	}
 	host := req.Host
 	if r.trusted(req.RemoteAddr) {
-		if v := first(req.Header.Get("X-Forwarded-Proto")); v == "https" || v == "http" {
-			scheme = v
+		// a proxy names the scheme of what it forwards, and for a WebSocket upgrade some (Traefik) say wss or ws
+		switch first(req.Header.Get("X-Forwarded-Proto")) {
+		case "https", "wss":
+			scheme = "https"
+		case "http", "ws":
+			scheme = "http"
 		}
 		if v := first(req.Header.Get("X-Forwarded-Host")); validHost(v) {
 			host = v
