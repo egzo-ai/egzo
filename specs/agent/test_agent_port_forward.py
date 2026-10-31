@@ -18,7 +18,7 @@ import pytest
 
 from support import agent, spec
 
-ECHO, BYE, UPGRADE, DEAF = 7100, 7101, 7102, 7103
+ECHO, BYE, UPGRADE, DEAF, REFUSE = 7100, 7101, 7102, 7103, 7104
 TIMEOUT = 30
 
 
@@ -138,6 +138,27 @@ def test_a_websocket_upgrade_passes(forward):
 def test_the_server_closing_first_ends_the_connection_and_the_exec(forward, engine, container):
     connection = forward(BYE).connect()
     assert read_all(connection) == b"bye\n"
+    assert eventually(lambda: not forwards_in(engine, container))
+
+
+def test_an_answer_that_refuses_an_upload_reaches_a_client_still_sending(forward, engine, container):
+    connection = forward(REFUSE).connect()
+    try:
+        while True:  # until the end of the answer has come back: the client notices it only when it next reads
+            connection.sendall(b"x" * (1 << 16))
+            connection.settimeout(0.05)
+            try:
+                first = connection.recv(4096)
+                break
+            except TimeoutError:
+                pass
+    except ConnectionError as reset:
+        pytest.fail(f"the client was reset before it read the answer: {reset}")
+    connection.settimeout(TIMEOUT)
+    for _ in range(20):  # what it still sends is taken: a close with this unread would be a reset
+        connection.sendall(b"x" * (1 << 16))
+    answer = first + read_all(connection)
+    assert answer.startswith(b"HTTP/1.1 413")
     assert eventually(lambda: not forwards_in(engine, container))
 
 
