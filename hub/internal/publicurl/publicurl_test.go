@@ -96,3 +96,12 @@ func TestSecureFollowsTheScheme(t *testing.T) {
 		t.Error("plain http is secure")
 	}
 }
+
+func TestAWebSocketUpgradeHasTheSchemeOfThePage(t *testing.T) {
+	resolver, _ := New("", []string{"127.0.0.0/8"})
+	for proto, want := range map[string]string{"wss": "https://h", "ws": "http://h"} {
+		if got := resolver.Base(request("127.0.0.1:1", "h", map[string]string{"X-Forwarded-Proto": proto})); got != want {
+			t.Errorf("%s = %s", proto, got)
+		}
+	}
+}
