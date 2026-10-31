@@ -1,6 +1,6 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** Draft. Built so far: the `__Host-` cookies (below).
+**Status.** Draft. Built so far: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward` (below).
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
 itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,
@@ -77,7 +77,11 @@ has none. The project file never names the domain, so a project moved to another
 - **`egzo agent port-forward <agent> [[address:]local:]port`** on the host, like `kubectl port-forward`: listens on
   `127.0.0.1:<local>` (default: the same number) of the machine where it runs, and opens one exec per connection it accepts. With
   `DOCKER_HOST=ssh://box` on a laptop, the port is on the laptop. Ctrl-C ends it; it ends by itself when the agent stops. It
-  forwards any port, exposed or not: whoever holds the engine holds the agent anyway.
+  forwards any port, exposed or not: whoever holds the engine holds the agent anyway. `port-forward` first asks the image's egzo
+  whether it can forward: what a failed exec says goes down the stream, so a client would read it as the server's words.
+- **A client gone and a server that ignores it.** The end of stdin shuts down the socket's write side, because the client may only
+  have ended its input. A stream cannot tell that from a client that left, so `egzo agent forward` gives the server a minute of
+  silence after the end of stdin, then exits.
 - **`egzo agent ls`** / **`egzo ps --json`** show the exposed ports.
 
 ### Specs

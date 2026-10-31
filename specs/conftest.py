@@ -336,6 +336,22 @@ class Engine:
         assert built.returncode == 0, f"could not build the session image with {self.cli}:\n{built.stderr}"
         return tag
 
+    def forward_image(self, binary):
+        """The session image with python3 and a server (fixtures/forward-server.py) to reach through `agent port-forward`."""
+        script = Path(__file__).parent / "fixtures" / "forward-server.py"
+        base = self.session_image(binary)
+        dockerfile = f"FROM {base}\nRUN apk add --no-cache python3\nCOPY forward-server /usr/local/bin/forward-server\nRUN chmod +x /usr/local/bin/forward-server\n"
+        digest = hashlib.sha256(script.read_bytes() + dockerfile.encode()).hexdigest()[:12]
+        tag = f"egzo-spec-forward:{digest}"
+        if self.run("image", "inspect", tag).returncode == 0:
+            return tag
+        with tempfile.TemporaryDirectory() as context:
+            shutil.copy(script, Path(context) / "forward-server")
+            (Path(context) / "Dockerfile").write_text(dockerfile)
+            built = self.run("build", "-t", tag, context)
+        assert built.returncode == 0, f"could not build the forward image with {self.cli}:\n{built.stderr}"
+        return tag
+
     def ssh_agent_image(self, binary):
         """An agent image with an ssh client and the egzo session holder as entrypoint running the fake TUI: what a harness image
         is, minus Chromium."""
