@@ -6,7 +6,7 @@
   import "@xterm/xterm/css/xterm.css";
   import { terminalURL } from "../lib/api";
   import { operate } from "../lib/agentops";
-  import { app, setRenderer, toast } from "../lib/app.svelte";
+  import { app, projectName, setRenderer, toast } from "../lib/app.svelte";
   import { href, navigate } from "../lib/router.svelte";
   import { copyText, osc52Text } from "../lib/clipboard";
   import { registerSender } from "../lib/registry";
@@ -29,7 +29,7 @@
 
   const visible = $derived(slot >= 0 && workspace.active !== null);
   const focused = $derived(workspace.active === term.id);
-  const agent = $derived(app.projects.find((p) => p.engine === term.engine && p.name === term.project)?.agents.find((a) => a.name === term.agent));
+  const agent = $derived(app.projects.find((p) => p.id === term.project)?.agents.find((a) => a.name === term.agent));
   const shown: TermState | "stopped" = $derived(term.state !== "connected" && term.state !== "connecting" && agent && !agent.running ? "stopped" : term.state);
 
   function cssTheme() {
@@ -149,7 +149,7 @@
     void epoch;
     session?.close();
     xterm.reset();
-    const url = terminalURL(term.engine, term.project, term.agent, takeover);
+    const url = terminalURL(term.project, term.agent, takeover);
     const s = new TermSession(
       url,
       {
@@ -185,7 +185,7 @@
 
   // the hub starts the agent as a task: the terminal connects again once it has
   async function startAndReconnect() {
-    await operate(term.engine, term.project, term.agent, "start", (task) => {
+    await operate(term.project, term.agent, "start", (task) => {
       if (task.state === "done") reconnect(term.id);
     });
   }
@@ -209,7 +209,7 @@
   onmousedown={() => focusPane(slot)}
 >
   <div class="thead">
-    <span class="id" title="{term.engine}:{term.project}/{term.agent}"><b>{term.agent}</b> {term.project}{app.engines.length > 1 ? " · " + term.engine : ""}</span>
+    <span class="id" title="{projectName(term.project)}/{term.agent}"><b>{term.agent}</b> {projectName(term.project)}</span>
     {#if agent}<Pill kind={activityKind(agent.activity, agent.waiting)} label={activityLabel(agent.activity, agent.waiting)} />{/if}
     <span class="grow"></span>
     <span class="tools">
@@ -219,7 +219,7 @@
         </button>
       {/if}
       <button class="btn" data-variant="quiet" data-size="sm" title="Terminal renderer: {renderer === 'webgl' ? 'WebGL' : 'DOM'}{app.renderer === 'dom' ? ' (forced)' : ' (auto)'}. Click to switch" onclick={() => setRenderer(app.renderer === "auto" ? "dom" : "auto")}>{renderer === "webgl" ? "WebGL" : "DOM"}</button>
-      <a class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Agent page" title="Agent page" href={href.agent(term.engine, term.project, term.agent)} onclick={() => (workspace.active = null)}><Icon name="file" size="sm" /></a>
+      <a class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Agent page" title="Agent page" href={href.agent(term.project, term.agent)} onclick={() => (workspace.active = null)}><Icon name="file" size="sm" /></a>
       <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Full screen" title="Full screen (Ctrl+] f)" onclick={() => (workspace.fullscreen = !workspace.fullscreen)}><Icon name="max" size="sm" /></button>
       <button class="btn" data-variant="quiet" data-size="sm" data-icon-only aria-label="Close terminal" title="Detach and close (Ctrl+] d)" onclick={() => { closeTerm(term.id); toast(`Detached from ${term.agent}. The agent keeps running.`); }}><Icon name="x" size="sm" /></button>
     </span>

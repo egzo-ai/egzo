@@ -378,7 +378,7 @@ said in the message. Anything else per instance belongs in another template.
   instance; the base clone and every directory workspace are volumes shared by every instance that lists them.
 
 ### For other tools (hub, broker, scripts)
-`agent spawn`, `agent ls`, `agent rm` and `ps` take `--json`. The hub calls the same package; a broker can run the CLI against
+`agent spawn`, `agent ls`, `agent rm` and `ps` take `--json`. A project's link calls the same package for the hub; a broker can run the CLI against
 the engine. A webhook becomes `spawn` followed by `send` (or `spawn -m`). Retrying a webhook is safe for the
 spawn and not for the message. Spawning, stopping and removing instances of declared templates is **operating**,
 not creating or changing a project: the hub's rule that only YAML and the CLI create projects holds, because the
@@ -978,13 +978,16 @@ Open, in the order they matter:
 
 ## Not in core: hub, web UI, chat clients
 
-Egzo core does not implement a hub, a web UI or chat integrations (Discord and the like); they are planned as a
-separate `egzo-hub` deliverable (see `roadmap/hub.md`). What that means for core:
+Egzo core does not implement a hub, a web UI or chat integrations (Discord and the like); they are a separate `egzo-hub` deliverable (see
+`roadmap/hub.md` and `roadmap/hub-link.md`). What that means for core:
 - The project YAML and the CLI are the only way to create or change a project. Nothing else writes config.
 - Secrets are CLI-only. No user identities live in YAML, ever; who may talk to agents is not declared there.
-- Core exposes what another client needs: the `ai.egzo.*` label schema, the control sidecar's operator API
-  (reached by `engine exec` only) and its status log (followed through the engine's log API), attach as `engine exec`, the message and event contract, and importable Go
-  packages (list, inspect, read-spec, start/stop, attach, send) rather than logic inside CLI commands.
+- A project connects itself to a hub: `hub:` in its file starts a **link** sidecar, which dials out, proves its key and, once a person has
+  approved it, does what the hub asks with egzo's verbs and nothing else (`internal/link`). The hub holds no engine access and imports none of
+  core's engine packages, only the protocol, `internal/hublink`, which needs no engine.
+- Core exposes what the link needs: the `ai.egzo.*` label schema, the control sidecar's operator API (reached by `engine exec` only) and its
+  status log, attach as `engine exec`, the message and event contract, and importable Go packages (list, inspect, read-spec, start/stop, attach,
+  send) rather than logic inside CLI commands.
 
 ## Hardening decisions (code review of the first implementation)
 

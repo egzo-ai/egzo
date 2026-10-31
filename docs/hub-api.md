@@ -18,17 +18,17 @@ sign-on; `redirect` is the callback address to register at the provider). Every 
 does); anything else is refused (415, 403).
 
 **Errors** are `{"code": "...", "message": "..."}` with a real status: `unauthorized` (401), `forbidden` (403), `not_found` (404; also
-for a project the person has no role on, so its existence is not leaked; an operator gets it for a project that is not on a scan), `bad_request`, `invalid` (422), `expired` (410),
-`conflict` and `busy` (409), and `engine_error` (502).
+for a project the person has no role on, so its existence is not leaked; and for a project that is not approved), `bad_request`, `invalid` (422), `expired` (410),
+`conflict`, `busy` and `offline` (409), and `link_error` (502).
 
 | Call | Answer |
 |---|---|
-| `GET /session` | `{user, engines: [{name, up, err}], identities: [identity], hasPassword, sso, issuer}`. A `user` is `{id, username, name, email, emailVerified, picture, isOperator, disabled}`: the username is the hub's; name, email and picture (https only, fetched by the browser) come from the provider, for display. An `identity` is `{id, issuer, email, name, current, lastLoginAt}`; `current` is false for an account of a former provider |
+| `GET /session` | `{user, identities: [identity], hasPassword, sso, issuer}`. A `user` is `{id, username, name, email, emailVerified, picture, isOperator, disabled}`: the username is the hub's; name, email and picture (https only, fetched by the browser) come from the provider, for display. An `identity` is `{id, issuer, email, name, current, lastLoginAt}`; `current` is false for an account of a former provider |
 | `POST /logout` | `{ok}`; the session's terminals close |
 | `POST /me/link` | `{url}`: send the browser there to sign in at the provider; the callback links that account to the signed-in user and returns to `/settings/account?linked=1` (or `?error=`). Refused when the account belongs to somebody else, or when the user already has one at that provider |
 | `DELETE /me/identities/{id}` | `{ok}`; the sessions made with it end. 409 `conflict` when it is the last way to sign in |
-| `GET /projects` | `{projects: [{engine, name, role, operator, feed, up, agents: [{name, template, running, activity, status, waiting}]}], unreachable: [{name, err}]}` from what the hub holds (the engines' last listing, kept current by their events, and the agents' status from the control sidecars' logs); it feeds the home page and the sidebar and calls no engine |
-| `GET /e/{engine}/p/{project}` | the project, from what the hub holds (the templates from the control sidecar, kept for five minutes): `{engine, name, role, operator, feed, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder, denied, task}], canSpawn, canManage, canAudit, ignored}`. `task` is what the hub does on the agent (a task, below), or the failure of what it did that nobody dismissed; absent when neither. An agent with a `task` and an empty `state` is one the engine does not have: a spawn that runs or failed, or a removal that is ending. `ignored` (for whoever may audit) lists the containers that carry the project's label with labels egzo never writes, and why: they are not shown as part of it. `denied` is how many hosts the proxy refused the agent in the last hour and that it has not reached since (0 for an agent the user may not operate) |
+| `GET /projects` | `{projects: [{id, name, host, role, operator, offlineSince, feed, up, agents: [{name, template, running, activity, status, waiting}]}]}` from what the links pushed (the agents' status from the control sidecars' logs); it feeds the home page and the sidebar and calls no engine |
+| `GET /p/{id}` | the project, from what its link pushed: `{id, name, host, role, operator, offlineSince, feed, up, templates, services, agents: [{name, template, state, running, activity, status, waiting, stale, creator, createdAt, canOperate, holder, denied, task}], canSpawn, canManage, canAudit, ignored}`. `task` is what the hub does on the agent (a task, below), or the failure of what it did that nobody dismissed; absent when neither. An agent with a `task` and an empty `state` is one the engine does not have: a spawn that runs or failed, or a removal that is ending. `ignored` (for whoever may audit) lists the containers that carry the project's label with labels egzo never writes, and why: they are not shown as part of it. `denied` is how many hosts the proxy refused the agent in the last hour and that it has not reached since (0 for an agent the user may not operate) |
 | `GET .../events?agent=&limit=` | `{events: [{time, type, agent, actor, text}]}`, newest first |
 | `POST .../spawn` `{template, name}` | `202 {task}`, at once: the hub runs the spawn as a task, in the background (it goes on if the request goes away), and the agent is in the project from then on. `name` is required (400 without); 409 `conflict` when an agent has it, `busy` when a task runs on that name. Spawns and removals of a project run one at a time, in order |
 | `GET .../tasks?agent=` | the project's activity, or one agent's: `{tasks: [task]}`, the latest 100, newest first. A task is `{id, verb, agent, template, creator, state, step, error, startedAt, endedAt, canDismiss}`: `verb` is `spawn`, `start`, `stop` or `rm`; `state` is `running`, `done`, `failed`, or `interrupted` (it ran when the hub stopped); `step` is what it does now, or did last (`create container ...`); `creator` is who asked. The hub keeps tasks for 30 days, and a failure nobody dismissed until it is |
@@ -43,20 +43,22 @@ for a project the person has no role on, so its existence is not leaked; an oper
 | `POST .../a/{agent}/{start,stop,rm}` | `202 {task}`, at once, like a spawn: the agent shows the task while it runs. 409 `busy` while another task runs on the agent, saying which and who asked |
 | `GET .../a/{agent}/logs` | `{text}` |
 | `GET .../a/{agent}/terminal[?takeover=1]` | the terminal websocket (below) |
-| `GET /engines` (operator) | `{engines: [{name, host, up, err}]}` |
-| `POST /engines` `{name, host, sshUser, ca, cert, key, sshKey}` (operator) | `{saved}`, or `{pending: {name, host, fingerprint, token}}` when an ssh host key must be confirmed first. Credentials are never returned |
-| `POST /engines/confirm` `{token}` (operator) | `{saved}`; the token lives ten minutes and works once |
-| `DELETE /engines/{name}` (operator) | `{removed}` |
+| `GET /links` (operator) | `{links: [link]}`: every registration, the newest first. A link is `{id, name, host, release, templates, state, code, owner, message, createdAt, offlineSince}`; `state` is `pending`, `approved`, `refused` or `revoked`, and `offlineSince` is null while it is connected |
+| `POST /links/{id}/revoke` `{message}` (operator) | `{ok}`: the project leaves the hub, what runs over its link ends, its link is refused and shows `message` |
+| `DELETE /links/{id}` (operator) | `{ok}`: forgets a project that was refused or revoked. 409 `conflict` for one that is not |
+| `GET /register/{code}` (operator) | `{link}`: the project that waits under a device code; 404 once it was decided |
+| `POST /register/{code}` `{approve, message}` (operator) | `{project}` with its id when `approve` is true, whoever approves being its owner; `{ok}` when it is false, `message` being what the link shows |
 | `GET /users` (operator) | `{users: [user + {createdAt, lastLoginAt, hasPassword, identities}], me}`, disabled users included |
 | `PUT /users/{id}` `{isOperator}` or `{disabled}` (operator) | `{ok}`. 409 `conflict` when it would remove the last operator, disable an operator, or make a disabled user an operator; setting the value a person already has changes nothing. Disabling ends the person's sessions and closes their terminals |
 | `DELETE /users/{id}/identities/{identity}` (operator) | `{ok}`: frees an account at a provider from a **disabled** user, so it can be linked to another (409 otherwise) |
 
-`.../` is `/e/{engine}/p/{project}`.
+`.../` is `/p/{id}`. What needs the project's link answers 409 `offline` while the project is offline; the pages keep working from what the
+hub last heard, and `offlineSince` says since when.
 
 **`activity` and `feed`.** An agent's `activity` is `starting`, `idle`, `working`, `blocked`, `stopped` (its container is not running), or
 `unknown` (it runs, and the hub cannot read what it is doing). A project's `feed` is `{state, message}` and says how far `activity`,
 `status` and `waiting` can be trusted: `live` (status lines are arriving), `connecting` (nothing yet), `stale` (it went quiet for
-longer than three heartbeats) or `unavailable` (the log cannot be followed, or the sidecar writes no status), with the reason in
+longer than three heartbeats) `unavailable` (the sidecar is not running, or writes no status), or `offline` (the link is not connected), with the reason in
 `message`. Unless the feed is `live`, every running agent is `unknown`.
 
 ## The terminal websocket

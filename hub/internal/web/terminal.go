@@ -11,8 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/egzo-ai/egzo/hub/internal/engines"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
@@ -29,8 +29,8 @@ type control struct {
 // terminal bridges a browser's xterm.js to an agent's session: binary frames are the terminal's bytes in both directions, text
 // frames are control messages.
 func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.User) {
-	engine, project, agent := r.PathValue("engine"), r.PathValue("project"), r.PathValue("agent")
-	att, err := s.hub.Attach(r.Context(), user, engine, project, agent, r.URL.Query().Get("takeover") == "1")
+	project, agent := r.PathValue("project"), r.PathValue("agent")
+	att, err := s.hub.Attach(r.Context(), user, project, agent, r.URL.Query().Get("takeover") == "1")
 	var inUse *hub.InUseError
 	if err != nil && !errors.As(err, &inUse) {
 		s.problem(w, r, err)
@@ -65,8 +65,8 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 	defer att.Close()
 
 	input, inputWriter := io.Pipe()
-	resize := make(chan engines.Size, 8)
-	size := engines.Size{Cols: 80, Rows: 24}
+	resize := make(chan links.Size, 8)
+	size := links.Size{Cols: 80, Rows: 24}
 	sized := make(chan struct{})
 
 	// browser -> agent
@@ -83,12 +83,12 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 				var c control
 				if json.Unmarshal(data, &c) == nil && c.Type == "resize" && c.Cols > 0 && c.Rows > 0 && c.Cols < 1000 && c.Rows < 1000 {
 					if first {
-						size = engines.Size{Cols: c.Cols, Rows: c.Rows}
+						size = links.Size{Cols: c.Cols, Rows: c.Rows}
 						first = false
 						close(sized)
 					} else {
 						select {
-						case resize <- engines.Size{Cols: c.Cols, Rows: c.Rows}:
+						case resize <- links.Size{Cols: c.Cols, Rows: c.Rows}:
 						default:
 						}
 					}
@@ -110,7 +110,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 	}
 
 	out := frameWriter{ctx: ctx, conn: conn}
-	err = att.Run(ctx, engines.Terminal{In: input, Out: out, Size: size, Resize: resize})
+	err = att.Run(ctx, links.Terminal{In: input, Out: out, Size: size, Resize: resize})
 	select {
 	case <-att.Taken():
 		sendControl(control{Type: "taken", Holder: att.TakenBy()})
@@ -121,6 +121,9 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 	switch {
 	case err == nil || errors.Is(err, context.Canceled):
 		conn.Close(websocket.StatusNormalClosure, "the session ended")
+	case errors.As(err, new(hub.OfflineError)):
+		sendControl(control{Type: "error", Message: "The link to this project dropped, and the terminal with it. The agent's session goes on."})
+		conn.Close(websocket.StatusNormalClosure, "the link dropped")
 	default:
 		s.log.Warn("terminal", "agent", agent, "err", err)
 		sendControl(control{Type: "error", Message: err.Error()})

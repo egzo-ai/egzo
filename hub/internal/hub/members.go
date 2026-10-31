@@ -18,15 +18,15 @@ type Member struct {
 }
 
 // Members lists who holds a role on a project, then the operators; only an owner may see it.
-func (h *Hub) Members(ctx context.Context, user store.User, engine, project string) ([]Member, error) {
-	role, err := h.access(ctx, user, engine, project)
+func (h *Hub) Members(ctx context.Context, user store.User, project string) ([]Member, error) {
+	role, err := h.access(ctx, user, project)
 	if err != nil {
 		return nil, err
 	}
 	if !rbac.Can(user.Subject(), role, rbac.ManageRoles, "") {
 		return nil, ErrForbidden
 	}
-	grants, err := h.store.GrantsOn(ctx, engine, project)
+	grants, err := h.store.GrantsOn(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +52,8 @@ func (h *Hub) Members(ctx context.Context, user store.User, engine, project stri
 
 // Candidates lists the users who hold no role on the project yet: the people an owner can still invite. Operators hold every
 // project, so they are not among them, and disabled users are left out. Users exist once they have signed in.
-func (h *Hub) Candidates(ctx context.Context, user store.User, engine, project string) ([]store.User, error) {
-	members, err := h.Members(ctx, user, engine, project)
+func (h *Hub) Candidates(ctx context.Context, user store.User, project string) ([]store.User, error) {
+	members, err := h.Members(ctx, user, project)
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +76,12 @@ func (h *Hub) Candidates(ctx context.Context, user store.User, engine, project s
 
 // SetRole grants, changes or (with rbac.None) removes a user's role on a project. Only an owner may; an owner cannot remove or
 // lower themselves.
-func (h *Hub) SetRole(ctx context.Context, actor store.User, engine, project, targetID string, role rbac.Role) error {
-	actorRole, err := h.access(ctx, actor, engine, project)
+func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID string, role rbac.Role) error {
+	actorRole, err := h.access(ctx, actor, project)
 	if err != nil {
 		return err
 	}
-	audit := store.AuditEntry{Actor: rbac.Actor(actor.ID), Action: "role.set", Engine: engine, Project: project,
+	audit := store.AuditEntry{Actor: rbac.Actor(actor.ID), Action: "role.set", Project: project,
 		Detail: fmt.Sprintf("%s -> %q", targetID, role)}
 	refuse := func(err error, why string) error {
 		audit.Detail = "refused: " + why + audit.Detail
@@ -106,7 +106,7 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, engine, project, ta
 	if !rbac.CanAssign(actorRole, actor.ID, targetID, role) {
 		return refuse(ErrForbidden, "")
 	}
-	if err := h.store.SetRole(ctx, engine, project, targetID, role); err != nil {
+	if err := h.store.SetRole(ctx, project, targetID, role); err != nil {
 		return err
 	}
 	audit.Allowed = true

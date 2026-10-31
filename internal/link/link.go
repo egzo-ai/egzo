@@ -254,6 +254,7 @@ func (l *Link) connect(ctx context.Context) error {
 		return err
 	}
 	defer session.Close()
+	defer context.AfterFunc(ctx, func() { session.Close() })() // what follows reads a stream, which knows no context
 	stream, err := session.OpenStream()
 	if err != nil {
 		return err

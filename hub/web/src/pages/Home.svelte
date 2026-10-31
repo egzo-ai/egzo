@@ -1,27 +1,20 @@
 <script lang="ts">
-  import { app, multiEngine } from "../lib/app.svelte";
-  import { href, nav, navigate } from "../lib/router.svelte";
-  import EngineBadge from "../components/EngineBadge.svelte";
+  import { app } from "../lib/app.svelte";
+  import { ago, stamp } from "../lib/format";
+  import { href } from "../lib/router.svelte";
   import Icon from "../components/Icon.svelte";
 
-  const multi = $derived(multiEngine());
-  const engineFilter = $derived(new URLSearchParams(nav.path.split("?")[1] ?? "").get("engine") ?? "all");
   let text = $state("");
 
   const rows = $derived(
     app.projects
-      .filter((p) => (engineFilter === "all" || p.engine === engineFilter) && p.name.toLowerCase().includes(text.trim().toLowerCase()))
+      .filter((p) => (p.name + " " + p.host).toLowerCase().includes(text.trim().toLowerCase()))
       .map((p) => {
         const running = p.agents.filter((a) => a.running).length;
         const waiting = p.agents.filter((a) => a.waiting).length;
         return { p, running, waiting, stopped: p.agents.length - running };
       }),
   );
-  const engineNames = $derived([...new Set(app.projects.map((p) => p.engine))]);
-
-  function setFilter(name: string) {
-    navigate(name === "all" ? "/" : "/?engine=" + encodeURIComponent(name), true);
-  }
 </script>
 
 <div class="page">
@@ -35,34 +28,17 @@
     {/if}
   </div>
 
-  {#each app.unreachable as e (e.name)}
-    <div class="banner" data-tone="unreachable" role="alert">
-      <span class="tag">⌁ {e.name} unreachable</span>
-      <div class="body">Engine <strong>{e.name}</strong> is unreachable: its projects are hidden until it answers again. <span class="muted">{e.err}</span></div>
-    </div>
-  {/each}
-
-  {#if multi && app.projects.length}
-    <div class="toolbar">
-      <span class="label">Engine</span>
-      <div class="chips" role="group" aria-label="Filter by engine">
-        <button class="chip" aria-pressed={engineFilter === "all"} onclick={() => setFilter("all")}>All <span class="count">{app.projects.length}</span></button>
-        {#each app.engines as e (e.name)}
-          <button class="chip" aria-pressed={engineFilter === e.name} onclick={() => setFilter(e.name)} data-down={e.up ? undefined : ""} title={e.up ? "reachable" : "unreachable: " + (e.err ?? "")}>
-            <EngineBadge name={e.name} /><span class="count">{app.projects.filter((p) => p.engine === e.name).length}</span>
-          </button>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
   {#if app.projects.length === 0 && app.projectsLoaded}
     <div class="empty">
       <pre class="art" aria-hidden="true">┌──────────────┐
 │  0 projects  │
 └──────────────┘</pre>
       <h2>Nothing here yet</h2>
-      <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Tell them your username: <code>{app.user?.username}</code>.</p>
+      {#if app.user?.isOperator}
+        <p>No project has linked to this hub yet. Name it in a project file, <code>hub: {location.origin}</code>, and run <code>egzo project up</code>: it prints the address that approves the project.</p>
+      {:else}
+        <p>You don't have a role on any project. Projects appear here when one of their owners adds you. Tell them your username: <code>{app.user?.username}</code>.</p>
+      {/if}
       <p class="muted">Projects are created from the command line with <code>egzo project up</code>, not from the hub.</p>
     </div>
   {:else if rows.length === 0 && app.projects.length}
@@ -70,12 +46,12 @@
   {:else if rows.length}
     <div class="table-wrap">
       <table class="table" data-testid="projects">
-        <thead><tr><th>Project</th>{#if multi}<th>Engine</th>{/if}<th>Agents</th><th>Questions</th><th>Your role</th></tr></thead>
+        <thead><tr><th>Project</th><th>Host</th><th>Agents</th><th>Questions</th><th>Your role</th></tr></thead>
         <tbody>
-          {#each rows as { p, running, waiting, stopped } (p.engine + "/" + p.name)}
+          {#each rows as { p, running, waiting, stopped } (p.id)}
             <tr data-row tabindex="-1" data-project={p.name}>
-              <td><a class="name" href={href.project(p.engine, p.name)}>{p.name}</a>{#if !p.up} <span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}</td>
-              {#if multi}<td><EngineBadge name={p.engine} /></td>{/if}
+              <td><a class="name" href={href.project(p.id)}>{p.name}</a>{#if p.offlineSince} <span class="pill" data-s="unreachable" data-testid="offline" title="offline since {stamp(p.offlineSince)}">offline {ago(p.offlineSince)}</span>{:else if !p.up} <span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}</td>
+              <td class="muted">{p.host}</td>
               <td>
                 <span class="agentsbar" aria-hidden="true">
                   {#if p.agents.length}<i class="r" style:width="{(running - waiting) / p.agents.length * 100}%"></i><i class="w" style:width="{waiting / p.agents.length * 100}%"></i><i class="s" style:width="{stopped / p.agents.length * 100}%"></i>{/if}
@@ -89,5 +65,4 @@
       </table>
     </div>
   {/if}
-  {#if engineFilter !== "all"}<p><a href={href.home()}>Show all engines</a></p>{/if}
 </div>

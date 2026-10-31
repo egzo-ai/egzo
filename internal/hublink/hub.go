@@ -79,6 +79,10 @@ func (p *Peer) Send(verdict Verdict) error {
 // Close ends the connection.
 func (p *Peer) Close() error { return p.session.Close() }
 
+// Closed is closed when the connection has ended, for whatever reason: what a verb or a terminal failed of can be told from what it
+// was refused.
+func (p *Peer) Closed() <-chan struct{} { return p.session.CloseChan() }
+
 // Handlers is what a hub does with what a link pushes. They are called from the feed's own goroutine; what a link says is
 // untrusted: names, status lines and audit events are data.
 type Handlers struct {
@@ -91,15 +95,27 @@ type Handlers struct {
 	Unlink func() Verdict
 }
 
+// maxFeeds is how many streams a link may hold open towards the hub: one per feed, and as many again for feeds that are being opened
+// again. What a link does is untrusted, and each stream is a goroutine of the hub.
+const maxFeeds = 6
+
 // Run takes what the link sends until the connection ends.
 func (p *Peer) Run(ctx context.Context, h Handlers) error {
 	go p.readControl(h)
+	slots := make(chan struct{}, maxFeeds)
 	for {
 		stream, err := p.session.AcceptStreamWithContext(ctx)
 		if err != nil {
 			return err
 		}
+		select {
+		case slots <- struct{}{}:
+		default:
+			stream.Close()
+			continue
+		}
 		go func() {
+			defer func() { <-slots }()
 			defer stream.Close()
 			if err := p.feed(stream, h); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, yamux.ErrStreamClosed) && !errors.Is(err, yamux.ErrSessionShutdown) {
 				_ = stream.Close()

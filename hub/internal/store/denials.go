@@ -10,7 +10,7 @@ import (
 // Denial is a group of the refusals and failures a project's proxy recorded for one instance: one host, one protocol, one
 // reason code.
 type Denial struct {
-	Engine, Project string
+	Project         string
 	Instance        string // the instance's id; empty when the proxy could not tell who it was
 	ClaimedAgent    string // the name the client sent in its proxy credentials: part of the group, so wrong ones are told apart by name
 	Client          string // the address of the latest
@@ -39,27 +39,27 @@ func (s *Store) RecordDenials(ctx context.Context, seen []Denial) error {
 		return err
 	}
 	defer tx.Rollback()
-	projects := map[[2]string]bool{}
+	projects := map[string]bool{}
 	for _, d := range seen {
 		_, err := tx.ExecContext(ctx, `INSERT INTO denials
-			(engine, project, instance, claimed_agent, protocol, host, code, event, decision, agent, client, user_agent, actor, profile, server, text,
+			(project, instance, claimed_agent, protocol, host, code, event, decision, agent, client, user_agent, actor, profile, server, text,
 				count, first_at, last_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (engine, project, instance, claimed_agent, protocol, host, code) DO UPDATE SET
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (project, instance, claimed_agent, protocol, host, code) DO UPDATE SET
 				event = excluded.event, decision = excluded.decision, agent = excluded.agent, client = excluded.client, user_agent = excluded.user_agent,
 				actor = CASE WHEN excluded.actor = '' THEN denials.actor ELSE excluded.actor END,
 				profile = excluded.profile, server = excluded.server, text = excluded.text, count = denials.count + excluded.count,
 				first_at = MIN(denials.first_at, excluded.first_at), last_at = MAX(denials.last_at, excluded.last_at), fixed_at = NULL`,
-			d.Engine, d.Project, d.Instance, d.ClaimedAgent, d.Protocol, d.Host, d.Code, d.Event, d.Decision, d.Agent, d.Client, d.UserAgent, d.Actor,
+			d.Project, d.Instance, d.ClaimedAgent, d.Protocol, d.Host, d.Code, d.Event, d.Decision, d.Agent, d.Client, d.UserAgent, d.Actor,
 			d.Profile, d.Server, d.Text, d.Count, d.First.UnixMilli(), d.Last.UnixMilli())
 		if err != nil {
 			return err
 		}
-		projects[[2]string{d.Engine, d.Project}] = true
+		projects[d.Project] = true
 	}
 	for p := range projects {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM denials WHERE engine = ? AND project = ? AND rowid NOT IN
-			(SELECT rowid FROM denials WHERE engine = ? AND project = ? ORDER BY last_at DESC LIMIT ?)`, p[0], p[1], p[0], p[1], MaxDenials); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM denials WHERE project = ? AND rowid NOT IN
+			(SELECT rowid FROM denials WHERE project = ? ORDER BY last_at DESC LIMIT ?)`, p, p, MaxDenials); err != nil {
 			return err
 		}
 	}
@@ -68,11 +68,11 @@ func (s *Store) RecordDenials(ctx context.Context, seen []Denial) error {
 
 // FixDenials marks the open groups of an instance's host and protocol for one of the steps as fixed: the instance got through at
 // at, after them.
-func (s *Store) FixDenials(ctx context.Context, engine, project, instance, protocol, host string, events []string, at time.Time) error {
+func (s *Store) FixDenials(ctx context.Context, project, instance, protocol, host string, events []string, at time.Time) error {
 	for _, event := range events {
-		_, err := s.db.ExecContext(ctx, `UPDATE denials SET fixed_at = ? WHERE engine = ? AND project = ? AND instance = ? AND protocol = ?
+		_, err := s.db.ExecContext(ctx, `UPDATE denials SET fixed_at = ? WHERE project = ? AND instance = ? AND protocol = ?
 			AND host = ? AND event = ? AND fixed_at IS NULL AND last_at <= ?`,
-			at.UnixMilli(), engine, project, instance, protocol, host, event, at.UnixMilli())
+			at.UnixMilli(), project, instance, protocol, host, event, at.UnixMilli())
 		if err != nil {
 			return err
 		}
@@ -81,9 +81,9 @@ func (s *Store) FixDenials(ctx context.Context, engine, project, instance, proto
 }
 
 // Denials lists a project's groups, the most recently seen first.
-func (s *Store) Denials(ctx context.Context, engine, project string) ([]Denial, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT engine, project, instance, claimed_agent, protocol, host, code, event, decision, agent, client,
-		user_agent, actor, profile, server, text, count, first_at, last_at, fixed_at FROM denials WHERE engine = ? AND project = ? ORDER BY last_at DESC, host`, engine, project)
+func (s *Store) Denials(ctx context.Context, project string) ([]Denial, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT project, instance, claimed_agent, protocol, host, code, event, decision, agent, client,
+		user_agent, actor, profile, server, text, count, first_at, last_at, fixed_at FROM denials WHERE project = ? ORDER BY last_at DESC, host`, project)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (s *Store) Denials(ctx context.Context, engine, project string) ([]Denial, 
 		var d Denial
 		var first, last int64
 		var fixed sql.NullInt64
-		if err := rows.Scan(&d.Engine, &d.Project, &d.Instance, &d.ClaimedAgent, &d.Protocol, &d.Host, &d.Code, &d.Event, &d.Decision, &d.Agent,
+		if err := rows.Scan(&d.Project, &d.Instance, &d.ClaimedAgent, &d.Protocol, &d.Host, &d.Code, &d.Event, &d.Decision, &d.Agent,
 			&d.Client, &d.UserAgent, &d.Actor, &d.Profile, &d.Server, &d.Text, &d.Count, &first, &last, &fixed); err != nil {
 			return nil, err
 		}
@@ -113,9 +113,9 @@ func (s *Store) PurgeDenials(ctx context.Context, before time.Time) error {
 }
 
 // AuditCursor is the time of the last event the hub handled from a project's audit trail; zero when it never read it.
-func (s *Store) AuditCursor(ctx context.Context, engine, project string) (time.Time, error) {
+func (s *Store) AuditCursor(ctx context.Context, project string) (time.Time, error) {
 	var at int64
-	err := s.db.QueryRowContext(ctx, `SELECT at FROM audit_cursors WHERE engine = ? AND project = ?`, engine, project).Scan(&at)
+	err := s.db.QueryRowContext(ctx, `SELECT at FROM audit_cursors WHERE project = ?`, project).Scan(&at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, nil
 	}
@@ -126,8 +126,8 @@ func (s *Store) AuditCursor(ctx context.Context, engine, project string) (time.T
 }
 
 // SetAuditCursor records how far a project's audit trail was read.
-func (s *Store) SetAuditCursor(ctx context.Context, engine, project string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO audit_cursors (engine, project, at) VALUES (?, ?, ?)
-		ON CONFLICT (engine, project) DO UPDATE SET at = MAX(audit_cursors.at, excluded.at)`, engine, project, at.UnixNano())
+func (s *Store) SetAuditCursor(ctx context.Context, project string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO audit_cursors (project, at) VALUES (?, ?)
+		ON CONFLICT (project) DO UPDATE SET at = MAX(audit_cursors.at, excluded.at)`, project, at.UnixNano())
 	return err
 }

@@ -5,43 +5,42 @@ describe("the router", () => {
   it("knows the app's addresses", () => {
     expect(parse("/")).toEqual({ name: "home" });
     expect(parse("/login")).toEqual({ name: "login" });
-    expect(parse("/settings/engines")).toEqual({ name: "settings", tab: "engines" });
+    expect(parse("/settings/links")).toEqual({ name: "settings", tab: "links" });
     expect(parse("/settings/users")).toEqual({ name: "settings", tab: "users" });
     expect(parse("/settings/account")).toEqual({ name: "settings", tab: "account" });
-    expect(parse("/e/lab/p/web")).toEqual({ name: "project", engine: "lab", project: "web", tab: "agents" });
-    expect(parse("/e/lab/p/web/members")).toEqual({ name: "project", engine: "lab", project: "web", tab: "members" });
-    expect(parse("/e/lab/p/web/a/coder-1")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "overview" });
-    expect(parse("/e/lab/p/web/a/coder-1/logs")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "logs" });
-    expect(parse("/e/lab/p/web/network")).toEqual({ name: "project", engine: "lab", project: "web", tab: "network" });
-    expect(parse("/e/lab/p/web/a/coder-1/network")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "network" });
-    expect(href.agent("lab", "web", "coder-1", "network")).toBe("/e/lab/p/web/a/coder-1/network");
-    expect(parse("/e/lab/p/web/activity")).toEqual({ name: "project", engine: "lab", project: "web", tab: "activity" });
-    expect(parse("/e/lab/p/web/a/coder-1/activity")).toEqual({ name: "agent", engine: "lab", project: "web", agent: "coder-1", tab: "activity" });
+    expect(parse("/p/p1")).toEqual({ name: "project", project: "p1", tab: "agents" });
+    expect(parse("/p/p1/members")).toEqual({ name: "project", project: "p1", tab: "members" });
+    expect(parse("/p/p1/a/coder-1")).toEqual({ name: "agent", project: "p1", agent: "coder-1", tab: "overview" });
+    expect(parse("/p/p1/a/coder-1/logs")).toEqual({ name: "agent", project: "p1", agent: "coder-1", tab: "logs" });
+    expect(parse("/p/p1/network")).toEqual({ name: "project", project: "p1", tab: "network" });
+    expect(parse("/p/p1/a/coder-1/network")).toEqual({ name: "agent", project: "p1", agent: "coder-1", tab: "network" });
+    expect(href.agent("p1", "coder-1", "network")).toBe("/p/p1/a/coder-1/network");
+    expect(parse("/p/p1/activity")).toEqual({ name: "project", project: "p1", tab: "activity" });
+    expect(parse("/p/p1/a/coder-1/activity")).toEqual({ name: "agent", project: "p1", agent: "coder-1", tab: "activity" });
   });
 
   it("answers not found for anything else", () => {
-    for (const path of ["/nope", "/e/lab", "/e/lab/p", "/e/lab/p/web/bogus", "/e/lab/p/web/a", "/e/lab/p/web/a/x/terminal", "/engines/x", "/settings/nope", "/settings/users/x"]) {
+    for (const path of ["/nope", "/p", "/p/p1/bogus", "/p/p1/a", "/p/p1/a/x/terminal", "/link", "/link/a/b", "/engines", "/settings/nope", "/settings/users/x"]) {
       expect(parse(path).name).toBe("notfound");
     }
   });
 
-  it("sends the old engines address, and settings alone, to the first tab", () => {
-    for (const path of ["/engines", "/settings"]) {
-      const route = parse(path);
-      expect(route).toEqual({ name: "settings", tab: "engines" });
-      expect(canonical(route)).toBe("/settings/engines");
-    }
+  it("sends settings alone to the first tab", () => {
+    const route = parse("/settings");
+    expect(route).toEqual({ name: "settings", tab: "links" });
+    expect(canonical(route)).toBe("/settings/links");
     expect(canonical(parse("/settings/users"))).toBe("/settings/users");
     expect(canonical(parse("/"))).toBeNull();
-    expect(href.engines()).toBe("/settings/engines");
+    expect(href.links()).toBe("/settings/links");
     expect(href.users()).toBe("/settings/users");
   });
 
   it("decodes names and builds addresses that parse back", () => {
-    const path = href.agent("my lab", "web app", "fix/bug", "logs");
-    expect(path).toBe("/e/my%20lab/p/web%20app/a/fix%2Fbug/logs");
-    expect(parse(path)).toEqual({ name: "agent", engine: "my lab", project: "web app", agent: "fix/bug", tab: "logs" });
-    expect(parse(href.project("lab", "web", "spec"))).toMatchObject({ tab: "spec" });
-    expect(href.project("lab", "web")).toBe("/e/lab/p/web");
+    const path = href.agent("p1", "fix/bug", "logs");
+    expect(path).toBe("/p/p1/a/fix%2Fbug/logs");
+    expect(parse(path)).toEqual({ name: "agent", project: "p1", agent: "fix/bug", tab: "logs" });
+    expect(parse(href.project("p1", "spec"))).toMatchObject({ tab: "spec" });
+    expect(href.project("p1")).toBe("/p/p1");
+    expect(parse("/link/QXRB-7KPM")).toEqual({ name: "register", code: "QXRB-7KPM" });
   });
 });

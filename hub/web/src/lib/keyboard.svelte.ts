@@ -57,7 +57,7 @@ function pageKey(e: KeyboardEvent): boolean {
   if (goPending && Date.now() - goPending < 1500) {
     goPending = 0;
     if (e.key === "p") { navigate(href.home()); return true; }
-    if (e.key === "e" && app.user?.isOperator) { navigate(href.engines()); return true; }
+    if (e.key === "l" && app.user?.isOperator) { navigate(href.links()); return true; }
     if (e.key === "u" && app.user?.isOperator) { navigate(href.users()); return true; }
     return false;
   }
