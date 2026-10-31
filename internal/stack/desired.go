@@ -74,12 +74,14 @@ type ContainerSpec struct {
 	Env          []string
 	Mounts       []MountSpec
 	Tmpfs        map[string]string
-	Network      string
-	WorkingDir   string
-	Harness      string
-	NanoCPUs     int64
-	Memory       int64
-	Healthcheck  []string
+	// Restart is the engine's restart policy; empty leaves the container down when it stops.
+	Restart     string `json:",omitempty"`
+	Network     string
+	WorkingDir  string
+	Harness     string
+	NanoCPUs    int64
+	Memory      int64
+	Healthcheck []string
 	// PidsLimit caps processes and threads; MemorySwap equals Memory when a memory limit is set, so
 	// swap does not double it.
 	PidsLimit  int64

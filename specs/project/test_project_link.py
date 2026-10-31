@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-from hubkit import eventually
-from support import agent, spec
+from hubkit import FakeHub, eventually
+from support import SECRET_KEY_VARIABLE, agent, spec
 
 
 def document(engine, egzo, hub):
@@ -58,6 +58,14 @@ def test_a_hub_that_is_not_an_address_is_refused(project, wrong):
     project.write(spec(hub=wrong))
     result = project.run("project", "check")
     assert result.returncode != 0 and "hub" in result.stdout
+
+
+def test_a_dry_run_of_a_linked_project_runs_nothing(project, engine, egzo, fake_hub):
+    project.write(document(engine, egzo, fake_hub))
+    absent = "egzo-spec-absent:never-built"
+    result = project.run("project", "up", "--dry-run", env={"EGZO_IMAGE": absent})
+    assert result.returncode == 1 and "would create" in result.stdout, "exit 1: there are changes to make, and it could say which"
+    assert "not up to date" in project.run("project", "check", env={"EGZO_IMAGE": absent}).stdout
 
 
 def test_a_ca_that_is_not_certificates_is_refused(project):
@@ -205,6 +213,23 @@ def test_an_agent_cannot_reach_the_link(linked, engine):
     assert engine.exec(container.name, "ping", "-c", "1", "-W", "2", address).returncode != 0
 
 
+def test_a_dropped_connection_comes_back_by_itself(linked, fake_hub):
+    before = fake_hub.registration(linked.name)["Connections"]
+    fake_hub.drop(linked.name)
+    assert eventually(lambda: fake_hub.registration(linked.name)["Connections"] > before)
+    assert eventually(lambda: fake_hub.verb(linked.name, "project").get("error") is None)
+
+
+def test_up_again_changes_nothing_and_recreating_the_link_keeps_its_key(linked, fake_hub):
+    key = fake_hub.registration(linked.name)["Key"]
+    assert "nothing to do" in linked.ok("project up").stdout
+    assert "nothing to do" in linked.ok("project up --dry-run").stdout, "a dry run sees the link as it is"
+    linked.ok("project up --recreate")
+    assert eventually(lambda: fake_hub.registration(linked.name)["Online"])
+    assert fake_hub.registration(linked.name)["Key"] == key
+    assert eventually(lambda: "owned by alice" in row(linked, "link")["status"])
+
+
 def test_revoked_ends_what_the_hub_may_do_and_check_fails(linked, fake_hub):
     fake_hub.revoke(linked.name, "the laptop was stolen")
     assert eventually(lambda: "revoked" in row(linked, "link")["status"])
@@ -275,3 +300,86 @@ def test_register_needs_a_hub_and_a_running_link(project, engine, egzo, fake_hub
     project.write(document(engine, egzo, fake_hub))
     result = project.run("project", "register", input="egzo-link-x\n")
     assert result.returncode != 0 and "project up" in result.stderr
+
+
+def test_a_hub_that_is_away_is_said_and_the_project_keeps_running(live_project, engine, egzo, tmp_path):
+    bridge = json.loads(engine.run("network", "inspect", "bridge").stdout)[0]
+    away = FakeHub(tmp_path / "away", bridge["IPAM"]["Config"][0]["Gateway"])
+    live_project.write(document(engine, egzo, away))
+    live_project.ok("project up")
+    register(live_project, away)
+    away.stop()
+    assert eventually(lambda: "unreachable" in row(live_project, "link")["status"])
+    result = check(live_project)
+    assert result.returncode == 0 and "unreachable" in result.stdout, "the project runs without the hub"
+    live_project.ok("agent spawn web still")
+    assert engine.instance(live_project.name, "still")
+
+
+def test_a_key_sealed_with_another_secret_key_is_refused_and_says_so(live_project, engine, egzo, fake_hub):
+    live_project.write(document(engine, egzo, fake_hub))
+    live_project.ok("project up")
+    register(live_project, fake_hub)
+    other = "b" * 64
+    result = live_project.run("project", "up", "--recreate", env={SECRET_KEY_VARIABLE: other})
+    assert result.returncode != 0 and "another secret key" in result.stderr
+
+
+def test_rotate_ca_moves_the_links_key_to_the_new_secret_key(live_project, engine, egzo, fake_hub):
+    live_project.write(document(engine, egzo, fake_hub))
+    live_project.ok("project up")
+    register(live_project, fake_hub)
+    key = fake_hub.registration(live_project.name)["Key"]
+    other = "b" * 64
+    live_project.ok("project rotate-ca", env={SECRET_KEY_VARIABLE: other}, timeout=300)
+    live_project.ok("project up", env={SECRET_KEY_VARIABLE: other})
+    link = f"{live_project.name}-link-1"
+    assert engine.run("restart", link).returncode == 0
+    assert eventually(lambda: "locked" in row(live_project, "link")["status"])
+    live_project.ok("project up", env={SECRET_KEY_VARIABLE: other})
+    assert eventually(lambda: fake_hub.registration(live_project.name)["Online"])
+    assert fake_hub.registration(live_project.name)["Key"] == key
+
+
+def test_after_a_reboot_up_brings_the_project_back_with_the_same_key_and_nobody_registers_again(live_project, engine, egzo, fake_hub):
+    """`up` is required after a restart. Who runs it is outside egzo."""
+    p = live_project
+    p.write(document(engine, egzo, fake_hub))
+    p.ok("project up")
+    register(p, fake_hub)
+    p.ok("agent spawn web worker")
+    registered = fake_hub.registration(p.name)
+    codes = fake_hub.codes()
+
+    assert engine.run("stop", *[c.name for c in engine.containers(p.name)]).returncode == 0  # what a reboot leaves
+    assert eventually(lambda: not fake_hub.registration(p.name)["Online"]), "the hub sees it go"
+
+    p.ok("project up")
+    assert eventually(lambda: "owned by alice" in row(p, "link")["status"])
+    assert fake_hub.registration(p.name)["Key"] == registered["Key"]
+    assert fake_hub.registration(p.name)["ID"] == registered["ID"]
+    assert fake_hub.codes() == codes, "nobody needed one"
+
+    assert eventually(lambda: fake_hub.verb(p.name, "project").get("error") is None), "the verbs are back"
+    fake_hub.must(p.name, "start", Agent="worker")
+    container = engine.instance(p.name, "worker").name
+    denied = lambda: engine.exec(container, "curl", "-s", "-m", "5", "-o", "/dev/null", "-w", "%{http_connect}", "https://denied.example.com").stdout
+    assert eventually(lambda: denied() == "403"), f"the proxy has its policy again and refuses by it, not with a 503: {denied()}"
+
+
+def test_a_link_that_restarted_alone_is_locked_and_says_what_opens_it(live_project, engine, egzo, fake_hub):
+    p = live_project
+    p.write(document(engine, egzo, fake_hub))
+    p.ok("project up")
+    link = f"{p.name}-link-1"
+    assert link_of(engine, p).raw["HostConfig"]["RestartPolicy"]["Name"] == "unless-stopped"
+    started = engine.inspect(link)["State"]["StartedAt"]
+    engine.exec(link, "kill", "-TERM", "1")  # the process ends: the engine starts it again, without the secret key
+    assert eventually(lambda: engine.inspect(link)["State"]["StartedAt"] != started and engine.inspect(link)["State"]["Running"])
+    assert eventually(lambda: "locked" in row(p, "link")["status"])
+    assert "egzo project up" in row(p, "link")["status"]
+    assert "locked" in check(p).stdout
+    result = p.run("project", "register", input=fake_hub.code() + "\n")
+    assert result.returncode != 0 and "locked" in result.stderr, "the link holds no key to present a code with"
+    p.ok("project up")
+    assert eventually(lambda: "not registered" in row(p, "link")["status"])

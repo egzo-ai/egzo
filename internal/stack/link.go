@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/mount"
+
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/hublink"
@@ -68,6 +70,30 @@ func socketPath(c *engine.Client) string {
 	return defaultSocket
 }
 
+// observedLinkSocket is what the running link was given. A dry run changes nothing, so it asks no container, and compares what
+// exists with itself: a link that is not there yet would be created whatever its socket is.
+func observedLinkSocket(ctx context.Context, c *engine.Client, project string) LinkSocket {
+	socket := LinkSocket{Path: socketPath(c)}
+	inspected, err := c.API.ContainerInspect(ctx, project+"-link-1")
+	if err != nil {
+		return socket
+	}
+	return linkSocketOf(socket, inspected.Config.User, inspected.HostConfig.Mounts)
+}
+
+// linkSocketOf reads a link's user and mounts, the reverse of linkUser and desireLink.
+func linkSocketOf(socket LinkSocket, user string, mounts []mount.Mount) LinkSocket {
+	if _, group, ok := strings.Cut(user, ":"); ok && user != "0:0" {
+		socket.Group = group
+	}
+	for _, m := range mounts {
+		if m.Target == LinkEngineSocket {
+			socket.Path = m.Source
+		}
+	}
+	return socket
+}
+
 // linkUser is who the link runs as: the sidecars' unprivileged user, in the group of the socket. Primary, not supplementary: that
 // is the one form every runtime honours.
 func linkUser(socket LinkSocket) string {
@@ -104,6 +130,7 @@ func desireLink(project *config.Resolved, in Inputs, identity engine.Identity) (
 		},
 		Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run/egzo": sidecarTmpfsState},
 		Network:        network.Name,
+		Restart:        "unless-stopped", // it comes back locked, which says what to do where a stopped container says nothing
 		Healthcheck:    []string{"/egzo", "link", "--healthcheck"},
 		ReadonlyRootfs: true,
 		Identity:       identity,
@@ -176,6 +203,13 @@ func RegisterLink(ctx context.Context, c *engine.Client, project, code string) (
 		return status, err
 	}
 	return status, json.Unmarshal(reply, &status)
+}
+
+// RekeyLink moves the link's key to another secret key, for `egzo project rotate-ca`.
+func RekeyLink(ctx context.Context, c *engine.Client, project, secretKey string) error {
+	body, _ := json.Marshal(LinkUnlock{SecretKey: secretKey})
+	_, err := linkRequest(ctx, c, project, "PUT", "/rekey", bytes.NewReader(body))
+	return err
 }
 
 // unlink tells the hub to forget the project, through the link, when the link runs. Never fatal: the project is going either way.

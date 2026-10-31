@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/api/types/mount"
+
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 )
@@ -509,6 +511,16 @@ func TestTheLinkIsDesiredOnlyForAProjectThatNamesAHub(t *testing.T) {
 	for _, attachment := range with.Attachments {
 		if attachment.Container == link.Name {
 			t.Errorf("the link joined the agents' networks: %+v", attachment)
+		}
+	}
+}
+
+func TestAnObservedLinkGivesBackTheSocketItWasMadeWith(t *testing.T) {
+	defaults := LinkSocket{Path: "/var/run/docker.sock"}
+	for _, want := range []LinkSocket{{Path: "/run/podman/podman.sock", Group: "998"}, {Path: "/run/user/1000/docker.sock"}, {Path: "/var/run/docker.sock", Group: "0"}} {
+		mounts := []mount.Mount{{Target: linkState, Source: "web_link"}, {Target: LinkEngineSocket, Source: want.Path}}
+		if got := linkSocketOf(defaults, linkUser(want), mounts); got != want {
+			t.Errorf("got %+v, want %+v", got, want)
 		}
 	}
 }

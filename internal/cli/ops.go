@@ -194,6 +194,11 @@ func newRotateCACommand(opts *options) *cobra.Command {
 			if len(rotated.CA) >= 12 {
 				fmt.Fprintf(cmd.OutOrStdout(), "new CA %s\n", rotated.CA[:12])
 			}
+			if s.Resolved.Hub != nil { // after the CA: a link that cannot follow must not hold back a key that has to change
+				if err := stack.RekeyLink(ctx, s.engine, s.Resolved.Name, key); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: the link's key stays sealed with the old secret key: %v\n", err)
+				}
+			}
 			timeout := 5
 			for _, r := range s.observed.Resources {
 				if r.Type == "container" && r.Kind == "agent" && r.State == "running" {
