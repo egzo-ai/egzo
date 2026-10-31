@@ -463,6 +463,9 @@ func Rows(observed Observed, reported map[string]Report, published *Published) [
 			continue
 		}
 		row := Row{Name: r.Name, Service: r.Service, Kind: r.Kind, State: r.State, Health: r.Health, Actor: r.Actor, Created: r.Created}
+		if r.Kind == kindLink {
+			row.Status = termsafe.Truncate(termsafe.Line(reported[LinkReport].Status), 200)
+		}
 		if r.Kind == kindAgent {
 			row.Name = r.Instance // what every command takes
 			row.ID = r.InstanceID

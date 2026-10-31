@@ -22,6 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/egzo-ai/egzo/internal/config"
+	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
 
@@ -31,7 +32,7 @@ func newProjectCommand(opts *options) *cobra.Command {
 		Use:   "project",
 		Short: "Create, bring up, check and take down the project",
 	}
-	cmd.AddCommand(newInitCommand(), newUpCommand(opts), newDownCommand(opts), newProjectCheckCommand(opts), newRotateCACommand(opts), newUnlockCommand(opts))
+	cmd.AddCommand(newInitCommand(), newUpCommand(opts), newDownCommand(opts), newProjectCheckCommand(opts), newRotateCACommand(opts), newUnlockCommand(opts), newRegisterCommand(opts))
 	return group(cmd)
 }
 
@@ -115,6 +116,9 @@ func checkProject(cmd *cobra.Command, opts *options) error {
 		}
 	}
 	reportSignIns(cmd, opts, report)
+	if p.Resolved.Hub != nil {
+		reportLinkState(cmd, opts, report)
+	}
 	if changes, ok := pendingChanges(cmd, opts); ok && changes > 0 {
 		report("warn", "the project is not up to date: %d change(s) pending, see `egzo project up --dry-run`", changes)
 	}
@@ -147,6 +151,31 @@ func reportSignIns(cmd *cobra.Command, opts *options, report func(level, format 
 		default:
 			report("warn", "service %s has no sign-in yet: sign in from an agent that uses it (`egzo agent attach`)", service)
 		}
+	}
+}
+
+// reportLinkState says, when the engine can be reached, how the project's link to its hub stands. A project that is not registered yet
+// or waits for a network is a warning: it runs without the hub. One the hub revoked is a failure, because only an operator changes that.
+func reportLinkState(cmd *cobra.Command, opts *options, report func(level, format string, a ...any)) {
+	ctx, stop := commandContext(cmd)
+	defer stop()
+	s, err := openSessionQuietly(ctx, opts)
+	if err != nil {
+		return
+	}
+	defer s.close()
+	status, err := stack.LinkStatus(ctx, s.engine, s.Resolved.Name, 0)
+	if err != nil {
+		report("warn", "the link is not running: `egzo project up` starts it")
+		return
+	}
+	switch status.State {
+	case hublink.StateApproved:
+		report("ok", "%s", status.Text())
+	case hublink.StateRevoked:
+		report("fail", "%s", status.Text())
+	default:
+		report("warn", "link: %s", status.Text())
 	}
 }
 

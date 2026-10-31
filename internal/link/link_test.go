@@ -5,14 +5,45 @@ package link
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/seal"
 )
+
+func TestRegisterOfALinkThatIsLockedOrRegisteredSendsNoCode(t *testing.T) {
+	l := New(Options{Project: "web", Hub: "https://hub"})
+	if _, err := l.Register(context.Background(), "egzo-link-x"); err == nil || !strings.Contains(err.Error(), "locked") {
+		t.Errorf("locked: %v", err)
+	}
+	l.record(hublink.Verdict{State: hublink.StateApproved})
+	status, err := l.Register(context.Background(), "egzo-link-x")
+	if err != nil || status.State != hublink.StateApproved || l.asked != nil {
+		t.Errorf("registered: %+v, %v, asked %+v", status, err, l.asked)
+	}
+}
+
+func TestACodeIsDroppedWhenTheHubDoesNotAnswer(t *testing.T) {
+	registerWait = 20 * time.Millisecond
+	defer func() { registerWait = dialLimit + 5*time.Second }()
+	l := New(Options{Project: "web", Hub: "https://hub"})
+	l.record(hublink.Verdict{State: hublink.StateUnregistered})
+	if _, err := l.Register(context.Background(), "egzo-link-x"); err == nil || !strings.Contains(err.Error(), "did not answer") {
+		t.Fatalf("err = %v", err)
+	}
+	if l.current() != nil {
+		t.Error("the code is still held")
+	}
+	if strings.Contains(fmt.Sprintf("%+v", l.Status()), "egzo-link-x") {
+		t.Error("the status shows the code")
+	}
+}
 
 func keysOf(t *testing.T, secret string) *seal.Keys {
 	t.Helper()
