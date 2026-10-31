@@ -16,6 +16,7 @@ func TestReservedAndMalformedNames(t *testing.T) {
 		{"agent control", "agents:\n  control: " + custom + "\n", "reserved"},
 		{"agent proxy", "agents:\n  proxy: " + custom + "\n", "reserved"},
 		{"agent prep", "agents:\n  prep: " + custom + "\n", "reserved"},
+		{"agent link", "agents:\n  link: " + custom + "\n", "reserved"},
 		{"agent with a space", "agents:\n  'my agent': " + custom + "\n", "lowercase"},
 		{"agent in capitals", "agents:\n  Coder: " + custom + "\n", "lowercase"},
 		{"agent too long", "agents:\n  " + strings.Repeat("a", 64) + ": " + custom + "\n", "lowercase"},
@@ -46,8 +47,10 @@ func TestInstanceNames(t *testing.T) {
 		"control":                     "reserved",
 		"proxy":                       "reserved",
 		"prep":                        "reserved",
+		"link":                        "reserved",
 		"control-1":                   "name of a sidecar",
 		"proxy-1":                     "name of a sidecar",
+		"link-1":                      "name of a sidecar",
 		"coder-home":                  "-home",
 		"egress":                      "proxy's",
 	} {
