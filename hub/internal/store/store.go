@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 5
+const schemaVersion = 6
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
 	username TEXT NOT NULL UNIQUE COLLATE NOCASE, -- disabled users keep theirs: a name is never freed
 	is_operator INTEGER NOT NULL DEFAULT 0,
 	disabled_at INTEGER,                          -- null: enabled
+	project_quota INTEGER NOT NULL DEFAULT 0,     -- how many projects they may connect; an operator is not held to it
 	created_at INTEGER NOT NULL,
 	last_login_at INTEGER
 );
@@ -68,7 +69,7 @@ CREATE TABLE IF NOT EXISTS projects (
 	offline_since INTEGER                 -- Unix milliseconds; null while its link is connected
 );
 CREATE INDEX IF NOT EXISTS projects_state ON projects (state, created_at);
--- A link code is what lets a project register: an operator makes one, and the project presents it, once (linkcodes.go).
+-- A link code is what lets a project register: a person with quota makes one, and the project presents it, once (linkcodes.go).
 CREATE TABLE IF NOT EXISTS link_codes (
 	id TEXT PRIMARY KEY,
 	hash BLOB NOT NULL UNIQUE,            -- SHA-256 of the code: the code itself is shown once and kept nowhere
@@ -81,6 +82,18 @@ CREATE TABLE IF NOT EXISTS grants (
 	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	role TEXT NOT NULL,
 	PRIMARY KEY (project, user_id)
+);
+-- An invite is what lets a person in: one code, good once, that grants a role on a project or the flags on a user (invites.go).
+CREATE TABLE IF NOT EXISTS invites (
+	id TEXT PRIMARY KEY,
+	hash BLOB NOT NULL UNIQUE,            -- SHA-256 of the code: the code itself is shown once and kept nowhere
+	created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL,
+	project TEXT REFERENCES projects(id) ON DELETE CASCADE, -- null: it grants the flags below
+	role TEXT NOT NULL DEFAULT '',
+	operator INTEGER NOT NULL DEFAULT 0,
+	project_quota INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash TEXT PRIMARY KEY,
@@ -216,6 +229,8 @@ type User struct {
 	DisabledAt  time.Time // zero: enabled
 	CreatedAt   time.Time
 	LastLoginAt time.Time // zero: never
+	// ProjectQuota is how many projects they may connect to the hub. Lowering it under what they have removes nothing.
+	ProjectQuota int
 
 	Name, Email   string
 	EmailVerified bool
@@ -245,7 +260,7 @@ func boolInt(b bool) int {
 type scanner interface{ Scan(...any) error }
 
 // userSelect reads a user with the display fields of their latest identity; append a WHERE on u.
-const userSelect = `SELECT u.id, u.username, u.is_operator, u.disabled_at, u.created_at, u.last_login_at,
+const userSelect = `SELECT u.id, u.username, u.is_operator, u.disabled_at, u.created_at, u.last_login_at, u.project_quota,
 	COALESCE(i.name, ''), COALESCE(i.email, ''), COALESCE(i.email_verified, 0), COALESCE(i.picture_url, ''),
 	EXISTS (SELECT 1 FROM user_passwords p WHERE p.user_id = u.id)
 	FROM users u LEFT JOIN user_identities i ON i.id =
@@ -256,7 +271,7 @@ func scanUser(row scanner) (User, error) {
 	var operator, verified, password int
 	var created int64
 	var disabled, login sql.NullInt64
-	if err := row.Scan(&u.ID, &u.Username, &operator, &disabled, &created, &login, &u.Name, &u.Email, &verified, &u.Picture, &password); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &operator, &disabled, &created, &login, &u.ProjectQuota, &u.Name, &u.Email, &verified, &u.Picture, &password); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
@@ -315,13 +330,25 @@ func insertUser(ctx context.Context, tx *sql.Tx, base string, operator bool) (Us
 		if taken > 0 {
 			continue
 		}
-		u := User{ID: newID("u", 6), Username: name, IsOperator: operator, CreatedAt: now, LastLoginAt: now}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, is_operator, created_at, last_login_at) VALUES (?, ?, ?, ?, ?)`,
-			u.ID, u.Username, boolInt(operator), now.Unix(), now.Unix()); err != nil {
-			return User{}, err
-		}
-		return u, nil
+		return insertNamed(ctx, tx, name, operator, now)
 	}
+}
+
+func insertNamed(ctx context.Context, tx *sql.Tx, name string, operator bool, now time.Time) (User, error) {
+	u := User{ID: newID("u", 6), Username: name, IsOperator: operator, CreatedAt: now, LastLoginAt: now}
+	_, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, is_operator, created_at, last_login_at) VALUES (?, ?, ?, ?, ?)`,
+		u.ID, u.Username, boolInt(operator), now.Unix(), now.Unix())
+	return u, err
+}
+
+// SetProjectQuota changes how many projects a user may connect. It reports whether anything changed.
+func (s *Store) SetProjectQuota(ctx context.Context, id string, quota int) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET project_quota = ? WHERE id = ? AND project_quota != ?`, quota, id, quota)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
 }
 
 // EnsureStarter makes sure the starter account exists, is enabled and is an operator, making or repairing it as needed.
@@ -537,50 +564,58 @@ func insertIdentity(ctx context.Context, tx *sql.Tx, userID, issuer, subject str
 	return id, err
 }
 
-// LoginIdentity signs in with an identity. Found and enabled: its snapshot and the times are refreshed. Found and disabled:
-// ErrDisabled, and nothing is written. Not found: a new user is made, with no access, and the identity is theirs (created is set).
-// identityID is the identity signed in with, for the session. Two first logins at once cannot both make a user: the store has one
-// connection, which the transaction holds from the lookup to the insert.
-func (s *Store) LoginIdentity(ctx context.Context, issuer, subject string, p Profile) (User, string, bool, error) {
+// LoginIdentity signs in with an identity. Found and enabled: its snapshot and the times are refreshed, and the invite is left alone.
+// Found and disabled: ErrDisabled, and nothing is written. Not found: it takes an invite, which is spent on a new user who owns the identity
+// (created is set); without one ErrNoInvite, with a bad one ErrBadInvite, and nothing is written. identityID is the identity signed in with,
+// for the session. Two first logins at once cannot both make a user: the store has one connection, which the transaction holds from the
+// lookup to the insert.
+func (s *Store) LoginIdentity(ctx context.Context, issuer, subject string, p Profile, invite string) (User, string, Invite, bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return User{}, "", false, err
+		return User{}, "", Invite{}, false, err
 	}
 	defer tx.Rollback()
 	now := time.Now().Unix()
 	var identityID, userID string
 	var disabled sql.NullInt64
+	var spent Invite
 	created := false
 	err = tx.QueryRowContext(ctx, `SELECT i.id, u.id, u.disabled_at FROM user_identities i JOIN users u ON u.id = i.user_id
 		WHERE i.issuer = ? AND i.subject = ?`, issuer, subject).Scan(&identityID, &userID, &disabled)
 	switch {
 	case err == nil:
 		if disabled.Valid {
-			return User{}, "", false, ErrDisabled
+			return User{}, "", Invite{}, false, ErrDisabled
 		}
 		if err := refreshIdentity(ctx, tx, identityID, p, now); err != nil {
-			return User{}, "", false, err
+			return User{}, "", Invite{}, false, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE id = ?`, now, userID); err != nil {
-			return User{}, "", false, err
+			return User{}, "", Invite{}, false, err
 		}
 	case errors.Is(err, sql.ErrNoRows):
+		if invite == "" {
+			return User{}, "", Invite{}, false, ErrNoInvite
+		}
 		u, err := insertUser(ctx, tx, UsernameFrom(p.PreferredUsername, p.Email, p.Name), false)
 		if err != nil {
-			return User{}, "", false, err
+			return User{}, "", Invite{}, false, err
 		}
 		userID, created = u.ID, true
 		if identityID, err = insertIdentity(ctx, tx, userID, issuer, subject, p, now); err != nil {
-			return User{}, "", false, err
+			return User{}, "", Invite{}, false, err
+		}
+		if spent, err = redeem(ctx, tx, invite, userID, time.Unix(now, 0)); err != nil {
+			return User{}, "", Invite{}, false, err
 		}
 	default:
-		return User{}, "", false, err
+		return User{}, "", Invite{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return User{}, "", false, err
+		return User{}, "", Invite{}, false, err
 	}
 	user, err := s.User(ctx, userID)
-	return user, identityID, created, err
+	return user, identityID, spent, created, err
 }
 
 // IdentityTakenError is returned when an identity to link belongs to somebody else.
@@ -721,16 +756,42 @@ type Grant struct {
 	Role            rbac.Role
 }
 
-// SetRole grants role, replaces the role, or (with rbac.None) removes the grant.
+// ErrLastOwner is returned when a change would leave a project without a valid owner.
+var ErrLastOwner = errors.New("a project keeps at least one owner")
+
+// SetRole grants role, replaces the role, or (with rbac.None) removes the grant. One transaction counts and writes: the last owner who can
+// sign in stays one, whoever asks. A disabled owner does not count, so that one can be removed once there is a new owner.
 func (s *Store) SetRole(ctx context.Context, project, userID string, role rbac.Role) error {
-	if role == rbac.None {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM grants WHERE project = ? AND user_id = ?`, project, userID)
-		return err
-	}
-	if !role.Valid() {
+	if role != rbac.None && !role.Valid() {
 		return fmt.Errorf("invalid role %q", role)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO grants (project, user_id, role) VALUES (?, ?, ?)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if role != rbac.Owner {
+		var valid, others int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE g.user_id = ?), COUNT(*) FILTER (WHERE g.user_id != ?) FROM grants g JOIN users u ON u.id = g.user_id
+			WHERE g.project = ? AND g.role = ? AND u.disabled_at IS NULL`, userID, userID, project, string(rbac.Owner)).Scan(&valid, &others); err != nil {
+			return err
+		}
+		if valid > 0 && others == 0 {
+			return ErrLastOwner
+		}
+	}
+	if err := setGrant(ctx, tx, project, userID, role); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func setGrant(ctx context.Context, tx *sql.Tx, project, userID string, role rbac.Role) error {
+	if role == rbac.None {
+		_, err := tx.ExecContext(ctx, `DELETE FROM grants WHERE project = ? AND user_id = ?`, project, userID)
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO grants (project, user_id, role) VALUES (?, ?, ?)
 		ON CONFLICT (project, user_id) DO UPDATE SET role = excluded.role`, project, userID, string(role))
 	return err
 }
@@ -753,6 +814,25 @@ func (s *Store) GrantsOf(ctx context.Context, userID string) ([]Grant, error) {
 // GrantsOn lists every grant on a project.
 func (s *Store) GrantsOn(ctx context.Context, project string) ([]Grant, error) {
 	return s.grants(ctx, `SELECT project, user_id, role FROM grants WHERE project = ? ORDER BY user_id`, project)
+}
+
+// ValidOwners lists the usernames of the enabled owners of each project: one that is not in the answer has nobody who can answer for it.
+func (s *Store) ValidOwners(ctx context.Context) (map[string][]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT g.project, u.username FROM grants g JOIN users u ON u.id = g.user_id
+		WHERE g.role = ? AND u.disabled_at IS NULL ORDER BY g.project, u.username`, string(rbac.Owner))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	owners := map[string][]string{}
+	for rows.Next() {
+		var project, username string
+		if err := rows.Scan(&project, &username); err != nil {
+			return nil, err
+		}
+		owners[project] = append(owners[project], username)
+	}
+	return owners, rows.Err()
 }
 
 func (s *Store) grants(ctx context.Context, query string, args ...any) ([]Grant, error) {

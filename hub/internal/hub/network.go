@@ -363,7 +363,7 @@ type NetworkView struct {
 // Network reads what a project's proxy recorded, or what it recorded for one agent (the instance of that name that exists now).
 // An administrator sees every agent; a user sees the agents they may operate, as for their logs.
 func (h *Hub) Network(ctx context.Context, user store.User, project, agent string) (NetworkView, error) {
-	role, err := h.access(ctx, user, project)
+	role, err := h.inspect(ctx, user, project)
 	if err != nil {
 		return NetworkView{}, err
 	}
@@ -402,7 +402,7 @@ func (h *Hub) Network(ctx context.Context, user store.User, project, agent strin
 			actors[d.Instance] = d.Actor // a removed instance
 		}
 	}
-	everyone := role.AtLeast(rbac.Administrator)
+	everyone := role.AtLeast(rbac.Admin)
 	visible := func(instance string) bool {
 		if only != "" {
 			return instance == only && (everyone || rbac.Can(user.Subject(), role, rbac.Operate, actors[instance]))

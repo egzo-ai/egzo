@@ -12,6 +12,8 @@
   let failure = $state<unknown>(null);
   let busy = $state("");
   let showDisabled = $state(false);
+  /** What is being typed in a quota box, by user: it stays while the page polls. */
+  let quotas = $state<Record<string, number>>({});
 
   const operators = $derived((users ?? []).filter((u) => u.isOperator).length);
   const disabled = $derived((users ?? []).filter((u) => u.disabled).length);
@@ -53,18 +55,26 @@
         ? {
             title: `Make ${u.username} an operator?`,
             lines: [
-              `${u.username} will manage the links and the users, and hold every project: other people's agents and terminals included.`,
-              "Everything they do stays in the audit log under their name.",
+              `${u.username} will manage the links, the invites and the users, and oversee every project.`,
+              "A terminal, logs or a project's network still take a role on it, which they can give themselves, on the record.",
             ],
             confirm: "Make operator", tone: "normal",
           }
         : {
             title: `Remove operator from ${u.username}?`,
-            lines: [`${u.username} stops managing the links and the users, and stops holding every project.`, "They keep any role they were given on a project, and lose the rest."],
+            lines: [`${u.username} stops managing the links, the invites and the users, and stops overseeing the projects.`, "They keep any role they hold on a project."],
             confirm: "Remove operator",
           },
     );
     if (ok) await run(u, () => api.setOperator(u.id, on), on ? `${u.username} is an operator` : `${u.username} is no longer an operator`);
+  }
+
+  async function saveQuota(u: UserRow, e: Event) {
+    e.preventDefault();
+    const quota = quotas[u.id];
+    if (quota === undefined || quota === u.projectQuota) return;
+    await run(u, () => api.setProjectQuota(u.id, quota), `${u.username} may connect ${quota} ${quota === 1 ? "project" : "projects"}`);
+    delete quotas[u.id];
   }
 
   async function setDisabled(u: UserRow, on: boolean) {
@@ -97,13 +107,13 @@
   <ErrorPage error={failure} />
 {:else}
   <div style="display:grid;gap:var(--space-4)">
-    <p class="dim" style="margin:0">Everybody who has signed in. An operator manages the links and the users and holds every project; everyone else holds what a project owner gave them. Roles on a project are managed on its Members tab.</p>
+    <p class="dim" style="margin:0">Everybody with an account. An operator manages the links, the invites and the users and oversees every project; going further takes a role, like for anybody. The quota is how many projects a person may connect: 0 cannot, an operator is not held to it, and lowering it removes nothing.</p>
     {#if disabled}
       <label class="check"><input type="checkbox" bind:checked={showDisabled} /> Show disabled users ({disabled})</label>
     {/if}
     <div class="table-wrap">
       <table class="table" data-testid="users">
-        <thead><tr><th>Person</th><th>Signs in with</th><th>Last signed in</th><th>Access</th><th></th></tr></thead>
+        <thead><tr><th>Person</th><th>Signs in with</th><th>Last signed in</th><th>Access</th><th>Projects</th><th></th></tr></thead>
         <tbody>
           {#each shown as u (u.id)}
             <tr data-user={u.id} data-dim={u.disabled ? "" : undefined}>
@@ -118,6 +128,13 @@
               </td>
               <td class="muted">{u.lastLoginAt ? day(u.lastLoginAt) : "never"}</td>
               <td>{#if u.isOperator}<span class="badge" data-testid="operator-badge">operator</span>{:else}<span class="muted">roles on projects</span>{/if}</td>
+              <td>
+                <form class="btn-group" onsubmit={(e) => saveQuota(u, e)}>
+                  <span class="muted" data-testid="connected">{u.projects} of</span>
+                  <input class="input" style="width:8ch" type="number" min="0" aria-label="Project quota of {u.username}" value={quotas[u.id] ?? u.projectQuota} oninput={(e) => (quotas[u.id] = e.currentTarget.valueAsNumber)} />
+                  {#if quotas[u.id] !== undefined && quotas[u.id] !== u.projectQuota}<button class="btn" data-size="sm" type="submit" disabled={busy === u.id}>Save</button>{/if}
+                </form>
+              </td>
               <td class="actions">
                 {#if u.isOperator}
                   <button class="btn" data-variant="danger" data-size="sm" aria-label="Remove operator from {u.username}" disabled={busy === u.id || operators < 2}

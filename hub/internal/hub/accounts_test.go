@@ -122,7 +122,7 @@ func TestWithLocalLoginOffThereIsNoPasswordAndItsSessionsEnd(t *testing.T) {
 	if _, err := r.hub.PasswordLogin(ctx, "admin", "admin-password"); !errors.Is(err, ErrNoLocalLogin) {
 		t.Errorf("a password sign-in with local login off: %v", err)
 	}
-	if u, _, err := r.hub.IdentityLogin(ctx, testIssuer, "admin-sub", store.Profile{}); err != nil || u.ID != admin.ID {
+	if u, _, _, err := r.hub.IdentityLogin(ctx, testIssuer, "admin-sub", store.Profile{}, ""); err != nil || u.ID != admin.ID {
 		t.Errorf("admin through SSO: %+v %v", u, err)
 	}
 }
@@ -144,7 +144,7 @@ func TestAHubThatNobodyCouldManageDoesNotStartAndALockoutIsReported(t *testing.T
 func TestChangingTheIssuerEndsTheSessionsOfTheOldOne(t *testing.T) {
 	r := newRig(t)
 	alice := r.login("alice")
-	_, identity, _ := r.hub.IdentityLogin(ctx, testIssuer, "alice", store.Profile{})
+	_, identity, _, _ := r.hub.IdentityLogin(ctx, testIssuer, "alice", store.Profile{}, "")
 	token, _ := r.store.NewSession(ctx, alice.ID, store.MethodIdentity, identity, time.Hour)
 	_, logged, err := r.restart(SignInOptions{LocalLogin: true, AdminPassword: "admin-password", Issuer: "https://new.example.com"})
 	if err != nil || !strings.Contains(logged, testIssuer) || !strings.Contains(logged, "https://new.example.com") {
@@ -153,10 +153,10 @@ func TestChangingTheIssuerEndsTheSessionsOfTheOldOne(t *testing.T) {
 	if _, err := r.store.SessionUser(ctx, token); err == nil {
 		t.Error("a session of the old issuer survived")
 	}
-	if _, _, err := r.hub.IdentityLogin(ctx, testIssuer, "alice", store.Profile{}); err == nil {
+	if _, _, _, err := r.hub.IdentityLogin(ctx, testIssuer, "alice", store.Profile{}, ""); err == nil {
 		t.Error("an identity of the old issuer signed in")
 	}
-	if u, _, _ := r.hub.IdentityLogin(ctx, "https://new.example.com", "alice", store.Profile{PreferredUsername: "alice"}); u.ID == alice.ID || u.Username != "alice-2" {
+	if u, _, _, _ := r.hub.IdentityLogin(ctx, "https://new.example.com", "alice", store.Profile{PreferredUsername: "alice"}, r.invited()); u.ID == alice.ID || u.Username != "alice-2" {
 		t.Errorf("the same person at the new provider is %+v", u)
 	}
 }
@@ -169,7 +169,7 @@ func TestADisabledUserCannotSignInEitherWayAndNoNewUserIsMade(t *testing.T) {
 		t.Fatal(err)
 	}
 	users, identities := r.count("users"), r.count("identities")
-	if _, _, err := r.hub.IdentityLogin(ctx, testIssuer, "bob", store.Profile{}); !errors.Is(err, ErrSignInRefused) {
+	if _, _, _, err := r.hub.IdentityLogin(ctx, testIssuer, "bob", store.Profile{}, ""); !errors.Is(err, ErrSignInRefused) {
 		t.Errorf("SSO: %v", err)
 	}
 	if r.count("users") != users || r.count("identities") != identities {

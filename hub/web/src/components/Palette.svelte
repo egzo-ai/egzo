@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { app, toggleTheme } from "../lib/app.svelte";
+  import { app, seesLinks, toggleTheme } from "../lib/app.svelte";
   import { href, navigate } from "../lib/router.svelte";
   import { cycleLayout, openTerm, showPage, workspace } from "../lib/workspace.svelte";
   import { toast } from "../lib/app.svelte";
@@ -14,8 +14,9 @@
   const items = $derived.by(() => {
     const out: Item[] = [];
     out.push({ group: "Go to", label: "All projects", run: () => { showPage(); navigate(href.home()); } });
+    if (seesLinks()) out.push({ group: "Go to", label: "Links", run: () => { showPage(); navigate(href.links()); } });
     if (app.user?.isOperator) {
-      out.push({ group: "Go to", label: "Links", run: () => { showPage(); navigate(href.links()); } });
+      out.push({ group: "Go to", label: "Invites", run: () => { showPage(); navigate(href.invites()); } });
       out.push({ group: "Go to", label: "Users", run: () => { showPage(); navigate(href.users()); } });
     }
     out.push({ group: "Go to", label: "Your account", run: () => { showPage(); navigate(href.account()); } });

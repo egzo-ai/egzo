@@ -12,6 +12,18 @@ func TestWhatEachRoleMayDo(t *testing.T) {
 	}{
 		{None, View, "", false},
 		{None, Spawn, "", false},
+		{Viewer, View, "", false},
+		{Viewer, Spawn, "", false},
+		{Viewer, Operate, "user:alice", false},
+		{Overseer, View, "", true},
+		{Overseer, Inspect, "", false},
+		{Overseer, Spawn, "", false},
+		{Overseer, Operate, "user:alice", false},
+		{Overseer, ManageRoles, "", false},
+		{Overseer, Unlink, "", false},
+		{User, Unlink, "", false},
+		{Admin, Unlink, "", false},
+		{Owner, Unlink, "", true},
 		{User, View, "", true},
 		{User, Spawn, "", true},
 		{User, Operate, "user:alice", true},
@@ -19,9 +31,9 @@ func TestWhatEachRoleMayDo(t *testing.T) {
 		{User, Operate, "operator", false},
 		{User, Operate, "", false},
 		{User, ManageRoles, "", false},
-		{Administrator, Operate, "user:bob", true},
-		{Administrator, Operate, "operator", true},
-		{Administrator, ManageRoles, "", false},
+		{Admin, Operate, "user:bob", true},
+		{Admin, Operate, "operator", true},
+		{Admin, ManageRoles, "", false},
 		{Owner, Operate, "user:bob", true},
 		{Owner, ManageRoles, "", true},
 		{Owner, "something-new", "", false},
@@ -33,14 +45,24 @@ func TestWhatEachRoleMayDo(t *testing.T) {
 	}
 }
 
-func TestAgentsSpawnedFromTheCLIBelongToTheOperator(t *testing.T) {
+func TestAgentsSpawnedFromTheCLIAreForAdministrators(t *testing.T) {
 	operator := Subject{ID: "root", IsOperator: true}
-	other := Subject{ID: "alice"}
-	if !Can(operator, User, Operate, Operator) {
-		t.Error("the operator cannot operate an agent the CLI spawned")
+	if !Can(Subject{ID: "alice"}, Admin, Operate, CLI) {
+		t.Error("an administrator cannot operate an agent the CLI spawned")
 	}
-	if Can(other, User, Operate, Operator) {
-		t.Error("a user operated an agent the CLI spawned")
+	for _, s := range []Subject{operator, {ID: "alice"}} {
+		if Can(s, User, Operate, CLI) {
+			t.Errorf("%s operated an agent the CLI spawned with the role user", s.ID)
+		}
+	}
+}
+
+func TestOperatorsSeeMembersWithoutARole(t *testing.T) {
+	if !Can(Subject{ID: "root", IsOperator: true}, Overseer, SeeMembers, "") {
+		t.Error("an operator cannot see who holds a project")
+	}
+	if Can(Subject{ID: "alice"}, Admin, SeeMembers, "") {
+		t.Error("an administrator saw the members")
 	}
 }
 
@@ -52,27 +74,41 @@ func TestAServiceOrAgentActorOwnsNothing(t *testing.T) {
 	}
 }
 
-func TestOwnersCannotRemoveOrLowerThemselves(t *testing.T) {
+func TestWhoMayChangeWhichRole(t *testing.T) {
+	alice, root := Subject{ID: "a"}, Subject{ID: "op", IsOperator: true}
 	cases := []struct {
-		actorRole Role
-		actor     string
+		name      string
+		actor     Subject
+		held      Role
 		target    string
 		role      Role
+		ownerless bool
 		want      bool
 	}{
-		{Owner, "a", "b", User, true},
-		{Owner, "a", "b", None, true},
-		{Owner, "a", "b", Owner, true},
-		{Owner, "a", "a", None, false},
-		{Owner, "a", "a", Administrator, false},
-		{Owner, "a", "a", Owner, true},
-		{Administrator, "a", "b", User, false},
-		{User, "a", "b", User, false},
-		{Owner, "a", "b", "boss", false},
+		{"an owner sets another's role", alice, Owner, "b", User, false, true},
+		{"an owner removes another", alice, Owner, "b", None, false, true},
+		{"an owner makes another owner", alice, Owner, "b", Owner, false, true},
+		{"an owner cannot remove themselves", alice, Owner, "a", None, false, false},
+		{"an owner cannot lower themselves", alice, Owner, "a", Admin, false, false},
+		{"an owner stays an owner", alice, Owner, "a", Owner, false, true},
+		{"an administrator grants nothing", alice, Admin, "b", User, false, false},
+		{"a user grants nothing", alice, User, "b", User, false, false},
+		{"what is not a role", alice, Owner, "b", "boss", false, false},
+		{"overseer is never granted", alice, Owner, "b", Overseer, false, false},
+		{"an operator gives themselves a role", root, Overseer, "op", Admin, false, true},
+		{"an operator gives themselves owner", root, Overseer, "op", Owner, false, true},
+		{"an operator takes their role back", root, Admin, "op", None, false, true},
+		{"an operator who owns steps down", root, Owner, "op", None, false, true},
+		{"an operator gives others nothing", root, Overseer, "b", Owner, false, false},
+		{"an operator removes no owner", root, Overseer, "b", None, false, false},
+		{"an operator with a role gives others nothing", root, Admin, "b", User, false, false},
+		{"an operator gives an ownerless project an owner", root, Overseer, "b", Owner, true, true},
+		{"an ownerless project gets an owner and nothing else", root, Overseer, "b", Admin, true, false},
+		{"nobody else fills an ownerless project", alice, Admin, "b", Owner, true, false},
 	}
 	for _, c := range cases {
-		if got := CanAssign(c.actorRole, c.actor, c.target, c.role); got != c.want {
-			t.Errorf("CanAssign(%q %s -> %s as %q) = %v, want %v", c.actorRole, c.actor, c.target, c.role, got, c.want)
+		if got := CanAssign(c.actor, c.held, c.target, c.role, c.ownerless); got != c.want {
+			t.Errorf("%s: CanAssign = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -90,7 +126,10 @@ func TestActorStrings(t *testing.T) {
 }
 
 func TestRoleOrder(t *testing.T) {
-	if !Owner.AtLeast(Administrator) || !Administrator.AtLeast(User) || User.AtLeast(Administrator) || None.AtLeast(None) {
+	if !Owner.AtLeast(Admin) || !Admin.AtLeast(User) || !User.AtLeast(Viewer) || Viewer.AtLeast(User) || User.AtLeast(Admin) || None.AtLeast(None) {
 		t.Error("the order of roles is wrong")
+	}
+	if Overseer.AtLeast(Viewer) || Overseer.Valid() {
+		t.Error("overseer is a role")
 	}
 }

@@ -16,6 +16,7 @@
   import AgentPage from "./pages/AgentPage.svelte";
   import ErrorPage from "./pages/ErrorPage.svelte";
   import Home from "./pages/Home.svelte";
+  import Invite from "./pages/Invite.svelte";
   import Project from "./pages/Project.svelte";
   import Settings from "./pages/Settings.svelte";
   import SignIn from "./pages/SignIn.svelte";
@@ -47,7 +48,7 @@
   $effect(() => {
     const r = nav.route;
     document.title =
-      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", links: "Links", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : "") + "egzo hub";
+      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", links: "Links", invites: "Invites", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : r.name === "invite" ? "Invite · " : "") + "egzo hub";
   });
 
   const routeKey = $derived.by(() => {
@@ -70,6 +71,8 @@
 
 {#if nav.route.name === "login"}
   <SignIn />
+{:else if nav.route.name === "invite"}
+  {#if app.ready}<Invite />{/if}
 {:else if app.ready && app.user}
   <div class="app" data-rail={workspace.rail ? "" : undefined} data-fullscreen={workspace.fullscreen && workspace.active ? "" : undefined} data-nav-open={workspace.navOpen ? "" : undefined}>
     <Sidebar onsignout={leave} />

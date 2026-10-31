@@ -141,7 +141,7 @@ func TestADisabledUserIsRefusedLosesTheirSessionsAndTheirTerminals(t *testing.T)
 	op.signIn("admin")
 	bob := r.browser()
 	bob.signIn("bob")
-	r.store.SetRole(ctx, r.id("web"), r.userID("bob"), rbac.Administrator)
+	r.store.SetRole(ctx, r.id("web"), r.userID("bob"), rbac.Admin)
 	term, err := bob.dial("/p/" + r.id("web") + "/a/coder-1/terminal")
 	if err != nil {
 		t.Fatal(err)

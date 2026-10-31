@@ -74,6 +74,15 @@ func (s *Server) link(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// unlinkProject is an owner's destroy: the hub forgets the project, which keeps running on its machine.
+func (s *Server) unlinkProject(w http.ResponseWriter, r *http.Request, user store.User) {
+	if err := s.hub.Unlink(r.Context(), user, r.PathValue("project")); err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // linkJSON is a registration, for an operator.
 type linkJSON struct {
 	ID           string     `json:"id"`
@@ -81,18 +90,23 @@ type linkJSON struct {
 	Host         string     `json:"host"`
 	Release      string     `json:"release"`
 	Templates    []string   `json:"templates"`
-	State        string     `json:"state"` // approved or revoked
-	Owner        string     `json:"owner,omitempty"`
+	State        string     `json:"state"`           // approved or revoked
+	Owner        string     `json:"owner,omitempty"` // who connected it
+	Owners       []string   `json:"owners"`          // who can answer for it now: none on an approved project is for the operators to deal with
 	Message      string     `json:"message,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	OfflineSince *time.Time `json:"offlineSince"`
 }
 
-func linkOf(r store.Registration, owner string) linkJSON {
-	j := linkJSON{ID: r.ID, Name: r.Name, Host: r.Host, Release: r.Release, Templates: r.Templates, State: r.State, Owner: owner, Message: r.Message,
+func linkOf(v hub.LinkView) linkJSON {
+	r := v.Registration
+	j := linkJSON{ID: r.ID, Name: r.Name, Host: r.Host, Release: r.Release, Templates: r.Templates, State: r.State, Owner: v.OwnerName, Owners: v.Owners, Message: r.Message,
 		CreatedAt: r.Created, OfflineSince: offlineOf(r.Offline)}
 	if j.Templates == nil {
 		j.Templates = []string{}
+	}
+	if j.Owners == nil {
+		j.Owners = []string{}
 	}
 	return j
 }
@@ -105,7 +119,7 @@ func (s *Server) listLinks(w http.ResponseWriter, r *http.Request, user store.Us
 	}
 	rows := make([]linkJSON, 0, len(views))
 	for _, v := range views {
-		rows = append(rows, linkOf(v.Registration, v.OwnerName))
+		rows = append(rows, linkOf(v))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"links": rows})
 }

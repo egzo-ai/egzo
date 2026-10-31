@@ -6,6 +6,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +19,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
-// A project is a registration: an operator makes a link code, and a link dials the hub, proves a key and presents the code. The key is how
+// A project is a registration: a person with quota makes a link code, and a link dials the hub, proves a key and presents the code. The key is how
 // the hub knows it from then on. A link with neither a known key nor a good code hears that it is unregistered and is closed, and leaves
 // nothing behind: the hub stores nothing for a stranger, and holds no connection. What an approved link says is untrusted too: it speaks
 // for itself only, in names, sizes and rates the hub bounds (clean.go).
@@ -124,6 +125,9 @@ func (h *Hub) register(ctx context.Context, hello links.Hello, code string) (sto
 	switch {
 	case errors.Is(err, store.ErrKeyTaken):
 		return h.store.RegistrationByKey(ctx, hello.Key)
+	case errors.Is(err, store.ErrOverQuota):
+		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(reg.Owner), Action: "project.register", Detail: "refused: the project quota is used up: " + hello.Project + " on " + hello.Host})
+		return reg, ErrBadCode
 	case errors.Is(err, store.ErrBadCode):
 		return reg, ErrBadCode
 	case err != nil:
@@ -293,17 +297,24 @@ func (h *Hub) requireOperator(ctx context.Context, user store.User, action, proj
 	return ErrForbidden
 }
 
-// LinkCodeView is a code as an operator sees it, without the code.
+// LinkCodeView is a code as it is listed, without the code.
 type LinkCodeView struct {
 	store.LinkCode
 	CreatorName string
 }
 
-// CreateLinkCode makes a code that lets one project register, owned by whoever made it. What it returns is the only time the code is
-// seen. Only an operator may, until the invites of roadmap/hub-link.md say who else can create a project.
+// CreateLinkCode makes a code that lets one project register, owned by whoever made it. What it returns is the only time the code is seen.
+// Whoever has room in their project quota may, and an operator is not held to one. The code is checked again when it is spent.
 func (h *Hub) CreateLinkCode(ctx context.Context, user store.User) (store.LinkCode, string, error) {
-	if err := h.requireOperator(ctx, user, "linkcode.create", ""); err != nil {
-		return store.LinkCode{}, "", err
+	if !user.IsOperator {
+		have, err := h.store.ConnectedProjects(ctx, user.ID)
+		if err != nil {
+			return store.LinkCode{}, "", err
+		}
+		if have >= user.ProjectQuota {
+			_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.create", Detail: fmt.Sprintf("refused: %d of %d projects", have, user.ProjectQuota)})
+			return store.LinkCode{}, "", ErrOverQuota
+		}
 	}
 	made, code, err := h.store.CreateLinkCode(ctx, user.ID, time.Now())
 	if err != nil {
@@ -313,12 +324,17 @@ func (h *Hub) CreateLinkCode(ctx context.Context, user store.User) (store.LinkCo
 	return made, code, nil
 }
 
-// LinkCodes lists the codes that are still good. Only an operator may.
-func (h *Hub) LinkCodes(ctx context.Context, user store.User) ([]LinkCodeView, error) {
-	if err := h.requireOperator(ctx, user, "linkcode.list", ""); err != nil {
-		return nil, err
+// only is the user a list or a change is limited to: an operator sees everyone's, a person their own.
+func only(user store.User) string {
+	if user.IsOperator {
+		return ""
 	}
-	codes, err := h.store.LinkCodes(ctx, time.Now())
+	return user.ID
+}
+
+// LinkCodes lists the codes that are still good: an operator's list has everyone's, a person's has their own.
+func (h *Hub) LinkCodes(ctx context.Context, user store.User) ([]LinkCodeView, error) {
+	codes, err := h.store.LinkCodes(ctx, only(user), time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -333,18 +349,48 @@ func (h *Hub) LinkCodes(ctx context.Context, user store.User) ([]LinkCodeView, e
 	return views, nil
 }
 
-// CancelLinkCode takes a code back before it is used. Only an operator may.
+// CancelLinkCode takes a code back before it is used: one's own, or anyone's for an operator.
 func (h *Hub) CancelLinkCode(ctx context.Context, user store.User, id string) error {
-	if err := h.requireOperator(ctx, user, "linkcode.cancel", ""); err != nil {
-		return err
-	}
-	if err := h.store.CancelLinkCode(ctx, id); err != nil {
+	if err := h.store.CancelLinkCode(ctx, id, only(user)); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return ErrNotFound
 		}
 		return err
 	}
 	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.cancel", Detail: id, Allowed: true})
+	return nil
+}
+
+// Unlink is what an owner's destroy is: the hub forgets the project, what runs over its link ends, and the link hears that it is not
+// registered, which stops it dialing. The project keeps running on its machine, until somebody runs `egzo project down` there; the hub never
+// does. A new code brings it back, as a new project with no roles.
+func (h *Hub) Unlink(ctx context.Context, user store.User, id string) error {
+	if err := h.require(ctx, user, id, rbac.Unlink, "project.unlink"); err != nil {
+		return err
+	}
+	reg, err := h.store.Registration(ctx, id)
+	if err != nil {
+		return err
+	}
+	c := h.connected(id)
+	if c != nil {
+		c.served.Store(false)
+	}
+	if err := h.forget(ctx, reg, hublink.StateApproved, "project.unlink", rbac.Actor(user.ID)); errors.Is(err, store.ErrNotFound) {
+		return ErrNotFound // revoked or unlinked in between: that dealt with the connection
+	} else if err != nil {
+		return err
+	}
+	if c != nil {
+		c.tell.Lock()
+		err := c.link.Send(links.Verdict{State: hublink.StateUnregistered})
+		c.tell.Unlock()
+		if err != nil {
+			h.log.Warn("tell a link it was unlinked", "project", id, "err", err)
+		}
+		c.end()
+		go c.link.Finish()
+	}
 	return nil
 }
 
@@ -401,10 +447,12 @@ func (h *Hub) Forget(ctx context.Context, user store.User, id string) error {
 // ErrNotTurnedAway is returned for a project that cannot be forgotten as it is.
 var ErrNotTurnedAway = errors.New("only a project that was revoked can be forgotten: revoke it first")
 
-// LinkView is a registration as an operator sees it.
+// LinkView is a registration as an operator sees it. OwnerName is who connected it, Owners are the people who can answer for it now: an
+// approved project with none is left for the operators to deal with.
 type LinkView struct {
 	store.Registration
 	OwnerName string
+	Owners    []string
 }
 
 // Links lists every registration, whatever its state. Only an operator may.
@@ -416,9 +464,13 @@ func (h *Hub) Links(ctx context.Context, user store.User) ([]LinkView, error) {
 	if err != nil {
 		return nil, err
 	}
+	owners, err := h.store.ValidOwners(ctx)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]LinkView, 0, len(regs))
 	for _, reg := range regs {
-		view := LinkView{Registration: reg}
+		view := LinkView{Registration: reg, Owners: owners[reg.ID]}
 		if reg.Owner != "" {
 			if owner, err := h.store.User(ctx, reg.Owner); err == nil {
 				view.OwnerName = owner.Username

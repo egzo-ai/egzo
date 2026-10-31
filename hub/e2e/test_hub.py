@@ -42,7 +42,7 @@ def test_the_starter_account_is_the_operator_and_sees_every_project(hub, page):
     expect(projects_table(page).locator("tbody tr")).to_have_count(4)  # web and data on local, web and ml on lab
     expect(projects_table(page).get_by_role("link", name="data")).to_be_visible()
     expect(projects_table(page).get_by_role("link", name="ml")).to_be_visible()
-    expect(projects_table(page).locator("tbody tr").first).to_contain_text("operator")  # held as an operator: no role
+    expect(projects_table(page).locator("tbody tr").first).to_contain_text("owner")  # it made the codes, so it owns them, like anybody
     # two machines: each project says where it runs, and the two called web are two projects
     expect(projects_table(page).locator("tr[data-project=web]")).to_have_count(2)
     expect(projects_table(page).locator("tr[data-project=web]").filter(has_text="lab")).to_have_count(1)
@@ -140,10 +140,10 @@ def test_a_code_that_is_cancelled_registers_nobody(single_hub, page):
     expect(page.get_by_test_id("links").locator("tr[data-link=fresh]")).to_have_count(0)
 
 
-def test_only_an_operator_makes_a_code(single_hub, page):
+def test_a_person_with_no_quota_makes_no_code(single_hub, page):
     sign_in(page, single_hub, "alice")
     answer = page.request.post(single_hub.url + "/api/v1/links/codes", data={}, headers={"Origin": single_hub.url})
-    assert answer.status == 403
+    assert answer.status == 409
 
 
 def test_the_address_a_link_used_to_show_is_gone(single_hub, page):
@@ -224,7 +224,7 @@ def test_a_newcomer_sees_nothing_until_an_owner_adds_them(hub, page, new_person)
     expect(alice.get_by_role("tab", name="Audit log")).to_have_count(0)
 
 
-def test_an_owner_cannot_remove_themselves_and_an_operator_is_a_locked_row(hub, page, new_person):
+def test_an_owner_cannot_remove_themselves(hub, page, new_person):
     sign_in(page, hub, "admin")
     alice = new_person("alice")
     hub.world("grant", project="web", user="alice", role="owner")
@@ -232,13 +232,9 @@ def test_an_owner_cannot_remove_themselves_and_an_operator_is_a_locked_row(hub, 
     mine = alice.locator("tr[data-user]").filter(has_text="alice@example.com")
     expect(mine.get_by_role("button", name="Remove")).to_have_count(0)
     expect(mine.get_by_role("combobox")).to_be_disabled()
-    # the operator holds the project without a role: listed, shaded, and nothing to change
-    locked = alice.locator("tr[data-operator]")
-    expect(locked).to_have_count(1)
-    expect(locked).to_contain_text("admin")
-    expect(locked).to_contain_text("operator")
-    expect(locked.get_by_role("button")).to_have_count(0)
-    expect(locked.get_by_role("combobox")).to_have_count(0)
+    # the operator who connected it is an owner like any other, and a co-owner can change that
+    other = alice.locator("tr[data-user]").filter(has_text="admin")
+    expect(other.get_by_role("button", name="Remove admin")).to_be_visible()
 
 
 def test_removing_a_member_asks_first(hub, page, new_person):
@@ -394,7 +390,7 @@ def test_the_terminal_types_into_the_agent_and_a_second_person_can_take_it_over(
     expect(page.get_by_test_id("presence")).to_contain_text("you", timeout=8000)
 
     alice = new_person("alice")
-    hub.world("grant", project="web", user="alice", role="administrator")
+    hub.world("grant", project="web", user="alice", role="admin")
     alice.goto(hub.url + hub.p("web") + "/a/coder-1")
     alice.get_by_role("button", name="Attach", exact=True).click()
     expect(terminal_state(alice)).to_have_text("in use by someone else")
@@ -546,7 +542,7 @@ def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub
     expect(page.get_by_role("status")).to_contain_text("alice is an operator")
     expect(alice_row.get_by_test_id("operator-badge")).to_be_visible()
 
-    # alice now has the settings, and holds every project
+    # alice now has the settings, and oversees every project
     alice.goto(hub.url + "/")
     expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_be_visible()
     expect(projects_table(alice).locator("tbody tr")).to_have_count(4)  # every project of both machines, none of them granted
@@ -761,3 +757,157 @@ def test_the_network_tab_shows_which_requests_carried_a_credential_and_why_the_o
     expect(steps.nth(1)).to_contain_text("GET /zen/v1/chat")
     expect(steps.nth(1)).to_contain_text("opencode")
     expect(steps.nth(3)).to_contain_text("[outside-paths] " + outside)
+
+
+def test_a_stranger_at_the_provider_is_refused_without_an_invite(hub, page):
+    page.goto(hub.url + "/login")
+    page.get_by_role("link", name="Sign in with Test login").click()
+    page.get_by_label("Who are you?").fill("stranger")
+    page.get_by_role("button", name="Sign in").click()
+    expect(page.get_by_role("alert")).to_contain_text("takes an invite")
+
+
+def test_an_owner_invites_somebody_with_a_link_that_works_once(hub, page, browser):
+    sign_in(page, hub, "admin")
+    page.goto(hub.url + hub.p("web") + "/members")
+    page.get_by_label("Invite as").select_option("user")
+    page.get_by_role("button", name="Make an invite").click()
+    link = page.get_by_test_id("invite-link").inner_text()
+    assert "/invite#egzo-invite-" in link
+    expect(page.get_by_test_id("invites").locator("tr[data-invite]")).to_have_count(1)
+
+    context = browser.new_context()
+    guest = context.new_page()
+    guest.goto(link)
+    expect(guest.get_by_test_id("invite-grants")).to_contain_text("admin invites you to web as user")
+    guest.get_by_role("button", name="Continue with Test login").click()
+    guest.get_by_label("Who are you?").fill("guest")
+    guest.get_by_role("button", name="Sign in").click()
+    expect(guest.get_by_test_id("signed-in-as")).to_contain_text("guest")
+    expect(projects_table(guest).get_by_role("link", name="web")).to_be_visible()
+
+    second = context.new_page()
+    second.goto(link)
+    expect(second.get_by_test_id("invite-gone")).to_contain_text("no longer good")
+    context.close()
+    page.reload()
+    expect(page.locator("tr[data-user]").filter(has_text="guest")).to_be_visible()
+    expect(page.get_by_test_id("invites")).to_have_count(0)
+
+
+def test_a_person_from_outside_makes_a_local_account_from_an_invite(hub, page, browser):
+    sign_in(page, hub, "admin")
+    page.goto(hub.url + "/settings/invites")
+    page.get_by_label("Projects they may connect").fill("2")
+    page.get_by_role("button", name="Make an invite").click()
+    link = page.get_by_test_id("invite-link").inner_text()
+
+    context = browser.new_context()
+    guest = context.new_page()
+    guest.goto(link)
+    expect(guest.get_by_test_id("invite-grants")).to_contain_text("to connect up to 2 projects")
+    guest.get_by_label("Choose a username").fill("guest")
+    guest.get_by_label("Choose a password").fill("correct horse battery")
+    guest.get_by_role("button", name="Create account").click()
+    expect(guest.get_by_test_id("signed-in-as")).to_contain_text("guest")
+    # a quota is what lets a person connect a project
+    guest.goto(hub.url + "/settings/links")
+    expect(guest.get_by_test_id("quota")).to_have_text("0 of 2 projects")
+    guest.get_by_role("button", name="Link a project").click()
+    expect(guest.get_by_test_id("link-code")).to_contain_text("egzo-link-")
+    expect(guest.get_by_test_id("links")).to_have_count(0)
+    context.close()
+
+
+def test_a_person_signed_in_accepts_an_invite(hub, page, new_person):
+    sign_in(page, hub, "admin")
+    alice = new_person("alice")
+    page.goto(hub.url + hub.p("web") + "/members")
+    page.get_by_role("button", name="Make an invite").click()
+    link = page.get_by_test_id("invite-link").inner_text()
+    alice.goto(link)
+    alice.get_by_role("button", name="Accept").click()
+    expect(alice.get_by_role("heading", name="web")).to_be_visible()
+
+
+def test_an_invite_can_be_revoked(hub, page, browser):
+    sign_in(page, hub, "admin")
+    page.goto(hub.url + "/settings/invites")
+    page.get_by_role("button", name="Make an invite").click()
+    link = page.get_by_test_id("invite-link").inner_text()
+    page.get_by_test_id("invites").get_by_role("button", name=re.compile("^Revoke invite")).click()
+    expect(page.get_by_text("No invite is waiting")).to_be_visible()
+    context = browser.new_context()
+    guest = context.new_page()
+    guest.goto(link)
+    expect(guest.get_by_test_id("invite-gone")).to_be_visible()
+    context.close()
+
+
+def test_an_operator_quota_and_a_person_over_it(hub, page, new_person):
+    sign_in(page, hub, "admin")
+    alice = new_person("alice")
+    alice.goto(hub.url + "/settings/links")
+    expect(alice.get_by_role("heading", name="Forbidden")).to_be_visible()
+    page.goto(hub.url + "/settings/users")
+    box = page.get_by_label("Project quota of alice")
+    box.fill("1")
+    page.get_by_test_id("users").locator("tr[data-user]").filter(has_text="alice@example.com").get_by_role("button", name="Save").click()
+    expect(page.get_by_role("status")).to_contain_text("alice may connect 1 project")
+    alice.reload()
+    expect(alice.get_by_role("button", name="Link a project")).to_be_enabled()
+
+
+def test_an_operator_goes_further_only_with_a_role_they_give_themselves(hub, page, new_person):
+    sign_in(page, hub, "admin")
+    alice = new_person("alice")
+    page.goto(hub.url + "/settings/users")
+    page.get_by_role("button", name="Make alice an operator").click()
+    page.get_by_role("dialog").get_by_role("button", name="Make operator").click()
+    expect(page.get_by_role("status")).to_contain_text("alice is an operator")
+
+    alice.goto(hub.url + hub.p("web"))
+    expect(alice.get_by_role("tab", name="Network")).to_have_count(0)
+    expect(alice.get_by_role("tab", name="Spec")).to_have_count(0)
+    expect(alice.get_by_role("button", name="Spawn agent")).to_have_count(0)
+    expect(alice.get_by_test_id("agents").get_by_role("button", name=re.compile("^Attach"))).to_have_count(0)
+    expect(alice.get_by_role("cell", name="coder-1")).to_be_visible()
+    alice.get_by_role("tab", name="Members").click()
+    alice.get_by_label("Your role").select_option("admin")
+    alice.get_by_role("button", name="Give me the role").click()
+    alice.get_by_role("dialog").get_by_role("button", name="Give me the role").click()
+    expect(alice.get_by_role("status")).to_contain_text("Your role is set")
+    expect(alice.get_by_test_id("members")).to_contain_text("alice")
+    alice.goto(hub.url + hub.p("web") + "/audit")
+    expect(alice.get_by_test_id("audit")).to_contain_text("role.set")
+    alice.goto(hub.url + hub.p("web"))
+    expect(alice.get_by_role("tab", name="Network")).to_be_visible()
+
+
+def test_an_owner_unlinks_and_the_project_is_not_touched(hub, page):
+    sign_in(page, hub, "admin")
+    page.goto(hub.url + hub.p("data") + "/members")
+    page.get_by_role("button", name="Unlink data").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_role("textbox").fill("data")
+    dialog.get_by_role("button", name="Unlink").click()
+    expect(page.get_by_role("status")).to_contain_text("Unlinked data")
+    expect(projects_table(page).get_by_role("link", name="data")).to_have_count(0)
+    assert not [c for c in (hub.calls("data") or []) if c.startswith(("rm", "stop"))]
+    assert hub.world("verdict", project="data")["State"] == "unregistered"
+
+
+def test_a_project_left_without_an_owner_is_shown_to_the_operators(hub, page, new_person):
+    sign_in(page, hub, "admin")
+    alice = new_person("alice")
+    hub.world("grant", project="web", user="alice", role="owner")
+    hub.world("grant", project="web", user="admin", role="user")
+    page.goto(hub.url + "/settings/users")
+    page.get_by_role("button", name="Disable alice").click()
+    page.get_by_role("dialog").get_by_role("button", name="Disable").click()
+    expect(page.get_by_role("status")).to_contain_text("alice is disabled")
+    page.goto(hub.url + "/")
+    expect(page.get_by_test_id("ownerless")).to_contain_text("web")
+    page.goto(hub.url + "/settings/links")
+    page.get_by_test_id("links").get_by_test_id("no-owner").first.click()
+    expect(page.get_by_test_id("ownerless")).to_be_visible()

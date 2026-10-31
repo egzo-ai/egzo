@@ -27,6 +27,11 @@ func UsernameFrom(candidates ...string) string {
 	return "user"
 }
 
+// ValidUsername reports whether a person may choose name: it is already in the form the hub writes names in, and not reserved.
+func ValidUsername(name string) bool {
+	return name != "" && name == NormalizeUsername(name) && !reserved[name]
+}
+
 // NormalizeUsername cuts a candidate at "@", drops accents, lowercases, turns every run of other characters than a-z 0-9 . _ - into
 // one "-", trims . _ - from both ends and keeps 32 characters at most. A name written only in another script normalizes to "".
 func NormalizeUsername(s string) string {

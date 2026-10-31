@@ -161,7 +161,7 @@ func TestOneTaskAtATimeOnAnAgentAndItIsPartOfTheAgentForEveryone(t *testing.T) {
 	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
 	op := r.operator()
 	carol := r.login("carol")
-	r.store.SetRole(ctx, r.id("web"), carol.ID, rbac.Administrator)
+	r.store.SetRole(ctx, r.id("web"), carol.ID, rbac.Admin)
 	r.fakes["web"].Hold()
 
 	stop, err := r.hub.StartOperation(ctx, op, VerbStop, r.id("web"), "coder-1")
@@ -225,8 +225,8 @@ func TestATaskThatRanWhenTheHubStoppedIsInterruptedAndShownUntilDismissed(t *tes
 	r.link("web", "coder")
 	op := r.operator()
 	// what a hub that stopped left behind
-	running, _ := r.store.AddTask(ctx, store.Task{Verb: VerbSpawn, Project: r.id("web"), Agent: "half", Template: "coder", Actor: rbac.Operator})
-	failed, _ := r.store.AddTask(ctx, store.Task{Verb: VerbSpawn, Project: r.id("web"), Agent: "broken", Template: "coder", Actor: rbac.Operator})
+	running, _ := r.store.AddTask(ctx, store.Task{Verb: VerbSpawn, Project: r.id("web"), Agent: "half", Template: "coder", Actor: rbac.CLI})
+	failed, _ := r.store.AddTask(ctx, store.Task{Verb: VerbSpawn, Project: r.id("web"), Agent: "broken", Template: "coder", Actor: rbac.CLI})
 	r.store.EndTask(ctx, failed.ID, store.TaskFailed, "no room", time.Now())
 
 	if err := r.hub.RecoverTasks(ctx); err != nil {

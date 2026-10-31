@@ -102,11 +102,8 @@ func TestARealLinkRegistersWithACodeAndIsForgottenWhenItUnlinks(t *testing.T) {
 	root.signIn("admin")
 	alice := r.browser()
 	alice.signIn("alice")
-	if code, _ := alice.post("/links/codes", json_{}); code != 403 {
-		t.Errorf("a user making a code = %d", code)
-	}
-	if code, _ := alice.get("/links/codes"); code != 403 {
-		t.Errorf("a user listing codes = %d", code)
+	if code, out := alice.post("/links/codes", json_{}); code != 409 || out["code"] != "over_quota" {
+		t.Errorf("a user with no quota making a code = %d %v", code, out)
 	}
 	code, made := root.post("/links/codes", json_{})
 	if code != 200 || made["hub"] != r.linkURL || !strings.HasPrefix(made["code"].(string), "egzo-link-") {
@@ -157,8 +154,8 @@ func TestACodeCanBeCancelled(t *testing.T) {
 	id := made["id"].(string)
 	alice := r.browser()
 	alice.signIn("alice")
-	if code, _ := alice.del("/links/codes/" + id); code != 403 {
-		t.Errorf("a user cancelling = %d", code)
+	if code, _ := alice.del("/links/codes/" + id); code != 404 {
+		t.Errorf("a user cancelling somebody else's = %d", code)
 	}
 	if code, out := root.del("/links/codes/" + id); code != 200 {
 		t.Errorf("cancel = %d %v", code, out)

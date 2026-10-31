@@ -126,7 +126,7 @@ const testIssuer = "https://idp.example.com"
 // login signs in through single sign-on as sub, whose username is sub too.
 func (r *rig) login(sub string) store.User {
 	r.t.Helper()
-	u, _, err := r.hub.IdentityLogin(ctx, testIssuer, sub, store.Profile{Email: sub + "@example.com", Name: sub, PreferredUsername: sub})
+	u, _, _, err := r.hub.IdentityLogin(ctx, testIssuer, sub, store.Profile{Email: sub + "@example.com", Name: sub, PreferredUsername: sub}, r.invited())
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -134,6 +134,16 @@ func (r *rig) login(sub string) store.User {
 }
 
 // operator is the starter account, an operator.
+// invited is a code that lets one new person in, with nothing else.
+func (r *rig) invited() string {
+	r.t.Helper()
+	_, code, err := r.hub.InviteToHub(ctx, r.operator(), false, 0)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return code
+}
+
 func (r *rig) operator() store.User {
 	r.t.Helper()
 	if r.op.ID == "" {
@@ -166,30 +176,112 @@ func names(refs []ProjectRef) string {
 	return strings.Join(out, ",")
 }
 
-func TestTheStarterAccountIsAnOperatorAndHoldsEveryProjectWithoutAGrant(t *testing.T) {
+func TestAnOperatorOverseesEveryProjectWithoutAGrant(t *testing.T) {
 	r := newRig(t)
 	r.link("web")
-	r.adopt(fake.New("web", "lab"))
-	r.adopt(fake.New("data", "lab"))
+	alice := r.login("alice")
+	second := fake.New("data", "lab")
+	r.adopt(second)
 	op := r.operator()
 	if !op.IsOperator {
 		t.Fatal("the starter account is not an operator")
 	}
-	if alice := r.login("alice"); alice.IsOperator {
+	if alice.IsOperator {
 		t.Fatal("a new user is an operator")
 	}
-	refs, _ := r.hub.Projects(ctx, op)
-	if names(refs) != "lab:data,lab:web,laptop:web" {
+	// what the other operator connected is theirs: this one only oversees it
+	other := r.login("bob")
+	if err := r.hub.SetOperator(ctx, op, other.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	other, _ = r.store.User(ctx, other.ID)
+	refs, _ := r.hub.Projects(ctx, other)
+	if names(refs) != "lab:data,laptop:web" {
 		t.Errorf("projects = %s", names(refs))
 	}
 	for _, ref := range refs {
-		if ref.Role != rbac.Owner || !ref.Operator {
-			t.Errorf("%s: role %q operator %v", ref.Project.Name, ref.Role, ref.Operator)
+		if ref.Role != rbac.Overseer {
+			t.Errorf("%s: role %q", ref.Project.Name, ref.Role)
 		}
 	}
-	view, err := r.hub.Project(ctx, op, r.id("data"))
-	if err != nil || view.Role != rbac.Owner || !view.Operator || !view.CanManage {
+	view, err := r.hub.Project(ctx, other, r.id("data"))
+	if err != nil || view.Role != rbac.Overseer || view.CanManage || view.CanSpawn || view.CanUnlink || !view.CanMembers {
 		t.Errorf("project view = %+v, %v", view, err)
+	}
+}
+
+func TestAnOperatorGoesNoFurtherThanTheStateWithoutARole(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "user:someone"))
+	other := r.login("bob")
+	if err := r.hub.SetOperator(ctx, r.operator(), other.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	other, _ = r.store.User(ctx, other.ID)
+	id := r.id("web")
+	view, err := r.hub.Project(ctx, other, id)
+	if err != nil || len(view.Agents) != 1 || view.Agents[0].CanOperate {
+		t.Fatalf("the project shows %+v, %v", view.Agents, err)
+	}
+	refused := map[string]func() error{
+		"logs":    func() error { _, err := r.hub.Logs(ctx, other, id, "coder-1", 10); return err },
+		"events":  func() error { _, err := r.hub.Events(ctx, other, id, "", 10); return err },
+		"spec":    func() error { _, err := r.hub.Spec(ctx, other, id); return err },
+		"tasks":   func() error { _, err := r.hub.Tasks(ctx, other, id, "", 10); return err },
+		"network": func() error { _, err := r.hub.Network(ctx, other, id, ""); return err },
+		"audit":   func() error { _, err := r.hub.Audit(ctx, other, id, 10); return err },
+		"attach":  func() error { _, err := r.hub.Attach(ctx, other, id, "coder-1", false); return err },
+		"stop":    func() error { return r.hub.Operate(ctx, other, "stop", id, "coder-1") },
+		"spawn":   func() error { return r.hub.Spawn(ctx, other, id, "coder", "coder-2") },
+		"unlink":  func() error { return r.hub.Unlink(ctx, other, id) },
+	}
+	for name, try := range refused {
+		if err := try(); !errors.Is(err, ErrForbidden) {
+			t.Errorf("%s without a role: %v", name, err)
+		}
+	}
+	// the role they give themselves is what opens it, and it is on the record and on the Members tab
+	if err := r.hub.SetRole(ctx, other, id, other.ID, rbac.Admin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.hub.Logs(ctx, other, id, "coder-1", 10); err != nil {
+		t.Errorf("logs with a role: %v", err)
+	}
+	members, _ := r.hub.Members(ctx, r.operator(), id)
+	var listed bool
+	for _, m := range members {
+		listed = listed || m.User.ID == other.ID && m.Role == rbac.Admin
+	}
+	if !listed {
+		t.Errorf("the operator's role is not listed: %+v", members)
+	}
+	entries, _ := r.store.AuditOf(ctx, id, 20)
+	var audited bool
+	for _, e := range entries {
+		audited = audited || e.Action == "role.set" && e.Allowed && e.Actor == rbac.Actor(other.ID)
+	}
+	if !audited {
+		t.Errorf("the grant was not audited: %+v", entries)
+	}
+}
+
+func TestAViewerIsShownNothingOfTheProject(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	alice := r.login("alice")
+	id := r.id("web")
+	if err := r.hub.SetRole(ctx, r.operator(), id, alice.ID, rbac.Viewer); err != nil {
+		t.Fatal(err)
+	}
+	if refs, _ := r.hub.Projects(ctx, alice); len(refs) != 0 {
+		t.Errorf("a viewer lists %s", names(refs))
+	}
+	if _, err := r.hub.Project(ctx, alice, id); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a viewer opened the project: %v", err)
+	}
+	if _, err := r.hub.Members(ctx, alice, id); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a viewer read the members: %v", err)
 	}
 }
 
@@ -212,9 +304,9 @@ func TestAnOperatorReachesOnlyWhatExists(t *testing.T) {
 	if refs, _ := r.hub.Projects(ctx, alice); len(refs) != 0 {
 		t.Errorf("an approval gave alice %s", names(refs))
 	}
-	// a project somebody else owns is held too, and the owner keeps their role
+	// a project somebody else owns is shown too, and the owner keeps their role
 	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.Owner)
-	if view, err := r.hub.Project(ctx, op, r.id("web")); err != nil || view.Role != rbac.Owner || !view.Operator {
+	if view, err := r.hub.Project(ctx, op, r.id("web")); err != nil || view.Role != rbac.Owner {
 		t.Errorf("a project with an owner: %+v %v", view, err)
 	}
 }
@@ -251,7 +343,7 @@ func TestUsersOperateTheirOwnAgentsAndAdministratorsAllOfThem(t *testing.T) {
 	alice, bob, carol := r.login("alice"), r.login("bob"), r.login("carol")
 	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
 	r.store.SetRole(ctx, r.id("web"), bob.ID, rbac.User)
-	r.store.SetRole(ctx, r.id("web"), carol.ID, rbac.Administrator)
+	r.store.SetRole(ctx, r.id("web"), carol.ID, rbac.Admin)
 
 	if err := r.hub.Spawn(ctx, alice, r.id("web"), "coder", "coder-1"); err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -296,18 +388,23 @@ func TestUsersOperateTheirOwnAgentsAndAdministratorsAllOfThem(t *testing.T) {
 	}
 }
 
-func TestAgentsSpawnedFromTheCLIBelongToTheOperator(t *testing.T) {
+func TestAgentsSpawnedFromTheCLIAreForAdministrators(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")
 	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
 	op := r.operator()
 	alice := r.login("alice")
+	bob := r.login("bob")
 	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
+	r.store.SetRole(ctx, r.id("web"), bob.ID, rbac.Admin)
 	if err := r.hub.Operate(ctx, alice, "stop", r.id("web"), "coder-1"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("a user stopping a CLI agent: %v", err)
 	}
-	if err := r.hub.Operate(ctx, op, "stop", r.id("web"), "coder-1"); err != nil {
-		t.Errorf("the operator stopping a CLI agent: %v", err)
+	if err := r.hub.Operate(ctx, bob, "stop", r.id("web"), "coder-1"); err != nil {
+		t.Errorf("an administrator stopping a CLI agent: %v", err)
+	}
+	if err := r.hub.Operate(ctx, op, "start", r.id("web"), "coder-1"); err != nil {
+		t.Errorf("the owner starting a CLI agent: %v", err)
 	}
 	view, _ := r.hub.Project(ctx, alice, r.id("web"))
 	if view.Agents[0].CanOperate {
@@ -335,7 +432,7 @@ func TestOneHolderPerAgentAndAnyoneMayTakeOver(t *testing.T) {
 	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
 	op := r.operator()
 	alice, bob := r.login("alice"), r.login("bob")
-	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.Administrator)
+	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.Admin)
 	r.store.SetRole(ctx, r.id("web"), bob.ID, rbac.User)
 	stranger := r.login("eve")
 
@@ -413,7 +510,7 @@ func TestRolesAreManagedByOwnersOnly(t *testing.T) {
 	r.link("web")
 	op := r.operator()
 	alice, bob := r.login("alice"), r.login("bob")
-	if err := r.hub.SetRole(ctx, op, r.id("web"), alice.ID, rbac.Administrator); err != nil {
+	if err := r.hub.SetRole(ctx, op, r.id("web"), alice.ID, rbac.Admin); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.hub.SetRole(ctx, alice, r.id("web"), bob.ID, rbac.User); !errors.Is(err, ErrForbidden) {
@@ -427,7 +524,7 @@ func TestRolesAreManagedByOwnersOnly(t *testing.T) {
 	if err := r.hub.SetRole(ctx, alice, r.id("web"), alice.ID, rbac.None); !errors.Is(err, ErrForbidden) {
 		t.Errorf("an owner removing themselves: %v", err)
 	}
-	if err := r.hub.SetRole(ctx, alice, r.id("web"), alice.ID, rbac.Administrator); !errors.Is(err, ErrForbidden) {
+	if err := r.hub.SetRole(ctx, alice, r.id("web"), alice.ID, rbac.Admin); !errors.Is(err, ErrForbidden) {
 		t.Errorf("an owner lowering themselves: %v", err)
 	}
 	if err := r.hub.SetRole(ctx, alice, r.id("web"), bob.ID, rbac.None); err != nil {
@@ -437,47 +534,99 @@ func TestRolesAreManagedByOwnersOnly(t *testing.T) {
 		t.Errorf("members without a role: %v", err)
 	}
 	members, err := r.hub.Members(ctx, alice, r.id("web"))
-	if err != nil || len(members) != 2 || members[0].User.ID != alice.ID || members[1].User.ID != op.ID || !members[1].Operator || members[1].Role != rbac.Owner {
-		t.Errorf("members = %+v %v: want alice, then the operator as a locked row", members, err)
+	if err != nil || len(members) != 2 {
+		t.Errorf("members = %+v %v: want the operator who approved it and alice", members, err)
 	}
 	candidates, _ := r.hub.Candidates(ctx, alice, r.id("web"))
 	if len(candidates) != 1 || candidates[0].ID != bob.ID {
-		t.Errorf("candidates = %+v: an operator is never one", candidates)
+		t.Errorf("candidates = %+v", candidates)
 	}
 	if _, err := r.hub.Audit(ctx, bob, r.id("web"), 5); !errors.Is(err, ErrNotFound) {
 		t.Errorf("audit without a role: %v", err)
 	}
 }
 
-func TestAnOperatorsAccessIsNotARoleAndCannotBeChangedOnAProject(t *testing.T) {
+func TestAProjectKeepsItsLastOwner(t *testing.T) {
 	r := newRig(t)
 	r.link("web")
 	op := r.operator()
+	id := r.id("web")
+	// the operator made the code, so they are its owner, and they may step down: but not leave it with nobody
+	if err := r.hub.SetRole(ctx, op, id, op.ID, rbac.None); !errors.Is(err, ErrLastOwner) {
+		t.Errorf("the last owner left: %v", err)
+	}
+	if err := r.hub.SetRole(ctx, op, id, op.ID, rbac.Admin); !errors.Is(err, ErrLastOwner) {
+		t.Errorf("the last owner lowered themselves: %v", err)
+	}
 	alice := r.login("alice")
-	r.hub.SetRole(ctx, op, r.id("web"), alice.ID, rbac.Owner)
-	for _, role := range []rbac.Role{rbac.None, rbac.User, rbac.Administrator, rbac.Owner} {
-		if err := r.hub.SetRole(ctx, alice, r.id("web"), op.ID, role); !errors.Is(err, ErrOperatorAccess) {
-			t.Errorf("setting an operator to %q: %v", role, err)
-		}
-		if err := r.hub.SetRole(ctx, op, r.id("web"), op.ID, role); !errors.Is(err, ErrOperatorAccess) {
-			t.Errorf("an operator setting themselves to %q: %v", role, err)
-		}
+	if err := r.hub.SetRole(ctx, op, id, alice.ID, rbac.Owner); err != nil {
+		t.Fatal(err)
 	}
-	if grants, _ := r.store.GrantsOf(ctx, op.ID); len(grants) != 1 { // the one for having approved the project
-		t.Errorf("a grant was written for an operator: %+v", grants)
+	if err := r.hub.SetRole(ctx, op, id, op.ID, rbac.None); err != nil {
+		t.Errorf("an operator stepping down: %v", err)
 	}
-	entries, _ := r.store.AuditOf(ctx, r.id("web"), 20)
-	if !strings.HasPrefix(entries[0].Detail, "refused:") || entries[0].Allowed {
-		t.Errorf("the refusal was not audited: %+v", entries[0])
+	// alice, who is no operator, cannot leave at all
+	bob := r.login("bob")
+	r.hub.SetRole(ctx, alice, id, bob.ID, rbac.Owner)
+	if err := r.hub.SetRole(ctx, alice, id, alice.ID, rbac.User); !errors.Is(err, ErrForbidden) {
+		t.Errorf("an owner lowering themselves: %v", err)
+	}
+	if err := r.hub.SetRole(ctx, alice, id, bob.ID, rbac.User); err != nil {
+		t.Errorf("an owner lowering another: %v", err)
 	}
 }
 
-func TestAGrantLeftOverOnAnOperatorIsIgnoredWhileTheyAreOne(t *testing.T) {
+func TestAProjectWithoutAValidOwnerIsShownToOperatorsWhoGiveItOne(t *testing.T) {
+	r := newRig(t)
+	r.link("web")
+	op := r.operator()
+	id := r.id("web")
+	alice := r.login("alice")
+	bob := r.login("bob")
+	carol := r.login("carol")
+	r.hub.SetRole(ctx, op, id, alice.ID, rbac.Owner)
+	r.hub.SetRole(ctx, op, id, op.ID, rbac.None)
+	if err := r.hub.SetOperator(ctx, op, carol.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	carol, _ = r.store.User(ctx, carol.ID)
+	if err := r.hub.SetRole(ctx, carol, id, bob.ID, rbac.Owner); !errors.Is(err, ErrForbidden) {
+		t.Errorf("an operator gave away a project that has an owner: %v", err)
+	}
+	if _, err := r.hub.SetDisabled(ctx, op, alice.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	refs, _ := r.hub.Projects(ctx, carol)
+	if len(refs) != 1 || !refs[0].Ownerless {
+		t.Fatalf("the project shows as %+v", refs)
+	}
+	views, _ := r.hub.Links(ctx, carol)
+	if len(views) != 1 || len(views[0].Owners) != 0 {
+		t.Fatalf("the links show %+v", views)
+	}
+	if reg, _ := r.store.Registration(ctx, id); !reg.Online() {
+		t.Fatal("the project left with its owner")
+	}
+	if err := r.hub.SetRole(ctx, carol, id, bob.ID, rbac.User); !errors.Is(err, ErrForbidden) {
+		t.Errorf("an ownerless project got something else than an owner: %v", err)
+	}
+	if err := r.hub.SetRole(ctx, carol, id, bob.ID, rbac.Owner); err != nil {
+		t.Fatal(err)
+	}
+	if refs, _ := r.hub.Projects(ctx, carol); refs[0].Ownerless {
+		t.Error("it stays ownerless with an owner")
+	}
+	// the disabled owner can go now
+	if err := r.hub.SetRole(ctx, bob, id, alice.ID, rbac.None); err != nil {
+		t.Errorf("removing a disabled owner: %v", err)
+	}
+}
+
+func TestAnOperatorKeepsOnlyWhatTheyGrantedThemselvesWhenTheyStopBeingOne(t *testing.T) {
 	r := newRig(t)
 	r.link("web")
 	op := r.operator()
 	alice := r.login("alice")
-	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
 	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
 	if err := r.hub.SetOperator(ctx, op, alice.ID, true); err != nil {
 		t.Fatal(err)
@@ -488,7 +637,7 @@ func TestAGrantLeftOverOnAnOperatorIsIgnoredWhileTheyAreOne(t *testing.T) {
 	for _, m := range members {
 		if m.User.ID == alice.ID {
 			rows++
-			if !m.Operator || m.Role != rbac.Owner {
+			if m.Role != rbac.User {
 				t.Errorf("alice listed as %+v", m)
 			}
 		}
@@ -497,10 +646,9 @@ func TestAGrantLeftOverOnAnOperatorIsIgnoredWhileTheyAreOne(t *testing.T) {
 		t.Errorf("alice appears %d times", rows)
 	}
 	view, _ := r.hub.Project(ctx, alice, r.id("web"))
-	if view.Role != rbac.Owner {
-		t.Errorf("an operator with an old user grant holds the project as %q", view.Role)
+	if view.Role != rbac.User {
+		t.Errorf("an operator with a grant holds the project as %q", view.Role)
 	}
-	// demoted, the old grant is what she has again
 	if err := r.hub.SetOperator(ctx, op, alice.ID, false); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +727,7 @@ func TestOperatorChangesAreAuditedWithNoProjectAndAnUnchangedOneIsNot(t *testing
 		e := entries[i]
 		got = append(got, e.Action+":"+map[bool]string{true: "allowed", false: "refused"}[e.Allowed])
 	}
-	want := "user.signin:allowed,user.create:allowed,operator.grant:allowed,operator.revoke:allowed,operator.revoke:refused"
+	want := "user.signin:allowed,invite.create:allowed,user.create:allowed,invite.redeem:allowed,operator.grant:allowed,operator.revoke:allowed,operator.revoke:refused"
 	if strings.Join(got, ",") != want {
 		t.Errorf("audit = %s, want %s", strings.Join(got, ","), want)
 	}

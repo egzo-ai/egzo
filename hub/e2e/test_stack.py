@@ -66,7 +66,7 @@ def test_a_real_project_that_registered_links_dex_and_works_with_the_project(pag
     dex_sign_in(page, failed)
     expect(page.get_by_test_id("signed-in-as")).to_contain_text("admin · operator")
 
-    # the operator holds the project that linked
+    # the project that linked is the admin's: it made the code
     page.get_by_test_id("projects").get_by_role("link", name=PROJECT).click()
     expect(page.get_by_role("heading", name=PROJECT)).to_be_visible()
     expect(page.get_by_role("heading", name="No agent yet")).to_be_visible()

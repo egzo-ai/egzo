@@ -1,4 +1,4 @@
-// Package hub is the hub's own logic: the projects that linked, the operators' access, and every operation a user asks for, each checked
+// Package hub is the hub's own logic: the projects that linked, the operators' oversight, and every operation a user asks for, each checked
 // against the roles and written to the audit log. It speaks to projects only through links.Engine.
 package hub
 
@@ -21,11 +21,12 @@ var (
 	ErrForbidden = errors.New("you are not allowed to do that")
 	// ErrNotFound is returned for what does not exist, and for a project the user has no role on: its existence is not leaked.
 	ErrNotFound = errors.New("not found")
-	// ErrOperatorAccess is returned when somebody tries to give, change or remove an operator's role on a project: an operator is not
-	// granted a role, they hold every project.
-	ErrOperatorAccess = errors.New("an operator holds every project: that is changed under Settings, Users, not as a role")
 	// ErrLastOperator is returned when a change would leave the hub with no operator.
 	ErrLastOperator = store.ErrLastOperator
+	// ErrLastOwner is returned when a change would leave a project without a valid owner.
+	ErrLastOwner = store.ErrLastOwner
+	// ErrOverQuota is returned to a person who has as many projects as their quota allows.
+	ErrOverQuota = store.ErrOverQuota
 )
 
 // Hub ties the database, the links and the rules together.
@@ -58,14 +59,14 @@ func (h *Hub) Store() *store.Store { return h.store }
 
 // --- the projects ----------------------------------------------------------------------------------------------------------------
 
-// ProjectRef is a project with what the user holds on it. For an operator Role is owner and Operator is set: they hold the project
-// without a grant.
+// ProjectRef is a project with what the user holds on it. An operator with no role on it has rbac.Overseer.
 type ProjectRef struct {
-	ID       string
-	Host     string
-	Project  links.Project
-	Role     rbac.Role
-	Operator bool
+	ID      string
+	Host    string
+	Project links.Project
+	Role    rbac.Role
+	// Ownerless says nobody who can sign in owns it, for an operator to see.
+	Ownerless bool
 	// Offline is when its link went away; zero while it is connected.
 	Offline time.Time
 	// Feed says how far what the agents are doing can be trusted.
@@ -74,7 +75,7 @@ type ProjectRef struct {
 	Tasks []Task
 }
 
-// Projects lists the projects the user holds a role on (an operator: every project), offline ones included, by name.
+// Projects lists the projects the user sees (an operator: every project), offline ones included, by name. A viewer does not see theirs.
 func (h *Hub) Projects(ctx context.Context, user store.User) ([]ProjectRef, error) {
 	grants, err := h.store.GrantsOf(ctx, user.ID)
 	if err != nil {
@@ -88,18 +89,32 @@ func (h *Hub) Projects(ctx context.Context, user store.User) ([]ProjectRef, erro
 	if err != nil {
 		return nil, err
 	}
+	var owners map[string][]string
+	if user.IsOperator {
+		if owners, err = h.store.ValidOwners(ctx); err != nil {
+			return nil, err
+		}
+	}
 	refs := []ProjectRef{}
 	for _, reg := range regs {
-		role, ok := roles[reg.ID]
-		if user.IsOperator {
-			role, ok = rbac.Owner, true
-		}
-		if ok {
+		if role := seen(user, roles[reg.ID]); role != rbac.None {
 			shown, feed := h.overlay(reg, h.heldOf(reg))
-			refs = append(refs, ProjectRef{ID: reg.ID, Host: reg.Host, Project: shown, Role: role, Operator: user.IsOperator, Offline: reg.Offline, Feed: feed, Tasks: h.runningTasks(reg.ID)})
+			refs = append(refs, ProjectRef{ID: reg.ID, Host: reg.Host, Project: shown, Role: role, Ownerless: user.IsOperator && len(owners[reg.ID]) == 0,
+				Offline: reg.Offline, Feed: feed, Tasks: h.runningTasks(reg.ID)})
 		}
 	}
 	return refs, nil
+}
+
+// seen is what a grant shows the user of a project. A viewer holds a role and is shown nothing: to them it is a project they have no role on.
+func seen(user store.User, role rbac.Role) rbac.Role {
+	switch {
+	case role != rbac.None && role != rbac.Viewer:
+		return role
+	case user.IsOperator:
+		return rbac.Overseer
+	}
+	return rbac.None
 }
 
 // heldOf is a project as its link last said it was, with the name it registered under: the name is the hub's to show, not an update's.
@@ -130,18 +145,21 @@ type AgentView struct {
 
 // ProjectView is the project page.
 type ProjectView struct {
-	ID       string
-	Host     string
-	Project  links.Project
-	Role     rbac.Role
-	Operator bool // the user holds the project as an operator, not through a grant
+	ID      string
+	Host    string
+	Project links.Project
+	Role    rbac.Role
+	// Ownerless says nobody who can sign in owns it, for an operator to see.
+	Ownerless bool
 	// Offline is when its link went away; zero while it is connected.
 	Offline time.Time
 	// Feed says how far what the agents are doing can be trusted.
-	Feed      Feed
-	Agents    []AgentView
-	CanSpawn  bool
-	CanManage bool
+	Feed       Feed
+	Agents     []AgentView
+	CanSpawn   bool
+	CanManage  bool // the user manages the roles and invites
+	CanUnlink  bool
+	CanMembers bool // the user sees who holds what
 }
 
 // registration reads a project the hub shows: one that was approved. Any other is not there, to anyone.
@@ -153,21 +171,30 @@ func (h *Hub) registration(ctx context.Context, id string) (store.Registration, 
 	return reg, err
 }
 
-// access finds the user's role on a project, or ErrNotFound when they have none. An operator holds every project: they are owner
-// without a grant.
+// access finds what the user holds on a project that is shown to them, or ErrNotFound when it is not: a role, or rbac.Overseer for an operator
+// with none. A viewer's role is not this kind of access: nothing of the project is shown to them.
 func (h *Hub) access(ctx context.Context, user store.User, id string) (rbac.Role, error) {
 	if _, err := h.registration(ctx, id); err != nil {
 		return rbac.None, err
-	}
-	if user.IsOperator {
-		return rbac.Owner, nil
 	}
 	role, err := h.store.Role(ctx, id, user.ID)
 	if err != nil {
 		return rbac.None, err
 	}
-	if role == rbac.None {
+	if role = seen(user, role); role == rbac.None {
 		return rbac.None, ErrNotFound
+	}
+	return role, nil
+}
+
+// inspect is access for what takes a role: an operator who holds none sees the project and its agents, and no further.
+func (h *Hub) inspect(ctx context.Context, user store.User, id string) (rbac.Role, error) {
+	role, err := h.access(ctx, user, id)
+	if err != nil {
+		return rbac.None, err
+	}
+	if !rbac.Can(user.Subject(), role, rbac.Inspect, "") {
+		return role, ErrForbidden
 	}
 	return role, nil
 }
@@ -214,13 +241,21 @@ func (h *Hub) Project(ctx context.Context, user store.User, id string) (ProjectV
 		return ProjectView{}, err
 	}
 	project, feed := h.overlay(reg, h.heldOf(reg))
-	view := ProjectView{ID: id, Host: reg.Host, Project: project, Role: role, Operator: user.IsOperator, Offline: reg.Offline, Feed: feed,
-		CanSpawn: reg.Online() && rbac.Can(user.Subject(), role, rbac.Spawn, ""), CanManage: rbac.Can(user.Subject(), role, rbac.ManageRoles, "")}
+	view := ProjectView{ID: id, Host: reg.Host, Project: project, Role: role, Offline: reg.Offline, Feed: feed,
+		CanSpawn: reg.Online() && rbac.Can(user.Subject(), role, rbac.Spawn, ""), CanManage: rbac.Can(user.Subject(), role, rbac.ManageRoles, ""),
+		CanUnlink: rbac.Can(user.Subject(), role, rbac.Unlink, ""), CanMembers: rbac.Can(user.Subject(), role, rbac.SeeMembers, "")}
+	if user.IsOperator {
+		owners, err := h.store.ValidOwners(ctx)
+		if err != nil {
+			return ProjectView{}, err
+		}
+		view.Ownerless = len(owners[id]) == 0
+	}
 	denied := h.deniedCounts(id)
 	for _, a := range project.Agents {
 		av := AgentView{Agent: a, CanOperate: rbac.Can(user.Subject(), role, rbac.Operate, a.Actor)}
 		av.Holder = h.holder(id, a.Name)
-		if a.ID != "" && (role.AtLeast(rbac.Administrator) || av.CanOperate) {
+		if a.ID != "" && (role.AtLeast(rbac.Admin) || av.CanOperate) {
 			av.Denied = denied[a.ID]
 		}
 		view.Agents = append(view.Agents, av)
@@ -273,6 +308,19 @@ func (h *Hub) authorize(ctx context.Context, user store.User, id, agent string, 
 	return role, nil
 }
 
+// require checks one action that writes its own entry when it is done: only a refusal is written here.
+func (h *Hub) require(ctx context.Context, user store.User, id string, action rbac.Action, audit string) error {
+	role, err := h.access(ctx, user, id)
+	if err != nil {
+		return err
+	}
+	if !rbac.Can(user.Subject(), role, action, "") {
+		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: audit, Project: id, Detail: fmt.Sprintf("refused: %s needs more than %s", action, role)})
+		return ErrForbidden
+	}
+	return nil
+}
+
 // creatorOf reads who spawned an agent, from the project.
 func (h *Hub) creatorOf(ctx context.Context, id, agent string) (string, error) {
 	var found string
@@ -299,7 +347,7 @@ func (h *Hub) creatorOf(ctx context.Context, id, agent string) (string, error) {
 
 // Events returns the timeline of a project, or of one agent.
 func (h *Hub) Events(ctx context.Context, user store.User, id, agent string, limit int) ([]links.Event, error) {
-	if _, err := h.access(ctx, user, id); err != nil {
+	if _, err := h.inspect(ctx, user, id); err != nil {
 		return nil, err
 	}
 	var events []links.Event
@@ -315,11 +363,11 @@ func (h *Hub) Events(ctx context.Context, user store.User, id, agent string, lim
 // Logs returns the end of a container's log: an agent or a sidecar. Administrators only: a log can show what an agent printed
 // from another user's session.
 func (h *Hub) Logs(ctx context.Context, user store.User, id, container string, tail int) (string, error) {
-	role, err := h.access(ctx, user, id)
+	role, err := h.inspect(ctx, user, id)
 	if err != nil {
 		return "", err
 	}
-	if !role.AtLeast(rbac.Administrator) {
+	if !role.AtLeast(rbac.Admin) {
 		creator, err := h.creatorOf(ctx, id, container)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return "", err // a project that cannot answer has refused nobody
@@ -340,7 +388,7 @@ func (h *Hub) Logs(ctx context.Context, user store.User, id, container string, t
 
 // Spec returns the project's resolved snapshot, read only.
 func (h *Hub) Spec(ctx context.Context, user store.User, id string) ([]byte, error) {
-	if _, err := h.access(ctx, user, id); err != nil {
+	if _, err := h.inspect(ctx, user, id); err != nil {
 		return nil, err
 	}
 	var spec []byte
@@ -359,7 +407,7 @@ func (h *Hub) Audit(ctx context.Context, user store.User, id string, limit int) 
 	if err != nil {
 		return nil, err
 	}
-	if !role.AtLeast(rbac.Administrator) {
+	if !role.AtLeast(rbac.Admin) {
 		return nil, ErrForbidden
 	}
 	return h.store.AuditOf(ctx, id, limit)

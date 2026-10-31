@@ -1,6 +1,9 @@
 // The shapes of the hub's JSON API (hub/internal/web/api.go; docs/api.md). Times are RFC 3339 strings.
 
-export type Role = "user" | "administrator" | "owner";
+/** A role that can be granted. */
+export type Role = "viewer" | "user" | "admin" | "owner";
+/** What a person holds on a project they are shown: a role, or "overseer" for an operator with none. */
+export type Held = Role | "overseer";
 
 /** A person: the username the hub chose, then what their login provider says (display only, from their latest sign-in). */
 export interface User {
@@ -13,6 +16,8 @@ export interface User {
   picture: string;
   isOperator: boolean;
   disabled: boolean;
+  /** How many projects they may connect to the hub; an operator is not held to it. */
+  projectQuota: number;
 }
 
 /** One account at a login provider. `current` is false for an account of a former provider: it cannot sign in. */
@@ -43,6 +48,9 @@ export interface Session {
   issuer: string;
   /** The address projects name in `hub:`. */
   hub: string;
+  /** They may make a link code now: an operator, or somebody with room in their quota. */
+  canLink: boolean;
+  connectedProjects: number;
 }
 
 /** One agent, as the project list and the sidebar know it (from what its link pushed). */
@@ -67,9 +75,9 @@ export interface ProjectBrief {
   id: string;
   name: string;
   host: string;
-  role: Role;
-  /** Held as an operator: every project, with no grant. */
-  operator: boolean;
+  role: Held;
+  /** Nobody who can sign in owns it. Told to operators only. */
+  ownerless?: boolean;
   /** When its link went away; null while it is connected. */
   offlineSince: string | null;
   feed: Feed;
@@ -131,9 +139,9 @@ export interface Project {
   id: string;
   name: string;
   host: string;
-  role: Role;
-  /** Held as an operator: every project, with no grant. */
-  operator: boolean;
+  role: Held;
+  /** Nobody who can sign in owns it. Told to operators only. */
+  ownerless?: boolean;
   /** When its link went away; null while it is connected. */
   offlineSince: string | null;
   feed: Feed;
@@ -142,7 +150,11 @@ export interface Project {
   services: Service[];
   agents: Agent[] | null;
   canSpawn: boolean;
+  /** May grant roles and invite. */
   canManage: boolean;
+  canUnlink: boolean;
+  /** May see who holds what: an owner, or an operator. */
+  canMembers: boolean;
   canAudit: boolean;
 }
 
@@ -162,8 +174,6 @@ export interface TimelineEvent {
 export interface Member {
   user: User;
   role: Role;
-  /** An operator holds the project without a role: the row cannot be changed here. */
-  operator: boolean;
 }
 
 /** A person who has signed in, as the Users page lists them. */
@@ -172,6 +182,8 @@ export interface UserRow extends User {
   lastLoginAt: string | null;
   hasPassword: boolean;
   identities: Identity[];
+  /** The projects they connected, which their quota is measured against. */
+  projects: number;
 }
 
 export interface Members {
@@ -275,7 +287,10 @@ export interface Link {
   release: string;
   templates: string[];
   state: "approved" | "revoked";
+  /** Who connected it. */
   owner?: string;
+  /** Who can answer for it now: none, on an approved project, is for the operators to deal with. */
+  owners: string[];
   message?: string;
   createdAt: string;
   /** When its link went away; null while it is connected. */
@@ -297,6 +312,33 @@ export interface NewLinkCode {
   expiresAt: string;
   /** The address the project names in `hub:`. */
   hub: string;
+}
+
+/** An invite as it is listed: its link is shown once, when it is made. With a project it grants a role, without one the flags on a user. */
+export interface Invite {
+  id: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  project?: string;
+  projectName?: string;
+  role?: Role;
+  operator: boolean;
+  projectQuota: number;
+}
+
+/** An invite that was just made. */
+export interface NewInvite {
+  id: string;
+  url: string;
+  expiresAt: string;
+}
+
+/** What a code grants and the ways to take it, for whoever holds the code. */
+export interface InvitePreview {
+  invite: Invite;
+  local: boolean;
+  sso: string;
 }
 
 /** The control frames of the terminal websocket (text frames; binary frames are the terminal's bytes). */

@@ -7,7 +7,7 @@ export const app = $state({
   ready: false,
   user: null as User | null,
   /** How the signed-in user signs in: their accounts at login providers, a password, and what single sign-on is called. */
-  account: { identities: [] as Identity[], hasPassword: false, sso: "", issuer: "", hub: "" },
+  account: { identities: [] as Identity[], hasPassword: false, sso: "", issuer: "", hub: "", canLink: false, connectedProjects: 0 },
   projects: [] as ProjectBrief[],
   projectsLoaded: false,
   offline: false,
@@ -79,7 +79,7 @@ export async function refreshProjects(): Promise<void> {
 export async function refreshSession(): Promise<void> {
   const s = await api.session();
   app.user = s.user;
-  app.account = { identities: s.identities, hasPassword: s.hasPassword, sso: s.sso, issuer: s.issuer, hub: s.hub };
+  app.account = { identities: s.identities, hasPassword: s.hasPassword, sso: s.sso, issuer: s.issuer, hub: s.hub, canLink: s.canLink, connectedProjects: s.connectedProjects };
 }
 
 function applyTheme(): void {
@@ -124,9 +124,13 @@ export function setRenderer(r: "auto" | "dom"): void {
 
 /** Where the login sends the browser back to. */
 export function toLogin(): void {
-  if (nav.route.name === "login") return;
+  if (nav.route.name === "login" || nav.route.name === "invite") return; // an invite is for somebody who is not signed in yet
+
   navigate("/login?next=" + encodeURIComponent(nav.path), true);
 }
+
+/** The links of the hub are theirs to see who may connect a project at all, even with no room left. */
+export const seesLinks = (): boolean => !!app.user && (app.user.isOperator || app.user.projectQuota > 0);
 
 /** Load the session, start following the projects, and send an anonymous visitor to the sign-in screen. */
 export async function boot(): Promise<void> {

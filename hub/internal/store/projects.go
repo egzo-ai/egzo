@@ -91,6 +91,14 @@ func (s *Store) registrations(ctx context.Context, where string, args ...any) ([
 	return out, rows.Err()
 }
 
+// ConnectedProjects counts the projects a person connected that are on the hub: what their quota is measured against. Who connected a project
+// is what counts, not who owns it now, so being invited as an owner spends nothing of anyone's quota.
+func (s *Store) ConnectedProjects(ctx context.Context, userID string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE owner = ? AND state = ?`, userID, hublink.StateApproved).Scan(&n)
+	return n, err
+}
+
 // Connected records that a project's link is here, and what it says of itself now.
 func (s *Store) Connected(ctx context.Context, id, name, host, release string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE projects SET name = ?, host = ?, release = ?, offline_since = NULL WHERE id = ?`, name, host, release, id)
