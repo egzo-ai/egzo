@@ -93,6 +93,9 @@ func TestAKeyThatSignsTheChallengeIsLetIn(t *testing.T) {
 	if err != nil || peer == nil || peer.Hello.Project != "web" || len(greeting.Nonce) != 32 || peer.Code != "" {
 		t.Fatalf("peer %+v, greeting %+v, err %v", peer, greeting, err)
 	}
+	if peer.control.limit != maxControl {
+		t.Errorf("a link that proved its key may send %d bytes on its control stream", peer.control.limit)
+	}
 }
 
 func TestACodeComesWithTheProofAndIsCoveredByIt(t *testing.T) {
@@ -150,6 +153,75 @@ func TestAStrangerWhoSaysNothingGetsTheTimeItWasGiven(t *testing.T) {
 	}
 	if took := time.Since(began); took > 3*time.Second {
 		t.Errorf("it held its slot for %v", took)
+	}
+}
+
+// silence is a control stream that stays open and says nothing, as a link's does.
+type silence struct{}
+
+func (silence) Read([]byte) (int, error)    { select {} }
+func (silence) Write(p []byte) (int, error) { return len(p), nil }
+
+// proved is a hub's Peer of a connection, past the handshake, with the link's end of its control stream.
+func proved(t *testing.T) (*Peer, *yamux.Session, *Lines) {
+	t.Helper()
+	link, hub := pair(t)
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	public := newKey(t).Public().(ed25519.PublicKey)
+	if err := lines.Write(Hello{Protocol: Version}); err != nil { // yamux tells the hub of a stream with its first bytes
+		t.Fatal(err)
+	}
+	accepted, err := hub.AcceptStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := NewLines(accepted)
+	var hello Hello
+	if err := control.Read(&hello); err != nil {
+		t.Fatal(err)
+	}
+	control.limit = maxControl
+	return &Peer{Hello: Hello{Key: public}, session: hub, control: control}, link, lines
+}
+
+func TestALineOverTheControlLimitEndsTheConnection(t *testing.T) {
+	peer, _, lines := proved(t)
+	go peer.Run(context.Background(), Handlers{})
+	if err := lines.Write(Unlink{}); err != nil {
+		t.Fatal(err)
+	}
+	go lines.Write(FeedOpen{Feed: strings.Repeat("x", 2*maxControl)})
+	select {
+	case <-peer.Closed():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection stayed up")
+	}
+}
+
+func TestControlMessagesAreHeldBack(t *testing.T) {
+	controlPause = 30 * time.Millisecond
+	defer func() { controlPause = 100 * time.Millisecond }()
+	peer, _, lines := proved(t)
+	asked := make(chan time.Time, 1)
+	go peer.Run(context.Background(), Handlers{Unlink: func() Verdict {
+		asked <- time.Now()
+		return Verdict{State: StateUnlinked}
+	}})
+	began := time.Now()
+	for range 10 {
+		if err := lines.Write(Unlink{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := lines.Write(Unlink{Unlink: true}); err != nil {
+		t.Fatal(err)
+	}
+	if took := (<-asked).Sub(began); took < 10*controlPause {
+		t.Errorf("11 messages were read in %v", took)
 	}
 }
 

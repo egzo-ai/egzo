@@ -34,6 +34,8 @@ const MaxLine = 4 << 20
 const (
 	// maxHello is the longest line of the handshake, read from anyone who reaches the endpoint. A Hello names a project and its templates.
 	maxHello = 256 << 10
+	// maxControl is the longest line a link sends on its control stream once it has proved its key: it has one thing left to say.
+	maxControl = 4 << 10
 )
 
 // KeepAlive is how often an idle connection proves it is alive. Reverse proxies cut a silent connection (nginx at 60 seconds), and
