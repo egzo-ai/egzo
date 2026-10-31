@@ -67,9 +67,6 @@ func (m Mapping) Listen() string {
 func ParseMapping(text string) (Mapping, error) {
 	m := Mapping{Address: "127.0.0.1"}
 	rest, port, hasLocal := cutLast(text)
-	if !hasLocal {
-		port = text
-	}
 	var err error
 	if m.Port, err = ParsePort(port); err != nil {
 		return m, err
@@ -79,9 +76,6 @@ func ParseMapping(text string) (Mapping, error) {
 		return m, nil
 	}
 	address, local, hasAddress := cutLast(rest)
-	if !hasAddress {
-		local = rest
-	}
 	if local != "0" {
 		if m.Local, err = ParsePort(local); err != nil {
 			return m, fmt.Errorf("local port: %w", err)
@@ -97,11 +91,12 @@ func ParseMapping(text string) (Mapping, error) {
 	return m, nil
 }
 
+// cutLast splits text at its last colon. Without one, all of it is what comes after.
 func cutLast(text string) (before, after string, found bool) {
 	if i := strings.LastIndexByte(text, ':'); i >= 0 {
 		return text[:i], text[i+1:], true
 	}
-	return text, "", false
+	return "", text, false
 }
 
 // ErrNothingListens says the port is closed on both loopback addresses.
