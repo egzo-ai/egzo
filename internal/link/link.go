@@ -427,6 +427,10 @@ func ignore(stream net.Conn) {
 	_, _ = io.Copy(io.Discard, stream)
 }
 
+// maxResult is the longest result a reply carries once it is JSON: what the hub reads is a line of at most hublink.MaxLine. Over that
+// it would refuse the stream, and say nothing of why.
+const maxResult = hublink.MaxLine - 1<<16
+
 // answer runs one verb.
 func (l *Link) answer(ctx context.Context, stream net.Conn) {
 	lines := hublink.NewLines(stream)
@@ -474,12 +478,21 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 	case err != nil:
 		reply.Error = err.Error()
 	case result != nil:
-		reply.Result, err = json.Marshal(result)
-		if err != nil {
-			reply.Error = err.Error()
-		}
+		reply.Result, reply.Error = encodeResult(request.Verb, result)
 	}
 	_ = lines.Write(reply)
+}
+
+// encodeResult is a verb's result as a reply carries it, or why it cannot.
+func encodeResult(verb string, result any) (json.RawMessage, string) {
+	encoded, err := json.Marshal(result)
+	switch {
+	case err != nil:
+		return nil, err.Error()
+	case len(encoded) > maxResult:
+		return nil, fmt.Sprintf("the answer to %s is %d bytes, over the %d a reply can carry", verb, len(encoded), maxResult)
+	}
+	return encoded, ""
 }
 
 // attach is a terminal on the verb's stream: raw output, and input frames from the hub.

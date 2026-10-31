@@ -152,6 +152,40 @@ func TestTheWrongSecretKeyDoesNotLockALinkThatHoldsItsKey(t *testing.T) {
 	}
 }
 
+func TestALogFullOfEscapesFitsAReply(t *testing.T) {
+	log := strings.Repeat("\x1b[31m<first>\n", 1<<18) + "the end\n"
+	got := tailThatFits(log)
+	encoded, _ := json.Marshal(got)
+	if len(encoded) > maxResult {
+		t.Fatalf("%d bytes as JSON", len(encoded))
+	}
+	if len(got) == 0 || !strings.HasSuffix(got, "the end\n") || !strings.HasPrefix(got, "\x1b[31m") {
+		t.Errorf("kept %d bytes, starting %q", len(got), got[:min(len(got), 10)])
+	}
+	if short := "a short log\n"; tailThatFits(short) != short {
+		t.Error("a log that fits changed")
+	}
+}
+
+func TestAResultTooLongForALineIsSaid(t *testing.T) {
+	if result, failure := encodeResult("spec", []byte(strings.Repeat("x", maxResult))); result != nil || !strings.Contains(failure, "spec") {
+		t.Errorf("%d bytes, %q", len(result), failure)
+	}
+	result, failure := encodeResult("spec", []byte(strings.Repeat("x", maxResult/2)))
+	if failure != "" {
+		t.Fatal(failure)
+	}
+	var out bytes.Buffer
+	lines := hublink.NewLines(&out)
+	if err := lines.Write(hublink.Reply{Done: true, Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	var reply hublink.Reply
+	if err := lines.Read(&reply); err != nil {
+		t.Errorf("the hub would refuse it: %v", err)
+	}
+}
+
 // sessions is the two ends of a connection: the hub's and the link's.
 func sessions(t *testing.T) (hub, link *yamux.Session) {
 	t.Helper()

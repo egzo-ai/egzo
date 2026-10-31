@@ -451,7 +451,22 @@ func (d *Engine) Logs(ctx context.Context, project, name string, tail int) (stri
 		// a container with a terminal logs one raw stream
 		return "", err
 	}
-	return out.String(), nil
+	return tailThatFits(out.String()), nil
+}
+
+// tailThatFits keeps the end of a log, at a line's start, that is at most maxResult as JSON. A log can grow six times over, when it is
+// all escape sequences.
+func tailThatFits(text string) string {
+	for {
+		encoded, err := json.Marshal(text)
+		if err != nil || len(encoded) <= maxResult {
+			return text
+		}
+		text = text[len(text)-len(text)*maxResult/len(encoded)*9/10:]
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			text = text[i+1:]
+		}
+	}
 }
 
 // Spec returns the resolved snapshot `up` stored on the control volume: references to secrets, never their values.
