@@ -236,3 +236,62 @@ func TestWhatAHubSaysCannotDriveATerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestALinkHoldsFewStreamsOpenTowardsTheHub(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub}
+	peer.control = NewLines(bytes.NewBuffer(nil))
+	go peer.Run(context.Background(), Handlers{})
+	var open []*yamux.Stream
+	refused := 0
+	for range maxFeeds + 3 {
+		stream, err := link.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := NewLines(stream)
+		if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+			t.Fatal(err)
+		}
+		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
+		var start FeedStart
+		if err := lines.Read(&start); err != nil {
+			refused++
+			continue
+		}
+		open = append(open, stream)
+	}
+	if len(open) != maxFeeds || refused != 3 {
+		t.Errorf("%d streams were served and %d refused, want %d and 3", len(open), refused, maxFeeds)
+	}
+	open[0].Close() // a feed that ended leaves room for its next try
+	again, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(again)
+	if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+		t.Fatal(err)
+	}
+	again.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var start FeedStart
+	if err := lines.Read(&start); err != nil {
+		t.Errorf("a feed opened again after one ended: %v", err)
+	}
+}
+
+func TestClosedSaysTheConnectionEnded(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub}
+	select {
+	case <-peer.Closed():
+		t.Fatal("closed while it runs")
+	default:
+	}
+	link.Close()
+	select {
+	case <-peer.Closed():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the end of the connection was not noticed")
+	}
+}

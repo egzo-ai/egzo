@@ -1,8 +1,11 @@
-package engines
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
 
-// What the hub does with what a compromised or broken engine answers. hostileEngine is a Docker API on a local port that answers
+package link
+
+// What the link does with what a compromised or broken engine answers. hostileEngine is a Docker API on a local port that answers
 // what each test tells it to, so a test can send what no real engine would: frames that claim gigabytes, listings without end,
-// labels that are not egzo's. The hub must refuse such answers with an error, in bounded memory and time, and never pass them on.
+// labels that are not egzo's. The link must refuse such answers with an error, in bounded memory and time, and never pass them on.
 
 import (
 	"context"
@@ -20,18 +23,12 @@ import (
 	"github.com/egzo-ai/egzo/internal/engine"
 )
 
-// hostileEngine serves the parts of the Docker API the hub reads. Each handler is keyed by the end of the path ("containers/json",
+// hostileEngine serves the parts of the Docker API the link reads. Each handler is keyed by the end of the path ("containers/json",
 // "logs", "events"); what has none answers an empty list.
 type hostileEngine struct {
 	t        *testing.T
 	handlers map[string]http.HandlerFunc
 }
-
-const (
-	kindAgent   = "agent"
-	kindControl = "control"
-	kindProxy   = "proxy"
-)
 
 func newHostileEngine(t *testing.T) *hostileEngine {
 	return &hostileEngine{t: t, handlers: map[string]http.HandlerFunc{}}
@@ -42,8 +39,8 @@ func (h *hostileEngine) on(suffix string, f http.HandlerFunc) *hostileEngine {
 	return h
 }
 
-// dial starts the engine and connects a Docker to it as the hub does.
-func (h *hostileEngine) dial() *Docker {
+// dial starts the engine and connects an Engine to it as the link does.
+func (h *hostileEngine) dial() *Engine {
 	h.t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Api-Version", "1.47")
@@ -70,7 +67,7 @@ func (h *hostileEngine) dial() *Docker {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	d := NewDocker(client)
+	d := NewEngine(client)
 	h.t.Cleanup(func() { d.Close() })
 	return d
 }
