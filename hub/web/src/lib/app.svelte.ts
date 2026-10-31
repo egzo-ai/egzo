@@ -7,7 +7,7 @@ export const app = $state({
   ready: false,
   user: null as User | null,
   /** How the signed-in user signs in: their accounts at login providers, a password, and what single sign-on is called. */
-  account: { identities: [] as Identity[], hasPassword: false, sso: "", issuer: "" },
+  account: { identities: [] as Identity[], hasPassword: false, sso: "", issuer: "", hub: "" },
   projects: [] as ProjectBrief[],
   projectsLoaded: false,
   offline: false,
@@ -79,7 +79,7 @@ export async function refreshProjects(): Promise<void> {
 export async function refreshSession(): Promise<void> {
   const s = await api.session();
   app.user = s.user;
-  app.account = { identities: s.identities, hasPassword: s.hasPassword, sso: s.sso, issuer: s.issuer };
+  app.account = { identities: s.identities, hasPassword: s.hasPassword, sso: s.sso, issuer: s.issuer, hub: s.hub };
 }
 
 function applyTheme(): void {
