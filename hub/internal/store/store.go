@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS projects (
 	offline_since INTEGER                 -- Unix milliseconds; null while its link is connected
 );
 CREATE INDEX IF NOT EXISTS projects_state ON projects (state, created_at);
+-- A link code is what lets a project register: an operator makes one, and the project presents it, once (linkcodes.go).
+CREATE TABLE IF NOT EXISTS link_codes (
+	id TEXT PRIMARY KEY,
+	hash BLOB NOT NULL UNIQUE,            -- SHA-256 of the code: the code itself is shown once and kept nowhere
+	created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS grants (
 	engine TEXT NOT NULL,
 	project TEXT NOT NULL,
