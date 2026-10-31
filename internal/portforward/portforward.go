@@ -134,12 +134,13 @@ func Forward(port int, in io.Reader, out io.Writer) error {
 		return err
 	}
 	defer conn.Close()
+	drain := drainTimeout
 	var inputEnded atomic.Bool
 	go func() {
 		_, _ = io.Copy(conn, in)
 		_ = conn.CloseWrite()
 		inputEnded.Store(true)
-		_ = conn.SetReadDeadline(time.Now().Add(drainTimeout))
+		_ = conn.SetReadDeadline(time.Now().Add(drain))
 	}()
 	buffer := make([]byte, 32<<10)
 	for {
@@ -149,7 +150,7 @@ func Forward(port int, in io.Reader, out io.Writer) error {
 				return nil // the client is gone
 			}
 			if inputEnded.Load() {
-				_ = conn.SetReadDeadline(time.Now().Add(drainTimeout))
+				_ = conn.SetReadDeadline(time.Now().Add(drain))
 			}
 		}
 		if err != nil {
