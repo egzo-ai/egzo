@@ -41,7 +41,7 @@ jobs:
           make hub-lint
       - name: Browser tests
         run: make hub-e2e
-      - name: The whole stack (hub image, Dex, a real project)
+      - name: The whole stack (hub image, Dex, a project that links itself)
         run: make hub-stack
 
   # Every image builds for both architectures without being pushed, so a broken Dockerfile shows on the pull request and not

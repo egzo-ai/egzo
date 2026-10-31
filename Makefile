@@ -59,6 +59,7 @@ hub-test:
 	cd hub && $(GO) vet ./... && $(GO) test -race ./...
 
 hub-lint:
+	scripts/check-hub-no-engine.sh
 	cd hub && staticcheck ./... && ../scripts/govulncheck.sh
 
 # The hub image: the context is the repository, because the hub module requires core from ../

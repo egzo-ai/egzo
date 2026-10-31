@@ -1,9 +1,8 @@
 # Roadmap: a project links itself to a hub
 
-**Status.** Draft, direction decided (below). Core is built (`hub:`, the link sidecar, registration, the verbs and feeds, against a fake hub); the
-hub's side is not. It replaces the hub's engines: when it lands, the hub no longer connects
-to engines, and everything in [hub.md](hub.md) about engines as data, engine credentials and discovery by labels goes away.
-Pre-1.0: no migration and no second mode. The old path is removed, not kept next to the new one.
+**Status.** Core and the hub are built (steps 2 and 3 of the [order of work](#order-of-work)): the hub no longer connects to engines. Until roles
+and invites land, only operators approve a project. Previews (step 4), roles and invites (step 5) and the rewrite of
+[messaging-adapters.md](messaging-adapters.md) and [discovery.md](discovery.md) are open.
 
 ## Why
 
@@ -132,7 +131,8 @@ Changed:
 - **The quick start**: the hub without the socket, and a project on the same machine linking to it.
 - [messaging-adapters.md](messaging-adapters.md) and [discovery.md](discovery.md) are rewritten for the link: the operator API
   and the event stream they use are reached through it instead of `engine exec`.
-- `EGZO_SECRET_KEY` keeps what it still protects (the sign-in provider's secret, sessions), or goes if nothing is left.
+- `EGZO_SECRET_KEY` went: nothing is left for it to protect. `EGZO_PUBLIC_URL` or `EGZO_LINK_URL` is required instead, and a link's proof is
+  checked against that address, never one taken from a request.
 
 ## Roles and invites (decided)
 
@@ -255,7 +255,8 @@ Partial notes, not conclusions:
 ## Open questions
 
 - Narrowing what the hub may do from the project file (`hub: { url: ..., allow: [attach, previews] }`): a later idea.
-- What the hub shows of a project that is offline: its last known state, marked as such, or nothing but its name.
+- What the hub shows of a project that is offline, after the hub restarted: its name and host, as what it pushed is in memory. Before that, its
+  last known state, marked as such. Keeping that state in the database is open.
 
 ## Alternatives considered
 

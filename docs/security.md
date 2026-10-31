@@ -41,8 +41,7 @@ Be clear about these before running agents on something you care about.
 - **The workspace is writable.** Agents can delete or corrupt what you mount read-write. Use `:ro` for directories and git for
   code. Every agent has its own worktree.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
-  that is root-equivalent. Prefer a rootless engine. [The hub](hub.md) holds engine access too: whoever controls it, or is
-  an operator in it, controls those engines.
+  that is root-equivalent. Prefer a rootless engine. [The hub](hub.md) holds no engine access: it can do what the link below lets it, on the projects that linked.
 - **What you open with `egzo agent port-forward` is the agent's.** The command reaches into the sandbox through the engine and the agent cannot
   use it to reach out, but the page your browser loads was written by the agent. Open it in a browser profile that is not signed in to anything
   you care about, on a local port no other site of yours uses (cookies ignore ports).

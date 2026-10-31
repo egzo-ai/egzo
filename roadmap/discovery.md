@@ -1,6 +1,7 @@
 # Roadmap: hub discovery
 
-**Status.** Mostly built; what is left is open. Split out of [hub.md](hub.md).
+**Status.** Mostly built; what is left is open. Split out of [hub.md](hub.md). What follows predates [hub-link.md](hub-link.md): the link now does
+what it says of the hub, and pushes the result, and this page is to be rewritten for it.
 
 **Built.** The hub does not poll the engines. It follows each engine's event stream and lists that engine again when a container of
 an egzo project is made, started, stopped or removed (a change from the CLI shows up within a fraction of a second), and it keeps

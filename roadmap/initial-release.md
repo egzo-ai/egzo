@@ -36,11 +36,6 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [ ] An install wrapper (after the plain download works, which it now does): a script that detects the platform, downloads the
       right binary, verifies its checksum and installs it, for a `curl ... | sh` style install and perhaps a package
       (Homebrew tap, `.deb`). Then update `docs/install.md` to lead with it and keep the manual download as the fallback.
-- [ ] **A hub with no engine is tested and supported.** Users may run the hub without the local socket and add engines in the UI
-      after they log in. `EGZO_LOCAL_ENGINE=none` already starts it, but nothing tests it: add a Go test that boots the hub with no
-      engine, an e2e test that logs in as the first operator and adds an engine, and fix the empty home page (it says "You don't have a
-      role on any project" instead of pointing the operator to Settings, Engines). Document it in `docs/hub.md` as a supported
-      setup, including the quick start without the `docker.sock` mount.
 - [ ] Check the name, domain, org and registry (DESIGN.md, "Naming": availability was never really checked).
 - [ ] **A CI matrix running the specs** on every reference platform ([`ci-test-matrix.md`](ci-test-matrix.md),
       `known-issues/reference-platform-ci-matrix.md`). `ci.yml` runs only the Go tests, linters and hub tests today. The CI solution is
@@ -58,8 +53,7 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [ ] **Address the CodeQL alerts and adjust its configuration.** 17 alerts are open on `main` (Security, Code scanning), none
       triaged. Review the real ones: archive extraction in `internal/stack/workspaces.go` (`go/zipslip`, `go/unsafe-unzip-symlink`;
       probably false positives behind the `filepath.Rel` and `linkLeaves` guards, but it unpacks what a container wrote, so prove
-      it with a spec), the key derivation in `hub/internal/secretbox` (`go/weak-sensitive-data-hashing`: one SHA-256 of
-      `EGZO_SECRET_KEY`; use HKDF or scrypt, or require a random key). `safeNext` (`go/bad-redirect-check`) was a real open redirect
+      it with a spec). `safeNext` (`go/bad-redirect-check`) was a real open redirect
       (a tab or newline in `next`) and is fixed. Dismiss the rest with a reason. Then configure the scan: `paths-ignore` for `specs/` and
       `roadmap/` (11 of the 17 are URL-substring checks in specs and the design mockups), decide whether the `python` analysis is
       worth a runner, and keep it out of the required checks.

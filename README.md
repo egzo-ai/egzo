@@ -62,7 +62,7 @@ repo or push, give the agent a GitHub token: the `github` service ([workspaces](
 
 ## Web UI
 
-The hub runs as one container next to your engine. See [the hub](docs/hub.md) to set it up.
+The hub runs as one container, and your projects link to it. See [the hub](docs/hub.md) to set it up.
 
 ## Example: architect with Claude, code with OpenCode
 
