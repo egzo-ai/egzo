@@ -5,14 +5,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egzo-ai/egzo/hub/internal/engines"
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
 
-// What the agents reached, and what they were refused, comes from the proxy's audit trail, which the proxy writes to its log. An
-// audit follower per project reads it through the engine's log API, as the status follower reads the control sidecar's, and:
+// What the agents reached, and what they were refused, comes from the proxy's audit trail, which the project's link follows and pushes.
+// An audit follower per project, which outlives its connections, takes it and:
 //
 //   - keeps the latest events in memory, for the Log of the Network view;
 //   - groups the refusals and the failures by instance, protocol, host and reason code, and writes the groups to the database, so
@@ -20,7 +20,7 @@ import (
 //     is the log pipeline of the engine's sysadmin;
 //   - marks a group fixed when the same instance gets through to the host afterwards.
 //
-// After a restart it reads from the time of the last event it handled. See roadmap/proxy-audit.md.
+// A link that connects says from when it is wanted: the time of the last event handled. See roadmap/proxy-audit.md.
 
 const (
 	// recentEvents is how many events of a project the hub keeps in memory.
@@ -42,7 +42,7 @@ var fixers = map[proxy.Kind][]proxy.Kind{
 
 // isDenial says whether an event is grouped: a refusal or a failure, except a client that left before its handshake (clients open
 // connections ahead of time and drop them).
-func isDenial(e engines.AuditEvent) bool {
+func isDenial(e links.AuditEvent) bool {
 	if e.Decision != proxy.OutcomeDeny && e.Decision != proxy.OutcomeError {
 		return false
 	}
@@ -69,18 +69,14 @@ type openGroup struct {
 
 // auditFollower is one audit follower and what it has heard.
 type auditFollower struct {
-	cancel  context.CancelFunc
-	proxyID string     // the proxy container it follows: another one is another follower
 	flushMu sync.Mutex // one flush at a time, so that the batches are written in the order they were heard
 
 	// guarded by the manager's lock
 	connected bool
-	heard     bool // a stream was opened at least once
-	err       string
 	cursor    time.Time       // the time of the last event handled
 	atCursor  map[string]bool // the events handled at that very time, by connection and step: a stream opened again replays them
 	resumed   bool            // the cursor is the database\'s: every event at it was handled by an earlier run
-	events    []engines.AuditEvent
+	events    []links.AuditEvent
 	open      map[hostKey]map[string]openGroup // by where, then by reason code
 	openCount int                              // groups in open, give or take the fixed ones: recounted when it passes maxOpen
 	pending   map[groupKey]*store.Denial
@@ -98,91 +94,78 @@ type fix struct {
 	at     time.Time
 }
 
-func (m *feedManager) startAudit(key projectKey, proxyID string) {
-	ctx, cancel := context.WithCancel(m.ctx)
-	f := &auditFollower{cancel: cancel, proxyID: proxyID, open: map[hostKey]map[string]openGroup{}, pending: map[groupKey]*store.Denial{},
-		atCursor: map[string]bool{}}
-	m.audits[key] = f
-	go m.followAudit(ctx, key, f)
+// startAudit readies the follower of a project for a connection: what the database holds, the first time, and the flushing of what it
+// hears until the connection ends.
+func (m *feedManager) startAudit(c *connection) {
+	key := c.project
+	m.mu.Lock()
+	f := m.audits[key]
+	fresh := f == nil
+	if fresh {
+		f = &auditFollower{open: map[hostKey]map[string]openGroup{}, pending: map[groupKey]*store.Denial{}, atCursor: map[string]bool{}}
+		m.audits[key] = f
+	}
+	f.connected = true
+	m.mu.Unlock()
+	if fresh {
+		m.loadAudit(c.ctx, key, f)
+	}
+	go func() {
+		tick := time.NewTicker(m.opt.Flush)
+		defer tick.Stop()
+		for {
+			select {
+			case <-c.ctx.Done():
+				m.flushAudit(context.WithoutCancel(c.ctx), key, f)
+				return
+			case <-tick.C:
+				m.flushAudit(c.ctx, key, f)
+			}
+		}
+	}()
 }
 
-func (m *feedManager) followAudit(ctx context.Context, key projectKey, f *auditFollower) {
+// loadAudit takes from the database the groups that are open, and how far the trail was read.
+func (m *feedManager) loadAudit(ctx context.Context, key string, f *auditFollower) {
 	store := m.hub.store
-	// What the database holds: the groups that are open, and how far the trail was read.
-	cursor, err := store.AuditCursor(ctx, key.engine, key.project)
+	cursor, err := store.AuditCursor(ctx, key)
 	if err != nil && ctx.Err() == nil {
-		m.hub.log.Warn("read the audit cursor", "engine", key.engine, "project", key.project, "err", err)
+		m.hub.log.Warn("read the audit cursor", "project", key, "err", err)
 	}
 	if oldest := time.Now().Add(-denialRetention); !cursor.IsZero() && cursor.Before(oldest) {
 		cursor = oldest
 	}
-	groups, _ := store.Denials(ctx, key.engine, key.project)
+	groups, _ := store.Denials(ctx, key)
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	f.cursor, f.resumed = cursor, !cursor.IsZero()
 	for _, d := range groups {
 		if d.Fixed.IsZero() {
 			f.opened(groupKey{d.Instance, d.ClaimedAgent, d.Protocol, d.Host, d.Code}, openGroup{event: proxy.Kind(d.Event), last: d.Last})
 		}
 	}
-	m.mu.Unlock()
+}
 
-	flushed := make(chan struct{})
-	go func() {
-		defer close(flushed)
-		tick := time.NewTicker(m.opt.Flush)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				m.flushAudit(context.WithoutCancel(ctx), key, f)
-				return
-			case <-tick.C:
-				m.flushAudit(ctx, key, f)
-			}
-		}
-	}()
-	defer func() { <-flushed }()
-
-	delay := newBackoff(m.opt.BackoffMin, m.opt.BackoffMax)
-	for ctx.Err() == nil {
-		started := time.Now()
-		m.mu.Lock()
-		since := f.cursor
-		m.mu.Unlock()
-
-		eng, err := m.hub.registry.Get(ctx, key.engine)
-		if err == nil {
-			m.mu.Lock()
-			f.connected, f.heard, f.err = true, true, ""
-			m.mu.Unlock()
-			err = eng.FollowAudit(ctx, key.project, since, func(e engines.AuditEvent) {
-				delay.reset()
-				m.handleAudit(key, f, e)
-			})
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if err == nil {
-			err = engines.ErrStreamEnded
-		}
-		if time.Since(started) >= m.opt.Healthy {
-			delay.reset()
-		}
-		m.mu.Lock()
-		f.connected, f.err = false, err.Error()
-		m.mu.Unlock()
-		m.hub.log.Debug("audit stream ended", "engine", key.engine, "project", key.project, "err", err)
-		if !sleep(ctx, delay.wait()) {
-			return
-		}
+// since says from when a link is to send the trail.
+func (m *feedManager) since(key string) time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if f := m.audits[key]; f != nil {
+		return f.cursor
 	}
+	return time.Time{}
 }
 
 // handleAudit takes one event of the trail.
-func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.AuditEvent) {
+func (m *feedManager) handleAudit(key string, e links.AuditEvent) {
+	m.mu.Lock()
+	f := m.audits[key]
+	m.mu.Unlock()
+	if f == nil {
+		return
+	}
 	if err := e.Check(); err != nil {
-		// not an event the proxy writes: the engine's log is not the proxy's, or not only
+		// not an event the proxy writes: a link says what it wants
 		m.mu.Lock()
 		f.ignored, f.lastIgnored = f.ignored+1, err.Error()
 		m.mu.Unlock()
@@ -191,7 +174,7 @@ func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.Au
 	denial := isDenial(e)
 	var actor string
 	if denial && e.Instance != "" {
-		actor = m.hub.actorOf(key.engine, key.project, e.Instance) // before the lock: it takes the hub's
+		actor = m.hub.actorOf(key, e.Instance) // before the lock: it takes the hub's
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -205,7 +188,7 @@ func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.Au
 	f.atCursor[id], f.dirty = true, true
 	f.events = append(f.events, e)
 	if len(f.events) > recentEvents {
-		f.events = append([]engines.AuditEvent(nil), f.events[len(f.events)-recentEvents:]...)
+		f.events = append([]links.AuditEvent(nil), f.events[len(f.events)-recentEvents:]...)
 	}
 
 	if denial {
@@ -216,7 +199,7 @@ func (m *feedManager) handleAudit(key projectKey, f *auditFollower, e engines.Au
 		k := groupKey{e.Instance, e.ClaimedAgent, string(e.Protocol), e.Host, code}
 		d := f.pending[k]
 		if d == nil {
-			d = &store.Denial{Engine: key.engine, Project: key.project, Instance: e.Instance, ClaimedAgent: e.ClaimedAgent, Protocol: string(e.Protocol),
+			d = &store.Denial{Project: key, Instance: e.Instance, ClaimedAgent: e.ClaimedAgent, Protocol: string(e.Protocol),
 				Host: e.Host, Code: code, First: e.Time}
 			f.pending[k] = d
 		}
@@ -282,7 +265,7 @@ func (f *auditFollower) opened(k groupKey, g openGroup) {
 }
 
 // flushAudit writes what was heard since the last flush: the groups, then the fixes, then how far the trail was read.
-func (m *feedManager) flushAudit(ctx context.Context, key projectKey, f *auditFollower) {
+func (m *feedManager) flushAudit(ctx context.Context, key string, f *auditFollower) {
 	f.flushMu.Lock()
 	defer f.flushMu.Unlock()
 	m.mu.Lock()
@@ -300,20 +283,20 @@ func (m *feedManager) flushAudit(ctx context.Context, key projectKey, f *auditFo
 	err := s.RecordDenials(ctx, seen)
 	for _, x := range fixes {
 		if err == nil {
-			err = s.FixDenials(ctx, key.engine, key.project, x.key.instance, x.key.protocol, x.key.host, x.events, x.at)
+			err = s.FixDenials(ctx, key, x.key.instance, x.key.protocol, x.key.host, x.events, x.at)
 		}
 	}
 	if err == nil && dirty {
-		err = s.SetAuditCursor(ctx, key.engine, key.project, cursor)
+		err = s.SetAuditCursor(ctx, key, cursor)
 	}
 	if err != nil {
-		m.hub.log.Warn("write the denials", "engine", key.engine, "project", key.project, "err", err)
+		m.hub.log.Warn("write the denials", "project", key, "err", err)
 	}
 }
 
-// actorOf finds who spawned an instance, by its id, in what the last scan saw.
-func (h *Hub) actorOf(engine, project, instance string) string {
-	p, ok := h.scannedProject(engine, project)
+// actorOf finds who spawned an instance, by its id, in what the link last pushed.
+func (h *Hub) actorOf(project, instance string) string {
+	p, ok := h.knownProject(project)
 	if !ok {
 		return ""
 	}
@@ -326,27 +309,22 @@ func (h *Hub) actorOf(engine, project, instance string) string {
 }
 
 // auditFeed says how far the network view of a project can be trusted.
-func (m *feedManager) auditFeed(f *auditFollower) Feed {
+func (m *feedManager) auditFeed(f *auditFollower, proxyRunning bool) Feed {
 	switch {
-	case f == nil:
+	case f == nil || !f.connected:
+		return Feed{FeedUnavailable, "the project is offline: this is what the hub last heard"}
+	case !proxyRunning:
 		return Feed{FeedUnavailable, "the project's proxy is not running"}
-	case f.connected:
-		return Feed{FeedLive, ""}
-	case f.err != "" && f.heard:
-		return Feed{FeedUnavailable, "the proxy's log cannot be followed: " + f.err}
 	}
-	return Feed{FeedConnecting, "opening the proxy's log"}
+	return Feed{FeedLive, ""}
 }
 
 // deniedCounts counts, for each instance of a project, the hosts it was refused in the last deniedWindow that are not fixed.
-func (h *Hub) deniedCounts(engine, project string) map[string]int {
-	m := h.feedManager()
-	if m == nil {
-		return nil
-	}
+func (h *Hub) deniedCounts(project string) map[string]int {
+	m := h.feeds
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	f := m.audits[projectKey{engine, project}]
+	f := m.audits[project]
 	if f == nil {
 		return nil
 	}
@@ -374,8 +352,8 @@ func (h *Hub) deniedCounts(engine, project string) map[string]int {
 type NetworkView struct {
 	Feed    Feed
 	Denials []store.Denial
-	Events  []engines.AuditEvent
-	// Ignored is how many lines of the proxy's log the hub refused as events the proxy never writes, and IgnoredWhy why the last
+	Events  []links.AuditEvent
+	// Ignored is how many events a link sent the hub refused as events the proxy never writes, and IgnoredWhy why the last
 	// one was; an administrator's view only.
 	Ignored    int
 	IgnoredWhy string
@@ -383,15 +361,19 @@ type NetworkView struct {
 
 // Network reads what a project's proxy recorded, or what it recorded for one agent (the instance of that name that exists now).
 // An administrator sees every agent; a user sees the agents they may operate, as for their logs.
-func (h *Hub) Network(ctx context.Context, user store.User, engine, project, agent string) (NetworkView, error) {
-	role, err := h.access(ctx, user, engine, project)
+func (h *Hub) Network(ctx context.Context, user store.User, project, agent string) (NetworkView, error) {
+	role, err := h.access(ctx, user, project)
 	if err != nil {
 		return NetworkView{}, err
 	}
-	scanned, _ := h.scannedProject(engine, project)
+	known, _ := h.knownProject(project)
 	actors := map[string]string{} // instance id -> who spawned it
 	only := ""
-	for _, a := range scanned.Agents {
+	proxyRunning := false
+	for _, s := range known.Services {
+		proxyRunning = proxyRunning || s.Name == "proxy" && s.State == "running"
+	}
+	for _, a := range known.Agents {
 		if a.ID != "" {
 			actors[a.ID] = a.Actor
 		}
@@ -403,17 +385,14 @@ func (h *Hub) Network(ctx context.Context, user store.User, engine, project, age
 		return NetworkView{}, ErrNotFound
 	}
 	// what the follower heard and has not written yet is written first: the view is never behind the agents list
-	m := h.feedManager()
-	var f *auditFollower
-	if m != nil {
-		m.mu.Lock()
-		f = m.audits[projectKey{engine, project}]
-		m.mu.Unlock()
-		if f != nil {
-			m.flushAudit(context.WithoutCancel(ctx), projectKey{engine, project}, f) // a batch is not lost to a request that went away
-		}
+	m := h.feeds
+	m.mu.Lock()
+	f := m.audits[project]
+	m.mu.Unlock()
+	if f != nil {
+		m.flushAudit(context.WithoutCancel(ctx), project, f) // a batch is not lost to a request that went away
 	}
-	denials, err := h.store.Denials(ctx, engine, project)
+	denials, err := h.store.Denials(ctx, project)
 	if err != nil {
 		return NetworkView{}, err
 	}
@@ -434,30 +413,26 @@ func (h *Hub) Network(ctx context.Context, user store.User, engine, project, age
 		return ok && instance != "" && rbac.Can(user.Subject(), role, rbac.Operate, actor)
 	}
 
-	view := NetworkView{Denials: []store.Denial{}, Events: []engines.AuditEvent{}}
+	view := NetworkView{Denials: []store.Denial{}, Events: []links.AuditEvent{}}
 	for _, d := range denials {
 		if visible(d.Instance) {
 			view.Denials = append(view.Denials, d)
 		}
 	}
-	if m != nil {
-		m.mu.Lock()
-		view.Feed = m.auditFeed(f)
-		var events []engines.AuditEvent
-		if f != nil {
-			events = append(events, f.events...)
-			if everyone {
-				view.Ignored, view.IgnoredWhy = f.ignored, f.lastIgnored
-			}
+	m.mu.Lock()
+	view.Feed = m.auditFeed(f, proxyRunning)
+	var events []links.AuditEvent
+	if f != nil {
+		events = append(events, f.events...)
+		if everyone {
+			view.Ignored, view.IgnoredWhy = f.ignored, f.lastIgnored
 		}
-		m.mu.Unlock()
-		for _, e := range events {
-			if visible(e.Instance) {
-				view.Events = append(view.Events, e)
-			}
+	}
+	m.mu.Unlock()
+	for _, e := range events {
+		if visible(e.Instance) {
+			view.Events = append(view.Events, e)
 		}
-	} else {
-		view.Feed = Feed{FeedUnavailable, "the hub follows no log"}
 	}
 	return view, nil
 }

@@ -2,7 +2,7 @@
 GO ?= go
 BIN := bin/egzo
 
-.PHONY: build test lint specs clean image images hub-web hub-web-test hub-build hub-test hub-lint hub-image hub-e2e hub-integration hub-stack
+.PHONY: build test lint specs clean image images hub-web hub-web-test hub-build hub-test hub-lint hub-image hub-e2e hub-stack
 
 VERSION ?= dev
 REGISTRY ?= ghcr.io/egzo-ai
@@ -70,10 +70,6 @@ hub-e2e: hub-web
 	cd hub && CGO_ENABLED=0 $(GO) build -o e2e/server/egzo-hub-e2e ./e2e/server
 	docker build -q -t egzo-hub-e2e hub/e2e
 	docker run --rm --network host --ipc=host -v $(CURDIR)/hub:/hub egzo-hub-e2e pytest -q -p no:cacheprovider
-
-# The Docker engine implementation against a real engine and a real project (needs docker).
-hub-integration: build
-	cd hub && EGZO_IT_BIN=$(CURDIR)/$(BIN) $(GO) test -tags integration -count=1 -timeout 10m ./internal/engines
 
 # The whole stack for real: hub image + Dex from compose.yaml, the local engine, a project made by the CLI, a browser logging in through Dex.
 hub-stack: build hub-image

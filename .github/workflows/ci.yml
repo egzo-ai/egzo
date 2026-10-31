@@ -39,8 +39,6 @@ jobs:
           go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           make hub-lint
-      - name: The Docker engine implementation against a real engine and project
-        run: make hub-integration
       - name: Browser tests
         run: make hub-e2e
       - name: The whole stack (hub image, Dex, a real project)

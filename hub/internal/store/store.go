@@ -1,5 +1,5 @@
-// Package store is the hub's database: users, grants, engines, sessions, the audit log, the tasks and what the proxies denied. SQLite,
-// one file, no cgo.
+// Package store is the hub's database: users, grants, the projects that linked, sessions, the audit log, the tasks and what the proxies
+// denied. SQLite, one file, no cgo.
 package store
 
 import (
@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -52,20 +52,28 @@ CREATE TABLE IF NOT EXISTS user_identities (
 	UNIQUE (issuer, subject),
 	UNIQUE (user_id, issuer)
 );
+-- A project is a registration: what a link asked, and what a person decided (projects.go). Its id is what everything else is keyed by.
+CREATE TABLE IF NOT EXISTS projects (
+	id TEXT PRIMARY KEY,
+	key BLOB NOT NULL UNIQUE,             -- the link's public key, which is how the hub knows it
+	name TEXT NOT NULL,                   -- as the link says: two projects may have the same one
+	host TEXT NOT NULL DEFAULT '',        -- the machine it says it runs on
+	release TEXT NOT NULL DEFAULT '',     -- the egzo it says it runs
+	templates TEXT NOT NULL DEFAULT '[]', -- JSON, what it said when it registered
+	state TEXT NOT NULL,                  -- pending, approved, refused or revoked
+	code TEXT UNIQUE,                     -- the device code, while it is pending
+	owner TEXT REFERENCES users(id) ON DELETE SET NULL, -- who approved it
+	message TEXT NOT NULL DEFAULT '',     -- why it was refused or revoked
+	created_at INTEGER NOT NULL,
+	decided_at INTEGER,
+	offline_since INTEGER                 -- Unix milliseconds; null while its link is connected
+);
+CREATE INDEX IF NOT EXISTS projects_state ON projects (state, created_at);
 CREATE TABLE IF NOT EXISTS grants (
-	engine TEXT NOT NULL,
-	project TEXT NOT NULL,
+	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	role TEXT NOT NULL,
-	PRIMARY KEY (engine, project, user_id)
-);
-CREATE TABLE IF NOT EXISTS engines (
-	name TEXT PRIMARY KEY,
-	host TEXT NOT NULL,
-	ssh_user TEXT NOT NULL DEFAULT '',
-	host_key TEXT NOT NULL DEFAULT '',    -- the pinned ssh host key fingerprint
-	credentials BLOB,                     -- sealed JSON: CA, cert, key, ssh key
-	created_at INTEGER NOT NULL
+	PRIMARY KEY (project, user_id)
 );
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash TEXT PRIMARY KEY,
@@ -79,17 +87,15 @@ CREATE TABLE IF NOT EXISTS audit (
 	at INTEGER NOT NULL,
 	actor TEXT NOT NULL,
 	action TEXT NOT NULL,
-	engine TEXT NOT NULL DEFAULT '',
 	project TEXT NOT NULL DEFAULT '',
 	agent TEXT NOT NULL DEFAULT '',
 	detail TEXT NOT NULL DEFAULT '',
 	allowed INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS audit_project ON audit (engine, project, id);
+CREATE INDEX IF NOT EXISTS audit_project ON audit (project, id);
 -- What the proxies denied, grouped: one row per instance, protocol, host and reason code (roadmap/proxy-audit.md).
 CREATE TABLE IF NOT EXISTS denials (
-	engine TEXT NOT NULL,
-	project TEXT NOT NULL,
+	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	instance TEXT NOT NULL,              -- the instance's id; '' when the proxy could not tell who it was
 	protocol TEXT NOT NULL,
 	host TEXT NOT NULL,
@@ -108,15 +114,14 @@ CREATE TABLE IF NOT EXISTS denials (
 	first_at INTEGER NOT NULL,           -- Unix milliseconds
 	last_at INTEGER NOT NULL,
 	fixed_at INTEGER,                    -- the same instance got through since the last one
-	PRIMARY KEY (engine, project, instance, claimed_agent, protocol, host, code)
+	PRIMARY KEY (project, instance, claimed_agent, protocol, host, code)
 );
-CREATE INDEX IF NOT EXISTS denials_recent ON denials (engine, project, last_at);
--- What the hub did on the engines, and how it went (hub/internal/hub/tasks.go). Times are Unix milliseconds.
+CREATE INDEX IF NOT EXISTS denials_recent ON denials (project, last_at);
+-- What the hub did on the projects, and how it went (hub/internal/hub/tasks.go). Times are Unix milliseconds.
 CREATE TABLE IF NOT EXISTS tasks (
 	id TEXT PRIMARY KEY,
 	verb TEXT NOT NULL,                  -- spawn, start, stop or rm
-	engine TEXT NOT NULL,
-	project TEXT NOT NULL,
+	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	agent TEXT NOT NULL,
 	template TEXT NOT NULL DEFAULT '',
 	actor TEXT NOT NULL,
@@ -127,14 +132,12 @@ CREATE TABLE IF NOT EXISTS tasks (
 	ended_at INTEGER,
 	dismissed INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS tasks_project ON tasks (engine, project, started_at);
+CREATE INDEX IF NOT EXISTS tasks_project ON tasks (project, started_at);
 CREATE INDEX IF NOT EXISTS tasks_open ON tasks (state, dismissed);
 -- How far the hub read each project's audit trail: the time of the last event it handled.
 CREATE TABLE IF NOT EXISTS audit_cursors (
-	engine TEXT NOT NULL,
-	project TEXT NOT NULL,
-	at INTEGER NOT NULL,                 -- Unix nanoseconds
-	PRIMARY KEY (engine, project)
+	project TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+	at INTEGER NOT NULL                  -- Unix nanoseconds
 );
 `
 
@@ -705,30 +708,30 @@ func removeIdentity(ctx context.Context, tx *sql.Tx, identityID string) ([]strin
 
 // --- grants ------------------------------------------------------------------------------------------------------------------
 
-// Grant is a role held by a user on one project of one engine.
+// Grant is a role held by a user on one project.
 type Grant struct {
-	Engine, Project, UserID string
-	Role                    rbac.Role
+	Project, UserID string
+	Role            rbac.Role
 }
 
 // SetRole grants role, replaces the role, or (with rbac.None) removes the grant.
-func (s *Store) SetRole(ctx context.Context, engine, project, userID string, role rbac.Role) error {
+func (s *Store) SetRole(ctx context.Context, project, userID string, role rbac.Role) error {
 	if role == rbac.None {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM grants WHERE engine = ? AND project = ? AND user_id = ?`, engine, project, userID)
+		_, err := s.db.ExecContext(ctx, `DELETE FROM grants WHERE project = ? AND user_id = ?`, project, userID)
 		return err
 	}
 	if !role.Valid() {
 		return fmt.Errorf("invalid role %q", role)
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO grants (engine, project, user_id, role) VALUES (?, ?, ?, ?)
-		ON CONFLICT (engine, project, user_id) DO UPDATE SET role = excluded.role`, engine, project, userID, string(role))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO grants (project, user_id, role) VALUES (?, ?, ?)
+		ON CONFLICT (project, user_id) DO UPDATE SET role = excluded.role`, project, userID, string(role))
 	return err
 }
 
 // Role is what a user holds on a project, rbac.None when nothing.
-func (s *Store) Role(ctx context.Context, engine, project, userID string) (rbac.Role, error) {
+func (s *Store) Role(ctx context.Context, project, userID string) (rbac.Role, error) {
 	var role string
-	err := s.db.QueryRowContext(ctx, `SELECT role FROM grants WHERE engine = ? AND project = ? AND user_id = ?`, engine, project, userID).Scan(&role)
+	err := s.db.QueryRowContext(ctx, `SELECT role FROM grants WHERE project = ? AND user_id = ?`, project, userID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return rbac.None, nil
 	}
@@ -737,12 +740,12 @@ func (s *Store) Role(ctx context.Context, engine, project, userID string) (rbac.
 
 // GrantsOf lists every grant of a user.
 func (s *Store) GrantsOf(ctx context.Context, userID string) ([]Grant, error) {
-	return s.grants(ctx, `SELECT engine, project, user_id, role FROM grants WHERE user_id = ? ORDER BY engine, project`, userID)
+	return s.grants(ctx, `SELECT project, user_id, role FROM grants WHERE user_id = ? ORDER BY project`, userID)
 }
 
 // GrantsOn lists every grant on a project.
-func (s *Store) GrantsOn(ctx context.Context, engine, project string) ([]Grant, error) {
-	return s.grants(ctx, `SELECT engine, project, user_id, role FROM grants WHERE engine = ? AND project = ? ORDER BY user_id`, engine, project)
+func (s *Store) GrantsOn(ctx context.Context, project string) ([]Grant, error) {
+	return s.grants(ctx, `SELECT project, user_id, role FROM grants WHERE project = ? ORDER BY user_id`, project)
 }
 
 func (s *Store) grants(ctx context.Context, query string, args ...any) ([]Grant, error) {
@@ -755,7 +758,7 @@ func (s *Store) grants(ctx context.Context, query string, args ...any) ([]Grant,
 	for rows.Next() {
 		var g Grant
 		var role string
-		if err := rows.Scan(&g.Engine, &g.Project, &g.UserID, &role); err != nil {
+		if err := rows.Scan(&g.Project, &g.UserID, &role); err != nil {
 			return nil, err
 		}
 		g.Role = rbac.Role(role)
@@ -877,97 +880,28 @@ func (s *Store) PurgeSessions(ctx context.Context) error {
 	return err
 }
 
-// --- engines -----------------------------------------------------------------------------------------------------------------
-
-// EngineRow is a stored engine; Credentials is still sealed.
-type EngineRow struct {
-	Name, Host, SSHUser, HostKey string
-	Credentials                  []byte
-	CreatedAt                    time.Time
-}
-
-func (s *Store) PutEngine(ctx context.Context, e EngineRow) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO engines (name, host, ssh_user, host_key, credentials, created_at) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (name) DO UPDATE SET host = excluded.host, ssh_user = excluded.ssh_user, host_key = excluded.host_key, credentials = excluded.credentials`,
-		e.Name, e.Host, e.SSHUser, e.HostKey, e.Credentials, time.Now().Unix())
-	return err
-}
-
-func (s *Store) Engine(ctx context.Context, name string) (EngineRow, error) {
-	var e EngineRow
-	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT name, host, ssh_user, host_key, credentials, created_at FROM engines WHERE name = ?`, name).
-		Scan(&e.Name, &e.Host, &e.SSHUser, &e.HostKey, &e.Credentials, &created)
-	if errors.Is(err, sql.ErrNoRows) {
-		return e, ErrNotFound
-	}
-	e.CreatedAt = time.Unix(created, 0)
-	return e, err
-}
-
-func (s *Store) Engines(ctx context.Context) ([]EngineRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, host, ssh_user, host_key, credentials, created_at FROM engines ORDER BY created_at, name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var engines []EngineRow
-	for rows.Next() {
-		var e EngineRow
-		var created int64
-		if err := rows.Scan(&e.Name, &e.Host, &e.SSHUser, &e.HostKey, &e.Credentials, &created); err != nil {
-			return nil, err
-		}
-		e.CreatedAt = time.Unix(created, 0)
-		engines = append(engines, e)
-	}
-	return engines, rows.Err()
-}
-
-// DeleteEngine removes an engine, and the grants and the denials of its projects.
-func (s *Store) DeleteEngine(ctx context.Context, name string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `DELETE FROM engines WHERE name = ?`, name)
-	if err != nil {
-		return err
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	for _, table := range []string{"grants", "denials", "audit_cursors"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE engine = ?`, name); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
 // --- audit -------------------------------------------------------------------------------------------------------------------
 
 // AuditEntry is one thing somebody did, or was refused.
 type AuditEntry struct {
-	ID                     int64
-	At                     time.Time
-	Actor, Action          string
-	Engine, Project, Agent string
-	Detail                 string
-	Allowed                bool
+	ID             int64
+	At             time.Time
+	Actor, Action  string
+	Project, Agent string
+	Detail         string
+	Allowed        bool
 }
 
 func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO audit (at, actor, action, engine, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		time.Now().Unix(), e.Actor, e.Action, e.Engine, e.Project, e.Agent, e.Detail, boolInt(e.Allowed))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO audit (at, actor, action, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		time.Now().Unix(), e.Actor, e.Action, e.Project, e.Agent, e.Detail, boolInt(e.Allowed))
 	return err
 }
 
 // AuditOf lists the latest entries about a project, newest first.
-func (s *Store) AuditOf(ctx context.Context, engine, project string, limit int) ([]AuditEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, at, actor, action, engine, project, agent, detail, allowed FROM audit
-		WHERE engine = ? AND project = ? ORDER BY id DESC LIMIT ?`, engine, project, limit)
+func (s *Store) AuditOf(ctx context.Context, project string, limit int) ([]AuditEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, at, actor, action, project, agent, detail, allowed FROM audit
+		WHERE project = ? ORDER BY id DESC LIMIT ?`, project, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -977,7 +911,7 @@ func (s *Store) AuditOf(ctx context.Context, engine, project string, limit int) 
 		var e AuditEntry
 		var at int64
 		var allowed int
-		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Action, &e.Engine, &e.Project, &e.Agent, &e.Detail, &allowed); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Action, &e.Project, &e.Agent, &e.Detail, &allowed); err != nil {
 			return nil, err
 		}
 		e.At, e.Allowed = time.Unix(at, 0), allowed == 1

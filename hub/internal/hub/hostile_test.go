@@ -13,19 +13,17 @@ import (
 // not control can write any line in the proxy's log: what the proxy never writes is not kept, it is counted, and the Network view
 // a person loads stays small whatever the log holds.
 func TestEventsTheProxyNeverWritesAreNotKeptAndTheNetworkViewStaysSmall(t *testing.T) {
-	r := newRig(t, "local")
-	r.fakes["local"].AddProject(project("web", "coder"))
+	r := newRig(t)
+	r.link("web", "coder")
 	op := r.operator()
-	if err := r.hub.Spawn(ctx, op, "local", "web", "coder", "coder-1"); err != nil {
+	if err := r.hub.Spawn(ctx, op, r.id("web"), "coder", "coder-1"); err != nil {
 		t.Fatal(err)
 	}
-	r.startFeeds(flushing)
-	r.scan()
 	a := trailOf(r.agentNamed("web", "coder-1"))
 	for i := range 600 {
-		r.fakes["local"].AddAudit("web", a.denied(fmt.Sprintf("%d.%s", i, strings.Repeat("x", 32<<10)), proxy.CodeNotInProfile))
+		r.fakes["web"].AddAudit(a.denied(fmt.Sprintf("%d.%s", i, strings.Repeat("x", 32<<10)), proxy.CodeNotInProfile))
 	}
-	r.fakes["local"].AddAudit("web", a.denied("registry.npmjs.org", proxy.CodeNotInProfile))
+	r.fakes["web"].AddAudit(a.denied("registry.npmjs.org", proxy.CodeNotInProfile))
 	eventually(t, "the trail to be read", func() bool { return groups(r.networkOf(op, ""))["registry.npmjs.org not-in-profile"].Count == 1 })
 
 	view := r.networkOf(op, "")

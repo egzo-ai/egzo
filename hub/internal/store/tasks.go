@@ -12,21 +12,21 @@ const (
 	TaskRunning     = "running"
 	TaskDone        = "done"
 	TaskFailed      = "failed"
-	TaskInterrupted = "interrupted" // it ran when the hub stopped
+	TaskInterrupted = "interrupted" // it ran when the hub stopped or the link dropped: nothing follows it any more
 )
 
-// Task is one action of the hub on an engine (a spawn, a start, a stop, a removal), from when it was asked for until it ended.
+// Task is one action of the hub on a project (a spawn, a start, a stop, a removal), from when it was asked for until it ended.
 type Task struct {
-	ID              string
-	Verb            string // spawn, start, stop or rm
-	Engine, Project string
-	Agent           string
-	Template        string // what a spawn makes the agent from
-	Actor           string // who asked (rbac.Actor)
-	State           string
-	Step            string // what it does now, or did last
-	Err             string // why it failed
-	Started, Ended  time.Time
+	ID             string
+	Verb           string // spawn, start, stop or rm
+	Project        string
+	Agent          string
+	Template       string // what a spawn makes the agent from
+	Actor          string // who asked (rbac.Actor)
+	State          string
+	Step           string // what it does now, or did last
+	Err            string // why it failed
+	Started, Ended time.Time
 	// Dismissed: somebody read the failure, and it is no longer shown on its agent.
 	Dismissed bool
 }
@@ -37,14 +37,14 @@ func (t Task) Over() bool { return t.State != TaskRunning }
 // ErrNoTask is returned for a task that does not exist.
 var ErrNoTask = errors.New("no such task")
 
-const taskColumns = `id, verb, engine, project, agent, template, actor, state, step, error, started_at, ended_at, dismissed`
+const taskColumns = `id, verb, project, agent, template, actor, state, step, error, started_at, ended_at, dismissed`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var started int64
 	var ended sql.NullInt64
 	var dismissed int
-	if err := row.Scan(&t.ID, &t.Verb, &t.Engine, &t.Project, &t.Agent, &t.Template, &t.Actor, &t.State, &t.Step, &t.Err, &started, &ended, &dismissed); err != nil {
+	if err := row.Scan(&t.ID, &t.Verb, &t.Project, &t.Agent, &t.Template, &t.Actor, &t.State, &t.Step, &t.Err, &started, &ended, &dismissed); err != nil {
 		return Task{}, err
 	}
 	t.Started, t.Dismissed = time.UnixMilli(started), dismissed == 1
@@ -82,8 +82,8 @@ func (s *Store) AddTask(ctx context.Context, t Task) (Task, error) {
 	if t.Started.IsZero() {
 		t.Started = time.Now()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks (`+taskColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
-		t.ID, t.Verb, t.Engine, t.Project, t.Agent, t.Template, t.Actor, t.State, t.Step, t.Err, t.Started.UnixMilli())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks (`+taskColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
+		t.ID, t.Verb, t.Project, t.Agent, t.Template, t.Actor, t.State, t.Step, t.Err, t.Started.UnixMilli())
 	return t, err
 }
 
@@ -134,11 +134,11 @@ func (s *Store) OpenTasks(ctx context.Context) ([]Task, error) {
 }
 
 // TasksOf lists the latest tasks of a project, or of one agent of it, newest first.
-func (s *Store) TasksOf(ctx context.Context, engine, project, agent string, limit int) ([]Task, error) {
+func (s *Store) TasksOf(ctx context.Context, project, agent string, limit int) ([]Task, error) {
 	if agent != "" {
-		return queryTasks(ctx, s.db, `WHERE engine = ? AND project = ? AND agent = ? ORDER BY started_at DESC, id DESC LIMIT ?`, engine, project, agent, limit)
+		return queryTasks(ctx, s.db, `WHERE project = ? AND agent = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`, project, agent, limit)
 	}
-	return queryTasks(ctx, s.db, `WHERE engine = ? AND project = ? ORDER BY started_at DESC, id DESC LIMIT ?`, engine, project, limit)
+	return queryTasks(ctx, s.db, `WHERE project = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`, project, limit)
 }
 
 // PurgeTasks removes the tasks that ended before, except a failure nobody dismissed.
