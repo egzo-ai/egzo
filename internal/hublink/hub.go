@@ -346,6 +346,65 @@ func (p *Peer) Spec(ctx context.Context) ([]byte, error) {
 	return spec, p.ask(ctx, Request{Verb: VerbSpec}, nil, &spec)
 }
 
+// DialPort connects to a port an agent exposed. As with a net.Dialer, ctx covers the dial and nothing after it: the connection lasts until it
+// is closed or the link goes.
+func (p *Peer) DialPort(ctx context.Context, agent string, port int) (net.Conn, error) {
+	stream, err := p.session.OpenStream()
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { stream.SetDeadline(time.Now()) }) // reads and writes on a stream know no context
+	lines := NewLines(stream)
+	failed := func(err error) (net.Conn, error) {
+		stop()
+		stream.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, err
+	}
+	if err := lines.Write(Request{Verb: VerbForward, Agent: agent, Port: port}); err != nil {
+		return failed(err)
+	}
+	for {
+		var reply Reply
+		if err := lines.Read(&reply); err != nil {
+			return failed(err)
+		}
+		if !reply.Done {
+			continue
+		}
+		if reply.Gone {
+			return failed(ErrNoProject{Name: p.Hello.Project})
+		}
+		if reply.Error != "" {
+			return failed(errors.New(reply.Error))
+		}
+		if !stop() {
+			return failed(context.Canceled)
+		}
+		return &portConn{Stream: stream, reader: lines.Rest()}, nil
+	}
+}
+
+// portConn is the stream of a forward: what was read past the reply comes first.
+type portConn struct {
+	*yamux.Stream
+	reader io.Reader
+}
+
+func (c *portConn) Read(b []byte) (int, error) { return c.reader.Read(b) }
+
+// CloseWrite ends what this side sends, and leaves the way back open: a stream's Close is a half close.
+func (c *portConn) CloseWrite() error { return c.Stream.Close() }
+
+// Close ends both ways here. The far side hears the end of its input, and goes by what the exposure's protocol says about that.
+func (c *portConn) Close() error {
+	err := c.Stream.Close()
+	c.Stream.SetDeadline(time.Now())
+	return err
+}
+
 // Attach connects a terminal to an agent's session until it ends or ctx is cancelled.
 func (p *Peer) Attach(ctx context.Context, agent string, term Terminal) error {
 	stream, lines, end, err := p.call(ctx, Request{Verb: VerbAttach, Agent: agent, Size: term.Size}, nil, nil)

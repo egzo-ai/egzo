@@ -26,7 +26,9 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
+	"github.com/egzo-ai/egzo/internal/portforward"
 	"github.com/egzo-ai/egzo/internal/seal"
+	"github.com/egzo-ai/egzo/internal/termsafe"
 	"github.com/egzo-ai/egzo/internal/version"
 )
 
@@ -69,6 +71,8 @@ type Link struct {
 	gone    chan struct{}      // closed when the hub has forgotten the project
 
 	template sync.Mutex // one template at a time goes to the control sidecar
+
+	exposed map[string]map[int]string // the protocol of what each agent exposes, as the latest status line says
 }
 
 // registering is one `egzo project register`. The code stays in memory, and only until the hub answers: it is never in a Status, a log
@@ -611,6 +615,14 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 		result, err = engine.Logs(ctx, project, request.Container, request.Tail)
 	case hublink.VerbSpec:
 		result, err = engine.Spec(ctx, project)
+	case hublink.VerbForward:
+		protocol, ok := l.exposure(request.Agent, request.Port)
+		if !ok {
+			err = fmt.Errorf("agent %q does not expose port %d", request.Agent, request.Port)
+			break
+		}
+		l.forward(ctx, stream, lines, request, protocol)
+		return
 	case hublink.VerbAttach:
 		if err = engine.Attachable(ctx, project, request.Agent); err == nil {
 			_ = lines.Write(hublink.Reply{Done: true})
@@ -643,6 +655,83 @@ func encodeResult(verb string, result any) (json.RawMessage, string) {
 		return nil, fmt.Sprintf("the answer to %s is %d bytes, over the %d a reply can carry", verb, len(encoded), maxResult)
 	}
 	return encoded, ""
+}
+
+// noteExposures keeps what the status feed says is exposed.
+func (l *Link) noteExposures(line StatusLine) {
+	exposed := make(map[string]map[int]string, len(line.Agents))
+	for _, a := range line.Agents {
+		for _, e := range a.Exposed {
+			if exposed[a.Agent] == nil {
+				exposed[a.Agent] = map[int]string{}
+			}
+			exposed[a.Agent][e.Port] = e.Protocol
+		}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.exposed = exposed
+}
+
+func (l *Link) exposure(agent string, port int) (string, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	protocol, ok := l.exposed[agent][port]
+	return protocol, ok
+}
+
+// forward is one connection to a port on the verb's stream. The reply waits for the command to say it reached the server, so that a port where
+// nothing listens is an answer: a server says nothing until it is spoken to, so a stream that ended could mean anything. The two ways out of the
+// command need not arrive in order, so a byte of the server's says the same. The protocol says what the end of the hub's side means: an HTTP
+// proxy never half closes, so it has left, and a tcp client may still be waiting for its answer.
+func (l *Link) forward(ctx context.Context, stream net.Conn, lines *hublink.Lines, request hublink.Request, protocol string) {
+	var answered sync.Once
+	connected := func() { answered.Do(func() { _ = lines.Write(hublink.Reply{Done: true}) }) }
+	said := &forwardWords{connected: connected}
+	out := firstByte{Writer: stream, connected: connected}
+	err := l.options.Engine.Forward(ctx, l.options.Project, request.Agent, request.Port, protocol == hublink.ProtocolHTTP, lines.Rest(), out, said)
+	answered.Do(func() {
+		reason := said.reason()
+		if reason == "" && err != nil {
+			reason = err.Error()
+		}
+		if reason == "" {
+			reason = "the forward ended before it reached the server"
+		}
+		_ = lines.Write(hublink.Reply{Done: true, Error: reason})
+	})
+}
+
+// firstByte writes what the server said, which proves it was reached.
+type firstByte struct {
+	io.Writer
+	connected func()
+}
+
+func (w firstByte) Write(data []byte) (int, error) {
+	w.connected()
+	return w.Writer.Write(data)
+}
+
+// forwardWords reads what the command says on stderr: that it connected, or the start of why it failed.
+type forwardWords struct {
+	connected func()
+	words     []byte
+}
+
+func (w *forwardWords) Write(data []byte) (int, error) {
+	if strings.HasPrefix(string(data), portforward.Connected) {
+		w.connected()
+		return len(data), nil
+	}
+	if room := 1024 - len(w.words); room > 0 {
+		w.words = append(w.words, data[:min(room, len(data))]...)
+	}
+	return len(data), nil
+}
+
+func (w *forwardWords) reason() string {
+	return termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(w.words))), 200)
 }
 
 // attach is a terminal on the verb's stream: raw output, and input frames from the hub.

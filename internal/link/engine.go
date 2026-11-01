@@ -23,6 +23,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/names"
+	"github.com/egzo-ai/egzo/internal/portforward"
 	"github.com/egzo-ai/egzo/internal/stack"
 )
 
@@ -373,6 +374,25 @@ func (d *Engine) Attach(ctx context.Context, project, agent string, term Termina
 		return fmt.Errorf("attach ended with code %d", code)
 	}
 	return nil
+}
+
+// Forward runs `egzo agent forward` in the agent's container for one connection. It finds the container with one question to the engine: it
+// runs for every connection a browser opens, so stack.Observe, a round trip per container, is too much.
+func (d *Engine) Forward(ctx context.Context, project, agent string, port int, closeOnEOF bool, in io.Reader, out, said io.Writer) error {
+	list, err := d.client.API.ContainerList(ctx, container.ListOptions{Filters: filters.NewArgs(
+		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindAgent),
+		filters.Arg("label", engine.LabelInstance+"="+agent), filters.Arg("status", "running"))})
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		return fmt.Errorf("agent %q is not running", agent)
+	}
+	code, err := d.client.ExecStream(ctx, list[0].ID, portforward.AnnouncedCommand(port, closeOnEOF), engine.Stream{In: in, Out: out, Err: said}, nil)
+	if err == nil && code != 0 {
+		return fmt.Errorf("the forward ended with code %d", code)
+	}
+	return err
 }
 
 // noisy are the event types that are not worth a person's time, or that carry message texts, which the hub does not show.

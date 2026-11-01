@@ -94,3 +94,36 @@ func TestTheAddressOfTheLinksIsTheAddressOfTheHubUnlessItHasItsOwn(t *testing.T)
 		}
 	}
 }
+
+func TestPreviews(t *testing.T) {
+	read := func(public, domain string) (Config, error) {
+		return Parse(func(name string) string {
+			return map[string]string{"EGZO_PUBLIC_URL": public, "EGZO_LINK_URL": "https://hub.example.com", "EGZO_PREVIEW_DOMAIN": domain}[name]
+		})
+	}
+	for _, good := range [][2]string{
+		{"https://hub.example.com", "egzo-preview.example.net"},
+		{"https://hub.example.com", "preview.example.com"}, // a sibling works over https: the hub's cookies are __Host-
+		{"http://localhost:18080", "preview.test:18081"},
+		{"http://hub.example.com", "egzo-preview.example.net"},
+		{"https://hub.example.com", ""},
+	} {
+		if c, err := read(good[0], good[1]); err != nil {
+			t.Errorf("%v: %v", good, err)
+		} else if good[1] != "" && c.PreviewListen != ":8081" {
+			t.Errorf("%v: listens on %q", good, c.PreviewListen)
+		}
+	}
+	for _, bad := range [][2]string{
+		{"http://hub.example.com", "preview.example.com"},
+		{"https://hub.example.com", "hub.example.com"},
+		{"https://preview.hub.example.com", "hub.example.com"},
+		{"", "egzo-preview.example.net"},
+		{"https://hub.example.com", "https://example.net"},
+		{"https://hub.example.com", "%s.example.net"},
+	} {
+		if _, err := read(bad[0], bad[1]); err == nil {
+			t.Errorf("%v was taken", bad)
+		}
+	}
+}

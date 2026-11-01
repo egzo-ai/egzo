@@ -86,6 +86,17 @@ func (r *Resolver) Base(req *http.Request) string {
 	return scheme + "://" + host
 }
 
+// Host is the host a request was for: X-Forwarded-Host from a configured proxy, or the request's own. What serves many hosts needs it,
+// and Base answers with the address of the hub.
+func (r *Resolver) Host(req *http.Request) string {
+	if r.trusted(req.RemoteAddr) {
+		if v := first(req.Header.Get("X-Forwarded-Host")); validHost(v) {
+			return v
+		}
+	}
+	return req.Host
+}
+
 // ClientIP is the address a request came from. Behind a configured proxy it is the last address in X-Forwarded-For that is not one of the
 // proxies: what is to the left of that was written by the client, who can write anything. Without a proxy the header is ignored.
 func (r *Resolver) ClientIP(req *http.Request) netip.Addr {
