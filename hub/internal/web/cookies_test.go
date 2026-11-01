@@ -101,7 +101,7 @@ func TestAPlantedLoginCookieDoesNotFinishASignIn(t *testing.T) {
 	login := r.send("GET", "/login/start", "").Cookies()[0]
 	planted := &http.Cookie{Name: "egzo_login", Value: login.Value}
 	resp := r.send("GET", "/auth/callback?state=x", "", planted)
-	if location := resp.Header.Get("Location"); !strings.Contains(location, "did+not+start+here") {
+	if location := resp.Header.Get("Location"); !strings.Contains(location, "error=not_started") {
 		t.Errorf("the callback took a planted login cookie: %s", location)
 	}
 }

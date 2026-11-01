@@ -2,12 +2,13 @@
   import { api } from "../lib/api";
   import { errorText, signedIn } from "../lib/app.svelte";
   import { nav } from "../lib/router.svelte";
+  import { failureText } from "../lib/signin";
   import type { SignInOptions } from "../lib/types";
   import Logo from "../components/Logo.svelte";
 
   const params = $derived(new URLSearchParams(nav.path.split("?")[1] ?? ""));
   const next = $derived(params.get("next") ?? "/");
-  const error = $derived(params.get("error"));
+  const error = $derived(failureText(params.get("error")));
 
   let options = $state<SignInOptions | null>(null);
   let username = $state("admin");

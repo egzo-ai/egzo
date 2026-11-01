@@ -2,12 +2,13 @@
   import { app, seesLinks } from "../lib/app.svelte";
   import { ago, stamp } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
+  import { inviteFailedText } from "../lib/signin";
   import Icon from "../components/Icon.svelte";
 
   let text = $state("");
 
   // the sign-in worked, and the invite it came with did not
-  const inviteFailed = $derived(new URLSearchParams(nav.path.split("?")[1] ?? "").get("invite"));
+  const inviteFailed = $derived(new URLSearchParams(nav.path.split("?")[1] ?? "").has("invite"));
   const ownerless = $derived(app.projects.filter((p) => p.ownerless));
 
   const rows = $derived(
@@ -32,7 +33,7 @@
     {/if}
   </div>
 
-  {#if inviteFailed}<div class="banner" role="alert"><span class="tag">✕ Invite</span><div class="body">{inviteFailed}</div></div>{/if}
+  {#if inviteFailed}<div class="banner" role="alert"><span class="tag">✕ Invite</span><div class="body">{inviteFailedText}</div></div>{/if}
   {#if ownerless.length}
     <div class="banner" data-tone="warn" role="status" data-testid="ownerless"><span class="tag">! No owner</span>
       <div class="body">{ownerless.map((p) => p.name).join(", ")} {ownerless.length === 1 ? "has" : "have"} nobody who can sign in as owner. Give {ownerless.length === 1 ? "it" : "them"} one on the Members tab, or revoke under <a href={href.links()}>Links</a>.</div></div>
