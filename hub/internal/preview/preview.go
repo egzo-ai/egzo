@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -233,16 +232,9 @@ func (s *Server) rewrite(pr *httputil.ProxyRequest) {
 	s.gate.StripRequest(pr.Out.Header)
 }
 
-// answered puts back what the rewrite took: an app that redirects to the name it was given means itself.
+// answered leaves the app's answer as it is, but for the gate's traces: an app knows its address from X-Forwarded-Host, or from what it was told.
 func (s *Server) answered(response *http.Response) error {
-	target := response.Request.Context().Value(requestTarget{}).(routed)
 	s.gate.StripResponse(response.Header)
-	if location := response.Header.Get("Location"); location != "" {
-		if u, err := url.Parse(location); err == nil && (u.Host == "localhost:"+strconv.Itoa(target.Port) || u.Host == "127.0.0.1:"+strconv.Itoa(target.Port)) {
-			u.Scheme, u.Host = s.opts.Scheme, target.host
-			response.Header.Set("Location", u.String())
-		}
-	}
 	return nil
 }
 
