@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 // An exposure is an agent saying that it serves something on a port of its own loopback, and that a person may open it. Nothing is checked:
@@ -40,9 +41,6 @@ const (
 	ProtocolTCP  = "tcp"
 	// previewTemplateFile keeps the address template the hub gave the project's link.
 	previewTemplateFile = "preview-template"
-	maxPreviewTemplate  = 256
-	// previewPlaceholder is where an exposure's id goes in a template.
-	previewPlaceholder = "%s"
 )
 
 // Exposure is one exposed port. ID is the same every time this agent exposes this port. Address and Command are not stored: they are what
@@ -263,7 +261,7 @@ func (s *server) forgetExposures(agent string) error {
 // machine that holds the engine.
 func (s *server) addressed(agent string, e Exposure, template string) Exposure {
 	if template != "" && e.Protocol == ProtocolHTTP {
-		e.Address = strings.Replace(template, previewPlaceholder, e.ID, 1)
+		e.Address = strings.Replace(template, hublink.PreviewPlaceholder, e.ID, 1)
 		return e
 	}
 	e.Command = fmt.Sprintf("egzo agent port-forward %s %d", agent, e.Port)
@@ -292,26 +290,16 @@ func (s *server) previewTemplate() string {
 	return string(data)
 }
 
-// validPreviewTemplate takes a base address with one place for an id, in the host name: every preview is an origin of its own.
-func validPreviewTemplate(template string) bool {
-	if len(template) > maxPreviewTemplate || strings.Count(template, "%") != 1 || strings.Count(template, previewPlaceholder) != 1 {
-		return false
-	}
-	const id = "exposureid"
-	u, err := url.Parse(strings.Replace(template, previewPlaceholder, id, 1))
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && strings.Contains(u.Hostname(), id) && u.User == nil
-}
-
 // putPreviewTemplate is the link handing on what the hub said: an empty body clears it. It is kept on the volume, so a sidecar that is made
 // again knows it before the link says so again.
 func (s *server) putPreviewTemplate(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPreviewTemplate+1))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, hublink.MaxPreviewTemplate+1))
 	if err != nil {
 		http.Error(w, "the address template is too long", http.StatusRequestEntityTooLarge)
 		return
 	}
 	template := strings.TrimSpace(string(body))
-	if template != "" && !validPreviewTemplate(template) {
+	if template != "" && !hublink.ValidPreviewTemplate(template) {
 		http.Error(w, "the address template is not an address with one %s", http.StatusBadRequest)
 		return
 	}

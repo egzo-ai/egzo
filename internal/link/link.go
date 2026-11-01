@@ -452,6 +452,7 @@ func (l *Link) hello(ctx context.Context, key ed25519.PrivateKey) hublink.Hello 
 // handTemplate tells the control sidecar what the hub says a preview's address is, or that it serves none, for as long as it takes: a sidecar
 // being made again is an ordinary moment, and a verdict is not held up for it. A newer verdict replaces what is being handed on.
 func (l *Link) handTemplate(ctx context.Context, template string) {
+	template = usableTemplate(template)
 	ctx, cancel := context.WithCancel(ctx)
 	l.mu.Lock()
 	if l.handing != nil {
@@ -476,6 +477,16 @@ func (l *Link) handTemplate(ctx context.Context, template string) {
 			}
 		}
 	}()
+}
+
+// usableTemplate is what to hand on of what the hub said. A template the control sidecar would refuse is no template: trying again would
+// never end, and an older one would go on being given out.
+func usableTemplate(template string) string {
+	if template != "" && !hublink.ValidPreviewTemplate(template) {
+		fmt.Fprintf(os.Stderr, "the hub's preview address is not an address with one %s in its host name: %q\n", hublink.PreviewPlaceholder, template)
+		return ""
+	}
+	return template
 }
 
 func (l *Link) record(v hublink.Verdict) {

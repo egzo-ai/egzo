@@ -77,3 +77,16 @@ func TestAStatusLineCarriesTheExposures(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 }
+
+func TestATemplateTheSidecarWouldRefuseIsNoTemplate(t *testing.T) {
+	for template, want := range map[string]string{
+		"":                       "",
+		"https://%s.example.net": "https://%s.example.net",
+		"https://example.net/%s": "",
+		"nonsense":               "",
+	} {
+		if got := usableTemplate(template); got != want {
+			t.Errorf("%q: %q", template, got)
+		}
+	}
+}
