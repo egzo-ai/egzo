@@ -4,7 +4,9 @@
 package control
 
 import (
+	"bytes"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -79,8 +81,31 @@ func TestAnAgentThatIsNotRegisteredLosesItsExposuresToo(t *testing.T) {
 	if gone.Code != http.StatusNoContent {
 		t.Fatalf("%d %s", gone.Code, gone.Body)
 	}
-	if list := s.readExposures("web"); len(list) != 0 {
-		t.Errorf("left behind: %+v", list)
+	if list, err := s.readExposures("web"); err != nil || len(list) != 0 {
+		t.Errorf("left behind: %+v, %v", list, err)
+	}
+}
+
+func TestAListThatCannotBeReadIsNotReplaced(t *testing.T) {
+	s := exposing(t)
+	if _, err := s.expose("web", 3000, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	damaged := []byte(`[{"port":3000`)
+	if err := os.WriteFile(s.exposuresFile("web"), damaged, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.expose("web", 3001, "", ""); err == nil {
+		t.Error("expose answered as if nothing was exposed")
+	}
+	if err := s.unexpose("web", 3000); err == nil {
+		t.Error("unexpose answered as if nothing was exposed")
+	}
+	if got, err := os.ReadFile(s.exposuresFile("web")); err != nil || !bytes.Equal(got, damaged) {
+		t.Errorf("the list was replaced: %q, %v", got, err)
+	}
+	if list := s.exposedBy("web", ""); len(list) != 0 {
+		t.Errorf("%+v", list)
 	}
 }
 
