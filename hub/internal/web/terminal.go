@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -29,6 +30,12 @@ type control struct {
 // terminal bridges a browser's xterm.js to an agent's session: binary frames are the terminal's bytes in both directions, text
 // frames are control messages.
 func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.User) {
+	// Attaching takes the seat and may end somebody's terminal, so it comes after this. A GET is not held to sameOrigin, and a link followed
+	// from another site brings the cookie: only a WebSocket from the hub's own pages says who it comes from.
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || r.Header.Get("Origin") != s.urls.Base(r) {
+		s.apiFail(w, http.StatusForbidden, "forbidden", "Cross-site request refused.")
+		return
+	}
 	project, agent := r.PathValue("project"), r.PathValue("agent")
 	att, err := s.hub.Attach(r.Context(), user, project, agent, r.URL.Query().Get("takeover") == "1")
 	var inUse *hub.InUseError

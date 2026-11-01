@@ -596,6 +596,42 @@ func TestTheTerminalRefusesWhatTheAPIRefuses(t *testing.T) {
 	}
 }
 
+func TestALinkFollowedFromAnotherSiteTakesNoTerminal(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
+	holder := r.browser()
+	holder.signIn("admin")
+	path := "/p/" + r.id("web") + "/a/coder-1/terminal"
+	term, err := holder.dial(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.CloseNow()
+	term.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":80,"rows":24}`))
+	readUntil(t, term, "attached to web/coder-1")
+
+	// what a browser sends for a top-level link: the cookie, no Origin, no Upgrade
+	if code, _ := holder.get(path + "?takeover=1"); code != 403 {
+		t.Errorf("a plain GET of the terminal = %d", code)
+	}
+	if _, v := holder.get("/p/" + r.id("web") + "/a/coder-1"); at(v, "agent", "holder") != "admin" {
+		t.Errorf("the seat changed: %v", v)
+	}
+	term.Write(ctx, websocket.MessageBinary, []byte("still here\r"))
+	readUntil(t, term, "you said: still here")
+	_, audit := holder.get("/p/" + r.id("web") + "/audit")
+	attached := 0
+	for _, e := range list(audit, "entries") {
+		if e["action"] == "agent.attach" {
+			attached++
+		}
+	}
+	if attached != 1 {
+		t.Errorf("the plain GET was audited as an attach: %v", audit)
+	}
+}
+
 func TestSpecAndLogsAreReadOnlyText(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")
