@@ -9,6 +9,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/distribution/reference v0.6.0
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/docker/go-connections v0.8.1
 	github.com/docker/go-units v0.5.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/moby/patternmatcher v0.6.1
@@ -26,7 +27,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.2.0 // indirect
-	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

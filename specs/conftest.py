@@ -337,16 +337,21 @@ class Engine:
         return tag
 
     def forward_image(self, binary):
-        """The session image with python3 and a server (fixtures/forward-server.py) to reach through `agent port-forward`."""
+        """The session image with python3 and the servers of the specs: fixtures/forward-server.py (loopback, for the hub's forward verb) and fixtures/local-server.py (0.0.0.0, for local ports)."""
         script = Path(__file__).parent / "fixtures" / "forward-server.py"
+        local = Path(__file__).parent / "fixtures" / "local-server.py"
         base = self.session_image(binary)
-        dockerfile = f"FROM {base}\nRUN apk add --no-cache python3\nCOPY forward-server /usr/local/bin/forward-server\nRUN chmod +x /usr/local/bin/forward-server\n"
-        digest = hashlib.sha256(script.read_bytes() + dockerfile.encode()).hexdigest()[:12]
+        dockerfile = (
+            f"FROM {base}\nRUN apk add --no-cache python3\nCOPY forward-server /usr/local/bin/forward-server\nCOPY local-server /usr/local/bin/local-server\n"
+            "RUN chmod +x /usr/local/bin/forward-server /usr/local/bin/local-server\n"
+        )
+        digest = hashlib.sha256(script.read_bytes() + local.read_bytes() + dockerfile.encode()).hexdigest()[:12]
         tag = f"egzo-spec-forward:{digest}"
         if self.run("image", "inspect", tag).returncode == 0:
             return tag
         with tempfile.TemporaryDirectory() as context:
             shutil.copy(script, Path(context) / "forward-server")
+            shutil.copy(local, Path(context) / "local-server")
             (Path(context) / "Dockerfile").write_text(dockerfile)
             built = self.run("build", "-t", tag, context)
         assert built.returncode == 0, f"could not build the forward image with {self.cli}:\n{built.stderr}"

@@ -18,6 +18,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/distribution/reference"
+	"github.com/docker/go-connections/nat"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -159,6 +160,15 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		}
 		host.Mounts = append(host.Mounts, mount.Mount{Type: kind, Source: m.Source, Target: m.Target, ReadOnly: m.ReadOnly})
 	}
+	if len(spec.Publish) > 0 {
+		config.ExposedPorts = nat.PortSet{}
+		host.PortBindings = nat.PortMap{}
+		for _, p := range spec.Publish {
+			port := nat.Port(fmt.Sprintf("%d/%s", p.Port, p.Protocol))
+			config.ExposedPorts[port] = struct{}{}
+			host.PortBindings[port] = append(host.PortBindings[port], nat.PortBinding{HostIP: p.HostIP, HostPort: fmt.Sprint(p.HostPort)})
+		}
+	}
 	networking := &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{spec.Network: {}}}
 
 	created, err := c.API.ContainerCreate(ctx, config, host, networking, nil, spec.Name)
@@ -174,6 +184,12 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 	if err := chownVolumes(ctx, c, prepImage, spec.User, spec.OwnedVolumes, spec.Identity); err != nil {
 		c.API.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true})
 		return "", err
+	}
+	if spec.ExtraNetwork != "" {
+		if err := c.API.NetworkConnect(ctx, spec.ExtraNetwork, created.ID, &network.EndpointSettings{}); err != nil {
+			c.API.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true})
+			return "", err
+		}
 	}
 	if err := c.API.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return created.ID, err

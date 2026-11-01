@@ -156,6 +156,15 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 			}
 			return full.Containers[0], nil
 		},
+		relay: func(tokens map[string]string, input RelayInput) (ContainerSpec, error) {
+			inputs := published.inputs(instances, tokens, nil)
+			inputs.Relay = map[string]RelayInput{name: input}
+			full, err := DesireInstance(view, dir, inputs, name, identity)
+			if err != nil {
+				return ContainerSpec{}, err
+			}
+			return full.Containers[1], nil
+		},
 	}
 	if err := spawnSteps(ctx, c, plan, &undo, out); err != nil {
 		cleanup := context.WithoutCancel(ctx)
@@ -186,6 +195,8 @@ type spawnPlan struct {
 	homeExisted        bool
 	// localAddresses maps a port name to the address people use on the local machine, for an instance that has a relay.
 	localAddresses map[string]string
+	// relay builds the instance's relay, for the host ports chosen; it is only called for an instance that has one.
+	relay func(tokens map[string]string, input RelayInput) (ContainerSpec, error)
 	// container builds the container once the instance's token is known.
 	container func(tokens map[string]string) (ContainerSpec, error)
 }
@@ -199,6 +210,11 @@ func (u *undoStack) run(ctx context.Context) {
 	for i := len(u.steps) - 1; i >= 0; i-- {
 		u.steps[i](ctx)
 	}
+}
+
+// hasRelay says whether an instance gets a relay: it declares ports, and the project has local ports.
+func hasRelay(view *config.Resolved, name string) bool {
+	return view.LocalPorts != nil && len(view.Agents[name].Ports) > 0
 }
 
 func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoStack, out io.Writer) error {
@@ -247,6 +263,15 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 		return err
 	}
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
+	// The relay comes before the agent: it holds the host ports, and an agent whose ports could not be published is not worth starting. It
+	// only needs the agent's network and a name to dial, and the agent is not up yet when the first connection comes.
+	if hasRelay(p.view, p.name) {
+		addresses, err := startRelay(ctx, c, p, tokens, undo, out)
+		if err != nil {
+			return err
+		}
+		p.localAddresses = addresses
+	}
 	if err := putControlPorts(ctx, c, p.project, p.name, p.view.Agents[p.name].Ports, p.localAddresses); err != nil {
 		return err
 	}
@@ -324,13 +349,15 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 	}()
 	control, proxy := observed.find("container", project+"-control-1"), observed.find("container", project+"-proxy-1")
 	for _, name := range names {
-		var container, network *Resource
+		var container, relay, network *Resource
 		var volumes []*Resource
 		for i := range observed.Resources {
 			r := &observed.Resources[i]
 			switch {
 			case r.Type == "container" && r.Instance == name && r.Kind == kindAgent:
 				container = r
+			case r.Type == "container" && r.Instance == name && r.Kind == kindRelay:
+				relay = r
 			case r.Type == "network" && r.Instance == name:
 				network = r
 			case r.Type == "volume" && r.Instance == name:
@@ -343,6 +370,12 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 			fmt.Fprintf(out, "remove container %s\n", container.Name)
 			if err := run(ctx, c, Desired{}, Action{Verb: "remove", Type: "container", Name: container.Name, ID: container.ID}); err != nil {
 				return removed, fmt.Errorf("remove container %s: %w", container.Name, err)
+			}
+		}
+		if relay != nil {
+			fmt.Fprintf(out, "remove container %s\n", relay.Name)
+			if err := run(ctx, c, Desired{}, Action{Verb: "remove", Type: "container", Name: relay.Name, ID: relay.ID}); err != nil {
+				return removed, fmt.Errorf("remove container %s: %w", relay.Name, err)
 			}
 		}
 		if proxy != nil && proxy.State == "running" {

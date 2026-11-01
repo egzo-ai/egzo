@@ -42,6 +42,10 @@ const (
 	kindProxy   = "proxy"
 	kindLink    = "link"
 	kindAgent   = "agent"
+	kindRelay   = "relay"
+
+	// localPortsService names the project's network for local ports: the relays of its instances share it, so a project uses one address pool.
+	localPortsService = "local-ports"
 )
 
 type NetworkSpec struct {
@@ -86,11 +90,24 @@ type ContainerSpec struct {
 	// swap does not double it.
 	PidsLimit  int64
 	MemorySwap int64
+	// Publish lists the ports published on the host. Each needs its exact host port: an engine given a range would choose again at each start.
+	Publish []PublishedPort `json:",omitempty"`
+	// ExtraNetwork is a second network the container joins before it starts. The first network is the one that decides where published
+	// ports are reached: an internal network there loses them without a word.
+	ExtraNetwork string `json:",omitempty"`
 	// Agents run under an init process that reaps children and forwards signals.
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
 	ReadonlyRootfs bool
 	Identity       engine.Identity `json:"-"`
+}
+
+// PublishedPort is a port of the container published on a host address.
+type PublishedPort struct {
+	Port     int
+	Protocol string // tcp or udp
+	HostIP   string
+	HostPort int
 }
 
 // Attachment joins a sidecar to agent networks under an alias. It is not part of the sidecar's
@@ -114,6 +131,13 @@ type Desired struct {
 	PrepImage string
 }
 
+// RelayInput is what is decided when an instance is spawned: the host port of each declared port, and the subnets of the network the
+// relay is reached through.
+type RelayInput struct {
+	Outside map[string]int
+	Subnets []string
+}
+
 // Inputs are what Desire needs besides the resolved project.
 type Inputs struct {
 	// LinkSocket is the engine's socket, for the link of a project that names a hub.
@@ -133,6 +157,8 @@ type Inputs struct {
 	Instances []string
 	// Placeholders maps each instance to the variables it gets and their placeholder texts (not secrets).
 	Placeholders map[string]map[string]string
+	// Relay maps an instance to what its relay needs besides its template; an instance without an entry has no relay.
+	Relay map[string]RelayInput
 	// SignIns maps each instance to the variables that carry the stand-ins of its sign-ins (not secrets: they only work
 	// through the proxy), for the harness to write where its client keeps its tokens.
 	SignIns map[string]map[string]string
@@ -263,6 +289,11 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		desired.Attachments = append(desired.Attachments, Attachment{Container: proxy.Name, Alias: "proxy", Networks: instanceNetworks})
 	}
 
+	if project.LocalPorts != nil {
+		// not internal: the relays of the project's instances are reached from the machine through it
+		networks = append(networks, NetworkSpec{Name: LocalPortsNetwork(project.Name), Identity: identity(localPortsService, kindRelay)})
+	}
+
 	if project.Hub != nil {
 		network, volume, link, err := desireLink(project, in, identity(linkService, kindLink))
 		if err != nil {
@@ -284,6 +315,12 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 	desired.Networks, desired.Volumes, desired.Containers = networks, volumes, containers
 	return desired, nil
 }
+
+// LocalPortsNetwork is the network the relays of a project share.
+func LocalPortsNetwork(project string) string { return project + "_local_ports" }
+
+// RelayContainer is the name of an instance's relay.
+func RelayContainer(project, instance string) string { return project + "-" + instance + "-relay-1" }
 
 // InstanceContainer is the name of an instance's container.
 func InstanceContainer(project, instance string) string { return project + "-" + instance }
@@ -328,6 +365,12 @@ func DesireInstance(view *config.Resolved, dir string, in Inputs, name string, f
 	}
 	desired.Networks = []NetworkSpec{network}
 	desired.Containers = []ContainerSpec{spec}
+	if relay, ok := in.Relay[name]; ok {
+		if view.LocalPorts == nil {
+			return desired, fmt.Errorf("instance %q has a relay but the project has no local ports", name)
+		}
+		desired.Containers = append(desired.Containers, relayContainer(view, name, agent, network.Name, in, relay, own(kindRelay)))
+	}
 	if hasHome(agent) {
 		desired.Volumes = []VolumeSpec{{Name: homeVolume(view.Name, name), Identity: identity(kindAgent)}}
 	}
@@ -346,6 +389,63 @@ func DesireInstance(view *config.Resolved, dir string, in Inputs, name string, f
 		desired.Containers[i].Identity.ConfigHash = hash(desired.Containers[i])
 	}
 	return desired, nil
+}
+
+const (
+	relayMemory = 64 << 20
+	relayPids   = 64
+)
+
+// relayContainer is the relay of an instance. It holds the instance's own token, which it shows to the control sidecar to ask what is open,
+// and no secret of the project, no engine socket and no volume. It is first on the project's network for local ports, where the published
+// ports are reached, and joins the agent's network before it starts.
+func relayContainer(
+	project *config.Resolved, name string, agent config.ResolvedAgent, instanceNetwork string, in Inputs, relay RelayInput, identity engine.Identity,
+) ContainerSpec {
+	var ports []relayPort
+	var published []PublishedPort
+	for _, portName := range sortedKeys(agent.Ports) {
+		port := agent.Ports[portName]
+		ports = append(ports, relayPort{Name: portName, Port: port.Port, Protocol: port.Protocol})
+		protocol := port.Protocol
+		if protocol == config.ProtocolHTTP {
+			protocol = config.ProtocolTCP
+		}
+		published = append(published, PublishedPort{Port: port.Port, Protocol: protocol, HostIP: project.LocalPorts.Bind, HostPort: relay.Outside[portName]})
+	}
+	encoded, _ := json.Marshal(ports)
+	env := []string{
+		"EGZO_PROJECT=" + project.Name,
+		"EGZO_AGENT=" + name,
+		"EGZO_CONTROL_URL=http://control:7777",
+		"EGZO_TOKEN=" + in.Tokens[name],
+		"EGZO_RELAY_TARGET=" + InstanceContainer(project.Name, name),
+		"EGZO_RELAY_PORTS=" + string(encoded),
+		"EGZO_RELAY_SUBNETS=" + strings.Join(relay.Subnets, ","),
+	}
+	return ContainerSpec{
+		Name:           RelayContainer(project.Name, name),
+		Image:          in.Image,
+		Cmd:            []string{"/egzo", "relay"},
+		User:           sidecarUser,
+		Env:            env,
+		Memory:         relayMemory,
+		MemorySwap:     relayMemory,
+		PidsLimit:      relayPids,
+		Restart:        "unless-stopped",
+		Network:        LocalPortsNetwork(project.Name),
+		ExtraNetwork:   instanceNetwork,
+		Publish:        published,
+		ReadonlyRootfs: true,
+		Identity:       identity,
+	}
+}
+
+// relayPort is a declared port as the relay reads it (see relay.Port).
+type relayPort struct {
+	Name     string `json:"name"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
 }
 
 // homeDir is where a harness image keeps its home. It is a volume, so the harness's own state, such
