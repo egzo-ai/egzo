@@ -264,7 +264,7 @@ func (h *Hub) Project(ctx context.Context, user store.User, id string) (ProjectV
 		if a.ID != "" && (role.AtLeast(rbac.Admin) || av.CanOperate) {
 			av.Denied = denied[a.ID]
 		}
-		av.Previews = h.previewsOf(id, a.Name, rbac.Can(user.Subject(), role, rbac.Preview, ""))
+		av.Previews = h.previewsOf(id, a.Name)
 		view.Agents = append(view.Agents, av)
 	}
 	view.Agents = h.withTasks(user, role, id, view.Agents)

@@ -72,10 +72,10 @@ type PreviewView struct {
 	Name, Protocol, Where, Address string
 }
 
-// previewsOf lists what an agent has open, by port. They are the project's to know: an operator who holds no role sees that they exist. The
-// address of a preview asks them for a role when they open it. The address of a local port has no sign-in behind it, so it goes to those who may
-// open a preview: maySee.
-func (h *Hub) previewsOf(project, agent string, maySee bool) []PreviewView {
+// previewsOf lists what an agent has open, by port. They are the project's to know, addresses included: an operator who holds no role sees them,
+// and a preview asks them for a role when they open it. A local port's address is shown to all of them too. Hiding it would protect nothing, as the
+// port is open to whoever reaches it either way, and it would hide from the people overseeing a project what it has opened.
+func (h *Hub) previewsOf(project, agent string) []PreviewView {
 	template := h.previewTemplate(project)
 	h.feeds.mu.Lock()
 	defer h.feeds.mu.Unlock()
@@ -96,11 +96,7 @@ func (h *Hub) previewsOf(project, agent string, maySee bool) []PreviewView {
 			if e.Where != hublink.WhereLocal {
 				continue
 			}
-			view := PreviewView{Port: e.Port, Name: e.Name, Protocol: e.Protocol, Where: e.Where}
-			if maySee {
-				view.Address = e.Address
-			}
-			views = append(views, view)
+			views = append(views, PreviewView{Port: e.Port, Name: e.Name, Protocol: e.Protocol, Where: e.Where, Address: e.Address})
 		}
 	}
 	sort.Slice(views, func(i, j int) bool {

@@ -270,8 +270,7 @@ func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 		Denied: a.Denied, Previews: previewsOf(a.Previews), Task: taskViewOf(a.Task, n)}
 }
 
-// previewJSON is a port an agent has open. Where says what Address is: `hub`, a preview to open, or `local`, a port on the project's machine. It
-// is empty for a person with no role on the project.
+// previewJSON is a port an agent has open. Where says what Address is: `hub`, a preview to open, or `local`, a port on the project's machine.
 type previewJSON struct {
 	Port     int    `json:"port"`
 	Name     string `json:"name"`

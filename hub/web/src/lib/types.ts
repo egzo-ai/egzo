@@ -117,7 +117,6 @@ export interface Preview {
   protocol: string;
   /** `hub`: a preview to open. `local`: a port on the project's machine, to copy. */
   where: string;
-  /** Empty for a person with no role on the project. */
   address: string;
 }
 
