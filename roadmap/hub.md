@@ -144,7 +144,8 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   [messaging-adapters.md](messaging-adapters.md).
 - **Roles and invites, and previews over the link**: see [hub-link.md](hub-link.md), "Order of work".
 - **Previews of an agent's dev server** (one origin per preview on a domain of its own), and the
-  `__Host-` session cookie they need first: see [agent-ports.md](agent-ports.md).
+  `__Host-` session cookie they need first: see [agent-ports.md](agent-ports.md). An agent opens a declared port for the hub with
+  `expose(name, "hub")`; see [declared-local-ports.md](declared-local-ports.md).
 - **Discovery, the rest** (a Refresh button, showing how fresh a listing is): see [discovery.md](discovery.md).
 - **The timelines without a command in the sidecar.** The status is streamed, but the project and agent timelines, the spec and the
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
