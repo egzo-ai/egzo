@@ -899,6 +899,16 @@ func (s *Store) SessionUser(ctx context.Context, token string) (User, error) {
 		WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled_at IS NULL`, HashToken(token), time.Now().Unix()))
 }
 
+// SessionExpires says when a live session ends.
+func (s *Store) SessionExpires(ctx context.Context, token string) (time.Time, error) {
+	var at int64
+	err := s.db.QueryRowContext(ctx, `SELECT expires_at FROM sessions WHERE token_hash = ? AND expires_at > ?`, HashToken(token), time.Now().Unix()).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	return time.Unix(at, 0), err
+}
+
 func (s *Store) EndSession(ctx context.Context, token string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, HashToken(token))
 	return err

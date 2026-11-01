@@ -204,6 +204,54 @@ func TestSigningOutClosesTheTerminalsOfThatSession(t *testing.T) {
 	closed(t, term)
 }
 
+func TestLosingTheRoleClosesTheTerminalAndSaysWhy(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
+	owner := r.browser()
+	owner.signIn("admin")
+	bob := r.browser()
+	bob.signIn("bob")
+	r.store.SetRole(ctx, r.id("web"), r.userID("bob"), rbac.Admin)
+	term, err := bob.dial("/p/" + r.id("web") + "/a/coder-1/terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.CloseNow()
+	term.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":80,"rows":24}`))
+	readUntil(t, term, "attached to web/coder-1")
+
+	if code, out := owner.post("/p/"+r.id("web")+"/members", json_{"user": r.userID("bob"), "role": "none"}); code != 200 {
+		t.Fatalf("remove = %d %v", code, out)
+	}
+	if m := readControl(t, term); m["type"] != "error" || !strings.Contains(m["message"].(string), "no longer yours") {
+		t.Errorf("the terminal said %v", m)
+	}
+	closed(t, term)
+}
+
+func TestATerminalEndsWithItsSession(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
+	b := r.browser()
+	b.signIn("admin")
+	token, err := r.store.NewSession(ctx, r.userID("admin"), store.MethodPassword, "", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(b.base)
+	b.client.Jar.SetCookies(u, []*http.Cookie{{Name: "egzo_session", Value: token, Path: "/"}})
+	term, err := b.dial("/p/" + r.id("web") + "/a/coder-1/terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.CloseNow()
+	term.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","cols":80,"rows":24}`))
+	readUntil(t, term, "attached to web/coder-1")
+	closed(t, term)
+}
+
 // closed waits for the hub to close a terminal.
 func closed(t *testing.T, conn *websocket.Conn) {
 	t.Helper()

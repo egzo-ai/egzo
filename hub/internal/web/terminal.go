@@ -36,6 +36,16 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 		s.apiFail(w, http.StatusForbidden, "forbidden", "Cross-site request refused.")
 		return
 	}
+	// a terminal is not a request that ends when it has been answered: it ends with the session, like everything the session gave
+	cookie, err := s.readCookie(r, sessionCookie)
+	var expires time.Time
+	if err == nil {
+		expires, err = s.hub.Store().SessionExpires(r.Context(), cookie.Value)
+	}
+	if err != nil {
+		s.apiFail(w, http.StatusUnauthorized, "unauthorized", "Sign in again.")
+		return
+	}
 	project, agent := r.PathValue("project"), r.PathValue("agent")
 	att, err := s.hub.Attach(r.Context(), user, project, agent, r.URL.Query().Get("takeover") == "1")
 	var inUse *hub.InUseError
@@ -53,12 +63,10 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(1 << 20)
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithDeadline(r.Context(), expires)
 	defer cancel()
 	// the terminal belongs to the session that opened it: signing out, being disabled or unlinking ends it
-	if c, err := s.readCookie(r, sessionCookie); err == nil {
-		defer s.trackTerminal(store.HashToken(c.Value), cancel)()
-	}
+	defer s.trackTerminal(store.HashToken(cookie.Value), cancel)()
 
 	sendControl := func(c control) {
 		data, _ := json.Marshal(c)
@@ -123,10 +131,14 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request, user store.Use
 		sendControl(control{Type: "taken", Holder: att.TakenBy()})
 		conn.Close(websocket.StatusNormalClosure, "taken over")
 		return
+	case <-att.Revoked():
+		sendControl(control{Type: "error", Message: "Your role on this project changed, and this terminal is no longer yours. The agent's session goes on."})
+		conn.Close(websocket.StatusNormalClosure, "access changed")
+		return
 	default:
 	}
 	switch {
-	case err == nil || errors.Is(err, context.Canceled):
+	case err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		conn.Close(websocket.StatusNormalClosure, "the session ended")
 	case errors.As(err, new(hub.OfflineError)):
 		sendControl(control{Type: "error", Message: "The link to this project dropped, and the terminal with it. The agent's session goes on."})
