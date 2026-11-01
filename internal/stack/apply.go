@@ -488,7 +488,7 @@ func Rows(observed Observed, reported map[string]Report, published *Published) [
 			row.Activity, row.Exposed = report.Activity, report.Exposed
 			switch {
 			case r.State != "running":
-				row.Activity = "stopped"
+				row.Activity, row.Exposed = "stopped", nil // nothing can reach it, and its next boot ends them
 			case row.Activity == "":
 				row.Activity = "starting"
 			}
