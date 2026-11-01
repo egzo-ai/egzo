@@ -39,6 +39,12 @@ def refused(worker, name, where="hub"):
     return result["content"][0]["text"]
 
 
+def has_no_hub(worker, name="app"):
+    """Whether a preview is refused for want of a hub now: a check to wait on, which does not fail while the answer is still the old one."""
+    result = worker.tool("expose", name=name, where="hub")
+    return bool(result.get("isError")) and "no hub" in result["content"][0]["text"]
+
+
 def unexpose(worker, *names):
     for name in names:
         worker.tool("unexpose", name=name)
@@ -92,7 +98,7 @@ def test_the_status_line_carries_the_exposures_and_where_through_the_link(linked
         lines = fake_hub.feed(shared_project.name, "status")
         agents = lines[-1]["Agents"] if lines else []
         exposures = next((a["Exposed"] for a in agents if a["Agent"] == linked.name), None) or []
-        return [e for e in exposures if e["Port"] == 3101]
+        return [e for e in exposures if e["Port"] == 3101 and e["Where"] == "hub"]
 
     assert eventually(carried, seconds=10)
     line = carried()[0]
@@ -114,7 +120,7 @@ def test_a_local_exposure_is_not_served_as_a_preview(linked, fake_hub, shared_pr
     def carried():
         lines = fake_hub.feed(shared_project.name, "status")
         agents = lines[-1]["Agents"] if lines else []
-        return [e for a in agents if a["Agent"] == linked.name for e in a.get("Exposed") or [] if e["Port"] == 3102]
+        return [e for a in agents if a["Agent"] == linked.name for e in a.get("Exposed") or [] if e["Port"] == 3102 and e["Where"] == "local"]
 
     assert eventually(carried, seconds=10)
     assert carried()[0]["Where"] == "local" and not carried()[0].get("ID")
@@ -144,7 +150,7 @@ def test_a_hub_that_changes_its_domain_moves_the_address(linked, fake_hub, share
 def test_a_hub_with_no_template_clears_it(linked, fake_hub, shared_project):
     fake_hub.preview("")
     fake_hub.drop(shared_project.name)
-    assert eventually(lambda: "no hub" in refused(linked, "app"), seconds=30)
+    assert eventually(lambda: has_no_hub(linked), seconds=30)
     fake_hub.preview(TEMPLATE)
     fake_hub.drop(shared_project.name)
     assert eventually(lambda: address(linked), seconds=30)
@@ -153,7 +159,7 @@ def test_a_hub_with_no_template_clears_it(linked, fake_hub, shared_project):
 
 def test_a_hub_that_turns_the_project_away_clears_it(linked, fake_hub, shared_project):
     fake_hub.revoke(shared_project.name)
-    assert eventually(lambda: "no hub" in refused(linked, "app"), seconds=30)
+    assert eventually(lambda: has_no_hub(linked), seconds=30)
     fake_hub.forget(shared_project.name)
     shared_project.ok("project register", input=fake_hub.code("alice") + "\n")
     assert eventually(lambda: address(linked), seconds=30)
@@ -162,8 +168,11 @@ def test_a_hub_that_turns_the_project_away_clears_it(linked, fake_hub, shared_pr
 
 def test_a_project_that_leaves_its_hub_has_no_address_and_its_local_ports_stay(linked, fake_hub, shared_project, engine, egzo):
     image = engine.session_image(egzo.binary)
-    document_without_hub = document(fake_hub, image)
-    del document_without_hub["hub"]
-    shared_project.up(document_without_hub)
-    assert eventually(lambda: "no hub" in refused(linked, "app"), seconds=30)
-    assert expose(linked, "db", where="local")["address"].startswith("127.0.0.1:")
+    unexpose(linked, "app")
+    shared_project.ok("agent rm --force", linked.name)  # naming a hub is part of the template: the instance is stale once it is gone
+    without_hub = document(fake_hub, image)
+    del without_hub["hub"]
+    shared_project.up(without_hub)
+    worker = Agent(engine, shared_project, shared_project.spawn("web", "again"))
+    assert "no hub" in refused(worker, "app")
+    assert expose(worker, "db", where="local")["address"].startswith("127.0.0.1:")

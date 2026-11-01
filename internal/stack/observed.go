@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,12 +23,14 @@ import (
 
 // Resource is one existing engine resource that belongs to a project.
 type Resource struct {
-	Type       string // container, network or volume
-	ID         string
-	Name       string
-	State      string   // containers only
-	Health     string   // containers only
-	Networks   []string // containers only: names of the networks it is attached to
+	Type     string // container, network or volume
+	ID       string
+	Name     string
+	State    string   // containers only
+	Health   string   // containers only
+	Networks []string // containers only: names of the networks it is attached to
+	// HostPorts are the ports a container publishes on the host, as it was created with them: they stay taken while it is stopped.
+	HostPorts  []int
 	Service    string
 	Kind       string
 	ConfigHash string
@@ -131,6 +134,15 @@ func Observe(ctx context.Context, c *engine.Client, project string) (Observed, e
 			if inspected, err := c.API.ContainerInspect(ctx, item.ID); err == nil {
 				if inspected.State != nil && inspected.State.Health != nil {
 					resource.Health = inspected.State.Health.Status
+				}
+				if inspected.HostConfig != nil {
+					for _, bindings := range inspected.HostConfig.PortBindings {
+						for _, binding := range bindings {
+							if port, err := strconv.Atoi(binding.HostPort); err == nil {
+								resource.HostPorts = append(resource.HostPorts, port)
+							}
+						}
+					}
 				}
 				if inspected.NetworkSettings != nil {
 					for networkName := range inspected.NetworkSettings.Networks {

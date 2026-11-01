@@ -50,6 +50,7 @@ func New() *cobra.Command {
 		newProxyCommand(opts),
 		newVersionCommand(),
 		newControlCommand(),
+		newRelayCommand(),
 		newLinkCommand(),
 		newPrepCommand(),
 		newStateCommand(),
