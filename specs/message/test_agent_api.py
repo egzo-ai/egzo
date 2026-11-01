@@ -185,7 +185,7 @@ def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team
 def test_the_mcp_endpoint_offers_exactly_the_tools_and_acts_as_the_calling_agent(team):
     coder, reviewer = team.coder, team.reviewer
     reply = coder.mcp("tools/list")
-    assert {t["name"] for t in reply["result"]["tools"]} == {"list_messages", "get_message", "resolve", "update", "ask", "message", "status", "agents"}
+    assert {t["name"] for t in reply["result"]["tools"]} == {"list_messages", "get_message", "resolve", "update", "ask", "message", "status", "agents", "expose", "unexpose"}
     descriptions = " ".join(t["description"] for t in reply["result"]["tools"])
     assert "sparingly" not in descriptions and "check_inbox" not in descriptions
 

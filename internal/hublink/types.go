@@ -103,6 +103,16 @@ type AgentStatus struct {
 	Open     int
 	Waiting  bool
 	Updated  time.Time
+	Exposed  []Exposure
+}
+
+// Exposure is a port an agent offers to people. The protocol says what is behind it: `http`, or `tcp` for any other stream. The stream
+// that reaches it is the same for both.
+type Exposure struct {
+	Port     int
+	Name     string
+	Protocol string
+	ID       string // made by the control sidecar, kept for as long as the port stays exposed
 }
 
 // Event is one entry of the control sidecar's event stream, as the web UI shows it.

@@ -4,7 +4,7 @@ Status: **open, deferred** (decided 2026-10-05). Not planned for v1.
 
 ## The rule
 
-egzo's agent-facing verbs (`list_messages`, `get_message`, `resolve`, `update`, `ask`, `message`, `status`,
+egzo's agent-facing verbs (`list_messages`, `get_message`, `resolve`, `update`, `ask`, `message`, `status`, `expose`, `unexpose`,
 `agents`) reach the agent as **MCP tools** served by the control
 sidecar at `http://control:7777/mcp`. So a harness has to be able to talk MCP over streamable HTTP, with a
 fixed header for the agent's credentials, to be integrated.

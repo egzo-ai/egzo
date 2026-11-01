@@ -43,6 +43,7 @@ type statusLogLine struct {
 		Open     int
 		Waiting  bool
 		Updated  time.Time
+		Exposed  []hublink.Exposure
 	}
 }
 
@@ -64,7 +65,7 @@ func parseStatusLine(line []byte) (StatusLine, bool, error) {
 	}
 	out := StatusLine{Time: raw.Time, Reason: raw.Reason, Interval: time.Duration(raw.Interval) * time.Second, Agents: []AgentStatus{}}
 	for _, a := range raw.Agents {
-		out.Agents = append(out.Agents, AgentStatus{Agent: a.Agent, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Updated: a.Updated})
+		out.Agents = append(out.Agents, AgentStatus{Agent: a.Agent, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Updated: a.Updated, Exposed: a.Exposed})
 	}
 	return out, true, nil
 }

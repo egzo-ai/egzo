@@ -52,7 +52,8 @@ type registration struct {
 }
 
 type hub struct {
-	origin string
+	origin  string
+	preview string // the address template it gives a link
 
 	mu    sync.Mutex
 	regs  map[string]*registration // by key
@@ -63,7 +64,11 @@ type hub struct {
 }
 
 func (h *hub) verdict(r *registration) hublink.Verdict {
-	return hublink.Verdict{State: r.State, Project: r.ID, Owner: r.Owner}
+	verdict := hublink.Verdict{State: r.State, Project: r.ID, Owner: r.Owner}
+	if r.State == hublink.StateApproved {
+		verdict.Preview = h.preview
+	}
+	return verdict
 }
 
 func (h *hub) link(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +287,13 @@ func (h *hub) control() http.Handler {
 			h.mu.Unlock()
 		}
 		answer(w, items)
+	})
+	mux.HandleFunc("POST /preview", func(w http.ResponseWriter, r *http.Request) {
+		var q struct{ Template string }
+		_ = json.NewDecoder(r.Body).Decode(&q)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.preview = q.Template
 	})
 	mux.HandleFunc("POST /drop", func(w http.ResponseWriter, r *http.Request) {
 		reg := h.find(r.URL.Query().Get("project"))

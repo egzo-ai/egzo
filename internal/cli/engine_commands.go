@@ -253,10 +253,11 @@ func reportedStatuses(ctx context.Context, s *session) map[string]stack.Report {
 		Agent, Status, Activity string
 		Open                    int
 		Waiting                 bool
+		Exposed                 []stack.Exposure
 	}
 	if json.Unmarshal(reply, &statuses) == nil {
 		for _, status := range statuses {
-			reported[status.Agent] = stack.Report{Status: status.Status, Activity: status.Activity, Open: status.Open, Waiting: status.Waiting}
+			reported[status.Agent] = stack.Report{Status: status.Status, Activity: status.Activity, Open: status.Open, Waiting: status.Waiting, Exposed: status.Exposed}
 		}
 	}
 	return reported

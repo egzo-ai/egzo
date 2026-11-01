@@ -42,6 +42,8 @@ type server struct {
 	key    []byte // the project key, read once
 	// placeholderMu makes reading and making placeholders one step.
 	placeholderMu sync.Mutex
+	// exposureMu makes reading and changing an agent's exposures one step.
+	exposureMu sync.Mutex
 	// registry is signalled when an agent is registered or removed, so the status log writes the new list.
 	registry chan struct{}
 }
@@ -84,6 +86,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("DELETE /agents/{name}", s.unregisterAgent)
 	mux.HandleFunc("PUT /templates", s.putTemplates)
 	mux.HandleFunc("GET /templates", s.getTemplates)
+	mux.HandleFunc("PUT /preview-template", s.putPreviewTemplate)
 	mux.HandleFunc("GET /placeholders", s.getPlaceholders)
 	mux.HandleFunc("POST /placeholders", s.postPlaceholders)
 	return root
@@ -468,6 +471,10 @@ func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
 	defer s.sendMu.Unlock()
 	registered := s.knownAgent(name)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.forgetExposures(name); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

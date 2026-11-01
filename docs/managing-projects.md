@@ -54,6 +54,9 @@ keeps going, so you can start it before the server. When a client has closed its
 or close before the connection is dropped, and ten minutes in all however much it says: a client that left cannot be told from one that only
 ended its input, and a server that keeps talking must not keep the command running in the agent. The agent's image must contain egzo, as for `agent attach`: the harness images do.
 
+An agent can tell you which port to open: it [exposes](messaging.md#ports-an-agent-offers) the port and gives you the command, and `egzo ps` lists
+what is exposed under `PORTS`. You can forward any port, exposed or not.
+
 ## Linking to a hub
 
 A project connects itself to a hub: name it in the file ([`hub:`](project-file.md#the-hub)), run `up`, then register it once with a link code. A

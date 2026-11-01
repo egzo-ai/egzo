@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,8 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/state", a.authenticatedLimit(maxStatePayload, a.state))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
+	mux.HandleFunc("POST /v1/expose", a.authenticated(a.expose))
+	mux.HandleFunc("DELETE /v1/expose/{port}", a.authenticated(a.unexpose))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
 	return mux
 }
@@ -223,6 +226,36 @@ func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) 
 	reply(w, http.StatusOK, a.server.othersOf(agent))
 }
 
+func (a *agentAPI) expose(w http.ResponseWriter, r *http.Request, agent string) {
+	var body struct {
+		Port     int    `json:"port"`
+		Name     string `json:"name"`
+		Protocol string `json:"protocol"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	exposure, err := a.server.expose(agent, body.Port, body.Name, body.Protocol)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, http.StatusOK, exposure)
+}
+
+func (a *agentAPI) unexpose(w http.ResponseWriter, r *http.Request, agent string) {
+	port, err := strconv.Atoi(r.PathValue("port"))
+	if err != nil {
+		http.Error(w, "the port is a number", http.StatusBadRequest)
+		return
+	}
+	if err := a.server.unexpose(agent, port); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // maxStatePayload is the largest state report read. A harness may forward a whole tool call with it; only
 // the state matters, and what is recorded is reduced to a few named fields.
 const maxStatePayload = 4 << 20
@@ -316,6 +349,7 @@ func (s *server) othersOf(agent string) []AgentStatus {
 // agentStatuses is every agent of the project, known from `up` and from what they reported.
 func (s *server) agentStatuses() []AgentStatus {
 	latest := s.events.statuses()
+	template := s.previewTemplate()
 	for _, name := range s.projectAgents() {
 		if _, ok := latest[name]; !ok {
 			latest[name] = AgentStatus{Agent: name}
@@ -325,6 +359,7 @@ func (s *server) agentStatuses() []AgentStatus {
 	for name, status := range latest {
 		status.Agent = name
 		status.Open, status.Waiting = s.overlay(name)
+		status.Exposed = s.exposedBy(name, template)
 		out = append(out, status)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Agent < out[j].Agent })

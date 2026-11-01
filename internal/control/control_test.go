@@ -313,7 +313,7 @@ func TestMCPOffersExactlyTheMessageTools(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"agents", "ask", "get_message", "list_messages", "message", "resolve", "status", "update"}
+	want := []string{"agents", "ask", "expose", "get_message", "list_messages", "message", "resolve", "status", "unexpose", "update"}
 	if !reflect.DeepEqual(names, want) {
 		t.Errorf("tools = %v, want %v", names, want)
 	}

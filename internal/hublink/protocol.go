@@ -144,6 +144,9 @@ type Verdict struct {
 	Project string `json:",omitempty"` // the hub's id of the project
 	Owner   string `json:",omitempty"`
 	Message string `json:",omitempty"`
+	// Preview is the template of a preview's address, with %s for an exposure's id, when the hub serves previews of this project. It holds
+	// what only the hub knows: the scheme, the domain, the project.
+	Preview string `json:",omitempty"`
 }
 
 // Unlink is the link's last message on the control stream: forget this project.
