@@ -170,7 +170,6 @@ func (h *Hub) AcceptInvite(ctx context.Context, user store.User, code string) (I
 	if err != nil {
 		return InviteView{}, err
 	}
-	h.auditRedeemed(ctx, user, i)
 	return h.inviteView(ctx, i), nil
 }
 
@@ -193,15 +192,11 @@ func (h *Hub) RegisterLocal(ctx context.Context, code, username, password string
 	if err != nil {
 		return store.User{}, err
 	}
-	user, i, err := h.store.RegisterLocal(ctx, code, username, hash, time.Now())
+	user, _, err := h.store.RegisterLocal(ctx, code, username, hash, time.Now())
 	if err != nil {
 		return store.User{}, err
 	}
 	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: user.Username + ", with a password", Allowed: true})
-	h.auditRedeemed(ctx, user, i)
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: "password, on making the account", Allowed: true})
 	return user, nil
-}
-
-func (h *Hub) auditRedeemed(ctx context.Context, user store.User, i store.Invite) {
-	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "invite.redeem", Project: i.Project, Detail: i.ID + ": " + grantsOf(i), Allowed: true})
 }

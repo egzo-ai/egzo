@@ -63,7 +63,7 @@ func (s *Server) link(w http.ResponseWriter, r *http.Request) {
 	proved()
 	leave()
 	// the connection is hijacked, and r.Context() knows nothing of its end: Run does
-	err = s.hub.Link(context.Background(), peer.Hello, peer.Code, peer)
+	err = s.hub.Link(s.clientContext(context.Background(), r), peer.Hello, peer.Code, peer)
 	switch {
 	case errors.Is(err, hub.ErrUnregistered), errors.Is(err, hub.ErrBadCode), errors.Is(err, hub.ErrBadHello):
 		if s.gate.failed(client) {

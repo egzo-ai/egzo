@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 6
+const schemaVersion = 7
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS audit (
 	project TEXT NOT NULL DEFAULT '',
 	agent TEXT NOT NULL DEFAULT '',
 	detail TEXT NOT NULL DEFAULT '',
-	allowed INTEGER NOT NULL
+	allowed INTEGER NOT NULL,
+	client TEXT NOT NULL DEFAULT ''  -- the address the request came from, as far as the hub can tell (publicurl.ClientIP)
 );
 CREATE INDEX IF NOT EXISTS audit_project ON audit (project, id);
 -- What the proxies denied, grouped: one row per instance, protocol, host and reason code (roadmap/proxy-audit.md).
@@ -996,6 +997,14 @@ type AuditEntry struct {
 	Project, Agent string
 	Detail         string
 	Allowed        bool
+	Client         string
+}
+
+type clientKey struct{}
+
+// WithClient says where a request came from, for the audit entries written on its behalf.
+func WithClient(ctx context.Context, address string) context.Context {
+	return context.WithValue(ctx, clientKey{}, address)
 }
 
 // Audit writes an entry. What it records has happened, so a request that went away in the meantime does not stop it.
@@ -1008,14 +1017,15 @@ type executor interface {
 }
 
 func audit(ctx context.Context, x executor, e AuditEntry) error {
-	_, err := x.ExecContext(ctx, `INSERT INTO audit (at, actor, action, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		time.Now().Unix(), e.Actor, e.Action, e.Project, e.Agent, e.Detail, boolInt(e.Allowed))
+	client, _ := ctx.Value(clientKey{}).(string)
+	_, err := x.ExecContext(ctx, `INSERT INTO audit (at, actor, action, project, agent, detail, allowed, client) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		time.Now().Unix(), e.Actor, e.Action, e.Project, e.Agent, e.Detail, boolInt(e.Allowed), client)
 	return err
 }
 
 // AuditOf lists the latest entries about a project, newest first.
 func (s *Store) AuditOf(ctx context.Context, project string, limit int) ([]AuditEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, at, actor, action, project, agent, detail, allowed FROM audit
+	rows, err := s.db.QueryContext(ctx, `SELECT id, at, actor, action, project, agent, detail, allowed, client FROM audit
 		WHERE project = ? ORDER BY id DESC LIMIT ?`, project, limit)
 	if err != nil {
 		return nil, err
@@ -1026,7 +1036,7 @@ func (s *Store) AuditOf(ctx context.Context, project string, limit int) ([]Audit
 		var e AuditEntry
 		var at int64
 		var allowed int
-		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Action, &e.Project, &e.Agent, &e.Detail, &allowed); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Action, &e.Project, &e.Agent, &e.Detail, &allowed, &e.Client); err != nil {
 			return nil, err
 		}
 		e.At, e.Allowed = time.Unix(at, 0), allowed == 1

@@ -297,6 +297,11 @@ func (h *Hub) requireOperator(ctx context.Context, user store.User, action, proj
 	return ErrForbidden
 }
 
+// RequireOperator refuses whoever is not an operator, and the audit log says so.
+func (h *Hub) RequireOperator(ctx context.Context, user store.User, action string) error {
+	return h.requireOperator(ctx, user, action, "")
+}
+
 // LinkCodeView is a code as it is listed, without the code.
 type LinkCodeView struct {
 	store.LinkCode

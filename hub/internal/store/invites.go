@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
@@ -225,7 +227,8 @@ func dropFallenInvites(ctx context.Context, tx *sql.Tx) error {
 }
 
 // redeem spends a code on a user. The delete comes first, so of two people who hold one code exactly one finds it. What it grants is only
-// ever added: a role is raised and never lowered, a quota only grows, so an invite cannot take from whoever spends it.
+// ever added: a role is raised and never lowered, a quota only grows, so an invite cannot take from whoever spends it. The audit log says what
+// it changed, in the same transaction.
 func redeem(ctx context.Context, tx *sql.Tx, code, userID string, now time.Time) (Invite, error) {
 	i, err := scanInvite(tx.QueryRowContext(ctx, `DELETE FROM invites WHERE hash = ? AND expires_at > ? RETURNING `+inviteColumns, hashCode(code), now.UnixMilli()))
 	if err != nil {
@@ -234,17 +237,56 @@ func redeem(ctx context.Context, tx *sql.Tx, code, userID string, now time.Time)
 	if err := inviteStands(ctx, tx, i); err != nil {
 		return Invite{}, err
 	}
+	var gave string
 	if i.Project == "" {
-		_, err := tx.ExecContext(ctx, `UPDATE users SET is_operator = MAX(is_operator, ?), project_quota = MAX(project_quota, ?) WHERE id = ?`, boolInt(i.Operator), i.ProjectQuota, userID)
-		return i, err
+		gave, err = redeemFlags(ctx, tx, i, userID)
+	} else {
+		gave, err = redeemRole(ctx, tx, i, userID)
 	}
-	var current string
-	err = tx.QueryRowContext(ctx, `SELECT role FROM grants WHERE project = ? AND user_id = ?`, i.Project, userID).Scan(&current)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
 		return Invite{}, err
 	}
-	if rbac.Role(current).AtLeast(i.Role) {
-		return i, nil
+	return i, audit(ctx, tx, AuditEntry{Actor: rbac.Actor(userID), Action: "invite.redeem", Project: i.Project, Detail: i.ID + ": " + gave, Allowed: true})
+}
+
+// redeemRole raises a role, and says what that changed.
+func redeemRole(ctx context.Context, tx *sql.Tx, i Invite, userID string) (string, error) {
+	var current string
+	err := tx.QueryRowContext(ctx, `SELECT role FROM grants WHERE project = ? AND user_id = ?`, i.Project, userID).Scan(&current)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
 	}
-	return i, setGrant(ctx, tx, i.Project, userID, i.Role)
+	if rbac.Role(current).AtLeast(i.Role) {
+		return fmt.Sprintf("nothing: %s already, it gives %s", current, i.Role), nil
+	}
+	if current == "" {
+		current = "none"
+	}
+	return fmt.Sprintf("%s -> %s", current, i.Role), setGrant(ctx, tx, i.Project, userID, i.Role)
+}
+
+// redeemFlags raises the flags on a user, and says what that changed. Becoming an operator is written as such, as when an operator does it.
+func redeemFlags(ctx context.Context, tx *sql.Tx, i Invite, userID string) (string, error) {
+	var username string
+	var operator, quota int
+	if err := tx.QueryRowContext(ctx, `SELECT username, is_operator, project_quota FROM users WHERE id = ?`, userID).Scan(&username, &operator, &quota); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET is_operator = MAX(is_operator, ?), project_quota = MAX(project_quota, ?) WHERE id = ?`, boolInt(i.Operator), i.ProjectQuota, userID); err != nil {
+		return "", err
+	}
+	var gave []string
+	if i.Operator && operator == 0 {
+		gave = append(gave, "operator")
+		if err := audit(ctx, tx, AuditEntry{Actor: rbac.Actor(i.CreatedBy), Action: "operator.grant", Detail: fmt.Sprintf("%s (%s), by invite %s", username, userID, i.ID), Allowed: true}); err != nil {
+			return "", err
+		}
+	}
+	if i.ProjectQuota > quota {
+		gave = append(gave, fmt.Sprintf("project quota %d -> %d", quota, i.ProjectQuota))
+	}
+	if len(gave) == 0 {
+		return "nothing: they had as much already", nil
+	}
+	return strings.Join(gave, ", "), nil
 }

@@ -40,6 +40,7 @@ func (h *Hub) Holder(ctx context.Context, user store.User, project, agent string
 // Attachment is a terminal the hub agreed to open.
 type Attachment struct {
 	hub            *Hub
+	ctx            context.Context // the request's values, for the entry its end writes: the request itself may be gone by then
 	project, agent string
 	name           string
 	subject        rbac.Subject
@@ -75,11 +76,15 @@ func (h *Hub) Attach(ctx context.Context, user store.User, project, agent string
 	if err != nil {
 		return nil, err
 	}
+	refused := func() error {
+		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "agent.attach", Project: project, Agent: agent, Detail: fmt.Sprintf("refused: %s needs more than %s", rbac.Operate, role)})
+		return ErrForbidden
+	}
 	if !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
-		return nil, ErrForbidden
+		return nil, refused()
 	}
 
-	att := &Attachment{hub: h, project: project, agent: agent, name: user.DisplayName(), subject: user.Subject(), creator: creator,
+	att := &Attachment{hub: h, ctx: context.WithoutCancel(ctx), project: project, agent: agent, name: user.DisplayName(), subject: user.Subject(), creator: creator,
 		taken: make(chan struct{}), revoked: make(chan struct{})}
 	key := attachKey(project, agent)
 	h.mu.Lock()
@@ -96,9 +101,9 @@ func (h *Hub) Attach(ctx context.Context, user store.User, project, agent string
 	h.mu.Unlock()
 
 	// A role changed while the project answered found no terminal to end: from here on it finds this one.
-	if role, err := h.access(ctx, user, project); err != nil || !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
-		att.Close()
-		return nil, ErrForbidden
+	if role, err = h.access(ctx, user, project); err != nil || !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
+		att.release()
+		return nil, refused()
 	}
 	detail := "open"
 	if previous != nil {
@@ -146,8 +151,21 @@ func (a *Attachment) Run(ctx context.Context, term links.Terminal) error {
 	return err
 }
 
-// Close frees the seat, unless somebody took it over already.
+// Close frees the seat, unless somebody took it over already, and the audit log says the terminal ended and why.
 func (a *Attachment) Close() {
+	a.release()
+	detail := "closed"
+	select {
+	case <-a.taken:
+		detail = "taken over by " + a.TakenBy()
+	case <-a.revoked:
+		detail = "the role changed"
+	default:
+	}
+	a.hub.record(a.ctx, store.AuditEntry{Actor: rbac.Actor(a.subject.ID), Action: "agent.detach", Project: a.project, Agent: a.agent, Detail: detail, Allowed: true})
+}
+
+func (a *Attachment) release() {
 	a.hub.mu.Lock()
 	defer a.hub.mu.Unlock()
 	key := attachKey(a.project, a.agent)
