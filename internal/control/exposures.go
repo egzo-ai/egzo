@@ -292,13 +292,14 @@ func (s *server) previewTemplate() string {
 	return string(data)
 }
 
-// validPreviewTemplate takes a base address with one place for an id, as a hub hands it out.
+// validPreviewTemplate takes a base address with one place for an id, in the host name: every preview is an origin of its own.
 func validPreviewTemplate(template string) bool {
 	if len(template) > maxPreviewTemplate || strings.Count(template, "%") != 1 || strings.Count(template, previewPlaceholder) != 1 {
 		return false
 	}
-	u, err := url.Parse(strings.Replace(template, previewPlaceholder, "id", 1))
-	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Hostname() != "" && u.User == nil
+	const id = "exposureid"
+	u, err := url.Parse(strings.Replace(template, previewPlaceholder, id, 1))
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && strings.Contains(u.Hostname(), id) && u.User == nil
 }
 
 // putPreviewTemplate is the link handing on what the hub said: an empty body clears it. It is kept on the volume, so a sidecar that is made

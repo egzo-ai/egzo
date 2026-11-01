@@ -217,6 +217,7 @@ func TestPreviewTemplates(t *testing.T) {
 		"https://%s-p1.example.net/":       true,
 		"http://%s.preview.localhost:8081": true,
 		"https://example.net/":             false,
+		"https://example.net/%s":           false,
 		"https://%s.%s.example.net/":       false,
 		"https://%s.example.net/%d":        false,
 		"ftp://%s.example.net/":            false,
