@@ -383,3 +383,39 @@ func TestOnlyPlainActorsAreWrittenToLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalPortsAndTheHubDecideTheStalenessOfATemplateWithPortsOnly(t *testing.T) {
+	project, dir := templateProject(t)
+	coder := project.Agents["coder"]
+	coder.Ports = map[string]config.ResolvedPort{"web": {Port: 5173, Protocol: "http"}}
+	project.Agents["coder"] = coder
+	project.Hub = &config.ResolvedHub{URL: "https://hub.example.org"}
+	before := publish(t, project, dir)
+	if !before.Templates["coder"].Hub || before.Templates["review"].Hub {
+		t.Errorf("only a template with ports is told whether a hub is named: %+v", before.Templates)
+	}
+	project.LocalPorts = &config.ResolvedLocalPorts{Bind: "127.0.0.1", Host: "127.0.0.1", PoolLow: 20000, PoolHigh: 29999, MaxExposed: 10}
+	after := publish(t, project, dir)
+	if before.Templates["coder"].Hash == after.Templates["coder"].Hash {
+		t.Error("a project that turns local ports on leaves the instances of a template with ports as they are")
+	}
+	if before.Templates["review"].Hash != after.Templates["review"].Hash {
+		t.Error("a template without ports went stale")
+	}
+	view := after.View(map[string]string{"coder-1": "coder"})
+	if view.LocalPorts == nil || view.Hub == nil || len(view.Agents["coder-1"].Ports) != 1 {
+		t.Errorf("the view an instance is made from lacks them: %+v", view)
+	}
+	if as := after.AsProject(nil); as.LocalPorts != nil || as.Hub != nil {
+		t.Error("the project as the templates describe it names no hub: the link is not made from it")
+	}
+}
+
+func TestPsShowsTheNameAndWhereOfEachOpenPort(t *testing.T) {
+	observed := Observed{Resources: []Resource{{Type: "container", Name: "p-coder-1", Kind: kindAgent, Instance: "coder-1", State: "running", Service: "coder"}}}
+	var out strings.Builder
+	WriteStatus(Rows(observed, map[string]Report{"coder-1": {Activity: "idle", Exposed: []Exposure{{Name: "web", Where: "hub", Port: 5173, Protocol: "http"}, {Name: "db", Where: "local", Port: 5432, Protocol: "tcp"}}}}, nil), time.Now(), &out)
+	if !strings.Contains(out.String(), "web:hub,db:local") {
+		t.Errorf("%s", out.String())
+	}
+}

@@ -91,7 +91,7 @@ type ResolvedAgent struct {
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      ResolvedInject    `yaml:"inject"`
 	// Ports are the declared ports by name; nil when the template declares none.
-	Ports map[string]ResolvedPort `yaml:"ports,omitempty"`
+	Ports map[string]ResolvedPort `yaml:"ports,omitempty" json:",omitempty"`
 }
 
 // ResolvedPort is a declared port: its number and its protocol (http, tcp or udp).
@@ -204,7 +204,7 @@ func resolvePorts(agent string, ports map[string]string, resolved *Resolved, p *
 	}
 	out := map[string]ResolvedPort{}
 	byNumber := map[int][]bool{} // for each number, whether each port seen is udp
-	raw := 0                       // tcp and udp ports, which a relay opens
+	raw := 0                     // tcp and udp ports, which a relay opens
 	for _, name := range slices.Sorted(maps.Keys(ports)) {
 		if len(name) > 32 || !portName.MatchString(name) {
 			p.addf("agent %q: port name %q must start with a lowercase letter, hold only lowercase letters, digits and dashes, and be at most 32 characters", agent, name)

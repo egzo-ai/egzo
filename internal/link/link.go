@@ -673,6 +673,9 @@ func (l *Link) noteExposures(line StatusLine) {
 	exposed := make(map[string]map[int]string, len(line.Agents))
 	for _, a := range line.Agents {
 		for _, e := range a.Exposed {
+			if e.Where != hublink.WhereHub {
+				continue // a port open for the local machine is no preview, and the hub never forwards to it
+			}
 			if exposed[a.Agent] == nil {
 				exposed[a.Agent] = map[int]string{}
 			}

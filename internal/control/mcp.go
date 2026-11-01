@@ -69,14 +69,21 @@ type textArgs struct {
 }
 
 type exposeArgs struct {
-	Port     int    `json:"port" jsonschema:"the port your server listens on, on this machine: 127.0.0.1 is enough"`
-	Name     string `json:"name,omitempty" jsonschema:"optional: a short name for people, such as shop"`
-	Protocol string `json:"protocol,omitempty" jsonschema:"http (the default) for plain HTTP, WebSockets included, or tcp for anything else"`
+	Name  string `json:"name" jsonschema:"the name of one of your declared ports"`
+	Where string `json:"where" jsonschema:"hub (a preview people open from the hub) or local (a port on the machine that runs this project); only the places named in your instructions work"`
 }
 
 type portArgs struct {
-	Port int `json:"port" jsonschema:"the port you exposed"`
+	Name string `json:"name" jsonschema:"the name of the port you exposed"`
 }
+
+// unexposeResult is what unexpose answers.
+type unexposeResult struct {
+	OK   bool   `json:"ok"`
+	Note string `json:"note"`
+}
+
+func unexposed() unexposeResult { return unexposeResult{OK: true, Note: UnexposeNote} }
 
 type noArgs struct{}
 
@@ -207,28 +214,27 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "expose",
-		Description: "Let a person open a server you run here: nobody can reach this sandbox's ports otherwise. Use it when you start something to " +
-			"try or look at, a web app or a demo, and pass on what it answers: an address, or a command they run. The server must speak plain HTTP " +
-			"unless you say tcp, and may start before or after this call. A restart of this sandbox ends what you exposed: exposing a port again gives " +
-			"it the same address.",
+		Description: "Open one of your declared ports so a person can reach the server you run on it, and pass on the address it answers. " +
+			"A port is closed until you expose it: do it when a person needs to reach the server, not before. Ports and places are named in your instructions. " +
+			"A restart of this sandbox closes everything you exposed.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in exposeArgs) (*mcp.CallToolResult, Exposure, error) {
 		agent, err := callerOf(req)
 		if err != nil {
 			return nil, Exposure{}, err
 		}
-		exposure, err := a.server.expose(agent, in.Port, in.Name, in.Protocol)
+		exposure, err := a.server.expose(agent, in.Name, in.Where)
 		return nil, exposure, err
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "unexpose",
-		Description: "Stop offering a port you exposed, when you are done with it. Its address stops working until you expose the port again.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, in portArgs) (*mcp.CallToolResult, okResult, error) {
+		Description: "Close a port you exposed, when you are done with it. New connections are refused; connections that are open may stay open until your server closes them.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in portArgs) (*mcp.CallToolResult, unexposeResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
-			return nil, okResult{}, err
+			return nil, unexposeResult{}, err
 		}
-		return nil, okResult{OK: true}, a.server.unexpose(agent, in.Port)
+		return nil, unexposed(), a.server.unexpose(agent, in.Name)
 	})
 	return server
 }

@@ -110,7 +110,7 @@ func allocated(f func()) uint64 {
 const allocationBound = 64 << 20
 
 func TestAPortIsRefusedOnceTheStatusFeedStops(t *testing.T) {
-	line := []byte(`{"type":"status","v":1,"agents":[{"agent":"coder-1","exposed":[{"port":3000,"name":"shop","protocol":"http","id":"abc"}]}]}` + "\n")
+	line := []byte(`{"type":"status","v":1,"agents":[{"agent":"coder-1","exposed":[{"port":3000,"name":"shop","protocol":"http","where":"hub","id":"abc"}]}]}` + "\n")
 	broken := make(chan struct{})
 	var follows atomic.Int32
 	d := newHostileEngine(t).

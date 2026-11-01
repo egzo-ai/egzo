@@ -25,7 +25,7 @@ func linkedPreview(t *testing.T) (*rig, *fake.Engine, string) {
 	r := newRig(t)
 	f := r.link("web", "coder")
 	f.SetAgent(links.Agent{Name: "coder-1", State: "running"})
-	f.Expose("coder-1", links.Exposure{Port: 3000, Protocol: hublink.ProtocolHTTP, ID: previewID, Name: "shop"})
+	f.Expose("coder-1", links.Exposure{Port: 3000, Protocol: hublink.ProtocolHTTP, Where: hublink.WhereHub, ID: previewID, Name: "shop"})
 	id := r.id("web")
 	eventually(t, "the exposure to be heard", func() bool {
 		_, err := r.hub.Previews().Find(ctx, id, previewID)
@@ -76,7 +76,7 @@ func TestAPreviewIsFoundByItsProject(t *testing.T) {
 
 func TestATCPExposureIsNoPreview(t *testing.T) {
 	r, f, id := linkedPreview(t)
-	f.Expose("coder-1", links.Exposure{Port: 5432, Protocol: hublink.ProtocolTCP, ID: "qqqqqqqqqqqqqqqq"})
+	f.Expose("coder-1", links.Exposure{Port: 5432, Protocol: hublink.ProtocolTCP, Where: hublink.WhereHub, ID: "qqqqqqqqqqqqqqqq"})
 	eventually(t, "the line to be heard", func() bool {
 		r.hub.feeds.mu.Lock()
 		defer r.hub.feeds.mu.Unlock()
@@ -84,6 +84,26 @@ func TestATCPExposureIsNoPreview(t *testing.T) {
 		return ok
 	})
 	if _, err := r.hub.Previews().Find(ctx, id, "qqqqqqqqqqqqqqqq"); !errors.Is(err, preview.ErrNotFound) {
+		t.Error(err)
+	}
+}
+
+func TestAPortOpenForTheLocalMachineIsNeverServed(t *testing.T) {
+	r, f, id := linkedPreview(t)
+	local := links.Exposure{Port: 8080, Protocol: hublink.ProtocolHTTP, Where: hublink.WhereLocal, ID: "llllllllllllllll", Name: "dev"}
+	if got := exposedIn(links.StatusLine{Agents: []links.AgentStatus{{Agent: "coder-1", Exposed: []links.Exposure{local}}}}); len(got) != 0 {
+		t.Errorf("exposedIn kept %+v", got)
+	}
+	if got := cleanExposures([]links.Exposure{local}); len(got) != 0 {
+		t.Errorf("cleanExposures kept %+v", got)
+	}
+	f.Expose("coder-1", local)
+	eventually(t, "the line to be heard", func() bool {
+		r.hub.feeds.mu.Lock()
+		defer r.hub.feeds.mu.Unlock()
+		return len(r.hub.feeds.exposed[id]) == 1 // the preview of linkedPreview, and nothing else
+	})
+	if _, err := r.hub.Previews().Find(ctx, id, local.ID); !errors.Is(err, preview.ErrNotFound) {
 		t.Error(err)
 	}
 }
@@ -137,8 +157,8 @@ func TestWhatALinkSaysOfItsPortsIsCleaned(t *testing.T) {
 	r, f, id := linkedPreview(t)
 	long := strings.Repeat("x", maxWord+10)
 	line := links.StatusLine{Agents: []links.AgentStatus{{Agent: "coder-1", Exposed: []links.Exposure{
-		{Port: 0, Protocol: "http", ID: previewID}, {Port: 70000, Protocol: "http", ID: previewID}, {Port: 80, Protocol: "udp", ID: previewID},
-		{Port: 80, Protocol: "http", ID: "../../etc"}, {Port: 80, Protocol: "http", ID: "UPPERCASEUPPERCA"}, {Port: 8080, Protocol: "http", ID: "aaaaaaaaaaaaaaaa", Name: "\x1b[2J" + long},
+		{Port: 0, Protocol: "http", Where: "hub", ID: previewID}, {Port: 70000, Protocol: "http", Where: "hub", ID: previewID}, {Port: 80, Protocol: "udp", Where: "hub", ID: previewID},
+		{Port: 80, Protocol: "http", Where: "hub", ID: "../../etc"}, {Port: 80, Protocol: "http", Where: "hub", ID: "UPPERCASEUPPERCA"}, {Port: 8080, Protocol: "http", Where: "hub", ID: "aaaaaaaaaaaaaaaa", Name: "\x1b[2J" + long},
 	}}}}
 	f.PushStatus(line)
 	eventually(t, "the line to be heard", func() bool {
@@ -156,7 +176,7 @@ func TestWhatALinkSaysOfItsPortsIsCleaned(t *testing.T) {
 func TestTooManyPortsAreCut(t *testing.T) {
 	list := make([]links.Exposure, 0, maxExposures+5)
 	for i := range maxExposures + 5 {
-		list = append(list, links.Exposure{Port: 1000 + i, Protocol: "http", ID: previewID})
+		list = append(list, links.Exposure{Port: 1000 + i, Protocol: "http", Where: "hub", ID: previewID})
 	}
 	if got := cleanExposures(list); len(got) != maxExposures {
 		t.Errorf("%d", len(got))

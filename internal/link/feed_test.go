@@ -69,11 +69,11 @@ func TestOnlyContainersThatAreNotRunningAreStoppedInAListing(t *testing.T) {
 }
 
 func TestAStatusLineCarriesTheExposures(t *testing.T) {
-	line, ok, err := parseStatusLine([]byte(`{"type":"status","v":1,"agents":[{"agent":"web","exposed":[{"port":3000,"name":"shop","protocol":"http","id":"abc","address":"https://abc.example.net/"}]}]}`))
+	line, ok, err := parseStatusLine([]byte(`{"type":"status","v":1,"agents":[{"agent":"web","exposed":[{"port":3000,"name":"shop","protocol":"http","where":"hub","id":"abc","address":"https://abc.example.net/"}]}]}`))
 	if err != nil || !ok || len(line.Agents) != 1 {
 		t.Fatalf("%+v %v %v", line, ok, err)
 	}
-	if got := line.Agents[0].Exposed; len(got) != 1 || got[0].Port != 3000 || got[0].Name != "shop" || got[0].Protocol != "http" || got[0].ID != "abc" {
+	if got := line.Agents[0].Exposed; len(got) != 1 || got[0].Port != 3000 || got[0].Name != "shop" || got[0].Protocol != "http" || got[0].Where != "hub" || got[0].ID != "abc" {
 		t.Errorf("%+v", got)
 	}
 }
@@ -87,6 +87,26 @@ func TestATemplateTheSidecarWouldRefuseIsNoTemplate(t *testing.T) {
 	} {
 		if got := usableTemplate(template); got != want {
 			t.Errorf("%q: %q", template, got)
+		}
+	}
+}
+
+func TestOnlyAPortOpenForTheHubIsRememberedForForwarding(t *testing.T) {
+	l := New(Options{Project: "web", Hub: "https://hub", Dir: t.TempDir()})
+	line, ok, err := parseStatusLine([]byte(`{"type":"status","v":1,"agents":[{"agent":"coder-1","exposed":[` +
+		`{"port":3000,"name":"app","protocol":"http","where":"hub","id":"abc"},` +
+		`{"port":5432,"name":"db","protocol":"tcp","where":"local","address":"box.lan:20002"},` +
+		`{"port":8080,"name":"dev","protocol":"http","where":"local","address":"http://box.lan:20003/"}]}]}`))
+	if err != nil || !ok {
+		t.Fatal(line, ok, err)
+	}
+	l.noteExposures(line)
+	if _, ok := l.exposure("coder-1", 3000); !ok {
+		t.Error("a preview is forwarded")
+	}
+	for _, port := range []int{5432, 8080} {
+		if _, ok := l.exposure("coder-1", port); ok {
+			t.Errorf("port %d is open for the local machine and must never be forwarded to the hub", port)
 		}
 	}
 }

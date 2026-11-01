@@ -12,7 +12,7 @@ cat) # raw terminal, every byte comes straight back
 	exec cat
 	;;
 exposes) # a harness whose first act is to expose a port, as a prompt can ask of it
-	curl -sS -m 10 -u "$EGZO_AGENT:$EGZO_TOKEN" -H 'content-type: application/json' -d '{"port":3200}' "$EGZO_CONTROL_URL/v1/expose" >/dev/null
+	curl -sS -m 10 -u "$EGZO_AGENT:$EGZO_TOKEN" -H 'content-type: application/json' -d '{"name":"early","where":"local"}' "$EGZO_CONTROL_URL/v1/expose" >/dev/null
 	stty raw -echo
 	printf 'READY\r\n'
 	exec cat

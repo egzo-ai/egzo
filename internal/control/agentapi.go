@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +46,8 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
 	mux.HandleFunc("POST /v1/boot", a.authenticated(a.boot))
 	mux.HandleFunc("POST /v1/expose", a.authenticated(a.expose))
-	mux.HandleFunc("DELETE /v1/expose/{port}", a.authenticated(a.unexpose))
+	mux.HandleFunc("GET /v1/expose", a.authenticated(a.exposed))
+	mux.HandleFunc("DELETE /v1/expose/{name}", a.authenticated(a.unexpose))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
 	return mux
 }
@@ -237,14 +237,13 @@ func (a *agentAPI) boot(w http.ResponseWriter, r *http.Request, agent string) {
 
 func (a *agentAPI) expose(w http.ResponseWriter, r *http.Request, agent string) {
 	var body struct {
-		Port     int    `json:"port"`
-		Name     string `json:"name"`
-		Protocol string `json:"protocol"`
+		Name  string `json:"name"`
+		Where string `json:"where"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	exposure, err := a.server.expose(agent, body.Port, body.Name, body.Protocol)
+	exposure, err := a.server.expose(agent, body.Name, body.Where)
 	if err != nil {
 		fail(w, err)
 		return
@@ -252,17 +251,21 @@ func (a *agentAPI) expose(w http.ResponseWriter, r *http.Request, agent string) 
 	reply(w, http.StatusOK, exposure)
 }
 
-func (a *agentAPI) unexpose(w http.ResponseWriter, r *http.Request, agent string) {
-	port, err := strconv.Atoi(r.PathValue("port"))
-	if err != nil {
-		http.Error(w, "the port is a number", http.StatusBadRequest)
-		return
+// exposed lists what the caller has open. The relay of an instance asks it at each new connection, with the instance's own token.
+func (a *agentAPI) exposed(w http.ResponseWriter, r *http.Request, agent string) {
+	list := a.server.exposedBy(agent, a.server.previewTemplate())
+	if list == nil {
+		list = []Exposure{}
 	}
-	if err := a.server.unexpose(agent, port); err != nil {
+	reply(w, http.StatusOK, list)
+}
+
+func (a *agentAPI) unexpose(w http.ResponseWriter, r *http.Request, agent string) {
+	if err := a.server.unexpose(agent, r.PathValue("name")); err != nil {
 		fail(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusOK, unexposed())
 }
 
 // maxStatePayload is the largest state report read. A harness may forward a whole tool call with it; only

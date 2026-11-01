@@ -1,40 +1,58 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""The `expose` and `unexpose` tools: an agent says a port of its own loopback is worth opening, and gets what to hand to its user.
+"""The `expose` and `unexpose` tools: an agent opens one of the ports its template declares, by name, for the hub or for the local machine,
+and gets the one address where the app can be reached.
 
-Without a hub that is the `egzo agent port-forward` command. Nothing is checked at `expose` time, so the specs need no server in the
-agent. With a hub: test_agent_expose_hub.py."""
+This project has local ports and no hub, so `local` is the place. With a hub: test_agent_expose_hub.py. Nothing here starts a server in the
+agent: nothing is checked at `expose` time, and a server may start after it. What reaches the server through the relay: test_agent_local_ports.py."""
 
 import json
 import re
 
 import pytest
 
+from agentapi import Agent
 from hubkit import eventually
+from support import custom, spec
+
+PORTS = {"web": "8080/http", "db": "5432/tcp", "voice": "5432/udp", "docs": "8081/http"}
+HTTP_ADDRESS = re.compile(r"^http://127\.0\.0\.1:(\d+)/$")
+RAW_ADDRESS = re.compile(r"^127\.0\.0\.1:(\d+)$")
+
+
+@pytest.fixture(scope="module")
+def ported(shared_project, engine, egzo):
+    shared_project.up(spec(local_ports={"bind": "127.0.0.1"}, agents={"worker": custom(engine.session_image(egzo.binary), ports=PORTS)}))
+    return shared_project
+
+
+@pytest.fixture(scope="module")
+def two(ported, engine):
+    return [Agent(engine, ported, ported.spawn("worker", name)) for name in ("coder", "reviewer")]
 
 
 @pytest.fixture
-def pair(team):
+def pair(ported, two):
     """The module's two agents with nothing exposed: every agent is a network of its own, and a machine has a limited number of them."""
-    yield team.coder, team.reviewer
-    for worker in (team.coder, team.reviewer):
-        for exposure in exposed(team.project, worker.name):
-            worker.tool("unexpose", port=exposure["port"])
+    yield two
+    for worker in two:
+        for exposure in exposed(ported, worker.name):
+            worker.tool("unexpose", name=exposure["name"])
 
 
 @pytest.fixture
-def fresh(team):
-    """Spawn an agent and take it away again: for a spec that spends a budget, or removes what it made."""
+def fresh(ported, engine):
+    """Spawn an agent and take it away again: for a spec that removes what it made."""
     spawned = []
 
     def spawn(name=None):
-        spawned.append(team.spawn(name))
+        spawned.append(Agent(engine, ported, ported.spawn("worker", name)))
         return spawned[-1]
 
     yield spawn
     for worker in spawned:
-        team.project.run("agent", "rm", "--force", worker.name)
+        ported.run("agent", "rm", "--force", worker.name)
 
 
 def answer(result):
@@ -43,8 +61,14 @@ def answer(result):
     return result.get("structuredContent", result)
 
 
-def expose(worker, port, **arguments):
-    return answer(worker.tool("expose", port=port, **arguments))
+def expose(worker, name, where="local"):
+    return answer(worker.tool("expose", name=name, where=where))
+
+
+def refused(worker, name, where="local"):
+    result = worker.tool("expose", name=name, where=where)
+    assert result.get("isError"), result
+    return result["content"][0]["text"]
 
 
 def exposed(project, name):
@@ -61,125 +85,149 @@ def latest_exposed(engine, project, name):
     return next(a for a in agents if a["agent"] == name).get("exposed") or []
 
 
-def test_without_a_hub_the_answer_is_the_command_a_person_runs(pair):
+NOTE = "Active connections may remain active - close your server to end them."
+
+
+def test_a_local_http_port_answers_an_http_address_and_a_raw_one_host_and_port(pair):
     a, _ = pair
-    got = expose(a, 3000)
-    assert got["command"] == f"egzo agent port-forward {a.name} 3000"
-    assert not got.get("address")
-    assert got["protocol"] == "http"
+    web, db, voice = expose(a, "web"), expose(a, "db"), expose(a, "voice")
+    assert HTTP_ADDRESS.fullmatch(web["address"]) and RAW_ADDRESS.fullmatch(db["address"]) and RAW_ADDRESS.fullmatch(voice["address"])
+    assert (web["name"], web["port"], web["protocol"], web["where"]) == ("web", 8080, "http", "local")
+    assert (db["port"], db["protocol"]) == (5432, "tcp") and (voice["port"], voice["protocol"]) == (5432, "udp")
+    ports = {int(HTTP_ADDRESS.fullmatch(web["address"]).group(1)), int(RAW_ADDRESS.fullmatch(db["address"]).group(1)), int(RAW_ADDRESS.fullmatch(voice["address"]).group(1))}
+    assert len(ports) == 3 and all(20000 <= port <= 29999 for port in ports), "three different ports of the default pool"
+    assert "id" not in web, "only a preview has an id"
 
 
-def test_exposing_again_changes_the_name_and_the_protocol_and_keeps_the_id(team, pair):
+def test_the_same_call_again_is_the_same_answer(pair):
     a, _ = pair
-    first = expose(a, 3001, name="shop")
-    again = expose(a, 3001, name="store", protocol="tcp")
-    assert again["id"] == first["id"]
-    row = exposed(team.project, a.name)
-    assert [(e["port"], e["name"], e["protocol"], e["id"]) for e in row] == [(3001, "store", "tcp", first["id"])]
+    assert expose(a, "web") == expose(a, "web")
 
 
-def test_each_port_has_an_id_of_its_own_and_it_tells_nothing(pair):
+def test_the_arguments_are_the_name_and_where_and_nothing_else_is_taken(pair):
     a, _ = pair
-    one, two = expose(a, 3002)["id"], expose(a, 3003)["id"]
-    assert one != two
-    assert re.fullmatch(r"[a-z2-7]{16}", one) and re.fullmatch(r"[a-z2-7]{16}", two)
+    assert refused(a, "web", where="")
+    assert refused(a, "web", where="everywhere")
+    assert refused(a, "web", where="LOCAL")
+    result = a.tool("expose", port=8080)
+    assert result.get("isError"), "a port number is not a name"
 
 
-@pytest.mark.parametrize("arguments", [{"port": 0}, {"port": 65536}, {"port": 3000, "protocol": "udp"}, {"port": 3000, "protocol": "HTTP"}, {"port": 3000, "name": "a\u001b[2Jb"}, {"port": 3000, "name": "x" * 65}])
-def test_what_is_not_an_exposure_is_refused(pair, arguments):
+def test_a_name_that_is_not_declared_is_refused_and_the_answer_lists_the_names(pair):
     a, _ = pair
-    assert a.tool("expose", **arguments).get("isError"), arguments
+    message = refused(a, "admin")
+    for name in PORTS:
+        assert name in message
+    assert refused(a, "8080")
 
 
-def test_an_agent_has_a_limit_of_exposures(fresh):
-    a = fresh()
-    answers = [a.tool("expose", port=port) for port in range(4000, 4033)]
-    assert not any(r.get("isError") for r in answers[:32])
-    assert answers[32].get("isError")
-
-
-def test_unexpose_ends_it_and_another_port_is_not_touched(team, pair):
+def test_hub_is_refused_when_no_hub_serves_the_project(pair):
     a, _ = pair
-    expose(a, 3004)
-    expose(a, 3005)
-    assert not a.tool("unexpose", port=3004).get("isError")
-    assert [e["port"] for e in exposed(team.project, a.name)] == [3005]
-    assert not a.tool("unexpose", port=3004).get("isError"), "it is gone, which is what was asked"
+    assert "no hub" in refused(a, "web", where="hub")
 
 
-def test_exposing_after_unexpose_is_the_same_id(pair):
+def test_unexpose_closes_it_and_another_port_is_not_touched(ported, pair):
     a, _ = pair
-    first = expose(a, 3006)["id"]
-    a.tool("unexpose", port=3006)
-    assert expose(a, 3006)["id"] == first
+    expose(a, "web")
+    expose(a, "db")
+    assert not a.tool("unexpose", name="web").get("isError")
+    assert [e["name"] for e in exposed(ported, a.name)] == ["db"]
+    assert not a.tool("unexpose", name="web").get("isError"), "it is closed, which is what was asked"
 
 
-def test_an_agent_exposes_for_itself_only(team, pair):
+def test_unexpose_answers_ok_and_the_note_about_active_connections_over_mcp_and_http(pair):
+    a, _ = pair
+    expose(a, "docs")
+    assert answer(a.tool("unexpose", name="docs")) == {"ok": True, "note": NOTE}
+    expose(a, "docs")
+    code, body = a.call("DELETE", "/v1/expose/docs")
+    assert code == 200 and body == {"ok": True, "note": NOTE}
+
+
+def test_exposing_after_unexpose_is_the_same_address(pair):
+    a, _ = pair
+    first = expose(a, "db")["address"]
+    a.tool("unexpose", name="db")
+    assert expose(a, "db")["address"] == first, "the outside port is the instance's for as long as it lives"
+
+
+def test_an_agent_exposes_for_itself_only(ported, pair):
     a, b = pair
-    expose(a, 3007)
-    assert exposed(team.project, b.name) == []
-    assert not b.tool("unexpose", port=3007).get("isError")
-    assert [e["port"] for e in exposed(team.project, a.name)] == [3007]
+    first = expose(a, "db")
+    assert exposed(ported, b.name) == []
+    assert not b.tool("unexpose", name="db").get("isError")
+    assert [e["name"] for e in exposed(ported, a.name)] == ["db"]
+    assert expose(b, "db")["address"] != first["address"], "each instance has its own outside port"
 
 
-def test_the_http_verbs_are_the_same_verbs(team, pair):
+def test_the_http_verbs_are_the_same_verbs(ported, pair):
     a, _ = pair
-    code, body = a.call("POST", "/v1/expose", {"port": 3008, "name": "shop"})
-    assert code == 200 and body["id"] and body["protocol"] == "http"
-    assert [e["port"] for e in exposed(team.project, a.name)] == [3008]
-    assert a.call("DELETE", "/v1/expose/3008")[0] == 204
-    assert exposed(team.project, a.name) == []
+    code, body = a.call("POST", "/v1/expose", {"name": "web", "where": "local"})
+    assert code == 200 and HTTP_ADDRESS.fullmatch(body["address"]) and body["protocol"] == "http"
+    code, listed = a.call("GET", "/v1/expose")
+    assert code == 200 and [(e["name"], e["where"]) for e in listed] == [("web", "local")]
+    assert [e["name"] for e in exposed(ported, a.name)] == ["web"]
+    assert a.call("DELETE", "/v1/expose/web")[0] == 200
+    assert exposed(ported, a.name) == []
+    assert a.call("GET", "/v1/expose")[1] == []
 
 
-def test_the_exposures_are_in_the_status_log_within_a_moment(team, engine, pair):
+def test_the_exposures_are_in_the_status_log_within_a_moment(ported, engine, pair):
     a, _ = pair
-    got = expose(a, 3009, name="shop")
-    assert eventually(lambda: latest_exposed(engine, team.project, a.name), seconds=5)
-    assert latest_exposed(engine, team.project, a.name)[0]["id"] == got["id"]
-    a.tool("unexpose", port=3009)
-    assert eventually(lambda: not latest_exposed(engine, team.project, a.name), seconds=5)
+    got = expose(a, "db")
+    assert eventually(lambda: latest_exposed(engine, ported, a.name), seconds=5)
+    line = latest_exposed(engine, ported, a.name)[0]
+    assert (line["name"], line["where"], line["protocol"], line["port"]) == ("db", "local", "tcp", 5432)
+    assert line["address"] == got["address"]
+    a.tool("unexpose", name="db")
+    assert eventually(lambda: not latest_exposed(engine, ported, a.name), seconds=5)
 
 
-def test_ps_shows_the_exposed_ports(team, pair):
+def test_ps_shows_the_names_and_where_and_json_has_the_address(ported, pair):
     a, _ = pair
-    expose(a, 3010)
-    expose(a, 3011, protocol="tcp")
-    assert team.project.ps()[a.name]["PORTS"] == "3010/http,3011/tcp"
+    expose(a, "web")
+    got = expose(a, "db")
+    assert ported.ps()[a.name]["PORTS"] == "db:local,web:local"
+    row = {e["name"]: e for e in exposed(ported, a.name)}
+    assert row["db"]["address"] == got["address"] and row["db"]["where"] == "local" and row["db"]["port"] == 5432
 
 
-def test_a_stopped_agent_shows_no_exposed_port(team, fresh):
+def test_a_stopped_agent_shows_no_open_port(ported, fresh):
     a = fresh()
-    expose(a, 3016)
-    team.project.ok("agent stop", a.name)
-    assert team.project.ps()[a.name]["PORTS"] == ""
-    assert exposed(team.project, a.name) == []
+    expose(a, "db")
+    ported.ok("agent stop", a.name)
+    assert ported.ps()[a.name]["PORTS"] == ""
+    assert exposed(ported, a.name) == []
 
 
-def test_an_agent_ls_shows_them_too(team, pair):
+def test_an_agent_ls_shows_them_too(ported, pair):
     a, _ = pair
-    expose(a, 3012, name="shop")
-    rows = json.loads(team.project.ok("agent ls --json").stdout)
-    assert next(r for r in rows if r["name"] == a.name)["exposed"][0]["port"] == 3012
+    expose(a, "docs")
+    rows = json.loads(ported.ok("agent ls --json").stdout)
+    assert next(r for r in rows if r["name"] == a.name)["exposed"][0]["name"] == "docs"
 
 
-def test_a_restart_of_the_sidecar_ends_nothing(team, engine, fresh):
+def test_a_restart_of_the_sidecar_ends_nothing(ported, engine, fresh):
     a = fresh()
-    first = expose(a, 3015)
-    assert engine.run("restart", f"{team.project.name}-control-1").returncode == 0
-    assert eventually(lambda: [e["id"] for e in exposed(team.project, a.name)] == [first["id"]], seconds=30)
+    first = expose(a, "db")
+    assert engine.run("restart", f"{ported.name}-control-1").returncode == 0
+    assert eventually(lambda: [e["address"] for e in exposed(ported, a.name)] == [first["address"]], seconds=30)
 
 
-def test_a_new_instance_of_a_name_inherits_nothing(team, fresh):
+def test_a_new_instance_of_a_name_inherits_nothing(ported, fresh):
     name = "again"
-    a = team.spawn(name)
-    first = expose(a, 3014)["id"]
-    team.project.ok("agent rm --force", name)
+    a = fresh(name)
+    expose(a, "db")
+    ported.ok("agent rm --force", name)
     b = fresh(name)
-    assert exposed(team.project, name) == []
-    assert expose(b, 3014)["id"] != first
+    assert exposed(ported, name) == []
+    assert refused(b, "nothing-here"), "its own declared ports are what it can open"
+    assert expose(b, "db")["where"] == "local"
 
 
-def test_the_instructions_of_an_agent_say_how(team):
-    tools = team.coder.mcp("tools/list")["result"]["tools"]
+def test_the_tools_say_how_and_say_nothing_about_this_agent(two):
+    tools = two[0].mcp("tools/list")["result"]["tools"]
     described = {tool["name"]: tool["description"] for tool in tools}
-    assert "HTTP" in described["expose"] and "unexpose" in described
+    assert "expose" in described and "unexpose" in described
+    for text in described.values():
+        assert not any(name in text.split() for name in ("web", "db", "voice")), "the ports of an agent are in its instructions, not in the tools"

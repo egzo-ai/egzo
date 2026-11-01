@@ -106,19 +106,29 @@ type AgentStatus struct {
 	Exposed  []Exposure
 }
 
-// What an exposed port speaks. A hub serves `http` as a preview; `tcp` is any other stream.
+// What a declared port speaks. A hub serves `http` as a preview; `tcp` and `udp` are local only.
 const (
 	ProtocolHTTP = "http"
 	ProtocolTCP  = "tcp"
+	ProtocolUDP  = "udp"
 )
 
-// Exposure is a port an agent offers to people. The protocol says what is behind it: `http`, or `tcp` for any other stream. The stream
-// that reaches it is the same for both.
+// Where an exposed port is open. A hub serves only the ones open for `hub`: a port open for `local` is on the machine of the project.
+const (
+	WhereHub   = "hub"
+	WhereLocal = "local"
+)
+
+// MaxExposures is how many ports one agent declares, and so how many it can have open: they go out in every status line.
+const MaxExposures = 32
+
+// Exposure is a port an agent has open. The protocol says what is behind it, and Where for whom.
 type Exposure struct {
 	Port     int
 	Name     string
 	Protocol string
-	ID       string // made by the control sidecar, the same each time this instance exposes this port
+	Where    string
+	ID       string // made by the control sidecar for a port open for the hub, the same each time this instance exposes this port
 }
 
 // Event is one entry of the control sidecar's event stream, as the web UI shows it.
