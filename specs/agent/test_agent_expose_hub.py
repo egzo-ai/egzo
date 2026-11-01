@@ -62,11 +62,11 @@ def test_a_hub_that_changes_its_domain_moves_the_address(linked, fake_hub, share
     first = expose(linked, 3105)
     fake_hub.preview("https://%s-p1a2b3c4d5e6.other.example.net/")
     fake_hub.drop(shared_project.name)
-    assert eventually(lambda: "other.example.net" in (expose(linked, 3105).get("address") or ""), seconds=30)
+    assert eventually(lambda: expose(linked, 3105).get("address") == f"https://{first['id']}-p1a2b3c4d5e6.other.example.net/", seconds=30)
     assert expose(linked, 3105)["id"] == first["id"]
     fake_hub.preview(TEMPLATE)
     fake_hub.drop(shared_project.name)
-    assert eventually(lambda: "egzo-preview" in (expose(linked, 3105).get("address") or ""), seconds=30)
+    assert eventually(lambda: expose(linked, 3105).get("address") == first["address"], seconds=30)
 
 def test_a_hub_with_no_template_clears_it(linked, fake_hub, shared_project):
     fake_hub.preview("")
