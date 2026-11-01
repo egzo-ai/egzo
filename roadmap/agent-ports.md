@@ -61,11 +61,11 @@ tools:
   listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
 - The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status feed carries
   them, so the hub learns of a new preview from the link within a second.
-- **The id** in the address is made by control at the first `expose` of a port by an agent, random (80 bits, 16 characters of
-  base32) and kept: stable, so a restart of the agent, the sidecar or the hub keeps the address an agent already gave out. Control
-  keeps registrations by name and knows no instance id (`roadmap/instance-id.md`), so the exposures belong to the registration:
-  every removal unregisters the agent, and that deletes them, so a new instance of the name never inherits an old one's address.
-  Opaque, never the project's or the agent's name: links travel in chat and logs.
+- **The id** in the address is an HMAC of the agent's registration and the port under the project key (80 bits, 16 characters of
+  base32): stable, so an agent that exposes a port again gets back the address it already gave out, and nothing has to be kept
+  for that. Control keeps registrations by name and knows no instance id (`roadmap/instance-id.md`), so the exposures belong to the
+  registration: every removal unregisters the agent, and a new instance of the name, with a registration of its own, never
+  inherits an old one's address. Opaque, never the project's or the agent's name: links travel in chat and logs.
 - **The address** is made from a template control learns from the hub (below). Without one, the answer is the `port-forward`
   command. Control never needs to reach the hub.
 

@@ -18,7 +18,52 @@ func exposing(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	register(t, s, "web")
 	return s
+}
+
+func register(t *testing.T, s *server, agent string) {
+	t.Helper()
+	w := newRecorder()
+	s.handler().ServeHTTP(w, mustRequest("PUT", "/v1/agents/"+agent, nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestAPortGetsItsIDBackAndARegistrationHasItsOwn(t *testing.T) {
+	s := exposing(t)
+	first, err := s.expose("web", 3000, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.unexpose("web", 3000); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.expose("web", 3000, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != first.ID {
+		t.Errorf("%s, then %s", first.ID, again.ID)
+	}
+	other, err := s.expose("web", 3001, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.ID == first.ID {
+		t.Error("two ports share an id")
+	}
+	gone := newRecorder()
+	s.handler().ServeHTTP(gone, mustRequest("DELETE", "/v1/agents/web", nil))
+	register(t, s, "web")
+	next, err := s.expose("web", 3000, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.ID == first.ID {
+		t.Error("a new instance of the name inherited the address")
+	}
 }
 
 func TestAnExposureKeepsItsIDAndTheAnswerFollowsTheTemplate(t *testing.T) {
@@ -72,16 +117,16 @@ func TestExposingNothingNewWritesNothing(t *testing.T) {
 
 func TestAnAgentThatIsNotRegisteredLosesItsExposuresToo(t *testing.T) {
 	s := exposing(t)
-	if _, err := s.expose("web", 3000, "", ""); err != nil {
+	if err := s.writeExposures("old", []Exposure{{Port: 3000}}); err != nil {
 		t.Fatal(err)
 	}
 	// a spawn clears a name this way before it registers: nothing is retired, and nothing may be left for the new instance
 	gone := newRecorder()
-	s.handler().ServeHTTP(gone, mustRequest("DELETE", "/v1/agents/web", nil))
+	s.handler().ServeHTTP(gone, mustRequest("DELETE", "/v1/agents/old", nil))
 	if gone.Code != http.StatusNoContent {
 		t.Fatalf("%d %s", gone.Code, gone.Body)
 	}
-	if list, err := s.readExposures("web"); err != nil || len(list) != 0 {
+	if list, err := s.readExposures("old"); err != nil || len(list) != 0 {
 		t.Errorf("left behind: %+v, %v", list, err)
 	}
 }

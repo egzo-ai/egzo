@@ -107,11 +107,11 @@ def test_unexpose_ends_it_and_another_port_is_not_touched(team, pair):
     assert not a.tool("unexpose", port=3004).get("isError"), "it is gone, which is what was asked"
 
 
-def test_exposing_after_unexpose_is_a_new_id(pair):
+def test_exposing_after_unexpose_is_the_same_id(pair):
     a, _ = pair
     first = expose(a, 3006)["id"]
     a.tool("unexpose", port=3006)
-    assert expose(a, 3006)["id"] != first
+    assert expose(a, 3006)["id"] == first
 
 
 def test_an_agent_exposes_for_itself_only(team, pair):

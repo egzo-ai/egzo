@@ -4,7 +4,8 @@
 package control
 
 import (
-	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base32"
 	"encoding/json"
 	"errors"
@@ -25,7 +26,8 @@ import (
 // a server may start after it, and stop and start again.
 //
 // Exposures are kept per agent name, next to the registration, because that is what control knows of an instance. Every removal unregisters
-// the agent, which deletes them, so a new instance of a name never inherits an old one's address.
+// the agent, which deletes them. An id is made from the registration and the port, so nothing has to be kept for a port to get its id back
+// when it is exposed again, and a new instance of a name, which has a registration of its own, never inherits an old one's address.
 const (
 	// maxExposures is how many ports one agent may expose: they go out in every status line.
 	maxExposures    = 32
@@ -40,8 +42,8 @@ const (
 	previewPlaceholder = "%s"
 )
 
-// Exposure is one exposed port. ID is made at the first `expose` and kept. Address and Command are not stored: they are what to hand to a
-// person, made when asked, and one of them is set.
+// Exposure is one exposed port. ID is the same every time this agent exposes this port. Address and Command are not stored: they are what
+// to hand to a person, made when asked, and one of them is set.
 type Exposure struct {
 	Port     int    `json:"port"`
 	Name     string `json:"name,omitempty"`
@@ -53,13 +55,23 @@ type Exposure struct {
 
 var exposureIDs = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-// newExposureID is 80 random bits, as 16 characters a host name can hold.
-func newExposureID() (string, error) {
-	random := make([]byte, 10)
-	if _, err := rand.Read(random); err != nil {
+// exposureID is 80 bits nobody can work out without the project key, as 16 characters a host name can hold.
+func (s *server) exposureID(agent string, port int) (string, error) {
+	key, err := s.projectKey()
+	if err != nil {
 		return "", err
 	}
-	return strings.ToLower(exposureIDs.EncodeToString(random)), nil
+	path, ok := s.agentFile(agent)
+	if !ok {
+		return "", errors.New("invalid agent name")
+	}
+	nonce, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	mac := hmac.New(sha256.New, key)
+	fmt.Fprintf(mac, "exposure:%s:%s:%d", agent, strings.TrimSpace(string(nonce)), port)
+	return strings.ToLower(exposureIDs.EncodeToString(mac.Sum(nil)[:10])), nil
 }
 
 func (s *server) exposuresFile(agent string) string {
@@ -83,7 +95,7 @@ func (s *server) readExposures(agent string) ([]Exposure, error) {
 	return list, nil
 }
 
-// writeExposures replaces an agent's list in one step: the ids in it are addresses somebody may have been given.
+// writeExposures replaces an agent's list in one step.
 func (s *server) writeExposures(agent string, list []Exposure) error {
 	path := s.exposuresFile(agent)
 	if len(list) == 0 {
@@ -165,7 +177,7 @@ func (s *server) expose(agent string, port int, name, protocol string) (Exposure
 		return Exposure{}, tooMany("exposed ports")
 	}
 	if at < 0 {
-		id, err := newExposureID()
+		id, err := s.exposureID(agent, port)
 		if err != nil {
 			return Exposure{}, err
 		}

@@ -112,7 +112,7 @@ type Exposure struct {
 	Port     int
 	Name     string
 	Protocol string
-	ID       string // made by the control sidecar, kept for as long as the port stays exposed
+	ID       string // made by the control sidecar, the same each time this instance exposes this port
 }
 
 // Event is one entry of the control sidecar's event stream, as the web UI shows it.
