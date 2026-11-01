@@ -93,7 +93,8 @@ func (s Status) text() string {
 	return s.State
 }
 
-// The verbs a hub may ask. There is no other: a hub cannot run a container, mount a path or exec a command of its choosing.
+// The verbs a hub may ask. There is no other: a hub cannot run a container, mount a path or exec a command of its choosing. forward reaches
+// a port an agent exposed, and no other: the link refuses the rest.
 const (
 	VerbProject   = "project"
 	VerbPublished = "published"
@@ -105,6 +106,7 @@ const (
 	VerbEvents    = "events"
 	VerbLogs      = "logs"
 	VerbSpec      = "spec"
+	VerbForward   = "forward"
 )
 
 // The feeds a link pushes.
@@ -183,10 +185,12 @@ type Request struct {
 	Tail      int    `json:",omitempty"` // logs
 	Limit     int    `json:",omitempty"` // events
 	Size      Size   `json:",omitempty"` // attach
+	Port      int    `json:",omitempty"` // forward
 }
 
 // Reply is a line the link answers a Request with: progress of what it does, then one with Done. After a Done without Error,
-// attach goes on as a terminal: raw output from the link, input frames from the hub.
+// attach goes on as a terminal: raw output from the link, input frames from the hub. forward goes on as raw bytes both ways, and its Done
+// says the server was reached.
 type Reply struct {
 	Progress string          `json:",omitempty"`
 	Done     bool            `json:",omitempty"`

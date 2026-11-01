@@ -4,6 +4,7 @@ package links
 
 import (
 	"context"
+	"net"
 
 	"github.com/egzo-ai/egzo/internal/hublink"
 )
@@ -24,6 +25,9 @@ type Engine interface {
 	Remove(ctx context.Context, agent string, progress func(step string)) error
 	// Attach connects a terminal to an agent's session until it ends or ctx is cancelled.
 	Attach(ctx context.Context, agent string, term Terminal) error
+	// DialPort connects to a port an agent exposed. ctx covers the dial and nothing after it, as with a net.Dialer: the connection lasts until
+	// it is closed or the link goes.
+	DialPort(ctx context.Context, agent string, port int) (net.Conn, error)
 	// Events returns the latest events of the project's control sidecar (message texts left out), oldest first.
 	Events(ctx context.Context, agent string, limit int) ([]Event, error)
 	// Logs returns the end of an agent's, or a sidecar's, container log.
@@ -57,6 +61,7 @@ type (
 	AuditEvent    = hublink.AuditEvent
 	StatusLine    = hublink.StatusLine
 	AgentStatus   = hublink.AgentStatus
+	Exposure      = hublink.Exposure
 	Event         = hublink.Event
 	Size          = hublink.Size
 	Terminal      = hublink.Terminal

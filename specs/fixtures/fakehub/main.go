@@ -159,8 +159,9 @@ func answer(w http.ResponseWriter, value any) {
 
 type verbRequest struct {
 	Project, Verb, Template, Name, Actor, Agent, Container, Input string
-	Tail, Limit                                                   int
+	Tail, Limit, Port                                             int
 	Seconds                                                       float64
+	HalfClose                                                     bool // forward: end the input, then read the answer
 }
 
 func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any, []string, error) {
@@ -191,6 +192,24 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 	case hublink.VerbSpec:
 		result, err := peer.Spec(ctx)
 		return string(result), steps, err
+	case hublink.VerbForward:
+		conn, err := peer.DialPort(ctx, q.Agent, q.Port)
+		if err != nil {
+			return nil, steps, err
+		}
+		defer conn.Close()
+		if _, err := io.WriteString(conn, q.Input); err != nil {
+			return nil, steps, err
+		}
+		if q.HalfClose {
+			if err := conn.(interface{ CloseWrite() error }).CloseWrite(); err != nil {
+				return nil, steps, err
+			}
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(q.Seconds * float64(time.Second))))
+		var out bytes.Buffer
+		_, _ = io.Copy(&out, conn)
+		return out.String(), steps, nil
 	case hublink.VerbAttach:
 		var out bytes.Buffer
 		input, writer := io.Pipe()

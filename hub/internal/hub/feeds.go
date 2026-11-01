@@ -85,10 +85,11 @@ type feedManager struct {
 	mu        sync.Mutex
 	followers map[string]*follower
 	audits    map[string]*auditFollower
+	exposed   map[string]map[string]exposedPort // by project and id. It stays while a project is offline: its addresses stay its own
 }
 
 func newFeedManager(h *Hub, opt FeedOptions) *feedManager {
-	return &feedManager{hub: h, opt: opt.withDefaults(), followers: map[string]*follower{}, audits: map[string]*auditFollower{}}
+	return &feedManager{hub: h, opt: opt.withDefaults(), followers: map[string]*follower{}, audits: map[string]*auditFollower{}, exposed: map[string]map[string]exposedPort{}}
 }
 
 // connected readies the followers of a connection that is served.
@@ -115,6 +116,7 @@ func (m *feedManager) forget(project string) {
 	defer m.mu.Unlock()
 	delete(m.followers, project)
 	delete(m.audits, project)
+	delete(m.exposed, project)
 }
 
 // status keeps what a status line says. A line that came with the log's replay at the start is as old as it was written, and it is not
@@ -138,6 +140,7 @@ func (m *feedManager) status(project string, line links.StatusLine) {
 	f.lastLine = now.Add(-age)
 	f.interval = line.Interval
 	f.agents = agents
+	m.exposed[project] = exposedIn(line)
 }
 
 // state says how far a follower can be trusted at a moment.

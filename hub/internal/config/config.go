@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // Config is everything the hub is told at start.
@@ -28,6 +30,10 @@ type Config struct {
 	// LinkURL is the address projects name in `hub:`, which is what their proof is for: EGZO_LINK_URL, else EGZO_PUBLIC_URL.
 	LinkURL      string
 	TrustedProxy []string
+	// PreviewDomain is what previews live under (EGZO_PREVIEW_DOMAIN), with a port if people reach them on one; empty: no previews.
+	// PreviewListen is where they are served (EGZO_PREVIEW_LISTEN, :8081 by default).
+	PreviewDomain string
+	PreviewListen string
 }
 
 // Parse reads the settings through get (os.Getenv in production). Every missing required setting is named in the one error.
@@ -45,6 +51,8 @@ func Parse(get func(string) string) (Config, error) {
 		AdminPassword: get("EGZO_ADMIN_PASSWORD"),
 		PublicURL:     get("EGZO_PUBLIC_URL"),
 		LinkURL:       or(get("EGZO_LINK_URL"), get("EGZO_PUBLIC_URL")),
+		PreviewDomain: strings.ToLower(get("EGZO_PREVIEW_DOMAIN")),
+		PreviewListen: or(get("EGZO_PREVIEW_LISTEN"), ":8081"),
 	}
 	for _, p := range strings.Split(get("EGZO_TRUSTED_PROXIES"), ",") {
 		if p = strings.TrimSpace(p); p != "" {
@@ -79,7 +87,47 @@ func Parse(get func(string) string) (Config, error) {
 		return c, fmt.Errorf("the address projects name in hub: %q is not a base address like https://hub.example.com", c.LinkURL)
 	}
 	c.LinkURL = u.Scheme + "://" + u.Host // as core keeps `hub:`
-	return c, nil
+	return c, c.checkPreviews()
+}
+
+// checkPreviews refuses a preview domain that would put code the agents wrote too close to the hub. Over https the hub's cookies are out of a
+// sibling's reach; over http they cannot be, so a sibling is refused.
+func (c Config) checkPreviews() error {
+	if c.PreviewDomain == "" {
+		return nil
+	}
+	if c.PublicURL == "" {
+		return errors.New("EGZO_PREVIEW_DOMAIN needs EGZO_PUBLIC_URL: a preview sends people to the hub to sign in")
+	}
+	if _, ok := names.HostHeader(c.PreviewDomain); !ok || strings.Contains(c.PreviewDomain, "%") {
+		return fmt.Errorf("EGZO_PREVIEW_DOMAIN %q is not a domain", c.PreviewDomain)
+	}
+	public, err := url.Parse(c.PublicURL)
+	if err != nil {
+		return fmt.Errorf("EGZO_PUBLIC_URL %q is not an address", c.PublicURL)
+	}
+	preview, _, found := strings.Cut(c.PreviewDomain, ":")
+	if !found {
+		preview = c.PreviewDomain
+	}
+	hub := strings.ToLower(public.Hostname())
+	if preview == hub || strings.HasSuffix(hub, "."+preview) {
+		return fmt.Errorf("EGZO_PREVIEW_DOMAIN %q holds the hub's own address: previews need a domain of their own", c.PreviewDomain)
+	}
+	if public.Scheme == "http" && sameSite(preview, hub) {
+		return fmt.Errorf("EGZO_PREVIEW_DOMAIN %q is on the same site as the hub at %s: over http the hub's cookies cannot be kept from it. Use https, or a domain of its own", c.PreviewDomain, hub)
+	}
+	return nil
+}
+
+// sameSite says whether two hosts end alike. It does not know the public suffixes: at worst it refuses two sites under `.co.uk` on plain http,
+// which is a trial, and a domain of its own is what it asks for anyway.
+func sameSite(a, b string) bool {
+	last := func(host string) string {
+		labels := strings.Split(host, ".")
+		return strings.Join(labels[max(0, len(labels)-2):], ".")
+	}
+	return last(a) == last(b)
 }
 
 func or(v, fallback string) string {
