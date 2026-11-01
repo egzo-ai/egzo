@@ -67,7 +67,7 @@ up() {
 
 # the project names the hub, and its first `up` says it is not registered
 mkdir "$WORK/$NAME"
-printf 'hub: %s\nsecret_key: v/EGZO_STACK_SECRET_KEY\nvaults:\n  v: { backend: env }\nagents:\n  coder:\n    harness: custom\n    image: %s\n    env:\n      FAKE_TUI: cat\n    ports:\n      demo: \"8000/http\"\n' "$EGZO_LINK_URL" "$SESSION" > "$WORK/$NAME/egzo.yaml"
+printf 'hub: %s\nsecret_key: v/EGZO_STACK_SECRET_KEY\nvaults:\n  v: { backend: env }\nagents:\n  coder:\n    harness: custom\n    image: %s\n    env:\n      FAKE_TUI: cat\n    ports:\n      demo: 8000/http\n' "$EGZO_LINK_URL" "$SESSION" > "$WORK/$NAME/egzo.yaml"
 OUTPUT=$(up 2>&1) || { echo "$OUTPUT" >&2; exit 1; }
 if ! echo "$OUTPUT" | grep -q 'link: not registered: run `egzo project register`'; then
 	echo "hub-stack: the first up did not say the project is not registered:" >&2
