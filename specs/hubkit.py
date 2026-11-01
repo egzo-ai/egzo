@@ -96,6 +96,10 @@ class FakeHub:
     def feed(self, project, feed):
         return self._call("GET", f"/feed?project={project}&feed={feed}")
 
+    def preview(self, template):
+        """The address template the hub gives a link from now on."""
+        self._call("POST", "/preview", {"Template": template})
+
     def drop(self, project):
         self._call("POST", f"/drop?project={project}")
 

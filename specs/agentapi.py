@@ -92,7 +92,7 @@ class Agent:
         assert reply.returncode == 0, reply.stderr
         return json.loads(reply.stdout)
 
-    def tool(self, name, **arguments):
+    def tool(self, name, /, **arguments):
         return self.mcp("tools/call", {"name": name, "arguments": arguments})["result"]
 
 

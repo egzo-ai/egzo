@@ -61,11 +61,14 @@ type Link struct {
 	changed chan struct{} // closed and replaced when the status changes
 	key     ed25519.PrivateKey
 	proxy   string
-	control *hublink.Lines // the live control stream, for the last word
-	asked   *registering   // the code `egzo project register` brought, until the hub has answered it
-	unlock  chan struct{}  // closed once the key is open
-	wake    chan struct{}  // a link that stopped dialing, or waits to dial again, goes on: holds one
-	gone    chan struct{}  // closed when the hub has forgotten the project
+	control *hublink.Lines     // the live control stream, for the last word
+	asked   *registering       // the code `egzo project register` brought, until the hub has answered it
+	unlock  chan struct{}      // closed once the key is open
+	handing context.CancelFunc // ends the handing on of an older template
+	wake    chan struct{}      // a link that stopped dialing, or waits to dial again, goes on: holds one
+	gone    chan struct{}      // closed when the hub has forgotten the project
+
+	template sync.Mutex // one template at a time goes to the control sidecar
 }
 
 // registering is one `egzo project register`. The code stays in memory, and only until the hub answers: it is never in a Status, a log
@@ -418,6 +421,7 @@ func (l *Link) connect(ctx context.Context, asked *registering) error {
 			return fmt.Errorf("the connection to the hub ended: %w", err)
 		}
 		l.record(verdict)
+		l.handTemplate(ctx, verdict.Preview)
 		// An answer to a connection that came without the code says nothing of the code, unless it is one the code would change nothing for.
 		if now := l.current(); now == asked || verdict.State != hublink.StateUnregistered {
 			l.answered(now)
@@ -443,6 +447,35 @@ func (l *Link) hello(ctx context.Context, key ed25519.PrivateKey) hublink.Hello 
 		hello.Templates = published.Names()
 	}
 	return hello
+}
+
+// handTemplate tells the control sidecar what the hub says a preview's address is, or that it serves none, for as long as it takes: a sidecar
+// being made again is an ordinary moment, and a verdict is not held up for it. A newer verdict replaces what is being handed on.
+func (l *Link) handTemplate(ctx context.Context, template string) {
+	ctx, cancel := context.WithCancel(ctx)
+	l.mu.Lock()
+	if l.handing != nil {
+		l.handing()
+	}
+	l.handing = cancel
+	l.mu.Unlock()
+	go func() {
+		l.template.Lock()
+		defer l.template.Unlock()
+		for delay := firstDelay; ctx.Err() == nil; delay = min(delay*2, lastDelay) {
+			err := l.options.Engine.SetPreviewTemplate(ctx, l.options.Project, template)
+			if err == nil {
+				return
+			}
+			if ctx.Err() == nil {
+				fmt.Fprintf(os.Stderr, "hand the preview address to the control sidecar: %v\n", err)
+			}
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+			}
+		}
+	}()
 }
 
 func (l *Link) record(v hublink.Verdict) {

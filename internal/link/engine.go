@@ -379,7 +379,7 @@ func (d *Engine) Attach(ctx context.Context, project, agent string, term Termina
 var noisy = map[string]bool{"state": true}
 
 // withText are the types whose text is shown: what the agent says about itself. The text of a message never is.
-var withText = map[string]bool{"status": true, "activity": true}
+var withText = map[string]bool{"status": true, "activity": true, "exposed": true, "unexposed": true}
 
 func (d *Engine) Events(ctx context.Context, project, agent string, limit int) ([]Event, error) {
 	path := "/v1/events"
@@ -467,6 +467,11 @@ func tailThatFits(text string) string {
 			text = text[i+1:]
 		}
 	}
+}
+
+// SetPreviewTemplate hands the control sidecar what the hub said a preview's address is. Empty clears it.
+func (d *Engine) SetPreviewTemplate(ctx context.Context, project, template string) error {
+	return stack.SetPreviewTemplate(ctx, d.client, project, template)
 }
 
 // Spec returns the resolved snapshot `up` stored on the control volume: references to secrets, never their values.

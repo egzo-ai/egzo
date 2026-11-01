@@ -256,12 +256,13 @@ func (s *store) interruptPending(agent string) bool {
 // AgentStatus is what the control sidecar knows of an agent: the status line it set, its activity, and what
 // it owes (open requests, an unanswered question).
 type AgentStatus struct {
-	Agent    string    `json:"agent"`
-	Status   string    `json:"status"`
-	Activity string    `json:"activity"`
-	Open     int       `json:"open"`
-	Waiting  bool      `json:"waiting"`
-	Updated  time.Time `json:"updated"`
+	Agent    string     `json:"agent"`
+	Status   string     `json:"status"`
+	Activity string     `json:"activity"`
+	Open     int        `json:"open"`
+	Waiting  bool       `json:"waiting"`
+	Updated  time.Time  `json:"updated"`
+	Exposed  []Exposure `json:"exposed,omitempty"`
 }
 
 func (s *store) statuses() map[string]AgentStatus {

@@ -51,6 +51,7 @@ var budgets = map[string]struct {
 }{
 	"state":  {200, 50},
 	"status": {20, 1},
+	"expose": {64, 1},
 	"update": {30, 0.5},
 }
 

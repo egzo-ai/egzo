@@ -67,3 +67,13 @@ func TestOnlyContainersThatAreNotRunningAreStoppedInAListing(t *testing.T) {
 		t.Error("a listing cannot say what a running agent is doing, and must not invent it")
 	}
 }
+
+func TestAStatusLineCarriesTheExposures(t *testing.T) {
+	line, ok, err := parseStatusLine([]byte(`{"type":"status","v":1,"agents":[{"agent":"web","exposed":[{"port":3000,"name":"shop","protocol":"http","id":"abc","address":"https://abc.example.net/"}]}]}`))
+	if err != nil || !ok || len(line.Agents) != 1 {
+		t.Fatalf("%+v %v %v", line, ok, err)
+	}
+	if got := line.Agents[0].Exposed; len(got) != 1 || got[0].Port != 3000 || got[0].Name != "shop" || got[0].Protocol != "http" || got[0].ID != "abc" {
+		t.Errorf("%+v", got)
+	}
+}

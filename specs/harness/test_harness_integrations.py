@@ -208,7 +208,7 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
 
     assert "--append-system-prompt" in cmdline(engine, p, scratch, "claude")
     instructions = read(engine, p, scratch, "$HOME/.egzo/instructions.md")
-    for needed in ("get_message", "list_messages", "resolve", "outcome", "update", "ask", "message(", "agents"):
+    for needed in ("get_message", "list_messages", "resolve", "outcome", "update", "ask", "message(", "agents", "expose(", "unexpose("):
         assert needed in instructions, f"the platform instructions do not mention {needed}"
 
     several_state = read_json(engine, p, two, "$HOME/.claude.json")

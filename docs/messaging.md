@@ -37,9 +37,24 @@ Agents get an `egzo` MCP server with these tools:
 | `message` | send a new request to the operator, a person or another agent |
 | `status` | one line on what it is doing, shown by `egzo ps` |
 | `agents` | the other agents, with their activity |
+| `expose` | offer a port of its own to people, and get what to hand them |
+| `unexpose` | stop offering it |
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: this is the only path between them.
+
+## Ports an agent offers
+
+Nobody can reach a port in an agent's sandbox, so an agent that starts a demo says so: `expose(port, name, protocol)`. Its server only has to
+listen on `127.0.0.1`, and may start before or after the call: nothing is checked.
+
+- The protocol is `http` by default, WebSockets included, or `tcp` for anything else, such as a database or a server that speaks TLS itself.
+- The answer is what the agent passes on. In a project with a [hub](hub.md) that serves previews, an `http` port gets an address. Otherwise it is
+  the command a person runs on a machine that holds the engine, `egzo agent port-forward coder-1 3000`.
+- The id in an address stays for as long as the port is exposed, through restarts of the agent and of the sidecars. A new agent with the same name gets
+  a new one. An agent may expose 32 ports.
+
+`egzo ps` shows them in `PORTS`, and `egzo ps --json` with their address or command.
 
 ## Questions from agents
 

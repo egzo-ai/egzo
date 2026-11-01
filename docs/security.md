@@ -45,6 +45,9 @@ Be clear about these before running agents on something you care about.
 - **What you open with `egzo agent port-forward` is the agent's.** The command reaches into the sandbox through the engine and the agent cannot
   use it to reach out, but the page your browser loads was written by the agent. Open it in a browser profile that is not signed in to anything
   you care about, on a local port no other site of yours uses (cookies ignore ports).
+- **An exposed port is what the agent says it is.** [`expose`](messaging.md#ports-an-agent-offers) publishes nothing and changes nothing in the sandbox: it
+  records a claim, and its name and protocol are the agent's words. The list goes to everyone who can read the project's status, and each agent sees the
+  others' with `agents`.
 - **The link holds the engine.** A project that names a [hub](managing-projects.md#linking-to-a-hub) runs a sidecar with the engine's socket
   mounted: on a rootful engine it is root-equivalent on its host, like the CLI. Agents do not reach it: it is on a network of its own. A hub that
   is taken over can do what its verbs do on the projects linked to it, which includes attaching to their agents: link only to a hub you trust. A

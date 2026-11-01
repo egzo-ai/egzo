@@ -437,23 +437,35 @@ type Report struct {
 	Activity string
 	Open     int  // requests the agent has fetched and not resolved
 	Waiting  bool // it has asked a question nobody has answered
+	Exposed  []Exposure
+}
+
+// Exposure is a port an agent offers to people, as the control sidecar says it: what to hand them is Address, or Command.
+type Exposure struct {
+	Port     int    `json:"port"`
+	Name     string `json:"name,omitempty"`
+	Protocol string `json:"protocol"`
+	ID       string `json:"id"`
+	Address  string `json:"address,omitempty"`
+	Command  string `json:"command,omitempty"`
 }
 
 // Row is one container of a project as `egzo ps` shows it.
 type Row struct {
-	Name     string    `json:"name"`
-	ID       string    `json:"id,omitempty"` // an instance's id; a sidecar has none
-	Service  string    `json:"service"`
-	Kind     string    `json:"kind"`
-	State    string    `json:"state"`
-	Health   string    `json:"health"`
-	Activity string    `json:"activity"`
-	Open     int       `json:"open"`
-	Waiting  bool      `json:"waiting"`
-	Status   string    `json:"status"`
-	Actor    string    `json:"actor"`
-	Created  time.Time `json:"created"`
-	Stale    bool      `json:"stale"`
+	Name     string     `json:"name"`
+	ID       string     `json:"id,omitempty"` // an instance's id; a sidecar has none
+	Service  string     `json:"service"`
+	Kind     string     `json:"kind"`
+	State    string     `json:"state"`
+	Health   string     `json:"health"`
+	Activity string     `json:"activity"`
+	Open     int        `json:"open"`
+	Waiting  bool       `json:"waiting"`
+	Status   string     `json:"status"`
+	Actor    string     `json:"actor"`
+	Created  time.Time  `json:"created"`
+	Stale    bool       `json:"stale"`
+	Exposed  []Exposure `json:"exposed,omitempty"`
 }
 
 // Rows describes a project's containers. reported holds what the control sidecar knows of each agent,
@@ -473,7 +485,7 @@ func Rows(observed Observed, reported map[string]Report, published *Published) [
 			row.ID = r.InstanceID
 			report := reported[r.Instance]
 			row.Open, row.Waiting, row.Status = report.Open, report.Waiting, termsafe.Truncate(termsafe.Line(report.Status), 200)
-			row.Activity = report.Activity
+			row.Activity, row.Exposed = report.Activity, report.Exposed
 			switch {
 			case r.State != "running":
 				row.Activity = "stopped"
@@ -492,7 +504,7 @@ func Rows(observed Observed, reported map[string]Report, published *Published) [
 // WriteStatus prints a project's containers.
 func WriteStatus(rows []Row, now time.Time, out io.Writer) {
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tOPEN\tWAITING\tACTOR\tAGE\tSTALE\tSTATUS")
+	fmt.Fprintln(table, "NAME\tSERVICE\tSTATE\tHEALTH\tACTIVITY\tOPEN\tWAITING\tACTOR\tAGE\tSTALE\tPORTS\tSTATUS")
 	for _, row := range rows {
 		open, waiting, stale := "", "", ""
 		if row.Kind == kindAgent {
@@ -504,8 +516,12 @@ func WriteStatus(rows []Row, now time.Time, out io.Writer) {
 				stale = "stale"
 			}
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			row.Name, row.Service, row.State, row.Health, row.Activity, open, waiting, termsafe.Line(row.Actor), Age(now.Sub(row.Created)), stale, row.Status)
+		ports := make([]string, len(row.Exposed))
+		for i, e := range row.Exposed {
+			ports[i] = fmt.Sprintf("%d/%s", e.Port, termsafe.Line(e.Protocol))
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.Name, row.Service, row.State, row.Health, row.Activity, open, waiting, termsafe.Line(row.Actor), Age(now.Sub(row.Created)), stale, strings.Join(ports, ","), row.Status)
 	}
 	table.Flush()
 }

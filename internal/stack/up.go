@@ -118,6 +118,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		if err := removeLinkVolume(ctx, c, observed, out); err != nil {
 			return err
 		}
+		if err := leaveHub(ctx, c, observed, project.Name); err != nil {
+			return err
+		}
 	}
 	markFresh(fresh, plan)
 	if !opts.DryRun && len(placeholders) > 0 {
