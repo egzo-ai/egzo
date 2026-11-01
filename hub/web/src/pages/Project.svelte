@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
+  import Previews from "../components/Previews.svelte";
   import { app, errorText, refreshProjects, toast } from "../lib/app.svelte";
   import { operate } from "../lib/agentops";
   import { ask } from "../lib/confirm.svelte";
@@ -242,6 +243,10 @@
             </tbody>
           </table>
         </div>
+        {#each agents.filter((a) => a.previews?.length) as a (a.name)}
+          <h3 class="h-section">Previews of {a.name}</h3>
+          <Previews agent={a.name} previews={a.previews} heading={false} />
+        {/each}
         <p class="muted" style="font-size:var(--text-xs);margin:0"><span class="kbd">j</span> <span class="kbd">k</span> move · <span class="kbd">Enter</span> open · <span class="kbd">a</span> attach · <span class="kbd">s</span> spawn</p>
       {:else}
         <div class="empty"><h2>No agent yet</h2><p>Spawn one from a template{#if project.templates.length === 0}. The project has published no template: run <code>egzo project up</code> on the project{/if}.</p></div>

@@ -104,9 +104,21 @@ export interface Agent {
   holder: string;
   /** Hosts the proxy refused the agent in the last hour, and that it has not reached since. */
   denied: number;
+  /** The ports it has open: a preview to open, or an address on the project's machine. */
+  previews: Preview[];
   /** What the hub does on it, or the failure of what it did that nobody dismissed. With no `state`, the project does not have the
    * agent: a spawn that runs or failed, or a removal that is ending. */
   task?: Task;
+}
+
+export interface Preview {
+  port: number;
+  name: string;
+  protocol: string;
+  /** `hub`: a preview to open. `local`: a port on the project's machine, to copy. */
+  where: string;
+  /** Empty for a person with no role on the project. */
+  address: string;
 }
 
 export type TaskVerb = "spawn" | "start" | "stop" | "rm";

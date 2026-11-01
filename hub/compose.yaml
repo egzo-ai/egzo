@@ -12,6 +12,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"           # meant for a private network (LAN, Tailscale, a tunnel), not the open internet
+      - "8081:8081"           # the previews: reach them through what terminates TLS. See docs/hub.md
     environment:
       # The address projects name in `hub:`. A link in a container reaches it, so not localhost.
       EGZO_PUBLIC_URL: ${EGZO_PUBLIC_URL:?set EGZO_PUBLIC_URL in .env}
@@ -27,6 +28,8 @@ services:
       EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:-}
       EGZO_OIDC_NAME: ${EGZO_OIDC_NAME:-}
       EGZO_TRUSTED_PROXIES: ${EGZO_TRUSTED_PROXIES:-}
+      # Previews of what agents expose: a domain of their own, with a wildcard certificate in front. See docs/hub.md.
+      EGZO_PREVIEW_DOMAIN: ${EGZO_PREVIEW_DOMAIN:-}
     volumes:
       - hub-data:/data
 

@@ -29,5 +29,5 @@ RUN apk add --no-cache ca-certificates && adduser -D -u 10001 hub && mkdir /data
 COPY --from=build /egzo-hub /egzo-hub
 USER hub
 VOLUME /data
-EXPOSE 8080
+EXPOSE 8080 8081
 ENTRYPOINT ["/egzo-hub"]
