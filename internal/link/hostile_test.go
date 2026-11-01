@@ -17,10 +17,12 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 // hostileEngine serves the parts of the Docker API the link reads. Each handler is keyed by the end of the path ("containers/json",
@@ -106,6 +108,40 @@ func allocated(f func()) uint64 {
 }
 
 const allocationBound = 64 << 20
+
+func TestAPortIsRefusedOnceTheStatusFeedStops(t *testing.T) {
+	line := []byte(`{"type":"status","v":1,"agents":[{"agent":"coder-1","exposed":[{"port":3000,"name":"shop","protocol":"http","id":"abc"}]}]}` + "\n")
+	broken := make(chan struct{})
+	var follows atomic.Int32
+	d := newHostileEngine(t).
+		on("containers/json", containers(sidecar("web", kindControl))).
+		on("/logs", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/vnd.docker.multiplexed-stream")
+			if follows.Add(1) == 1 {
+				_, _ = w.Write(append(frame(uint32(len(line))), line...))
+				w.(http.Flusher).Flush()
+				<-broken
+			}
+		}).dial()
+	l := New(Options{Project: "web", Hub: "https://hub", Dir: t.TempDir(), Engine: d})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go l.pushStatus(ctx, hublink.NewLines(notes{}), hublink.FeedStart{})
+
+	eventually := func(what string, want bool) {
+		t.Helper()
+		for range 500 {
+			if _, ok := l.exposure("coder-1", 3000); ok == want {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal(what)
+	}
+	eventually("the status feed's exposure never arrived", true)
+	close(broken)
+	eventually("a port stayed open on what a stopped feed said last", false)
+}
 
 func TestALogFrameThatClaimsAGigabyteIsRefusedWithoutAllocatingIt(t *testing.T) {
 	d := newHostileEngine(t).
