@@ -221,6 +221,7 @@ func (h *Hub) handlers(c *connection) links.Handlers {
 			if c.served.Load() {
 				c.lines.wait(time.Second / linesPerSecond)
 				h.feeds.status(c.project, cleanStatus(line))
+				h.endUnexposed(c.project)
 			}
 		},
 		Audit: func(event links.AuditEvent) {

@@ -224,6 +224,7 @@ func (h *Hub) Run(ctx context.Context) {
 		_ = h.store.PurgeTasks(ctx, now.Add(-taskRetention))
 		_ = h.store.PurgeLinkCodes(ctx, now)
 		_ = h.store.PurgeInvites(ctx, now)
+		_ = h.store.PurgePreviewTickets(ctx, now)
 		select {
 		case <-ctx.Done():
 			return

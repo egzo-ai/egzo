@@ -43,6 +43,9 @@ type Hub struct {
 	signIn   SignInOptions           // set by SetupSignIn
 	tasks    taskList                // what the hub does on the projects (tasks.go)
 	previews previewSite             // set by ServePreviews
+
+	previewMu  sync.Mutex
+	previewing map[*openPreview]struct{} // what preview servers are answering now
 }
 
 // New builds a hub; log may be nil.

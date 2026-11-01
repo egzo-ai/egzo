@@ -21,7 +21,7 @@ import (
 type Store struct{ db *sql.DB }
 
 // schemaVersion is kept in SQLite's user_version. Pre-1.0 has no migrations: a database of another version is refused.
-const schemaVersion = 7
+const schemaVersion = 8
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -159,6 +159,21 @@ CREATE INDEX IF NOT EXISTS tasks_open ON tasks (state, dismissed);
 CREATE TABLE IF NOT EXISTS audit_cursors (
 	project TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
 	at INTEGER NOT NULL                  -- Unix nanoseconds
+);
+-- A person signed in to a preview (previews.go): they end with the hub session they came from.
+CREATE TABLE IF NOT EXISTS preview_tickets (
+	token_hash TEXT PRIMARY KEY,
+	session_hash TEXT NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE,
+	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	preview TEXT NOT NULL,
+	path TEXT NOT NULL,
+	expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS preview_sessions (
+	token_hash TEXT PRIMARY KEY,
+	session_hash TEXT NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE,
+	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	preview TEXT NOT NULL
 );
 `
 
