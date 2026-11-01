@@ -18,6 +18,7 @@ type File struct {
 	Version    int                  `yaml:"version"`
 	Name       *string              `yaml:"name"`
 	Hub        *Hub                 `yaml:"hub"`
+	LocalPorts *LocalPorts          `yaml:"local_ports"`
 	SecretKey  string               `yaml:"secret_key"`
 	Vaults     map[string]Vault     `yaml:"vaults"`
 	Proxy      Proxy                `yaml:"proxy"`
@@ -44,6 +45,18 @@ func (h *Hub) UnmarshalYAML(node *yaml.Node) error {
 	}
 	type plain Hub
 	return node.Decode((*plain)(h))
+}
+
+// LocalPorts turns on local ports: ports an agent may open on the machine, through a relay. Without it they are off.
+type LocalPorts struct {
+	// Bind is the IP address the published ports listen on.
+	Bind string `yaml:"bind"`
+	// Host is the name or address people use to reach the machine; it defaults to Bind, and is required for 0.0.0.0 and ::.
+	Host string `yaml:"host,omitempty"`
+	// Pool is the range of ports on the machine, LOW-HIGH.
+	Pool string `yaml:"pool,omitempty"`
+	// MaxExposed is how many local ports may be open at once in the project. A pointer tells 0 from not given.
+	MaxExposed *int `yaml:"max_exposed,omitempty"`
 }
 
 // Vault is one secret store: a backend. Its secrets are declared where they are used, by their reference
@@ -207,6 +220,8 @@ type Agent struct {
 	Permissions string            `yaml:"permissions,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      *AgentInject      `yaml:"inject,omitempty"`
+	// Ports are the ports the agent may serve, by name: "5173/http", "5432/tcp" or "5432/udp".
+	Ports map[string]string `yaml:"ports,omitempty"`
 }
 
 // Build is an image `up` builds from a Dockerfile, in Compose's terms. The context is relative to the project
