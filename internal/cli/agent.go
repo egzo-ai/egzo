@@ -25,7 +25,7 @@ import (
 	sess "github.com/egzo-ai/egzo/internal/session"
 )
 
-// newAgentCommand is the group of commands about agents: the ones you run (spawn, ls, rm, start, stop, attach, port-forward)
+// newAgentCommand is the group of commands about agents: the ones you run (spawn, ls, rm, start, stop, attach)
 // and, hidden, the roles that run inside an agent container (run, browser, forward).
 func newAgentCommand(opts *options) *cobra.Command {
 	cmd := &cobra.Command{
@@ -67,7 +67,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 		Short:  "Carry one connection to a port of this container's loopback over stdin and stdout",
 		Hidden: true,
 		Long: "Connect to PORT on this container's loopback and copy bytes between it and stdin and stdout. What\n" +
-			"`egzo agent port-forward` runs in the agent's container, once per connection. It takes a port and never an\n" +
+			"the project's link runs in the agent's container for a preview, once per connection. It takes a port and never an\n" +
 			"address: it reaches nothing but this container. --announce says on stderr when it reached the server, and\n" +
 			"--close-on-eof ends at the end of stdin, for a client that never half closes.",
 		Args: cobra.ExactArgs(1),
@@ -91,7 +91,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 	forward.Flags().BoolVar(&closeOnEOF, "close-on-eof", false, "end at the end of stdin")
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
-		newAttachCommand(opts), newPortForwardCommand(opts), run, browserCommand, forward, newSSHSetupCommand())
+		newAttachCommand(opts), run, browserCommand, forward, newSSHSetupCommand())
 	return group(cmd)
 }
 

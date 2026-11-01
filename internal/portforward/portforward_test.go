@@ -15,27 +15,6 @@ import (
 	"time"
 )
 
-func TestParseMapping(t *testing.T) {
-	cases := map[string]Mapping{
-		"3000":                {"127.0.0.1", 3000, 3000},
-		"8000:3000":           {"127.0.0.1", 8000, 3000},
-		"0:3000":              {"127.0.0.1", 0, 3000},
-		"0.0.0.0:8000:3000":   {"0.0.0.0", 8000, 3000},
-		"localhost:8000:3000": {"localhost", 8000, 3000},
-		"[::1]:8000:3000":     {"::1", 8000, 3000},
-	}
-	for text, want := range cases {
-		if got, err := ParseMapping(text); err != nil || got != want {
-			t.Errorf("%s = %+v, %v", text, got, err)
-		}
-	}
-	for _, text := range []string{"", "http", "0", "65536", ":3000", "x:3000", "a:b:c", "1:2:3:4", ":8000:3000", "8000:0"} {
-		if got, err := ParseMapping(text); err == nil {
-			t.Errorf("%q was accepted: %+v", text, got)
-		}
-	}
-}
-
 func listen(t *testing.T, network, address string) (*net.TCPListener, int) {
 	t.Helper()
 	listener, err := net.Listen(network, address)

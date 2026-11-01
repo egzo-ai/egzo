@@ -12,9 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -33,11 +31,6 @@ var drainTimeout = time.Minute
 // keeps talking (an event stream, a tail) would otherwise keep the command, and its connection, for ever. The price is that a client
 // that really only ended its side gets at most this long of answer.
 var drainLimit = 10 * time.Minute
-
-// Command is the command that forwards one connection, run in the agent's container.
-func Command(port int) []string {
-	return []string{"egzo", "agent", "forward", strconv.Itoa(port)}
-}
 
 // Connected is the line `egzo agent forward --announce` writes on stderr once it reached the server. Without it, a port where nothing listens
 // and a server that closed look the same to whoever holds the stream: a server says nothing until it is spoken to.
@@ -71,54 +64,6 @@ func ParsePort(text string) (int, error) {
 		return 0, fmt.Errorf("%q %s", text, NotAPort)
 	}
 	return port, nil
-}
-
-// Mapping is what `egzo agent port-forward` listens on and the agent's port it reaches.
-type Mapping struct {
-	Address string // default 127.0.0.1
-	Local   int    // 0 lets the system choose
-	Port    int
-}
-
-// Listen is the address to listen on.
-func (m Mapping) Listen() string {
-	return net.JoinHostPort(m.Address, strconv.Itoa(m.Local))
-}
-
-// ParseMapping reads [[ADDRESS:]LOCAL:]PORT. An IPv6 address goes in brackets.
-func ParseMapping(text string) (Mapping, error) {
-	m := Mapping{Address: "127.0.0.1"}
-	rest, port, hasLocal := cutLast(text)
-	var err error
-	if m.Port, err = ParsePort(port); err != nil {
-		return m, err
-	}
-	if !hasLocal {
-		m.Local = m.Port
-		return m, nil
-	}
-	address, local, hasAddress := cutLast(rest)
-	if local != "0" {
-		if m.Local, err = ParsePort(local); err != nil {
-			return m, fmt.Errorf("local port: %w", err)
-		}
-	}
-	if hasAddress {
-		address = strings.TrimSuffix(strings.TrimPrefix(address, "["), "]")
-		if _, err := netip.ParseAddr(address); err != nil && (address == "" || strings.Contains(address, ":")) {
-			return m, fmt.Errorf("%q is not an address to listen on: use [[ADDRESS:]LOCAL:]PORT, an IPv6 address in brackets", address)
-		}
-		m.Address = address
-	}
-	return m, nil
-}
-
-// cutLast splits text at its last colon. Without one, all of it is what comes after.
-func cutLast(text string) (before, after string, found bool) {
-	if i := strings.LastIndexByte(text, ':'); i >= 0 {
-		return text[:i], text[i+1:], true
-	}
-	return "", text, false
 }
 
 // ErrNothingListens says the port is closed on both loopback addresses.
