@@ -62,7 +62,7 @@ tools:
   so the first thing a harness does may be to expose a port. A restart of the sidecars ends nothing.
 - Nothing is checked at `expose` time: a server may start after it, and stop and start again. A preview of a port where nothing
   listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
-- The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status feed carries
+- The control sidecar keeps the exposures per agent name, next to the registration, on its volume. The agent's removal removes them. The status feed carries
   them, so the hub learns of a new preview from the link within a second.
 - **The id** in the address is an HMAC of the agent's registration and the port under the project key (80 bits, 16 characters of
   base32): stable, so an agent that exposes a port again gets back the address it already gave out, and nothing has to be kept
