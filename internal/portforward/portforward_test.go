@@ -50,7 +50,7 @@ func TestNothingListening(t *testing.T) {
 	listener, port := listen(t, "tcp4", "127.0.0.1:0")
 	listener.Close()
 	var closed ErrNothingListens
-	if err := Forward(port, strings.NewReader(""), io.Discard); !errors.As(err, &closed) || closed.Port != port {
+	if err := Forward(port, strings.NewReader(""), io.Discard, Options{}); !errors.As(err, &closed) || closed.Port != port {
 		t.Errorf("got %v", err)
 	}
 }
@@ -76,7 +76,7 @@ func TestAServerOnIPv6LoopbackIsReached(t *testing.T) {
 		}
 	}()
 	var out bytes.Buffer
-	if err := Forward(port, blocked(t), &out); err != nil || out.String() != "six" {
+	if err := Forward(port, blocked(t), &out, Options{}); err != nil || out.String() != "six" {
 		t.Errorf("got %q, %v", out.String(), err)
 	}
 }
@@ -100,7 +100,7 @@ func TestTheEndOfInputLeavesTheAnswerComing(t *testing.T) {
 		conn.Write(append([]byte("read "), got...))
 	}()
 	var out bytes.Buffer
-	if err := Forward(port, strings.NewReader("all of it"), &out); err != nil || out.String() != "read all of it" {
+	if err := Forward(port, strings.NewReader("all of it"), &out, Options{}); err != nil || out.String() != "read all of it" {
 		t.Errorf("got %q, %v", out.String(), err)
 	}
 }
@@ -116,7 +116,7 @@ func TestAServerThatIgnoresTheEndOfInputIsLeft(t *testing.T) {
 		}
 	}()
 	done := make(chan error, 1)
-	go func() { done <- Forward(port, strings.NewReader(""), io.Discard) }()
+	go func() { done <- Forward(port, strings.NewReader(""), io.Discard, Options{}) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -143,7 +143,7 @@ func TestAServerStillTalkingAfterTheEndOfInputIsNotCutOff(t *testing.T) {
 		}
 	}()
 	var out bytes.Buffer
-	if err := Forward(port, strings.NewReader(""), &out); err != nil || out.Len() != 8 {
+	if err := Forward(port, strings.NewReader(""), &out, Options{}); err != nil || out.Len() != 8 {
 		t.Errorf("got %d bytes, %v", out.Len(), err)
 	}
 }
@@ -166,7 +166,7 @@ func TestAServerThatNeverStopsTalkingIsLeftAtTheLimit(t *testing.T) {
 		}
 	}()
 	done := make(chan error, 1)
-	go func() { done <- Forward(port, strings.NewReader(""), io.Discard) }() // no write fails: the engine reads a gone client's stdout
+	go func() { done <- Forward(port, strings.NewReader(""), io.Discard, Options{}) }() // no write fails: the engine reads a gone client's stdout
 	select {
 	case err := <-done:
 		if err != nil {
@@ -174,5 +174,56 @@ func TestAServerThatNeverStopsTalkingIsLeftAtTheLimit(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("still running")
+	}
+}
+
+func TestConnectedIsCalledBeforeAnyByteAndNotWhenNothingListens(t *testing.T) {
+	listener, port := listen(t, "tcp4", "127.0.0.1:0")
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Write([]byte("hello"))
+			conn.Close()
+		}
+	}()
+	var out bytes.Buffer
+	seen := -1
+	err := Forward(port, blocked(t), &out, Options{Connected: func() { seen = out.Len() }})
+	if err != nil || seen != 0 || out.String() != "hello" {
+		t.Errorf("err %v, seen after %d bytes, got %q", err, seen, out.String())
+	}
+	listener.Close()
+	called := false
+	if err := Forward(port, strings.NewReader(""), io.Discard, Options{Connected: func() { called = true }}); err == nil || called {
+		t.Errorf("err %v, called %v", err, called)
+	}
+}
+
+func TestCloseOnEOFDoesNotWaitForAServerThatKeepsQuiet(t *testing.T) {
+	listener, port := listen(t, "tcp4", "127.0.0.1:0")
+	go func() {
+		if conn, err := listener.Accept(); err == nil {
+			defer conn.Close()
+			time.Sleep(time.Hour) // the server says nothing and closes nothing
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- Forward(port, strings.NewReader("bye"), io.Discard, Options{CloseOnEOF: true}) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("it waited for the server")
+	}
+}
+
+func TestAnnouncedCommand(t *testing.T) {
+	if got := strings.Join(AnnouncedCommand(3000, false), " "); got != "egzo agent forward --announce 3000" {
+		t.Error(got)
+	}
+	if got := strings.Join(AnnouncedCommand(3000, true), " "); got != "egzo agent forward --announce --close-on-eof 3000" {
+		t.Error(got)
 	}
 }
