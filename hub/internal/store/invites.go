@@ -172,7 +172,8 @@ type querier interface {
 }
 
 // inviteStands checks that whoever made an invite may still make it, and that what it grants is still there: an invite of a person who was
-// disabled, lost the project or stopped being an operator is worth nothing, like a link code.
+// disabled, lost the project or stopped being an operator is worth nothing, like a link code. dropFallenInvites deletes those in the
+// transaction that takes the right away; this is what makes that the rule for a code in somebody's hand.
 func inviteStands(ctx context.Context, q querier, i Invite) error {
 	var allowed int
 	var err error
@@ -187,6 +188,38 @@ func inviteStands(ctx context.Context, q querier, i Invite) error {
 	}
 	if allowed == 0 {
 		return ErrBadInvite
+	}
+	return nil
+}
+
+// dropFallenInvites deletes what inviteStands would refuse, in the transaction that made it so: giving the right back does not bring an invite
+// back, and no list shows one as good. The audit log says so, in the same transaction.
+func dropFallenInvites(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `DELETE FROM invites WHERE
+		(project IS NOT NULL AND NOT EXISTS (SELECT 1 FROM grants g JOIN users u ON u.id = g.user_id JOIN projects p ON p.id = g.project
+			WHERE g.project = invites.project AND g.user_id = invites.created_by AND g.role = ? AND u.disabled_at IS NULL AND p.state = ?))
+		OR (project IS NULL AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = invites.created_by AND u.is_operator = 1 AND u.disabled_at IS NULL))
+		RETURNING `+inviteColumns, string(rbac.Owner), hublink.StateApproved)
+	if err != nil {
+		return err
+	}
+	var dropped []Invite
+	for rows.Next() {
+		i, err := scanInvite(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		dropped = append(dropped, i)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, i := range dropped {
+		if err := audit(ctx, tx, AuditEntry{Actor: "hub", Action: "invite.revoke", Project: i.Project, Detail: i.ID + ": its maker can no longer give it", Allowed: true}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

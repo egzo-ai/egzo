@@ -127,8 +127,18 @@ func (s *Store) Revoke(ctx context.Context, id, why string) (Registration, error
 		return Registration{}, ErrNotFound
 	}
 	r.State, r.Message, r.Decided = hublink.StateRevoked, why, time.Now()
-	_, err = s.db.ExecContext(ctx, `UPDATE projects SET state = ?, message = ?, decided_at = ? WHERE id = ?`, r.State, why, r.Decided.UnixMilli(), id)
-	return r, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Registration{}, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE projects SET state = ?, message = ?, decided_at = ? WHERE id = ?`, r.State, why, r.Decided.UnixMilli(), id); err != nil {
+		return Registration{}, err
+	}
+	if err := dropFallenInvites(ctx, tx); err != nil {
+		return Registration{}, err
+	}
+	return r, tx.Commit()
 }
 
 // ForgetProject removes a project that is in state, and everything keyed by it: its roles, its denials, its tasks. The audit log stays.
