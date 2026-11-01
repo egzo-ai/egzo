@@ -20,7 +20,10 @@ def hub_host(engine):
     if engine.cli == "podman" and engine.rootless:
         return engine.run("run", "--rm", "docker.io/library/alpine:3", "sh", "-c", "getent hosts host.containers.internal").stdout.split()[0]
     network = "podman" if engine.cli == "podman" else "bridge"
-    return json.loads(engine.run("network", "inspect", network).stdout)[0]["IPAM"]["Config"][0]["Gateway"]
+    inspected = json.loads(engine.run("network", "inspect", network).stdout)[0]
+    if "subnets" in inspected:  # Podman's own format: Docker's is IPAM.Config
+        return inspected["subnets"][0]["gateway"]
+    return inspected["IPAM"]["Config"][0]["Gateway"]
 
 
 class FakeHub:
