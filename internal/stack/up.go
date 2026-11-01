@@ -118,8 +118,10 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		if err := removeLinkVolume(ctx, c, observed, out); err != nil {
 			return err
 		}
-		if err := leaveHub(ctx, c, observed, project.Name); err != nil {
-			return err
+		// Whether or not a link was here to leave: an `up` that failed after removing it leaves the address behind, and the next one finds no
+		// link. The same goes for this: it is said, and the next `up` tries again.
+		if err := SetPreviewTemplate(ctx, c, project.Name, ""); err != nil {
+			fmt.Fprintf(out, "warning: the preview address was not cleared: %v\n", err)
 		}
 	}
 	markFresh(fresh, plan)

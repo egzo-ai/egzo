@@ -241,19 +241,6 @@ func SetPreviewTemplate(ctx context.Context, c *engine.Client, project, template
 	return err
 }
 
-// leaveHub clears what the link handed to the control sidecar when `hub:` is gone: no link is left to do it.
-func leaveHub(ctx context.Context, c *engine.Client, observed Observed, project string) error {
-	for _, r := range observed.Resources {
-		if r.Type == "container" && r.Kind == kindLink {
-			if err := SetPreviewTemplate(ctx, c, project, ""); err != nil {
-				return fmt.Errorf("clear the preview address: %w", err)
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
 // removeLinkVolume removes the link's key when `hub:` is gone: a project linked again is a new project on the hub.
 func removeLinkVolume(ctx context.Context, c *engine.Client, observed Observed, out io.Writer) error {
 	for _, r := range observed.Resources {
