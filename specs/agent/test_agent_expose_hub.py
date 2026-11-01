@@ -124,6 +124,7 @@ def test_a_local_exposure_is_not_served_as_a_preview(linked, fake_hub, shared_pr
 
     assert eventually(carried, seconds=10)
     assert carried()[0]["Where"] == "local" and not carried()[0].get("ID")
+    assert carried()[0]["Address"] == got["address"], "the hub shows it: a person of the project may not be able to ask the agent"
     answer = fake_hub.verb(shared_project.name, "forward", Agent=linked.name, Port=3102, Seconds=1)
     assert "does not expose port 3102" in answer["error"], "the link forwards a port open for the hub and no other"
     assert got["where"] == "local"

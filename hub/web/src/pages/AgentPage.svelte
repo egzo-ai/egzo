@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
+  import Previews from "../components/Previews.svelte";
   import { app, errorText, toast } from "../lib/app.svelte";
   import { operate } from "../lib/agentops";
   import { activityKind, activityLabel, ago, initials, stamp, taskDoing, taskFailedLabel } from "../lib/format";
@@ -152,6 +153,7 @@
     {#if tab === "overview" && !overseeing}
       <div class="twocol">
         {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
+        <Previews agent={a.name} previews={a.previews} />
         <section class="panel">
           <header><h2 class="h-section">Details</h2></header>
           <div class="pad">

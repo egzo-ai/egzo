@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +64,52 @@ func (h *Hub) previewTemplate(project string) string {
 		return ""
 	}
 	return preview.Template(h.previews.scheme, project, h.previews.domain)
+}
+
+// PreviewView is a port an agent has open, as a page shows it: Where says whether Address is a preview to open or a port on the project's machine.
+type PreviewView struct {
+	Port                           int
+	Name, Protocol, Where, Address string
+}
+
+// previewsOf lists what an agent has open, by port. They are the project's to know: an operator who holds no role sees that they exist. The
+// address of a preview asks them for a role when they open it. The address of a local port has no sign-in behind it, so it goes to those who may
+// open a preview: maySee.
+func (h *Hub) previewsOf(project, agent string, maySee bool) []PreviewView {
+	template := h.previewTemplate(project)
+	h.feeds.mu.Lock()
+	defer h.feeds.mu.Unlock()
+	var views []PreviewView
+	for id, port := range h.feeds.exposed[project] {
+		if port.agent != agent {
+			continue
+		}
+		if template == "" || port.Protocol != hublink.ProtocolHTTP {
+			continue // nothing the hub can open
+		}
+		views = append(views, PreviewView{Port: port.Port, Name: port.Name, Protocol: port.Protocol, Where: hublink.WhereHub,
+			Address: strings.Replace(template, "%s", id, 1)})
+	}
+	// What the latest status line says, and nothing once the feed has gone: an address is only worth showing while it may be true.
+	if f := h.feeds.followers[project]; f != nil {
+		for _, e := range f.agents[agent].Exposed {
+			if e.Where != hublink.WhereLocal {
+				continue
+			}
+			view := PreviewView{Port: e.Port, Name: e.Name, Protocol: e.Protocol, Where: e.Where}
+			if maySee {
+				view.Address = e.Address
+			}
+			views = append(views, view)
+		}
+	}
+	sort.Slice(views, func(i, j int) bool {
+		if views[i].Port != views[j].Port {
+			return views[i].Port < views[j].Port
+		}
+		return views[i].Protocol < views[j].Protocol
+	})
+	return views
 }
 
 // PreviewBackend is the hub as the preview proxy needs it.

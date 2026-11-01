@@ -129,6 +129,7 @@ type Exposure struct {
 	Protocol string
 	Where    string
 	ID       string // made by the control sidecar for a port open for the hub, the same each time this instance exposes this port
+	Address  string // where the port is reached: the hub makes its own for a port open for the hub, and shows this one for a port open for `local`
 }
 
 // Event is one entry of the control sidecar's event stream, as the web UI shows it.

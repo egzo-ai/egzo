@@ -1,0 +1,16 @@
+# The stack test's TLS: a wildcard for the previews, as a real deployment has, from Caddy's own CA. Not a recipe for production.
+{
+	servers {
+		protocols h1 h2 # the compose file publishes TCP
+	}
+}
+
+https://hub.localhost:18443 {
+	tls internal
+	reverse_proxy hub:8080
+}
+
+https://*.preview.localhost:18443 {
+	tls internal
+	reverse_proxy hub:8081
+}

@@ -145,6 +145,8 @@ type AgentView struct {
 	Denied int
 	// Task is what the hub does on the agent, or the failure of what it did that nobody dismissed; nil when neither.
 	Task *TaskView
+	// Previews are the ports it exposed.
+	Previews []PreviewView
 }
 
 // ProjectView is the project page.
@@ -262,6 +264,7 @@ func (h *Hub) Project(ctx context.Context, user store.User, id string) (ProjectV
 		if a.ID != "" && (role.AtLeast(rbac.Admin) || av.CanOperate) {
 			av.Denied = denied[a.ID]
 		}
+		av.Previews = h.previewsOf(id, a.Name, rbac.Can(user.Subject(), role, rbac.Preview, ""))
 		view.Agents = append(view.Agents, av)
 	}
 	view.Agents = h.withTasks(user, role, id, view.Agents)

@@ -19,6 +19,7 @@ staticClients:
     secretEnv: EGZO_OIDC_CLIENT_SECRET   # set in .env, shared with the hub
     redirectURIs:
       - http://localhost:18080/auth/callback
+      - https://hub.localhost:18443/auth/callback
 
 # The account the stack test links to the starter account and then signs in with.
 enablePasswordDB: true

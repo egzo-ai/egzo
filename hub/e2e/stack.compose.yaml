@@ -9,8 +9,20 @@ services:
       EGZO_OIDC_CLIENT_ID: egzo-hub
       EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:?}
       EGZO_OIDC_NAME: Dex
+      EGZO_PREVIEW_DOMAIN: preview.localhost:18443
+      EGZO_TRUSTED_PROXIES: 0.0.0.0/0
     depends_on:
       - dex
+
+  # What terminates TLS in front of the hub. It is here to test the hub behind one, with real __Host- cookies: egzo ships no proxy.
+  caddy:
+    image: docker.io/library/caddy:2
+    ports:
+      - "18443:18443"
+    volumes:
+      - ./e2e/Caddyfile:/etc/caddy/Caddyfile:ro   # relative to compose.yaml, the first file
+    depends_on:
+      - hub
 
   dex:
     image: ghcr.io/dexidp/dex:v2.41.1

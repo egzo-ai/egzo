@@ -1,7 +1,6 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** In progress. Built so far: the `__Host-` cookies, `egzo agent forward` (below), and the viewer role and invites
-([hub-link.md](hub-link.md)).
+**Status.** Built, for `http` through the hub. Raw TCP and UDP are local only: see below.
 
 **What changed.** [declared-local-ports.md](declared-local-ports.md) replaces what this file said about the `expose` tool, `egzo agent
 port-forward` and raw TCP: ports are declared by name in the template, `expose(name, where)` opens one for the hub or for the local

@@ -24,6 +24,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/links/fake"
 	"github.com/egzo-ai/egzo/hub/internal/oidctest"
+	"github.com/egzo-ai/egzo/hub/internal/preview"
 	"github.com/egzo-ai/egzo/hub/internal/publicurl"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
@@ -65,7 +66,7 @@ func run(scenario string) error {
 		return err
 	}
 
-	hubListener, providerListener, controlListener := listen(), listen(), listen()
+	hubListener, providerListener, controlListener, previewListener := listen(), listen(), listen(), listen()
 	issuer := "http://" + providerListener.Addr().String()
 	provider := oidctest.New(issuer, "hub", "secret")
 	go http.Serve(providerListener, provider.Handler())
@@ -74,13 +75,17 @@ func run(scenario string) error {
 	if _, err := h.SetupSignIn(ctx, hub.SignInOptions{LocalLogin: true, AdminPassword: "e2e-admin-password", Issuer: issuer}); err != nil {
 		return err
 	}
-	urls, _ := publicurl.New("", nil)
 	address := "http://" + hubListener.Addr().String()
-	app, err := web.New(h, auth.New(auth.Config{Issuer: issuer, ClientID: "hub", ClientSecret: "secret"}), web.Options{SSOName: "Test login", LinkURL: address}, urls, nil)
+	urls, _ := publicurl.New(address, nil)
+	// a browser takes every name under .localhost for this machine
+	domain := fmt.Sprintf("preview.localhost:%d", previewListener.Addr().(*net.TCPAddr).Port)
+	h.ServePreviews("http", domain)
+	app, err := web.New(h, auth.New(auth.Config{Issuer: issuer, ClientID: "hub", ClientSecret: "secret"}), web.Options{SSOName: "Test login", LinkURL: address, PreviewDomain: domain, PreviewScheme: "http"}, urls, nil)
 	if err != nil {
 		return err
 	}
 	go http.Serve(hubListener, app.Handler())
+	go http.Serve(previewListener, preview.New(h.Previews(), app.PreviewGate(), preview.Options{Domain: domain, Scheme: "http"}, nil))
 	go h.Run(ctx)
 
 	w := &world{hub: h, db: db, address: address, projects: map[string]*fake.Engine{}}
@@ -174,6 +179,7 @@ type command struct {
 	Role    string `json:"role"`
 	State   string `json:"state"`
 	Text    string `json:"text"`
+	Port    int    `json:"port"`
 	Waiting bool   `json:"waiting"`
 	Actor   string `json:"actor"`
 	// an event of the proxy's audit trail (op audit): the agent's, to host, with a decision and a reason code
@@ -212,6 +218,13 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			return reg.ID
 		}
 		switch c.Op {
+		case "expose": // an agent starts a server and exposes it
+			e.Listen(c.Agent, c.Port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(rw, "<!doctype html><title>the demo</title><h1>the demo of %s at %s</h1>", c.Agent, r.URL.Path)
+			}))
+			e.Expose(c.Agent, links.Exposure{Port: c.Port, Name: c.Text, Protocol: hublink.ProtocolHTTP, Where: hublink.WhereHub, ID: "abcdefghijklmnop"})
+		case "expose-local": // an agent opens a port on the project's machine
+			e.Expose(c.Agent, links.Exposure{Port: c.Port, Name: c.Text, Protocol: hublink.ProtocolTCP, Where: hublink.WhereLocal, Address: "127.0.0.1:20417"})
 		case "id":
 			json.NewEncoder(rw).Encode(idOf())
 			return

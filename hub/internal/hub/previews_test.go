@@ -88,14 +88,69 @@ func TestATCPExposureIsNoPreview(t *testing.T) {
 	}
 }
 
+func TestWhatALinkSaysOfALocalPortIsChecked(t *testing.T) {
+	for _, tc := range []struct {
+		protocol, address string
+		kept              bool
+	}{
+		{hublink.ProtocolHTTP, "http://127.0.0.1:20417/", true},
+		{hublink.ProtocolHTTP, "http://mybox.lan:20417/", true},
+		{hublink.ProtocolHTTP, "http://[fd00::1]:20417/", true},
+		{hublink.ProtocolTCP, "127.0.0.1:20417", true},
+		{hublink.ProtocolUDP, "mybox.lan:20417", true},
+		{hublink.ProtocolHTTP, "127.0.0.1:20417", false},
+		{hublink.ProtocolHTTP, "https://example.com:443/", false},
+		{hublink.ProtocolHTTP, "http://127.0.0.1:20417/path", false},
+		{hublink.ProtocolHTTP, "javascript:alert(1)//", false},
+		{hublink.ProtocolTCP, "http://127.0.0.1:20417/", false},
+		{hublink.ProtocolTCP, "127.0.0.1", false},
+		{hublink.ProtocolTCP, "127.0.0.1:0", false},
+		{hublink.ProtocolTCP, "127.0.0.1:70000", false},
+		{hublink.ProtocolTCP, ":20417", false},
+		{hublink.ProtocolTCP, "a b:20417", false},
+		{hublink.ProtocolTCP, "<img>:20417", false},
+		{hublink.ProtocolTCP, "", false},
+		{"sctp", "127.0.0.1:20417", false},
+	} {
+		got := cleanExposures([]links.Exposure{{Port: 5432, Name: "db", Protocol: tc.protocol, Where: hublink.WhereLocal, ID: "llllllllllllllll", Address: tc.address}})
+		if (len(got) == 1) != tc.kept {
+			t.Errorf("%s %q: kept %+v", tc.protocol, tc.address, got)
+		}
+		if len(got) == 1 && got[0].ID != "" {
+			t.Errorf("%q kept an id", tc.address)
+		}
+	}
+	hub := cleanExposures([]links.Exposure{{Port: 3000, Protocol: hublink.ProtocolHTTP, Where: hublink.WhereHub, ID: "aaaaaaaaaaaaaaaa", Address: "http://evil.example/"}})
+	if len(hub) != 1 || hub[0].Address != "" {
+		t.Errorf("the hub makes the address of a preview itself: %+v", hub)
+	}
+}
+
+func TestALocalPortIsListedAndItsAddressGoesToWhoMayOpenAPreview(t *testing.T) {
+	r, f, id := linkedPreview(t)
+	f.Expose("coder-1", links.Exposure{Port: 5432, Name: "db", Protocol: hublink.ProtocolTCP, Where: hublink.WhereLocal, Address: "127.0.0.1:20417"})
+	find := func(maySee bool) *PreviewView {
+		for _, view := range r.hub.previewsOf(id, "coder-1", maySee) {
+			if view.Where == hublink.WhereLocal {
+				return &view
+			}
+		}
+		return nil
+	}
+	eventually(t, "the local port to be listed", func() bool { return find(true) != nil })
+	if got := find(true); got.Address != "127.0.0.1:20417" || got.Name != "db" || got.Protocol != hublink.ProtocolTCP {
+		t.Errorf("%+v", got)
+	}
+	if got := find(false); got == nil || got.Address != "" {
+		t.Errorf("a person with no role was given %+v", got)
+	}
+}
+
 func TestAPortOpenForTheLocalMachineIsNeverServed(t *testing.T) {
 	r, f, id := linkedPreview(t)
 	local := links.Exposure{Port: 8080, Protocol: hublink.ProtocolHTTP, Where: hublink.WhereLocal, ID: "llllllllllllllll", Name: "dev"}
 	if got := exposedIn(links.StatusLine{Agents: []links.AgentStatus{{Agent: "coder-1", Exposed: []links.Exposure{local}}}}); len(got) != 0 {
 		t.Errorf("exposedIn kept %+v", got)
-	}
-	if got := cleanExposures([]links.Exposure{local}); len(got) != 0 {
-		t.Errorf("cleanExposures kept %+v", got)
 	}
 	f.Expose("coder-1", local)
 	eventually(t, "the line to be heard", func() bool {

@@ -219,12 +219,48 @@ All settings are environment variables. The compose file passes the common ones 
 | `EGZO_HUB_LISTEN` | `:8080` | the port of the UI, and of the link endpoint unless it has its own |
 | `EGZO_HUB_DATA` | `/data` | the SQLite database (a volume) |
 | `EGZO_TRUSTED_PROXIES` | none | addresses or CIDRs of the reverse proxy whose `X-Forwarded-Host` and `X-Forwarded-Proto` are believed |
+| `EGZO_PREVIEW_DOMAIN` | none | turns [previews](#previews) on: the domain they live under, with a port if people reach them on one. It needs `EGZO_PUBLIC_URL` |
+| `EGZO_PREVIEW_LISTEN` | `:8081` | the port of the previews |
 
 The hub does not terminate TLS. Behind a proxy set `EGZO_TRUSTED_PROXIES`, so the login redirect and the cookies use the right
 address and scheme.
 
 The database records its schema version. Before 1.0 there are no migrations: a hub that finds a database made by another version
 refuses to start and says to remove `hub.db` (users and roles are then set up again, and every project registers again).
+
+## Previews
+
+An agent that starts a demo [opens a port it declares](messaging.md#ports-an-agent-opens) for the hub, and with `EGZO_PREVIEW_DOMAIN` set it gets an address to give
+out, `https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`. The person opens it in their browser, and the hub carries it over the project's link
+to the agent's own loopback. Nothing is published, and the sandbox does not change. The agent's page and the project's page list the previews, with **Open**
+and **Copy link**. A port the agent opened for the [local machine](managing-projects.md#opening-an-agents-dev-server) is listed too, as an address to copy and never a link: it works only
+on that machine or its network, it has no sign-in, and a person with no role on the project sees that it exists and not where it is.
+
+- **A preview is never public.** Every request needs a person signed in to the hub who holds a role on the project, any role. There is no anonymous preview
+  and no setting for one. A person from outside gets the viewer role and an account from an [invite](hub-access.md). An operator with no role grants themselves one.
+- **What opens is plain HTTP**: HTTP/1.1, WebSockets and event streams. The app sees `Host: localhost:<port>`, because dev servers refuse names they do not
+  know, and `X-Forwarded-Host` and `X-Forwarded-Proto` say the real ones. An app that compares `Origin` with `Host` (a CSRF check, in Rails or Django) has
+  to trust those headers.
+- **`/_egzo/` is the hub's** on every preview host, and the hub's cookie for the preview never reaches the app. The app's own cookies and `Authorization` do.
+- **Limits**: 32 connections per preview and 1024 in all. A request over them waits ten seconds, then the page says so. A server has a minute to start answering.
+- Redeploying the hub drops open previews, as it drops terminals. A reload brings them back.
+
+### What has to be in front
+
+The hub does not terminate TLS, so something in front has to, on both the hub's address and the previews. It needs:
+
+- **a wildcard certificate** for the domain: one host per project's preview means one certificate for all of them. The ACME DNS-01 challenge issues one with no
+  public server, so a hub on a LAN or a tailnet can have it, and only the domain lands in the Certificate Transparency logs. A team with its own CA uses it
+  instead, and every viewer's browser trusts its root;
+- **a wildcard DNS record** to it, and the name forwarded to `EGZO_PREVIEW_LISTEN`, keeping `Host` or setting `X-Forwarded-Host`;
+- **WebSockets passed through**, for hot reload. Caddy does it as it is; nginx needs the `Upgrade` and `Connection` lines above;
+- **`EGZO_TRUSTED_PROXIES`** set to it.
+
+Do not publish the hub's own ports past it.
+
+**Use a domain of its own** (`egzo-preview.example.net`, not `preview.example.com` next to a hub at `hub.example.com`). Every preview is code an agent wrote,
+running in somebody's browser. Over https the hub's cookies are out of reach of a sibling host, and a sibling domain works. Over plain http they are not, so the
+hub refuses to start with one.
 
 ## Development
 

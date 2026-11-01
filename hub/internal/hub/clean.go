@@ -4,7 +4,10 @@
 package hub
 
 import (
+	"net"
 	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/internal/hublink"
@@ -86,12 +89,48 @@ func cleanExposures(list []links.Exposure) []links.Exposure {
 		if len(out) == maxExposures {
 			break
 		}
-		if e.Port >= 1 && e.Port <= 65535 && (e.Protocol == hublink.ProtocolHTTP || e.Protocol == hublink.ProtocolTCP) && e.Where == hublink.WhereHub && exposureID.MatchString(e.ID) {
-			e.Name = word(e.Name, maxWord)
+		if e.Port < 1 || e.Port > 65535 {
+			continue
+		}
+		e.Name = word(e.Name, maxWord)
+		switch {
+		case e.Where == hublink.WhereHub && (e.Protocol == hublink.ProtocolHTTP || e.Protocol == hublink.ProtocolTCP) && exposureID.MatchString(e.ID):
+			e.Address = "" // the hub makes the address of a preview itself
+			out = append(out, e)
+		case e.Where == hublink.WhereLocal && localAddress(e.Protocol, e.Address):
+			e.ID = "" // no preview, so nothing may be looked up by it
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// localAddress says whether an address can be what a relay publishes for a protocol: `http://host:port/`, or `host:port`. A link says it and a
+// page shows it, so anything else goes, whatever it holds.
+func localAddress(protocol, address string) bool {
+	text := address
+	switch protocol {
+	case hublink.ProtocolHTTP:
+		var scheme, slash bool
+		text, scheme = strings.CutPrefix(text, "http://")
+		text, slash = strings.CutSuffix(text, "/")
+		if !scheme || !slash {
+			return false
+		}
+	case hublink.ProtocolTCP, hublink.ProtocolUDP:
+	default:
+		return false
+	}
+	host, port, err := net.SplitHostPort(text)
+	if err != nil || host == "" || len(text) > maxHost {
+		return false
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	return !strings.ContainsFunc(host, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == ':')
+	})
 }
 
 // cleanStatus keeps what the hub shows of what the agents are doing.
