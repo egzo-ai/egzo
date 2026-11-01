@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"os"
@@ -220,7 +221,7 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 		switch c.Op {
 		case "expose": // an agent starts a server and exposes it
 			e.Listen(c.Agent, c.Port, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-				fmt.Fprintf(rw, "<!doctype html><title>the demo</title><h1>the demo of %s at %s</h1>", c.Agent, r.URL.Path)
+				fmt.Fprintf(rw, "<!doctype html><title>the demo</title><h1>the demo of %s at %s</h1>", html.EscapeString(c.Agent), html.EscapeString(r.URL.Path))
 			}))
 			e.Expose(c.Agent, links.Exposure{Port: c.Port, Name: c.Text, Protocol: hublink.ProtocolHTTP, Where: hublink.WhereHub, ID: "abcdefghijklmnop"})
 		case "expose-local": // an agent opens a port on the project's machine
