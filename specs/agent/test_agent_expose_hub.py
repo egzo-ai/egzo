@@ -76,6 +76,14 @@ def test_a_hub_with_no_template_clears_it(linked, fake_hub, shared_project):
     fake_hub.drop(shared_project.name)
     assert eventually(lambda: expose(linked, 3106).get("address"), seconds=30)
 
+def test_a_hub_that_turns_the_project_away_clears_it(linked, fake_hub, shared_project):
+    fake_hub.revoke(shared_project.name)
+    assert eventually(lambda: "port-forward" in expose(linked, 3108).get("command", ""), seconds=30)
+    fake_hub.forget(shared_project.name)
+    shared_project.ok("project register", input=fake_hub.code("alice") + "\n")
+    assert eventually(lambda: expose(linked, 3108).get("address"), seconds=30)
+
+
 def test_a_project_that_leaves_its_hub_has_no_address(linked, fake_hub, shared_project, engine, egzo):
     image = engine.session_image(egzo.binary)
     shared_project.up(spec(agents={"web": agent(harness="custom", image=image, env={"FAKE_TUI": "cat"})}))
