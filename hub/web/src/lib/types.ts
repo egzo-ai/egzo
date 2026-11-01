@@ -200,6 +200,14 @@ export interface AuditEntry {
   agent: string;
   detail: string;
   allowed: boolean;
+  client?: string;
+}
+
+/** An entry of the hub's own log, which spans the projects: `projectName` is empty for a project that is gone. */
+export interface HubAuditEntry extends AuditEntry {
+  id: number;
+  project?: string;
+  projectName?: string;
 }
 
 /** Why the proxy decided what it did: a code from a fixed list (roadmap/proxy-audit.md), and a text for people. */

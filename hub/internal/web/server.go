@@ -112,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 	api("DELETE "+apiPrefix+"/links/codes/{id}", s.cancelLinkCode)
 	api("POST "+apiPrefix+"/links/{id}/revoke", s.operatorOnly(s.revokeLink))
 	api("DELETE "+apiPrefix+"/links/{id}", s.operatorOnly(s.forgetLink))
+	api("GET "+apiPrefix+"/audit", s.operatorOnly(s.hubAudit))
 	api("GET "+apiPrefix+"/users", s.operatorOnly(s.listUsers))
 	api("PUT "+apiPrefix+"/users/{id}", s.operatorOnly(s.updateUser))
 	api("DELETE "+apiPrefix+"/users/{id}/identities/{identity}", s.operatorOnly(s.removeIdentity))

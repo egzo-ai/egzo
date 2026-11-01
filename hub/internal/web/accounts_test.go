@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -401,5 +402,41 @@ func TestTheAuditLogSaysWhoSignedInFromWhereAndWhoWasRefused(t *testing.T) {
 	}
 	if !signIn || !refused {
 		t.Errorf("sign-in %t, refusal %t: %+v", signIn, refused, entries)
+	}
+}
+
+func TestAnOperatorReadsTheWholeHubsAuditLogAndNobodyElse(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	id := r.id("web")
+	root := r.browser()
+	root.signIn("admin")
+	alice := r.browser()
+	alice.signIn("alice")
+	if code, _ := alice.get("/audit"); code != 403 {
+		t.Errorf("a person reading the hub's audit log = %d", code)
+	}
+	if code, out := root.post("/links/"+id+"/revoke", json_{"message": "no"}); code != 200 {
+		t.Fatalf("revoke = %d %v", code, out)
+	}
+	if code, out := root.del("/links/" + id); code != 200 {
+		t.Fatalf("forget = %d %v", code, out)
+	}
+	code, out := root.get("/audit?limit=500")
+	if code != 200 {
+		t.Fatalf("the audit log = %d %v", code, out)
+	}
+	var hubLevel, forgotten bool
+	for _, e := range list(out, "entries") {
+		hubLevel = hubLevel || e["action"] == "user.signin"
+		forgotten = forgotten || e["action"] == "project.revoke" && e["project"] == id
+	}
+	if !hubLevel || !forgotten {
+		t.Errorf("sign-ins %t, a forgotten project %t: %v", hubLevel, forgotten, out)
+	}
+	entries := list(out, "entries")
+	last := entries[0]["id"].(float64)
+	if _, older := root.get(fmt.Sprintf("/audit?before=%d", int64(last))); len(list(older, "entries")) != len(entries)-1 {
+		t.Errorf("the page after the newest entry = %v", older)
 	}
 }

@@ -4,15 +4,16 @@
   import { href, type SettingsTab } from "../lib/router.svelte";
   import Account from "./Account.svelte";
   import ErrorPage from "./ErrorPage.svelte";
+  import HubAudit from "./HubAudit.svelte";
   import Invites from "./Invites.svelte";
   import Links from "./Links.svelte";
   import Users from "./Users.svelte";
 
   let { tab }: { tab: SettingsTab } = $props();
 
-  // everyone has an account; who may connect a project has links, and an operator manages the invites and the users
+  // everyone has an account; who may connect a project has links, and an operator manages the invites and the users and reads the audit log
   const tabs = $derived.by<[SettingsTab, string][]>(() => {
-    if (app.user?.isOperator) return [["links", "Links"], ["invites", "Invites"], ["users", "Users"], ["account", "Account"]];
+    if (app.user?.isOperator) return [["links", "Links"], ["invites", "Invites"], ["users", "Users"], ["audit", "Audit log"], ["account", "Account"]];
     return seesLinks() ? [["links", "Links"], ["account", "Account"]] : [["account", "Account"]];
   });
 </script>
@@ -25,7 +26,7 @@
         <a class="tab" role="tab" href={href.settings(id)} aria-selected={tab === id}>{label}</a>
       {/each}
     </div>
-    {#if tab === "links"}<Links />{:else if tab === "invites"}<Invites />{:else if tab === "users"}<Users />{:else}<Account />{/if}
+    {#if tab === "links"}<Links />{:else if tab === "invites"}<Invites />{:else if tab === "users"}<Users />{:else if tab === "audit"}<HubAudit />{:else}<Account />{/if}
   </div>
 {:else}
   <ErrorPage error={new ApiError(403, "forbidden", "That part of the settings is not yours to manage.")} />

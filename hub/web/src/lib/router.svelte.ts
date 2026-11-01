@@ -5,8 +5,8 @@ export const projectTabs: ProjectTab[] = ["agents", "services", "timeline", "act
 
 export type AgentTab = "overview" | "activity" | "network" | "logs";
 
-export type SettingsTab = "links" | "invites" | "users" | "account";
-export const settingsTabs: SettingsTab[] = ["links", "invites", "users", "account"];
+export type SettingsTab = "links" | "invites" | "users" | "audit" | "account";
+export const settingsTabs: SettingsTab[] = ["links", "invites", "users", "audit", "account"];
 
 export type Route =
   | { name: "home" }

@@ -421,3 +421,12 @@ func (h *Hub) Audit(ctx context.Context, user store.User, id string, limit int) 
 	}
 	return h.store.AuditOf(ctx, id, limit)
 }
+
+// HubAudit lists the entries of the whole hub, newest first: what has no project, and what is left of projects that are gone. Only an operator
+// may, and with no role on the projects it covers: overseeing the hub takes reading what was done on it.
+func (h *Hub) HubAudit(ctx context.Context, user store.User, before int64, limit int) ([]store.AuditEntry, error) {
+	if err := h.requireOperator(ctx, user, "audit.read", ""); err != nil {
+		return nil, err
+	}
+	return h.store.AuditAll(ctx, before, limit)
+}

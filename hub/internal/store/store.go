@@ -1025,8 +1025,20 @@ func audit(ctx context.Context, x executor, e AuditEntry) error {
 
 // AuditOf lists the latest entries about a project, newest first.
 func (s *Store) AuditOf(ctx context.Context, project string, limit int) ([]AuditEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, at, actor, action, project, agent, detail, allowed, client FROM audit
-		WHERE project = ? ORDER BY id DESC LIMIT ?`, project, limit)
+	return s.auditEntries(ctx, `WHERE project = ? ORDER BY id DESC LIMIT ?`, project, limit)
+}
+
+// AuditAll lists the entries of the whole hub, newest first: those about projects it has forgotten as well. before, when not zero, is the id
+// the list goes on from.
+func (s *Store) AuditAll(ctx context.Context, before int64, limit int) ([]AuditEntry, error) {
+	if before > 0 {
+		return s.auditEntries(ctx, `WHERE id < ? ORDER BY id DESC LIMIT ?`, before, limit)
+	}
+	return s.auditEntries(ctx, `ORDER BY id DESC LIMIT ?`, limit)
+}
+
+func (s *Store) auditEntries(ctx context.Context, query string, args ...any) ([]AuditEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, at, actor, action, project, agent, detail, allowed, client FROM audit `+query, args...)
 	if err != nil {
 		return nil, err
 	}

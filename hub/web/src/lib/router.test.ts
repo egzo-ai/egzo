@@ -8,6 +8,7 @@ describe("the router", () => {
     expect(parse("/settings/links")).toEqual({ name: "settings", tab: "links" });
     expect(parse("/settings/invites")).toEqual({ name: "settings", tab: "invites" });
     expect(parse("/settings/users")).toEqual({ name: "settings", tab: "users" });
+    expect(parse("/settings/audit")).toEqual({ name: "settings", tab: "audit" });
     expect(parse("/invite")).toEqual({ name: "invite" });
     expect(parse("/settings/account")).toEqual({ name: "settings", tab: "account" });
     expect(parse("/p/p1")).toEqual({ name: "project", project: "p1", tab: "agents" });
