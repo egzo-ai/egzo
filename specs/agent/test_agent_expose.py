@@ -175,7 +175,8 @@ def test_the_http_verbs_are_the_same_verbs(ported, pair):
 def test_the_exposures_are_in_the_status_log_within_a_moment(ported, engine, pair):
     a, _ = pair
     got = expose(a, "db")
-    assert eventually(lambda: latest_exposed(engine, ported, a.name), seconds=5)
+    # the log gathers changes before it writes them, so the newest line may still be what an earlier spec left: wait for this one
+    assert eventually(lambda: [e["name"] for e in latest_exposed(engine, ported, a.name)] == ["db"], seconds=5)
     line = latest_exposed(engine, ported, a.name)[0]
     assert (line["name"], line["where"], line["protocol"], line["port"]) == ("db", "local", "tcp", 5432)
     assert line["address"] == got["address"]
