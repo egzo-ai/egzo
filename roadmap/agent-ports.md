@@ -1,7 +1,6 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** In progress. Built so far: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward` (below), and the
-viewer role and invites ([hub-link.md](hub-link.md)).
+**Status.** Built, for `http`. What is left is the open question below: reaching a `tcp` exposure through the hub.
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
 itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,

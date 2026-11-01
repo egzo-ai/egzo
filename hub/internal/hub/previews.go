@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +61,35 @@ func (h *Hub) previewTemplate(project string) string {
 		return ""
 	}
 	return preview.Template(h.previews.scheme, project, h.previews.domain)
+}
+
+// PreviewView is a port an agent exposed, as a page shows it: the address of a preview, or the command that reaches the port.
+type PreviewView struct {
+	Port                             int
+	Name, Protocol, Address, Command string
+}
+
+// previewsOf lists what an agent exposed, by port. They are the project's to know: an operator who holds no role sees that they exist, and the
+// address asks them for a role.
+func (h *Hub) previewsOf(project, agent string) []PreviewView {
+	template := h.previewTemplate(project)
+	h.feeds.mu.Lock()
+	defer h.feeds.mu.Unlock()
+	var views []PreviewView
+	for id, port := range h.feeds.exposed[project] {
+		if port.agent != agent {
+			continue
+		}
+		view := PreviewView{Port: port.Port, Name: port.Name, Protocol: port.Protocol}
+		if template != "" && port.Protocol == hublink.ProtocolHTTP {
+			view.Address = strings.Replace(template, "%s", id, 1)
+		} else {
+			view.Command = fmt.Sprintf("egzo agent port-forward %s %d", agent, port.Port)
+		}
+		views = append(views, view)
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].Port < views[j].Port })
+	return views
 }
 
 // PreviewBackend is the hub as the preview proxy needs it.

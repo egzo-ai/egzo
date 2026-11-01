@@ -184,19 +184,20 @@ func (s *Server) identitiesOf(list []store.Identity) []identityJSON {
 }
 
 type agentJSON struct {
-	Name       string    `json:"name"`
-	Template   string    `json:"template"`
-	State      string    `json:"state"`
-	Running    bool      `json:"running"`
-	Activity   string    `json:"activity"`
-	Status     string    `json:"status"`
-	Waiting    bool      `json:"waiting"`
-	Stale      bool      `json:"stale"`
-	Creator    string    `json:"creator"`
-	CreatedAt  time.Time `json:"createdAt"`
-	CanOperate bool      `json:"canOperate"`
-	Holder     string    `json:"holder"`
-	Denied     int       `json:"denied"` // hosts the proxy refused it in the last hour, not reached since
+	Name       string        `json:"name"`
+	Template   string        `json:"template"`
+	State      string        `json:"state"`
+	Running    bool          `json:"running"`
+	Activity   string        `json:"activity"`
+	Status     string        `json:"status"`
+	Waiting    bool          `json:"waiting"`
+	Stale      bool          `json:"stale"`
+	Creator    string        `json:"creator"`
+	CreatedAt  time.Time     `json:"createdAt"`
+	CanOperate bool          `json:"canOperate"`
+	Holder     string        `json:"holder"`
+	Denied     int           `json:"denied"` // hosts the proxy refused it in the last hour, not reached since
+	Previews   []previewJSON `json:"previews"`
 	// Task is what the hub does on the agent, or the failure of what it did that nobody dismissed. An agent with a task and no state
 	// is one the project does not have: a spawn that runs or failed, or a removal that is ending.
 	Task *taskJSON `json:"task,omitempty"`
@@ -266,7 +267,24 @@ func taskOf(t hub.Task, n namer) taskJSON {
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 	return agentJSON{Name: a.Name, Template: a.Template, State: a.State, Running: a.Running(), Activity: a.Activity, Status: a.Status,
 		Waiting: a.Waiting, Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder,
-		Denied: a.Denied, Task: taskViewOf(a.Task, n)}
+		Denied: a.Denied, Previews: previewsOf(a.Previews), Task: taskViewOf(a.Task, n)}
+}
+
+// previewJSON is a port an agent exposed: what opens it, Address or Command.
+type previewJSON struct {
+	Port     int    `json:"port"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Address  string `json:"address"`
+	Command  string `json:"command"`
+}
+
+func previewsOf(list []hub.PreviewView) []previewJSON {
+	out := make([]previewJSON, 0, len(list))
+	for _, p := range list {
+		out = append(out, previewJSON(p))
+	}
+	return out
 }
 
 func taskViewOf(t *hub.TaskView, n namer) *taskJSON {

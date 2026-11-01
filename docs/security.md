@@ -48,6 +48,10 @@ Be clear about these before running agents on something you care about.
 - **An exposed port is what the agent says it is.** [`expose`](messaging.md#ports-an-agent-offers) publishes nothing and changes nothing in the sandbox: it
   records a claim, and its name and protocol are the agent's words. The list goes to everyone who can read the project's status, and each agent sees the
   others' with `agents`.
+- **A preview is the agent's code in somebody's browser.** That is why it never runs on the hub's origin: each [preview](hub.md#previews) has a host of its own,
+  on a domain the docs ask to keep apart, it reaches nothing of the hub's session, and a person signs in to each one separately. An app the agent wrote can still
+  show whatever it likes to whoever opens it, so a viewer should trust an address as far as they trust the agent behind it. The hub can reach only ports an
+  agent exposed, and the link enforces that.
 - **The link holds the engine.** A project that names a [hub](managing-projects.md#linking-to-a-hub) runs a sidecar with the engine's socket
   mounted: on a rootful engine it is root-equivalent on its host, like the CLI. Agents do not reach it: it is on a network of its own. A hub that
   is taken over can do what its verbs do on the projects linked to it, which includes attaching to their agents: link only to a hub you trust. A

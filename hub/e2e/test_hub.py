@@ -65,6 +65,29 @@ def test_two_projects_of_one_name_are_two_projects(hub, page):
     expect(page.locator("tr[data-agent=coder-1]")).to_contain_text("refactoring the parser on local")
 
 
+def test_a_preview_opens_from_its_panel_and_a_person_who_is_not_signed_in_signs_in_first(single_hub, page):
+    single_hub.world("expose", project="web", agent="coder-1", port=3000, text="shop")
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + single_hub.p("web") + "/a/coder-1")
+    panel = page.get_by_test_id("previews")
+    expect(panel).to_contain_text("shop")
+    expect(panel).to_contain_text("3000/http")
+    address = panel.get_by_role("link", name="Open").get_attribute("href")
+    with page.context.expect_page() as opened:
+        panel.get_by_role("link", name="Open").click()
+    expect(opened.value.get_by_role("heading")).to_have_text("the demo of coder-1 at /")
+    assert opened.value.url == address, "the ticket does not stay in the address"
+
+    other = page.context.browser.new_context()
+    stranger = other.new_page()
+    stranger.goto(address + "shop?x=1")
+    stranger.get_by_label("Username").fill("admin")
+    stranger.get_by_label("Password").fill(ADMIN_PASSWORD)
+    stranger.get_by_role("button", name="Sign in", exact=True).click()
+    expect(stranger.get_by_role("heading")).to_have_text("the demo of coder-1 at /shop")
+    other.close()
+
+
 def test_a_project_whose_link_went_away_is_offline_with_what_was_last_known_and_comes_back(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + single_hub.p("web"))

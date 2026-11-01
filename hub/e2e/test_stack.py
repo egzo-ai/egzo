@@ -13,16 +13,29 @@ URL = os.environ.get("HUB_STACK_URL")
 PROJECT = os.environ.get("HUB_STACK_PROJECT")
 CODE_FILE = os.environ.get("HUB_STACK_CODE_FILE")
 ADMIN_PASSWORD = os.environ.get("HUB_STACK_ADMIN_PASSWORD")
+PREVIEW = os.environ.get("HUB_STACK_PREVIEW")
 
 pytestmark = pytest.mark.skipif(not URL, reason="needs the stack of e2e/stack.sh (make hub-stack)")
+
+
+def password(page):
+    """Sends the sign-in form. The browser shares the machine's network, and Docker adding a network makes it drop a TLS connection in the
+    middle of a request (ERR_NETWORK_CHANGED): the form says it could not reach the hub, and a person would try again."""
+    page.get_by_label("Username").fill("admin")
+    page.get_by_label("Password").fill(ADMIN_PASSWORD)
+    for _ in range(5):
+        failed = []
+        page.on("requestfailed", lambda request: failed.append(request.failure))
+        page.get_by_role("button", name="Sign in", exact=True).click()
+        page.wait_for_timeout(1500)
+        if not any("ERR_NETWORK_CHANGED" in (f or "") for f in failed):
+            return
 
 
 def sign_in(page):
     """The starter account, with the password the stack set."""
     page.goto(URL)
-    page.get_by_label("Username").fill("admin")
-    page.get_by_label("Password").fill(ADMIN_PASSWORD)
-    page.get_by_role("button", name="Sign in", exact=True).click()
+    password(page)
     expect(page.get_by_test_id("signed-in-as")).to_contain_text("admin · operator")
 
 
@@ -35,6 +48,23 @@ def dex_sign_in(page, failed):
     page.get_by_placeholder("email address").fill("admin@example.com")
     page.get_by_placeholder("password").fill("password")
     page.get_by_role("button", name="Login").click()
+
+
+@pytest.fixture
+def browser_context_args(browser_context_args):
+    return {**browser_context_args, "ignore_https_errors": True}  # Caddy's own CA
+
+
+def test_a_preview_through_a_real_proxy_opens_for_who_signed_in_and_keeps_its_cookie_to_itself(page):
+    page.goto(PREVIEW)
+    assert "/login" in page.url, "a preview is never open"
+    password(page)
+    page.wait_for_url(PREVIEW)
+    expect(page.get_by_role("heading").first).to_contain_text("Directory listing")
+    cookies = {c["name"]: c for c in page.context.cookies()}
+    cookie = cookies["__Host-egzo_preview"]
+    assert cookie["secure"] and cookie["httpOnly"] and cookie["path"] == "/" and cookie["domain"] == PREVIEW.split("/")[2].split(":")[0]
+    assert "__Host-egzo_session" in cookies and cookies["__Host-egzo_session"]["domain"] == "hub.localhost"
 
 
 def test_the_admin_makes_a_link_code(page):
