@@ -25,7 +25,8 @@ def document(engine, egzo, hub):
 @pytest.fixture(scope="module")
 def linked(shared_project, engine, egzo, fake_hub):
     shared_project.write(document(engine, egzo, fake_hub))
-    shared_project.up_output = shared_project.ok("project up").stdout
+    up = shared_project.ok("project up")
+    shared_project.up_output = up.stdout + up.stderr  # a link that has no answer yet is a warning
     return shared_project
 
 
@@ -76,7 +77,9 @@ def test_a_ca_that_is_not_certificates_is_refused(project):
 
 
 def test_up_starts_the_link_says_it_is_not_registered_and_does_not_wait_for_anyone(linked, fake_hub, engine):
-    assert "link: not registered: run `egzo project register`" in linked.up_output
+    # `up` waits five seconds for the hub's first answer: a slow engine may not have it by then, and says "connecting" instead
+    assert "link: not registered: run `egzo project register`" in linked.up_output or "link: connecting" in linked.up_output
+    assert eventually(lambda: "not registered" in row(linked, "link")["status"], seconds=60), "the hub said so, in the end"
     assert fake_hub.registration(linked.name) is None, "a key the hub does not know leaves nothing on it"
 
     linked.ok("agent spawn web early")  # the project runs without the hub
@@ -110,7 +113,7 @@ def test_the_secret_key_is_never_in_the_links_settings_and_the_key_on_the_volume
 
 
 def test_a_project_that_is_not_registered_is_a_warning_and_the_link_stops_dialing(linked, fake_hub):
-    assert "not registered" in row(linked, "link")["status"]
+    assert eventually(lambda: "not registered" in row(linked, "link")["status"], seconds=60)
     result = check(linked)
     assert result.returncode == 0, "a project runs without its hub"
     assert "warn" in result.stdout and "not registered" in result.stdout
