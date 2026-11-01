@@ -107,7 +107,7 @@ $ egzo project up                                     # the proxy, the control s
 $ egzo agent spawn architect -m "I want to build my own agent orchestration system"
 $ egzo agent spawn coder issue-123 -m "Start work on the oldest backlog item" --attach
 $ egzo ps
-NAME             SERVICE    STATE    HEALTH   ACTIVITY  OPEN  WAITING  ACTOR     AGE  STALE  STATUS
+NAME             SERVICE    STATE    HEALTH   ACTIVITY  OPEN  WAITING  ACTOR     AGE  STALE  PORTS  STATUS
 architect-1      architect  running           working   1              operator  2m
 issue-123        coder      running           working   1              operator  1m
 myapp-control-1  control    running  healthy                                     3m
