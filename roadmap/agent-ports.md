@@ -198,9 +198,11 @@ role to open it, as for a terminal.
 - `Host` is rewritten to `localhost:<port>`: dev servers refuse unknown host names (Vite's `allowedHosts`). `X-Forwarded-Host`
   and `X-Forwarded-Proto` say the real ones, and `Origin` stays what the browser sent: an app uses them, or is told its address.
   What an app answers is not rewritten: a proxy that fixes the simple cases leaves the rest half working.
-- Limits, because the server on the other side is untrusted: open streams per preview and per hub, response header size and
-  time, idle time. A request over the stream limit waits a moment, because a dev server's page opens hundreds of files at once;
+- Limits, because the server on the other side is untrusted: open streams per preview and per hub, time to dial, response
+  header size and time, idle time. A request over the stream limit waits a moment, because a dev server's page opens hundreds of files at once;
   after that it is a 503 that says which limit, never a hub that slows down.
+- Not built yet: a limit per project, across its previews, and idle connections that do not count. An idle connection keeps its
+  slot for up to 30 seconds, and a request over the limit cannot close one, so previews viewed a moment ago can fill the hub's limit.
 - The listener has limits of its own: the hub's 30 seconds to read a request would cut an upload short.
 - Redeploying the hub drops open previews, as it drops terminals today. A reload brings them back.
 
