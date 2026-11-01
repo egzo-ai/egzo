@@ -35,27 +35,28 @@ which suits scripts. Messages wait in a queue until the harness is ready.
 
 ## Opening an agent's dev server
 
-An agent that runs a server in its sandbox (`npm run dev`, `python3 -m http.server`) has no address you can reach: it is on an internal
-network of its own, and nothing is published. `agent port-forward` brings the port to you:
+An agent that runs a server in its sandbox (`npm run dev`, a database) has no address you can reach: it is on an internal network of its own.
+You decide which ports it may serve, and it opens them when someone needs them:
 
-```console
-$ egzo agent port-forward issue-412 3000        # http://127.0.0.1:3000 here reaches port 3000 in the agent
-$ egzo agent port-forward issue-412 8000:3000   # on local port 8000
-$ egzo agent port-forward issue-412 0:3000      # on a local port the system chooses, which it prints
+```yaml
+local_ports: { bind: 192.168.8.242, host: mybox.lan }
+agents:
+  coder:
+    harness: claude-code
+    ports: { web: "5173/http", db: "5432/tcp" }
 ```
 
-The port shows up on the machine where you run the command: with `DOCKER_HOST=ssh://box` on a laptop, it is on the laptop, and the engine's
-host listens on nothing. Each connection is one exec of `egzo agent forward` in the agent's container, which connects to the container's own
-loopback, so a server bound to `127.0.0.1` works, WebSockets too, and the sandbox does not change. It takes any port, on `127.0.0.1` unless you
-name an address (`0.0.0.0:8000:3000` offers the agent's server to your network).
+The agent runs its servers on `0.0.0.0` on those ports and calls `expose(web, local)`, which answers `http://mybox.lan:20481/`. That is the one
+address where the app can be reached, from any machine that can reach `192.168.8.242`. A `tcp` or `udp` port answers `mybox.lan:20482`. A
+project with a [hub](hub.md) can open an `http` port for it instead: `expose(web, hub)` answers the preview's address. A port is open for one of
+the two at a time.
 
-Ctrl-C ends it, and it ends by itself when the agent stops. A connection to a port where nothing listens closes, and the command says so and
-keeps going, so you can start it before the server. When a client has closed its side, the agent's server has a minute of silence to answer
-or close before the connection is dropped, and ten minutes in all however much it says: a client that left cannot be told from one that only
-ended its input, and a server that keeps talking must not keep the command running in the agent. The agent's image must contain egzo, as for `agent attach`: the harness images do.
+A local port goes through a small relay, a container of its own that lives as long as the instance: its port stays the same through `agent stop`
+and `agent start` and a reboot, and `agent rm` frees it. Between `stop` and `start` a connection just fails. The agent's own network stays internal
+and the agent cannot reach the relay. Closing a port (`unexpose`) stops new connections; ones that are open last until they close.
 
-An agent can tell you which port to open: it [exposes](messaging.md#ports-an-agent-offers) the port and gives you the command, and `egzo ps` lists
-what is exposed under `PORTS`. You can forward any port, exposed or not.
+`egzo ps` lists what is open under `PORTS` (`web:hub,db:local`), and `egzo ps --json` has the address of each. See [messaging](messaging.md#ports-an-agent-opens)
+for what an agent is told, and [security](security.md) for what a local port gives away.
 
 ## Linking to a hub
 
