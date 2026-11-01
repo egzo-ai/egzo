@@ -632,7 +632,10 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request, user store.User
 		s.problem(w, r, err)
 		return
 	}
-	candidates, _ := s.hub.Candidates(r.Context(), user, project)
+	var candidates []store.User
+	if user.IsOperator {
+		candidates, _ = s.hub.Candidates(r.Context(), user, project)
+	}
 	type member struct {
 		User userJSON  `json:"user"`
 		Role rbac.Role `json:"role"`

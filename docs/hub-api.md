@@ -35,8 +35,8 @@ for a project the person has no role on, so its existence is not leaked; and for
 | `GET .../tasks/{id}` | `{task}`: whoever asked for it follows it until it ends |
 | `DELETE .../tasks/{id}` | takes an ended task off its agent (a failure, once read); the activity keeps it. For who may operate its agent (`403` otherwise), `409` while it runs, `404` once it is off. Recorded in the audit log as `task.dismiss`. A new task on the agent takes the failure off by itself |
 | `GET .../spec` | `{text}` |
-| `GET .../members` (owner, operator) | `{members: [{user, role}], candidates: [user], roles, me}` |
-| `POST .../members` `{user, role}` | `{ok}`; `role` is `viewer`, `user`, `admin`, `owner` or `none`. An owner may, but not to lower or remove themselves. An operator may set their own role, and make somebody the owner of a project with none. 409 `conflict` when it would leave the project without a valid owner |
+| `GET .../members` (owner, operator) | `{members: [{user, role}], candidates: [user], roles, me}`; `candidates`, the users with no role on it, are for an operator and empty for anybody else |
+| `POST .../members` `{user, role}` | `{ok}`; `role` is `viewer`, `user`, `admin`, `owner` or `none`. An owner may for who holds a role already, but not to lower or remove themselves: a person with none comes by an invite, or an owner who is an operator adds them. An operator may set their own role, and make somebody the owner of a project with none. 409 `conflict` when it would leave the project without a valid owner |
 | `GET .../invites` (owner, operator) | `{invites: [invite]}`: those of the project that are still good |
 | `POST .../invites` `{role}` (owner) | `{id, url, expiresAt}`: this is the only time `url` is seen |
 | `POST .../unlink` `{}` (owner) | `{ok}`: the hub forgets the project and its link hears it is not registered. The project keeps running on its machine |

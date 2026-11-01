@@ -537,12 +537,48 @@ func TestRolesAreManagedByOwnersOnly(t *testing.T) {
 	if err != nil || len(members) != 2 {
 		t.Errorf("members = %+v %v: want the operator who approved it and alice", members, err)
 	}
-	candidates, _ := r.hub.Candidates(ctx, alice, r.id("web"))
+	candidates, _ := r.hub.Candidates(ctx, op, r.id("web"))
 	if len(candidates) != 1 || candidates[0].ID != bob.ID {
 		t.Errorf("candidates = %+v", candidates)
 	}
 	if _, err := r.hub.Audit(ctx, bob, r.id("web"), 5); !errors.Is(err, ErrNotFound) {
 		t.Errorf("audit without a role: %v", err)
+	}
+}
+
+func TestOnlyAnOperatorSeesWhoIsOnTheHubAndAddsThem(t *testing.T) {
+	r := newRig(t)
+	r.link("web")
+	op := r.operator()
+	alice, bob := r.login("alice"), r.login("bob")
+	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.Owner)
+
+	if _, err := r.hub.Candidates(ctx, alice, r.id("web")); !errors.Is(err, ErrForbidden) {
+		t.Errorf("an owner listing the hub's users: %v", err)
+	}
+	if err := r.hub.SetRole(ctx, alice, r.id("web"), bob.ID, rbac.User); !errors.Is(err, ErrForbidden) {
+		t.Errorf("an owner adding somebody without their say: %v", err)
+	}
+	if role := r.role(bob, r.id("web")); role != rbac.None {
+		t.Errorf("bob = %q", role)
+	}
+	if err := r.hub.SetRole(ctx, op, r.id("web"), bob.ID, rbac.User); err != nil {
+		t.Errorf("an operator adding an existing user: %v", err)
+	}
+	// who holds a role already is the owner's
+	if err := r.hub.SetRole(ctx, alice, r.id("web"), bob.ID, rbac.Admin); err != nil {
+		t.Errorf("an owner changing a member: %v", err)
+	}
+	if err := r.hub.SetRole(ctx, alice, r.id("web"), bob.ID, rbac.None); err != nil {
+		t.Errorf("an owner removing a member: %v", err)
+	}
+	entries, _ := r.store.AuditOf(ctx, r.id("web"), 20)
+	refused := false
+	for _, e := range entries {
+		refused = refused || e.Action == "role.set" && !e.Allowed && strings.Contains(e.Detail, "only an operator adds a person")
+	}
+	if !refused {
+		t.Errorf("the refusal is not in the audit log: %+v", entries)
 	}
 }
 
@@ -567,7 +603,7 @@ func TestAProjectKeepsItsLastOwner(t *testing.T) {
 	}
 	// alice, who is no operator, cannot leave at all
 	bob := r.login("bob")
-	r.hub.SetRole(ctx, alice, id, bob.ID, rbac.Owner)
+	r.store.SetRole(ctx, id, bob.ID, rbac.Owner)
 	if err := r.hub.SetRole(ctx, alice, id, alice.ID, rbac.User); !errors.Is(err, ErrForbidden) {
 		t.Errorf("an owner lowering themselves: %v", err)
 	}

@@ -40,9 +40,12 @@ func (h *Hub) Members(ctx context.Context, user store.User, project string) ([]M
 	return members, nil
 }
 
-// Candidates lists the users who hold no role on the project yet: the people an owner can still add. Disabled users are left out. Users exist
-// once they have signed in.
+// Candidates lists the users who hold no role on the project yet, for an operator to add: it says who is on the hub, which is not an owner's to
+// read, and an owner invites. Disabled users are left out. Users exist once they have signed in.
 func (h *Hub) Candidates(ctx context.Context, user store.User, project string) ([]store.User, error) {
+	if !user.IsOperator {
+		return nil, ErrForbidden
+	}
 	members, err := h.Members(ctx, user, project)
 	if err != nil {
 		return nil, err
@@ -70,9 +73,9 @@ func (h *Hub) ownerless(ctx context.Context, project string) (bool, error) {
 	return len(owners[project]) == 0, err
 }
 
-// SetRole grants, changes or (with rbac.None) removes a user's role on a project. An owner may, but cannot remove or lower themselves, and a
-// project keeps a valid owner. An operator grants themselves a role with this, audited like any grant; a project with no owner gets a new
-// one from them the same way.
+// SetRole grants, changes or (with rbac.None) removes a user's role on a project. An owner may for those who hold one, but cannot remove or lower
+// themselves, and a project keeps a valid owner; a person who holds none comes by an invite they accept, unless an operator adds them. An
+// operator grants themselves a role with this, audited like any grant; a project with no owner gets a new one from them the same way.
 func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID string, role rbac.Role) error {
 	actorRole, err := h.access(ctx, actor, project)
 	if err != nil {
@@ -103,6 +106,11 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID s
 	}
 	if !rbac.CanAssign(actor.Subject(), actorRole, targetID, role, ownerless) {
 		return refuse(ErrForbidden, "")
+	}
+	if current, err := h.store.Role(ctx, project, targetID); err != nil {
+		return err
+	} else if current == rbac.None && role != rbac.None && !actor.IsOperator {
+		return refuse(ErrForbidden, "only an operator adds a person: ")
 	}
 	if err := h.store.SetRole(ctx, project, targetID, role); errors.Is(err, store.ErrLastOwner) {
 		return refuse(ErrLastOwner, "the last owner: ")

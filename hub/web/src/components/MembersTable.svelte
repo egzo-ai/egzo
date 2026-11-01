@@ -159,7 +159,7 @@
 </section>
 
 <section class="panel" aria-labelledby="add-person">
-  <header><h2 class="h-section" id="add-person">Add a person</h2></header>
+  <header><h2 class="h-section" id="add-person">{operator ? "Add a person" : "Roles"}</h2></header>
   <div class="pad">
     {#if data.candidates.length}
       <form class="toolbar" onsubmit={add}>
@@ -172,7 +172,7 @@
           <select id="m-role" class="select" bind:value={addRole}>{#each data.roles as r}<option value={r}>{r}</option>{/each}</select></div>
         <button class="btn" data-variant="primary" type="submit" style="align-self:end">Add</button>
       </form>
-    {:else}
+    {:else if operator}
       <p class="muted" style="margin:0">Everybody on this hub already has a role here. Invite whoever is not on it yet.</p>
     {/if}
     <dl class="roles">
