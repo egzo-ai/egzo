@@ -83,7 +83,7 @@ func run(log *slog.Logger) error {
 
 	failed := make(chan error, 2)
 	serve := func(addr string, handler http.Handler, what string) *http.Server {
-		server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+		server := newServer(addr, handler, readLimit)
 		log.Info("egzo-hub listening", "for", what, "addr", addr, "version", version.Version)
 		go func() {
 			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -107,6 +107,15 @@ func run(log *slog.Logger) error {
 		server.Shutdown(shutdown)
 	}
 	return nil
+}
+
+// readLimit is how long a request may take to arrive: every body the hub takes is small, so one that is still coming is somebody holding a
+// connection open.
+const readLimit = 30 * time.Second
+
+// newServer limits what a connection may hold on to. A terminal or a link is unaffected: a WebSocket is hijacked, which clears these deadlines.
+func newServer(addr string, handler http.Handler, read time.Duration) *http.Server {
+	return &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: min(10*time.Second, read), ReadTimeout: read, IdleTimeout: 2 * time.Minute}
 }
 
 // printPassword shows the starter account's new password, once, on standard output: it is not kept anywhere else in clear.
