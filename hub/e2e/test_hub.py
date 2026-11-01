@@ -608,6 +608,8 @@ def test_the_command_menu_opens_an_agent_terminal(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.keyboard.press("Control+k")
     page.get_by_role("combobox", name="Command").fill("coder-1")
+    # an agent is listed once its link has pushed it, which can be after the sign-in, and Enter on an empty list only closes the menu
+    expect(page.get_by_role("dialog", name="Command menu")).to_contain_text("web/coder-1")
     page.keyboard.press("Enter")
     expect(terminal_text(page, "coder-1")).to_contain_text("attached to web/coder-1")
 
