@@ -209,7 +209,8 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 		Name: "expose",
 		Description: "Let a person open a server you run here: nobody can reach this sandbox's ports otherwise. Use it when you start something to " +
 			"try or look at, a web app or a demo, and pass on what it answers: an address, or a command they run. The server must speak plain HTTP " +
-			"unless you say tcp, and may start before or after this call. Exposing a port again keeps its address.",
+			"unless you say tcp, and may start before or after this call. A restart of this sandbox ends what you exposed: exposing a port again gives " +
+			"it the same address.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in exposeArgs) (*mcp.CallToolResult, Exposure, error) {
 		agent, err := callerOf(req)
 		if err != nil {
@@ -221,7 +222,7 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "unexpose",
-		Description: "Stop offering a port you exposed, when what it served is gone. Its address stops working.",
+		Description: "Stop offering a port you exposed, when you are done with it. Its address stops working until you expose the port again.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in portArgs) (*mcp.CallToolResult, okResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {

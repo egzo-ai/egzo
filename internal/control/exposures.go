@@ -25,6 +25,9 @@ import (
 // An exposure is an agent saying that it serves something on a port of its own loopback, and that a person may open it. Nothing is checked:
 // a server may start after it, and stop and start again.
 //
+// It lasts as long as the sandbox: a restart ends every exposure, because the server is gone and the agent starts with no memory of it. What
+// is exposed is then what this boot of the agent said, and an old address cannot reach something new on its port by accident.
+//
 // Exposures are kept per agent name, next to the registration, because that is what control knows of an instance. Every removal unregisters
 // the agent, which deletes them. An id is made from the registration and the port, so nothing has to be kept for a port to get its id back
 // when it is exposed again, and a new instance of a name, which has a registration of its own, never inherits an old one's address.
@@ -227,6 +230,26 @@ func (s *server) tellExposure(agent, kind, text string) {
 		logger.Error("cannot record a change of exposures", "agent", agent, "event", kind, "err", err)
 		s.registryChanged()
 	}
+}
+
+// boot ends what an earlier boot of the sandbox exposed. A list that cannot be read goes too: nothing in it is meant to last.
+func (s *server) boot(agent string) error {
+	s.exposureMu.Lock()
+	defer s.exposureMu.Unlock()
+	list, unreadable := s.readExposures(agent)
+	if unreadable != nil {
+		logger.Error("cannot read the exposures of an agent", "agent", agent, "err", unreadable)
+	}
+	if err := s.writeExposures(agent, nil); err != nil {
+		return err
+	}
+	if unreadable != nil {
+		s.registryChanged()
+	}
+	for _, e := range list {
+		s.tellExposure(agent, "unexposed", strconv.Itoa(e.Port))
+	}
+	return nil
 }
 
 // forgetExposures is the end of an agent's: the next instance of the name starts with none.

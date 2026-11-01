@@ -51,8 +51,11 @@ listen on `127.0.0.1`, and may start before or after the call: nothing is checke
 - The protocol is `http` by default, WebSockets included, or `tcp` for anything else, such as a database or a server that speaks TLS itself.
 - The answer is what the agent passes on. In a project with a [hub](hub.md) that serves previews, an `http` port gets an address. Otherwise it is
   the command a person runs on a machine that holds the engine, `egzo agent port-forward coder-1 3000`.
-- The id in an address stays for as long as the port is exposed, through restarts of the agent and of the sidecars. A new agent with the same name gets
-  a new one. An agent may expose 32 ports.
+- A restart of the agent ends what it exposed, because its server is gone and it starts with no memory of it. It exposes the port again, or its prompt
+  says to, and the port gets the same address: an address belongs to an agent and a port for as long as the agent exists. A new agent with the same
+  name gets new addresses. A restart of the sidecars changes nothing. It is the entrypoint that tells control of a restart, so a `custom` image that
+  replaces it [keeps its exposures](images.md).
+- An agent may expose 32 ports.
 
 `egzo ps` shows them in `PORTS`, and `egzo ps --json` with their address or command.
 

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -128,6 +129,56 @@ func TestAnAgentThatIsNotRegisteredLosesItsExposuresToo(t *testing.T) {
 	}
 	if list, err := s.readExposures("old"); err != nil || len(list) != 0 {
 		t.Errorf("left behind: %+v, %v", list, err)
+	}
+}
+
+func TestABootEndsWhatWasExposedAndThePortGetsItsIDBack(t *testing.T) {
+	s := exposing(t)
+	first, err := s.expose("web", 3000, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.boot("web"); err != nil {
+		t.Fatal(err)
+	}
+	if list := s.exposedBy("web", ""); len(list) != 0 {
+		t.Errorf("left: %+v", list)
+	}
+	again, err := s.expose("web", 3000, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != first.ID {
+		t.Errorf("%s, then %s", first.ID, again.ID)
+	}
+}
+
+func TestABootWithNothingExposedSaysNothing(t *testing.T) {
+	s := exposing(t)
+	wake := s.events.waker()
+	if err := s.boot("web"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-wake:
+		t.Error("a boot with nothing to end woke the status log")
+	default:
+	}
+}
+
+func TestABootClearsAListThatCannotBeRead(t *testing.T) {
+	s := exposing(t)
+	if err := os.MkdirAll(filepath.Dir(s.exposuresFile("web")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.exposuresFile("web"), []byte("["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.boot("web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.expose("web", 3000, "", ""); err != nil {
+		t.Error(err)
 	}
 }
 

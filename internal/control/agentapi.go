@@ -45,6 +45,7 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/state", a.authenticatedLimit(maxStatePayload, a.state))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
+	mux.HandleFunc("POST /v1/boot", a.authenticated(a.boot))
 	mux.HandleFunc("POST /v1/expose", a.authenticated(a.expose))
 	mux.HandleFunc("DELETE /v1/expose/{port}", a.authenticated(a.unexpose))
 	mux.Handle("/mcp", a.authenticatedHandler(a.mcpHandler()))
@@ -224,6 +225,14 @@ func (a *agentAPI) ask(w http.ResponseWriter, r *http.Request, agent string) {
 
 func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) {
 	reply(w, http.StatusOK, a.server.othersOf(agent))
+}
+
+func (a *agentAPI) boot(w http.ResponseWriter, r *http.Request, agent string) {
+	if err := a.server.boot(agent); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *agentAPI) expose(w http.ResponseWriter, r *http.Request, agent string) {

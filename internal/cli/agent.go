@@ -183,6 +183,7 @@ func runAgent(args []string) error {
 	environment = withDefault(environment, "TERM", "xterm-256color")
 	environment = withDefault(environment, "COLORTERM", "truecolor")
 
+	reportBoot()
 	holder, err := sess.Start(command, environment, "")
 	if err != nil {
 		return err
@@ -229,6 +230,35 @@ func runAgent(args []string) error {
 		return ExitError{Code: code}
 	}
 	return nil
+}
+
+// bootLimit is how long a harness waits for the control sidecar to hear that the sandbox is new. An agent starts once the sidecar is healthy,
+// so this is for a sidecar that is down, and a harness that does not start is the bigger problem.
+const bootLimit = 10 * time.Second
+
+// reportBoot tells the control sidecar that this sandbox is new, which ends what an earlier boot exposed. It comes before the harness starts:
+// the first thing a harness does may be to expose a port, and that must not be undone.
+func reportBoot() {
+	api, err := agentclient.FromEnv()
+	if err != nil {
+		return // no control sidecar to tell, as for delivery
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bootLimit)
+	defer cancel()
+	for {
+		_, err := api.Do(ctx, "POST", "/v1/boot", nil)
+		if err == nil {
+			return
+		}
+		if !agentclient.Temporary(err) || ctx.Err() != nil {
+			fmt.Fprintf(os.Stderr, "egzo: what an earlier boot exposed may still be exposed: %v\n", err)
+			return
+		}
+		select {
+		case <-time.After(250 * time.Millisecond):
+		case <-ctx.Done():
+		}
+	}
 }
 
 func withDefault(environment []string, key, value string) []string {
