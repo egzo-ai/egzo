@@ -158,5 +158,8 @@ The quota on a user, under **Settings, Users** or in the invite that made them, 
 
 Everything anyone does, allowed or refused, is in the project's audit log.
 
+An open terminal lasts as long as the right to it: a role change that takes the right away closes it at once, and it ends with the session that
+opened it, 12 hours after signing in at most. The agent's session goes on.
+
 There is no messaging in the web UI: talk to an agent in its terminal.
 

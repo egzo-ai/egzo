@@ -76,7 +76,7 @@ longer than three heartbeats) `unavailable` (the sidecar is not running, or writ
 
 Binary frames are the terminal's bytes in both directions. Text frames are JSON control messages. Up: `{"type":"resize","cols":N,"rows":N}`
 (the first one sizes the session; the hub waits two seconds for it). Down: `{"type":"busy","holder":"..."}` (somebody else holds it,
-the socket closes), `{"type":"taken","holder":"..."}` (somebody took it over, the socket closes), `{"type":"error","message":"..."}`.
+the socket closes), `{"type":"taken","holder":"..."}` (somebody took it over, the socket closes), `{"type":"error","message":"..."}` (the terminal failed, or the person lost the right to it: the socket closes). The socket also closes when the session that opened it ends. It takes the `Origin` of the hub's own pages: anything else is refused with a 403 before the terminal is touched.
 The Origin must be the hub's own.
 
 ## Everything else

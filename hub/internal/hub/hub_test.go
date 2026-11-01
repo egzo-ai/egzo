@@ -481,6 +481,55 @@ func TestOneHolderPerAgentAndAnyoneMayTakeOver(t *testing.T) {
 	again.Close()
 }
 
+func TestARoleChangeEndsOnlyTheTerminalsItTakesAway(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("cli-1", "operator"))
+	op := r.operator()
+	alice := r.login("alice")
+	r.fakes["web"].SetAgent(agent("hers-1", rbac.Actor(alice.ID)))
+	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.Admin)
+	theirs, err := r.hub.Attach(ctx, alice, r.id("web"), "cli-1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer theirs.Close()
+	own, err := r.hub.Attach(ctx, alice, r.id("web"), "hers-1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer own.Close()
+	done := make(chan error, 1)
+	in, _ := io.Pipe()
+	go func() { done <- theirs.Run(ctx, links.Terminal{In: in, Out: io.Discard}) }()
+
+	// a user keeps their own agent's terminal and loses the others'
+	if err := r.hub.SetRole(ctx, op, r.id("web"), alice.ID, rbac.User); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the terminal outlived the role")
+	}
+	select {
+	case <-own.Revoked():
+		t.Error("alice lost the terminal of her own agent")
+	default:
+	}
+	if err := r.hub.SetRole(ctx, op, r.id("web"), alice.ID, rbac.None); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-own.Revoked():
+	default:
+		t.Error("removing alice left her a terminal")
+	}
+}
+
 func TestATakenOverAttachmentEndsWithoutAnError(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")

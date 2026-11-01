@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
@@ -41,12 +42,19 @@ type Attachment struct {
 	hub            *Hub
 	project, agent string
 	name           string
+	subject        rbac.Subject
+	creator        string // the agent's: what the right to its terminal depends on
 	taken          chan struct{}
 	takenBy        string
+	revoke         sync.Once
+	revoked        chan struct{}
 }
 
 // Taken is closed when somebody else took the terminal over.
 func (a *Attachment) Taken() <-chan struct{} { return a.taken }
+
+// Revoked is closed when the person lost the right to this terminal while it was open.
+func (a *Attachment) Revoked() <-chan struct{} { return a.revoked }
 
 // TakenBy is who took the terminal over; it is only set once Taken is closed.
 func (a *Attachment) TakenBy() string {
@@ -56,7 +64,8 @@ func (a *Attachment) TakenBy() string {
 }
 
 // Attach gives the user the agent's terminal. One person holds it at a time: when somebody else does, it fails with an InUseError, unless
-// takeOver is set, which ends the other person's terminal. Whoever may operate the agent may attach. Close the attachment when the terminal ends.
+// takeOver is set, which ends the other person's terminal. Whoever may operate the agent may attach, for as long as they may: Close the attachment
+// when the terminal ends, or when Revoked says so.
 func (h *Hub) Attach(ctx context.Context, user store.User, project, agent string, takeOver bool) (*Attachment, error) {
 	role, err := h.access(ctx, user, project)
 	if err != nil {
@@ -70,7 +79,8 @@ func (h *Hub) Attach(ctx context.Context, user store.User, project, agent string
 		return nil, ErrForbidden
 	}
 
-	att := &Attachment{hub: h, project: project, agent: agent, name: user.DisplayName(), taken: make(chan struct{})}
+	att := &Attachment{hub: h, project: project, agent: agent, name: user.DisplayName(), subject: user.Subject(), creator: creator,
+		taken: make(chan struct{}), revoked: make(chan struct{})}
 	key := attachKey(project, agent)
 	h.mu.Lock()
 	previous := h.attached[key]
@@ -85,12 +95,29 @@ func (h *Hub) Attach(ctx context.Context, user store.User, project, agent string
 	h.attached[key] = att
 	h.mu.Unlock()
 
+	// A role changed while the project answered found no terminal to end: from here on it finds this one.
+	if role, err := h.access(ctx, user, project); err != nil || !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
+		att.Close()
+		return nil, ErrForbidden
+	}
 	detail := "open"
 	if previous != nil {
 		detail = "took over from " + previous.name
 	}
 	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "agent.attach", Project: project, Agent: agent, Detail: detail, Allowed: true})
 	return att, nil
+}
+
+// endLostTerminals ends the terminals a person may no longer hold on a project now that they have role there. The right is checked at the door
+// only for what opens afterwards: a terminal that is open stays open until this says otherwise.
+func (h *Hub) endLostTerminals(project, userID string, role rbac.Role) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, a := range h.attached {
+		if a.project == project && a.subject.ID == userID && !rbac.Can(a.subject, role, rbac.Operate, a.creator) {
+			a.revoke.Do(func() { close(a.revoked) })
+		}
+	}
 }
 
 // Run connects the terminal until it ends or is taken over. A taken-over terminal ends without an error: check Taken.
@@ -101,16 +128,20 @@ func (a *Attachment) Run(ctx context.Context, term links.Terminal) error {
 		select {
 		case <-a.taken:
 			cancel()
+		case <-a.revoked:
+			cancel()
 		case <-ctx.Done():
 		}
 	}()
 	err := a.hub.call(ctx, a.project, func(ctx context.Context, e links.Engine) error { return e.Attach(ctx, a.agent, term) })
 	select {
 	case <-a.taken:
-		if errors.Is(err, context.Canceled) {
-			err = nil
-		}
+	case <-a.revoked:
 	default:
+		return err
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil
 	}
 	return err
 }
