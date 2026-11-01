@@ -133,3 +133,16 @@ func TestRoleOrder(t *testing.T) {
 		t.Error("overseer is a role")
 	}
 }
+
+func TestEveryRoleOpensAPreviewAndOverseeingIsNotARole(t *testing.T) {
+	for _, role := range Roles {
+		if !Can(Subject{ID: "u"}, role, Preview, "") {
+			t.Errorf("%s may not", role)
+		}
+	}
+	for _, role := range []Role{None, Overseer} {
+		if Can(Subject{ID: "u", IsOperator: true}, role, Preview, "") {
+			t.Errorf("%q may", role)
+		}
+	}
+}

@@ -28,6 +28,7 @@
       await api.passwordLogin(username, password);
       password = "";
       await signedIn(); // the app then goes where the person was going
+      if (next.startsWith("/preview/")) location.assign(next); // the hub's server answers that one, not the app
     } catch (e) {
       failure = errorText(e);
     } finally {

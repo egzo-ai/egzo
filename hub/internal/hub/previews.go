@@ -6,11 +6,15 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/preview"
+	"github.com/egzo-ai/egzo/hub/internal/rbac"
+	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
@@ -117,4 +121,131 @@ func (c *endingConn) CloseWrite() error {
 		return half.CloseWrite()
 	}
 	return errors.ErrUnsupported
+}
+
+// previewTicketLife is how long a redirect from the hub to a preview may take.
+const previewTicketLife = 30 * time.Second
+
+// mayPreview says whether a person may open a project's previews now: every role may, and only a role.
+func (h *Hub) mayPreview(ctx context.Context, user store.User, project string) (rbac.Role, bool, error) {
+	if _, err := h.registration(ctx, project); err != nil {
+		return rbac.None, false, err
+	}
+	role, err := h.store.Role(ctx, project, user.ID)
+	if err != nil {
+		return rbac.None, false, err
+	}
+	return role, rbac.Can(user.Subject(), role, rbac.Preview, ""), nil
+}
+
+// OpenPreview lets a person into a preview, and returns the ticket that takes them there. Somebody who may not sees what a preview that does not
+// exist shows: the address says nothing of the project. It is one entry in the audit log per ticket, not per request.
+func (h *Hub) OpenPreview(ctx context.Context, user store.User, sessionHash, project, id, path string) (string, error) {
+	role, allowed, err := h.mayPreview(ctx, user, project)
+	if err != nil {
+		return "", err
+	}
+	if !allowed {
+		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "preview.open", Project: project, Detail: fmt.Sprintf("refused: %s holds no role", role)})
+		return "", ErrNotFound
+	}
+	agent, port := "", 0
+	target, err := h.Previews().Find(ctx, project, id)
+	switch {
+	case err == nil:
+		agent, port = target.Agent, target.Port
+	case !errors.Is(err, preview.ErrOffline): // an offline project says so on the preview's own host
+		return "", ErrNotFound
+	}
+	ticket, err := h.store.NewPreviewTicket(ctx, sessionHash, project, id, path, previewTicketLife)
+	if err != nil {
+		return "", err
+	}
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "preview.open", Project: project, Agent: agent, Detail: fmt.Sprintf("port %d", port), Allowed: true})
+	return ticket, nil
+}
+
+// EnterPreview spends a ticket, on the preview's host, and returns the path to go to and the cookie's value.
+func (h *Hub) EnterPreview(ctx context.Context, ticket, project, id string) (string, string, error) {
+	path, token, err := h.store.SpendPreviewTicket(ctx, ticket, project, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", "", ErrNotFound
+	}
+	return path, token, err
+}
+
+// Visitor is a person a preview's cookie stands for.
+type Visitor struct {
+	User    store.User
+	Session string // the hash of the hub session it came from
+	Expires time.Time
+}
+
+// PreviewVisitor checks a preview's cookie, on each request: the session lives, the user is enabled, and they still hold a role.
+func (h *Hub) PreviewVisitor(ctx context.Context, token, project, id string) (Visitor, error) {
+	user, session, expires, err := h.store.PreviewVisitor(ctx, token, project, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return Visitor{}, ErrNotFound
+	}
+	if err != nil {
+		return Visitor{}, err
+	}
+	if _, allowed, err := h.mayPreview(ctx, user, project); err != nil {
+		return Visitor{}, err
+	} else if !allowed {
+		return Visitor{}, ErrNotFound
+	}
+	return Visitor{User: user, Session: session, Expires: expires}, nil
+}
+
+// openPreview is a request a preview's server is answering. A WebSocket or an event stream asks nothing more, so what would refuse its next
+// request ends it instead, as with a terminal.
+type openPreview struct {
+	project, id, user string
+	cancel            func()
+}
+
+// TrackPreview registers a request; the returned func forgets it.
+func (h *Hub) TrackPreview(project, id, userID string, cancel func()) func() {
+	open := &openPreview{project: project, id: id, user: userID, cancel: cancel}
+	h.previewMu.Lock()
+	defer h.previewMu.Unlock()
+	if h.previewing == nil {
+		h.previewing = map[*openPreview]struct{}{}
+	}
+	h.previewing[open] = struct{}{}
+	return func() {
+		h.previewMu.Lock()
+		defer h.previewMu.Unlock()
+		delete(h.previewing, open)
+	}
+}
+
+func (h *Hub) endPreviews(ended func(*openPreview) bool) {
+	h.previewMu.Lock()
+	defer h.previewMu.Unlock()
+	for open := range h.previewing {
+		if ended(open) {
+			open.cancel()
+		}
+	}
+}
+
+// endLostPreviews ends what a person may no longer watch now that they have role on a project.
+func (h *Hub) endLostPreviews(project, userID string, role rbac.Role) {
+	if rbac.Can(rbac.Subject{ID: userID}, role, rbac.Preview, "") {
+		return
+	}
+	h.endPreviews(func(open *openPreview) bool { return open.project == project && open.user == userID })
+}
+
+// endUnexposed ends what is open on a port that is no longer exposed.
+func (h *Hub) endUnexposed(project string) {
+	h.feeds.mu.Lock()
+	exposed := h.feeds.exposed[project]
+	h.feeds.mu.Unlock()
+	h.endPreviews(func(open *openPreview) bool {
+		_, ok := exposed[open.id]
+		return open.project == project && !ok
+	})
 }
