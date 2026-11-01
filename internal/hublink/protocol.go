@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
@@ -147,6 +148,23 @@ type Verdict struct {
 	// Preview is the template of a preview's address, with %s for an exposure's id, when the hub serves previews of this project. It holds
 	// what only the hub knows: the scheme, the domain, the project.
 	Preview string `json:",omitempty"`
+}
+
+const (
+	// PreviewPlaceholder is where an exposure's id goes in a Verdict's Preview.
+	PreviewPlaceholder = "%s"
+	// MaxPreviewTemplate is the longest template taken.
+	MaxPreviewTemplate = 256
+)
+
+// ValidPreviewTemplate takes a base address with one place for an id, in the host name: every preview is an origin of its own.
+func ValidPreviewTemplate(template string) bool {
+	if len(template) > MaxPreviewTemplate || strings.Count(template, "%") != 1 || strings.Count(template, PreviewPlaceholder) != 1 {
+		return false
+	}
+	const id = "exposureid"
+	u, err := url.Parse(strings.Replace(template, PreviewPlaceholder, id, 1))
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && strings.Contains(u.Hostname(), id) && u.User == nil
 }
 
 // Unlink is the link's last message on the control stream: forget this project.

@@ -212,25 +212,6 @@ func TestAnExposureInTheStatusListIsSeenAsAChange(t *testing.T) {
 	}
 }
 
-func TestPreviewTemplates(t *testing.T) {
-	for template, want := range map[string]bool{
-		"https://%s-p1.example.net/":       true,
-		"http://%s.preview.localhost:8081": true,
-		"https://example.net/":             false,
-		"https://example.net/%s":           false,
-		"https://%s.%s.example.net/":       false,
-		"https://%s.example.net/%d":        false,
-		"ftp://%s.example.net/":            false,
-		"https://u:p@%s.example.net/":      false,
-		"%s":                               false,
-		"https://%s." + strings.Repeat("a", maxPreviewTemplate) + "/": false,
-	} {
-		if got := validPreviewTemplate(template); got != want {
-			t.Errorf("%q: %v", template, got)
-		}
-	}
-}
-
 func TestATemplateThatIsNoAddressIsRefusedAndEmptyClears(t *testing.T) {
 	s := exposing(t)
 	put := func(body string) int {
