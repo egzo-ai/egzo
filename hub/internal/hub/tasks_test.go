@@ -130,6 +130,33 @@ func TestAFailedSpawnStaysAnAgentWithWhyUntilItIsDismissed(t *testing.T) {
 	}
 }
 
+func TestAnOperatorWithNoRoleSeesThatATaskFailedAndNotWhy(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	alice, op := r.login("alice"), r.login("bob") // bob holds no role: whoever connected the project owns it
+	if err := r.hub.SetOperator(ctx, r.operator(), op.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	op, _ = r.store.User(ctx, op.ID)
+	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
+	r.fakes["web"].FailNext("the registry refused the pull")
+	if _, err := r.hub.StartSpawn(ctx, alice, r.id("web"), "coder", "fix-bug"); err != nil {
+		t.Fatal(err)
+	}
+	r.hub.WaitForTasks()
+
+	seen, n := r.agentIn(op, r.id("web"), "fix-bug")
+	if n != 1 || seen.Task == nil || seen.Task.State != store.TaskFailed {
+		t.Fatalf("the operator sees %d %+v", n, seen.Task)
+	}
+	if seen.Task.Err != "" || seen.Task.Step != "" {
+		t.Errorf("an overseer read what the task says: %+v", seen.Task)
+	}
+	if own, _ := r.agentIn(alice, r.id("web"), "fix-bug"); !strings.Contains(own.Task.Err, "registry refused") {
+		t.Errorf("who has a role lost the failure: %+v", own.Task)
+	}
+}
+
 func TestATaskThatRunsCannotBeDismissedAndAFailureGivesWayToTheNextTask(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder", "reviewer")
