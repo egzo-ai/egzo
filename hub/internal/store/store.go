@@ -399,6 +399,9 @@ func (s *Store) SetOperator(ctx context.Context, id string, on bool) (changed bo
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET is_operator = ? WHERE id = ?`, boolInt(on), id); err != nil {
 		return false, err
 	}
+	if err := dropFallenInvites(ctx, tx); err != nil {
+		return false, err
+	}
 	return true, tx.Commit()
 }
 
@@ -450,6 +453,9 @@ func (s *Store) SetDisabled(ctx context.Context, id string, on bool) (changed bo
 			return false, nil, err
 		}
 		if ended, err = endSessions(ctx, tx, `user_id = ?`, id); err != nil {
+			return false, nil, err
+		}
+		if err := dropFallenInvites(ctx, tx); err != nil {
 			return false, nil, err
 		}
 	} else if _, err := tx.ExecContext(ctx, `UPDATE users SET disabled_at = NULL WHERE id = ?`, id); err != nil {
@@ -783,6 +789,9 @@ func (s *Store) SetRole(ctx context.Context, project, userID string, role rbac.R
 	if err := setGrant(ctx, tx, project, userID, role); err != nil {
 		return err
 	}
+	if err := dropFallenInvites(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -981,7 +990,15 @@ type AuditEntry struct {
 
 // Audit writes an entry. What it records has happened, so a request that went away in the meantime does not stop it.
 func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
-	_, err := s.db.ExecContext(context.WithoutCancel(ctx), `INSERT INTO audit (at, actor, action, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	return audit(context.WithoutCancel(ctx), s.db, e)
+}
+
+type executor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func audit(ctx context.Context, x executor, e AuditEntry) error {
+	_, err := x.ExecContext(ctx, `INSERT INTO audit (at, actor, action, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		time.Now().Unix(), e.Actor, e.Action, e.Project, e.Agent, e.Detail, boolInt(e.Allowed))
 	return err
 }

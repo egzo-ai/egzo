@@ -100,6 +100,55 @@ func TestAnInviteIsWorthNothingOnceItsMakerMayNoLongerMakeIt(t *testing.T) {
 	}
 }
 
+func TestAnInviteIsGoneForGoodOnceItsMakerLosesTheRight(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	alice := login(t, s, "alice")
+	first, second := login(t, s, "first"), login(t, s, "second")
+	s.SetRole(ctx, web, first.ID, rbac.Owner)
+	s.SetRole(ctx, web, second.ID, rbac.Owner)
+	op := operatorNamed(t, s, "op")
+	operatorNamed(t, s, "keep")
+	_, lowered, _ := s.CreateInvite(ctx, Invite{CreatedBy: first.ID, Project: web, Role: rbac.Admin}, time.Now())
+	_, disabled, _ := s.CreateInvite(ctx, Invite{CreatedBy: second.ID, Project: web, Role: rbac.Admin}, time.Now())
+	_, flags, _ := s.CreateInvite(ctx, Invite{CreatedBy: op.ID, ProjectQuota: 2}, time.Now())
+	kept, _, _ := s.CreateInvite(ctx, Invite{CreatedBy: operatorNamed(t, s, "other").ID}, time.Now())
+
+	s.SetRole(ctx, web, first.ID, rbac.User)
+	s.SetRole(ctx, web, first.ID, rbac.Owner)
+	s.SetDisabled(ctx, second.ID, true)
+	s.SetDisabled(ctx, second.ID, false)
+	s.SetOperator(ctx, op.ID, false)
+	s.SetOperator(ctx, op.ID, true)
+
+	for what, code := range map[string]string{"a former owner's": lowered, "a disabled owner's": disabled, "a former operator's": flags} {
+		if _, err := s.RedeemInvite(ctx, code, alice.ID, time.Now()); !errors.Is(err, ErrBadInvite) {
+			t.Errorf("%s, once the right came back: %v", what, err)
+		}
+	}
+	if listed, _ := s.Invites(ctx, "", time.Now()); len(listed) != 1 || listed[0].ID != kept.ID {
+		t.Errorf("still listed = %+v", listed)
+	}
+	entries, _ := s.AuditOf(ctx, web, 10)
+	if len(entries) != 2 || entries[0].Actor != "hub" || entries[0].Action != "invite.revoke" || !entries[0].Allowed {
+		t.Errorf("the audit log = %+v", entries)
+	}
+}
+
+func TestARevokedProjectLosesItsInvites(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	owner := login(t, s, "owner")
+	s.SetRole(ctx, web, owner.ID, rbac.Owner)
+	s.CreateInvite(ctx, Invite{CreatedBy: owner.ID, Project: web, Role: rbac.User}, time.Now())
+	if _, err := s.Revoke(ctx, web, "no"); err != nil {
+		t.Fatal(err)
+	}
+	if listed, _ := s.Invites(ctx, web, time.Now()); len(listed) != 0 {
+		t.Errorf("still listed = %+v", listed)
+	}
+}
+
 func TestAnInviteOnlyEverAdds(t *testing.T) {
 	s := open(t)
 	web := registered(t, s, "web")
