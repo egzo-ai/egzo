@@ -42,9 +42,10 @@ docker-gvisor)
 	rm -rf "$tmp"
 	# registers the runtime `runsc` in /etc/docker/daemon.json and makes it the engine's default: egzo never chooses a runtime,
 	# so gVisor is what the host is, and every container the engine starts runs under it
+	# --host-uds=open: the link sidecar connects to the engine's socket, bind-mounted into it, which gVisor refuses by default (docs/gvisor.md)
 	# --network=host: gVisor's own network stack cannot reach Docker's embedded DNS (127.0.0.11), so no container name resolves in it;
-	# the sandbox then uses the container's kernel network stack, which weakens gVisor's network isolation (known-issues/gvisor-docker-embedded-dns.md)
-	sudo runsc install -- --network=host
+	# the sandbox then uses the container's kernel network stack, which weakens gVisor's network isolation (docs/gvisor.md)
+	sudo runsc install -- --network=host --host-uds=open
 	sudo jq '. + {"default-runtime": "runsc"}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new
 	sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
 	sudo systemctl restart docker

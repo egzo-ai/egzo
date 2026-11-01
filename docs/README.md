@@ -8,6 +8,7 @@ detail, and the executable specs in `specs/` are the status report.
 
 1. [Introduction](intro.md): what egzo is, how it is built, a first run
 2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, `egzo system check`
+   - [Using gVisor](gvisor.md): why, the cost, the two flags
 
 ## Using egzo
 
