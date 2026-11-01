@@ -380,6 +380,9 @@ func (h *Hub) withTasks(user store.User, role rbac.Role, project string, agents 
 			index[t.Agent] = i
 		}
 		creator := agents[i].Actor
+		if !rbac.Can(user.Subject(), role, rbac.Inspect, "") {
+			t.Step, t.Err = "", "" // an operator with no role sees that it runs or failed: what it says is the tasks', which are for a role
+		}
 		agents[i].Task = &TaskView{Task: t, CanDismiss: t.Over() && rbac.Can(user.Subject(), role, rbac.Operate, creator)}
 	}
 	return agents
