@@ -847,3 +847,15 @@ func TestTheLastValidOwnerStaysOneInOneTransaction(t *testing.T) {
 		t.Errorf("owners = %v", owners)
 	}
 }
+
+func TestAnAuditEntryOutlivesTheRequestThatMadeIt(t *testing.T) {
+	s := open(t)
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.Audit(gone, AuditEntry{Actor: "user:u1", Action: "role.set", Project: "p1", Allowed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := s.AuditOf(ctx, "p1", 10); err != nil || len(entries) != 1 {
+		t.Errorf("entries = %v, %v", entries, err)
+	}
+}
