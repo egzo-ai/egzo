@@ -693,10 +693,11 @@ func (s *Server) audit(w http.ResponseWriter, r *http.Request, user store.User) 
 		Agent   string    `json:"agent"`
 		Detail  string    `json:"detail"`
 		Allowed bool      `json:"allowed"`
+		Client  string    `json:"client,omitempty"`
 	}
 	rows := make([]row, 0, len(entries))
 	for _, e := range entries {
-		rows = append(rows, row{At: e.At, Actor: n.actor(e.Actor), Action: e.Action, Agent: e.Agent, Detail: e.Detail, Allowed: e.Allowed})
+		rows = append(rows, row{At: e.At, Actor: n.actor(e.Actor), Action: e.Action, Agent: e.Agent, Detail: e.Detail, Allowed: e.Allowed, Client: e.Client})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": rows})
 }
@@ -819,8 +820,8 @@ func (s *Server) removeIdentity(w http.ResponseWriter, r *http.Request, user sto
 
 func (s *Server) operatorOnly(next authedHandler) authedHandler {
 	return func(w http.ResponseWriter, r *http.Request, user store.User) {
-		if !user.IsOperator {
-			s.problem(w, r, hub.ErrForbidden)
+		if err := s.hub.RequireOperator(r.Context(), user, r.Pattern); err != nil {
+			s.problem(w, r, err)
 			return
 		}
 		next(w, r, user)

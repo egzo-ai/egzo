@@ -380,6 +380,7 @@ func (h *Hub) Logs(ctx context.Context, user store.User, id, container string, t
 			return "", err // a project that cannot answer has refused nobody
 		}
 		if err != nil || !rbac.Can(user.Subject(), role, rbac.Operate, creator) {
+			h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "agent.logs", Project: id, Agent: container, Detail: fmt.Sprintf("refused: reading a log needs more than %s", role)})
 			return "", ErrForbidden
 		}
 	}
@@ -415,6 +416,7 @@ func (h *Hub) Audit(ctx context.Context, user store.User, id string, limit int) 
 		return nil, err
 	}
 	if !role.AtLeast(rbac.Admin) {
+		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "audit.read", Project: id, Detail: fmt.Sprintf("refused: the audit log needs more than %s", role)})
 		return nil, ErrForbidden
 	}
 	return h.store.AuditOf(ctx, id, limit)

@@ -379,3 +379,27 @@ func TestAnOperatorFreesAnAccidentalUsersAccount(t *testing.T) {
 		t.Errorf("link after the removal ended on %s", final)
 	}
 }
+
+func TestTheAuditLogSaysWhoSignedInFromWhereAndWhoWasRefused(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	root := r.browser()
+	root.signIn("admin")
+	bob := r.browser()
+	bob.signIn("bob") // a provider sign-in
+	if code, _ := bob.get("/users"); code != 403 {
+		t.Fatalf("a person listing users = %d", code)
+	}
+	entries, err := r.store.AuditOf(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var signIn, refused bool
+	for _, e := range entries {
+		signIn = signIn || e.Action == "user.signin" && e.Allowed && strings.Contains(e.Detail, "at "+r.provider.URL) && e.Client == "127.0.0.1"
+		refused = refused || e.Action == "GET /api/v1/users" && !e.Allowed && e.Client == "127.0.0.1"
+	}
+	if !signIn || !refused {
+		t.Errorf("sign-in %t, refusal %t: %+v", signIn, refused, entries)
+	}
+}

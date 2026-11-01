@@ -812,7 +812,7 @@ func TestOperatorChangesAreAuditedWithNoProjectAndAnUnchangedOneIsNot(t *testing
 		e := entries[i]
 		got = append(got, e.Action+":"+map[bool]string{true: "allowed", false: "refused"}[e.Allowed])
 	}
-	want := "user.signin:allowed,invite.create:allowed,user.create:allowed,invite.redeem:allowed,operator.grant:allowed,operator.revoke:allowed,operator.revoke:refused"
+	want := "user.signin:allowed,invite.create:allowed,invite.redeem:allowed,user.create:allowed,user.signin:allowed,operator.grant:allowed,operator.revoke:allowed,operator.revoke:refused"
 	if strings.Join(got, ",") != want {
 		t.Errorf("audit = %s, want %s", strings.Join(got, ","), want)
 	}
@@ -827,8 +827,8 @@ func TestAdministratorsReadTheAuditLogAndUsersDoNot(t *testing.T) {
 	if _, err := r.hub.Audit(ctx, alice, r.id("web"), 5); !errors.Is(err, ErrForbidden) {
 		t.Errorf("a user reading the audit log: %v", err)
 	}
-	entries, err := r.hub.Audit(ctx, op, r.id("web"), 5)
-	if err != nil || len(entries) == 0 || entries[0].Action != "role.set" || !entries[0].Allowed {
+	entries, err := r.hub.Audit(ctx, op, r.id("web"), 5) // the newest first: the refusal, then the grant
+	if err != nil || len(entries) < 2 || entries[0].Action != "audit.read" || entries[0].Allowed || entries[1].Action != "role.set" || !entries[1].Allowed {
 		t.Errorf("entries = %+v %v", entries, err)
 	}
 }
@@ -855,5 +855,60 @@ func TestEventsLogsAndSpecNeedARole(t *testing.T) {
 	}
 	if out, err := r.hub.Logs(ctx, op, r.id("web"), "coder-1", 50); err != nil || !strings.Contains(out, "coder-1") {
 		t.Errorf("logs = %q %v", out, err)
+	}
+}
+
+func TestTheAuditLogHasWhatWasRefusedAndHowATerminalEnded(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
+	op := r.operator()
+	alice := r.login("alice")
+	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
+	id := r.id("web")
+
+	if _, err := r.hub.Attach(ctx, alice, id, "coder-1", false); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("attach: %v", err)
+	}
+	if _, err := r.hub.Logs(ctx, alice, id, "coder-1", 10); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("logs: %v", err)
+	}
+	if _, err := r.hub.Audit(ctx, alice, id, 10); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("audit: %v", err)
+	}
+	for _, action := range []string{"agent.attach", "agent.logs", "audit.read"} {
+		if got := audited(r, id, action); len(got) != 1 || got[0].Allowed || got[0].Actor != rbac.Actor(alice.ID) || !strings.HasPrefix(got[0].Detail, "refused: ") {
+			t.Errorf("%s = %+v", action, got)
+		}
+	}
+
+	first, err := r.hub.Attach(ctx, op, id, "coder-1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.hub.Attach(ctx, op, id, "coder-1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	second.Close()
+	got := audited(r, id, "agent.detach")
+	if len(got) != 2 || !strings.Contains(got[0].Detail+got[1].Detail, "taken over by admin") || !strings.Contains(got[0].Detail+got[1].Detail, "closed") {
+		t.Errorf("detach = %+v", got)
+	}
+}
+
+func TestARoleChangeSaysWhoAndFromWhat(t *testing.T) {
+	r := newRig(t)
+	r.link("web")
+	op := r.operator()
+	alice := r.login("alice")
+	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
+	if err := r.hub.SetRole(ctx, op, r.id("web"), alice.ID, rbac.Admin); err != nil {
+		t.Fatal(err)
+	}
+	got := audited(r, r.id("web"), "role.set")
+	if len(got) != 1 || !strings.Contains(got[0].Detail, alice.Username) || !strings.Contains(got[0].Detail, `"user" -> "admin"`) {
+		t.Errorf("role.set = %+v", got)
 	}
 }

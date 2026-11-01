@@ -156,7 +156,21 @@ func (s *Server) Handler() http.Handler {
 			http.NotFound(w, r)
 		}
 	})
-	return s.sameOrigin(s.jsonOnly(securityHeaders(mux)))
+	return s.withClient(s.sameOrigin(s.jsonOnly(securityHeaders(mux))))
+}
+
+// withClient gives what a request does its address, for the audit log.
+func (s *Server) withClient(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(s.clientContext(r.Context(), r)))
+	})
+}
+
+func (s *Server) clientContext(ctx context.Context, r *http.Request) context.Context {
+	if client := s.urls.ClientIP(r); client.IsValid() {
+		return store.WithClient(ctx, client.String())
+	}
+	return ctx
 }
 
 // LinkHandler is the link endpoint alone, for a listener of its own: all that has to be reachable by the projects. It serves registered

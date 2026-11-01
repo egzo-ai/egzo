@@ -156,7 +156,8 @@ The quota on a user, under **Settings, Users** or in the invite that made them, 
 - What counts is the projects the person connected that are on the hub, whoever owns them now. Being invited as an owner costs nothing, and a project that
   was revoked or unlinked no longer counts.
 
-Everything anyone does, allowed or refused, is in the project's audit log.
+Everything anyone does on a project, allowed or refused, is in the project's audit log, with the address it came from: who opened and closed a
+terminal and why it ended, each role change from what to what, and what an invite changed for whoever spent it.
 
 An open terminal lasts as long as the right to it: a role change that takes the right away closes it at once, and it ends with the session that
 opened it, 12 hours after signing in at most. The agent's session goes on.

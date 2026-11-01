@@ -100,6 +100,11 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID s
 	if target.Disabled() && role != rbac.None {
 		return refuse(ErrDisabled, "a disabled user: ")
 	}
+	current, err := h.store.Role(ctx, project, targetID)
+	if err != nil {
+		return err
+	}
+	audit.Detail = fmt.Sprintf("%s (%s): %q -> %q", target.Username, targetID, current, role)
 	ownerless, err := h.ownerless(ctx, project)
 	if err != nil {
 		return err
@@ -107,9 +112,7 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID s
 	if !rbac.CanAssign(actor.Subject(), actorRole, targetID, role, ownerless) {
 		return refuse(ErrForbidden, "")
 	}
-	if current, err := h.store.Role(ctx, project, targetID); err != nil {
-		return err
-	} else if current == rbac.None && role != rbac.None && !actor.IsOperator {
+	if current == rbac.None && role != rbac.None && !actor.IsOperator {
 		return refuse(ErrForbidden, "only an operator adds a person: ")
 	}
 	if err := h.store.SetRole(ctx, project, targetID, role); errors.Is(err, store.ErrLastOwner) {

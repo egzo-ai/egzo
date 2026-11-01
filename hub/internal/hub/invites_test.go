@@ -328,3 +328,37 @@ func TestAnOwnersDestroyIsAnUnlinkAndTheHubNeverTouchesTheProject(t *testing.T) 
 		t.Errorf("the link coming back: %v", err)
 	}
 }
+
+func TestRedeemingAnInviteSaysWhatItChanged(t *testing.T) {
+	r := newRig(t)
+	r.link("web")
+	op := r.operator()
+	id := r.id("web")
+	alice := r.login("alice")
+	r.store.SetRole(ctx, id, alice.ID, rbac.Admin)
+	_, code, err := r.hub.InviteToProject(ctx, op, id, rbac.Viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.hub.AcceptInvite(ctx, alice, code); err != nil {
+		t.Fatal(err)
+	}
+	if got := audited(r, id, "invite.redeem"); len(got) != 1 || !strings.Contains(got[0].Detail, "nothing: admin already") {
+		t.Errorf("an invite that changed nothing = %+v", got)
+	}
+
+	bob := r.login("bob")
+	_, code, err = r.hub.InviteToHub(ctx, op, true, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.hub.AcceptInvite(ctx, bob, code); err != nil {
+		t.Fatal(err)
+	}
+	if got := audited(r, "", "invite.redeem"); len(got) == 0 || !strings.Contains(got[0].Detail, "operator, project quota 0 -> 3") {
+		t.Errorf("an invite that made an operator = %+v", got)
+	}
+	if got := audited(r, "", "operator.grant"); len(got) != 1 || got[0].Actor != rbac.Actor(op.ID) || !strings.Contains(got[0].Detail, bob.Username) {
+		t.Errorf("operator.grant = %+v", got)
+	}
+}

@@ -171,7 +171,7 @@ func (h *Hub) IdentityLogin(ctx context.Context, issuer, subject string, p store
 	if h.signIn.Issuer == "" || issuer != h.signIn.Issuer {
 		return store.User{}, "", false, fmt.Errorf("the identity is from %q, not the configured issuer %q", issuer, h.signIn.Issuer)
 	}
-	user, identityID, spent, created, err := h.store.LoginIdentity(ctx, issuer, subject, p, invite)
+	user, identityID, _, created, err := h.store.LoginIdentity(ctx, issuer, subject, p, invite)
 	if errors.Is(err, store.ErrDisabled) {
 		h.record(ctx, store.AuditEntry{Actor: "hub", Action: "user.signin", Detail: fmt.Sprintf("refused: a disabled user, at %s as %s", issuer, subject)})
 		return store.User{}, "", false, ErrSignInRefused
@@ -185,8 +185,8 @@ func (h *Hub) IdentityLogin(ctx context.Context, issuer, subject string, p store
 	}
 	if created {
 		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: fmt.Sprintf("%s, at %s", user.Username, issuer), Allowed: true})
-		h.auditRedeemed(ctx, user, spent)
 	}
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: "at " + issuer, Allowed: true})
 	return user, identityID, invite != "" && !created, nil
 }
 
