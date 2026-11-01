@@ -160,25 +160,17 @@ func TestTheAppSeesItsOwnHostAndTheRealOneInHeaders(t *testing.T) {
 	}
 }
 
-func TestARedirectToTheNameItWasGivenIsWrittenBack(t *testing.T) {
+func TestAnAnswerComesBackAsTheAppGaveItButForTheGatesTraces(t *testing.T) {
 	front, _, _ := start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Gate", "planted")
-		http.Redirect(w, r, r.URL.Query().Get("to"), http.StatusFound)
+		http.Redirect(w, r, "http://localhost:3000/login", http.StatusFound)
 	}), Options{})
-	for to, want := range map[string]string{
-		"http://localhost:3000/login?x=1": "https://" + host + "/login?x=1",
-		"http://127.0.0.1:3000/":          "https://" + host + "/",
-		"/relative":                       "/relative",
-		"https://example.org/":            "https://example.org/",
-		"http://localhost:4000/":          "http://localhost:4000/",
-	} {
-		response := get(t, front, host, "/?to="+to)
-		if got := response.Header.Get("Location"); got != want {
-			t.Errorf("%s: %s", to, got)
-		}
-		if response.Header.Get("X-Gate") != "" {
-			t.Error("the app answered in the gate's name")
-		}
+	response := get(t, front, host, "/")
+	if got := response.Header.Get("Location"); got != "http://localhost:3000/login" {
+		t.Error(got)
+	}
+	if response.Header.Get("X-Gate") != "" {
+		t.Error("the app answered in the gate's name")
 	}
 }
 
