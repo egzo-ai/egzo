@@ -131,11 +131,9 @@ type Desired struct {
 	PrepImage string
 }
 
-// RelayInput is what is decided when an instance is spawned: the host port of each declared port, and the subnets of the network the
-// relay is reached through.
+// RelayInput is what is decided when an instance is spawned: the host port of each declared port.
 type RelayInput struct {
 	Outside map[string]int
-	Subnets []string
 }
 
 // Inputs are what Desire needs besides the resolved project.
@@ -421,7 +419,6 @@ func relayContainer(
 		"EGZO_TOKEN=" + in.Tokens[name],
 		"EGZO_RELAY_TARGET=" + InstanceContainer(project.Name, name),
 		"EGZO_RELAY_PORTS=" + string(encoded),
-		"EGZO_RELAY_SUBNETS=" + strings.Join(relay.Subnets, ","),
 	}
 	return ContainerSpec{
 		Name:           RelayContainer(project.Name, name),

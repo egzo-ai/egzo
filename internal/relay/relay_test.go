@@ -6,10 +6,12 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,7 +25,8 @@ func start(t *testing.T, port Port, upstream string, open *atomic.Bool, adjust f
 	t.Cleanup(cancel)
 	opts := Options{
 		Listen: net.ParseIP("127.0.0.1"), Target: "agent", Ports: []Port{port},
-		Gate: func(ctx context.Context, name string) (bool, error) { return open.Load() && name == port.Name, nil },
+		Lookup: func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("192.0.2.1")}, nil },
+		Gate:   func(ctx context.Context, name string) (bool, error) { return open.Load() && name == port.Name, nil },
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, network, upstream)
 		},
@@ -389,15 +392,89 @@ func TestStartingFailsWhenAPortCannotBeOpened(t *testing.T) {
 	}
 }
 
-func TestTheListenAddressIsOneOfTheOutsideNetworkAndNeverTheAgents(t *testing.T) {
-	_, outside, _ := net.ParseCIDR("172.20.0.0/16")
-	inside := &net.IPNet{IP: net.ParseIP("172.30.0.5"), Mask: net.CIDRMask(16, 32)}
-	mine := &net.IPNet{IP: net.ParseIP("172.20.0.7"), Mask: net.CIDRMask(16, 32)}
-	if ip, ok := ListenAddress([]*net.IPNet{outside}, []net.Addr{inside, mine}); !ok || !ip.Equal(net.ParseIP("172.20.0.7")) {
-		t.Errorf("%v %v", ip, ok)
+func TestAConnectionFromTheAgentIsTurnedAwayBeforeTheGateAndNothingGoesThrough(t *testing.T) {
+	var asked, dialled atomic.Bool
+	r := start(t, Port{Name: "db", Port: 0, Protocol: ProtocolTCP}, echoThenCount(t), allow(), func(o *Options) {
+		o.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
+		gate, dial := o.Gate, o.Dial
+		o.Gate = func(ctx context.Context, name string) (bool, error) { asked.Store(true); return gate(ctx, name) }
+		o.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialled.Store(true)
+			return dial(ctx, network, address)
+		}
+	})
+	conn, err := net.Dial("tcp", r.Addr("db").String())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := ListenAddress([]*net.IPNet{outside}, []net.Addr{inside}); ok {
-		t.Error("an address of the agent's network was taken")
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	conn.Write([]byte("hello"))
+	if n, err := conn.Read(make([]byte, 16)); n != 0 || err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("%d bytes, %v: the relay did not close at once", n, err)
+	}
+	if asked.Load() || dialled.Load() {
+		t.Errorf("asked the gate %v, dialled %v: the agent got past the first check", asked.Load(), dialled.Load())
+	}
+}
+
+func TestADatagramFromTheAgentGoesNowhere(t *testing.T) {
+	upstream, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	r := start(t, Port{Name: "voice", Port: 0, Protocol: ProtocolUDP}, upstream.LocalAddr().String(), allow(), func(o *Options) {
+		o.Lookup = func(context.Context, string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
+	})
+	conn, err := net.Dial("udp", r.Addr("voice").String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.Write([]byte("ping"))
+	upstream.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if n, _, err := upstream.ReadFrom(make([]byte, 16)); err == nil {
+		t.Errorf("%d bytes reached the agent's port", n)
+	}
+}
+
+func TestAnAgentThatCannotBeLookedUpLetsNothingThrough(t *testing.T) {
+	var asked atomic.Bool
+	r := start(t, Port{Name: "db", Port: 0, Protocol: ProtocolTCP}, echoThenCount(t), allow(), func(o *Options) {
+		o.Lookup = func(context.Context, string) ([]net.IP, error) { return nil, errors.New("no such host") }
+		o.Gate = func(context.Context, string) (bool, error) { asked.Store(true); return true, nil }
+	})
+	conn, err := net.Dial("tcp", r.Addr("db").String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if n, err := conn.Read(make([]byte, 16)); n != 0 || err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("%d bytes, %v", n, err)
+	}
+	if asked.Load() {
+		t.Error("the gate was asked")
+	}
+}
+
+func TestWithoutAnAddressTheRelayListensOnEveryOne(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r, err := Start(ctx, Options{Target: "a", Ports: []Port{{Name: "a", Port: 0, Protocol: ProtocolTCP}, {Name: "b", Port: 0, Protocol: ProtocolUDP}}, Gate: nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, name := range []string{"a", "b"} {
+		host, _, err := net.SplitHostPort(r.Addr(name).String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ip := net.ParseIP(host); ip == nil || !ip.IsUnspecified() {
+			t.Errorf("%s listens on %s", name, host)
+		}
 	}
 }
 
