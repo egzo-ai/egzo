@@ -101,3 +101,11 @@ No upstream issue matches the exact behavior.
 The rootful `podman` engine is required, so these proxy specs fail on this host when the flake hits.
 Everything else in the agent, project and proxy specs passed on it (38 passed, 3 failed, 4 skipped, 1 xfail in one run, before
 the specs were reorganised: the three proxy specs above are now scenarios of `proxy/`).
+
+## Rootless Podman looks the same (2026-11-01, not confirmed)
+
+On the CI runner, `workspace/test_git_workspaces.py::test_the_fetch_goes_through_the_proxy_as_the_instance_…` failed on rootless
+Podman in two runs, and the proxy's audit says why: the instance was identified, and the dial failed with
+`dial: dial tcp: lookup github.com: i/o timeout` (every other fetch of the same run resolved it in about 30 ms). A proxy that cannot
+reach the resolver or the world is what the diagnosis above describes, and rootless Podman puts the proxy on a netavark bridge as
+well. Nobody has looked at the bridge's `forwarding` on a failing rootless runner yet, so it is a suspicion, not a finding.

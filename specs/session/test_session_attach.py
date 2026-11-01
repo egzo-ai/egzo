@@ -184,7 +184,11 @@ def test_the_program_gets_a_truecolor_terminal_its_signals_and_the_modes_it_set_
     p.sh(f"exec {lines} -- sh -c", "pkill -9 -f '^/bin/sh /usr/local/bin/fake-tui'")
     client.expect(pexpect.EOF, timeout=30)
     client.close()
-    assert p.ps()[lines]["STATE"] == "exited"
+    exited = lambda: p.ps()[lines]["STATE"] == "exited"
+    deadline = time.time() + 30  # the client ends when the program does; the engine may report it a moment later
+    while not exited() and time.time() < deadline:
+        time.sleep(0.5)
+    assert exited()
 
 
 def test_escape_sequences_pass_through_and_a_clipboard_write_reaches_the_clients_attached_but_is_not_replayed_to_a_later_one(sandbox):
