@@ -100,7 +100,12 @@ func (s *server) writeExposures(agent string, list []Exposure) error {
 	if err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), "exposures.*.tmp")
+	return writeAtomic(path, data)
+}
+
+// writeAtomic replaces a file in one step, and what it holds is on the disk before it does.
+func writeAtomic(path string, data []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -267,20 +272,7 @@ func (s *server) putPreviewTemplate(w http.ResponseWriter, r *http.Request) {
 			err = nil
 		}
 	} else {
-		var temp *os.File
-		if temp, err = os.CreateTemp(s.dir, "preview-template.*.tmp"); err == nil {
-			defer os.Remove(temp.Name())
-			_, err = temp.WriteString(template)
-			if closeErr := temp.Close(); err == nil {
-				err = closeErr
-			}
-		}
-		if err == nil {
-			err = os.Chmod(temp.Name(), 0o644)
-		}
-		if err == nil {
-			err = os.Rename(temp.Name(), path)
-		}
+		err = writeAtomic(path, []byte(template))
 	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
