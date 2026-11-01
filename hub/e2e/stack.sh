@@ -76,8 +76,10 @@ if ! echo "$OUTPUT" | grep -q 'link: not registered: run `egzo project register`
 fi
 
 docker build -q -t egzo-hub-e2e hub/e2e >/dev/null
+# The browser shares Caddy's network, where `hub.localhost` is Caddy on loopback and `dex` is Docker's name for it. It must never share the machine's:
+# every network Docker adds there is a network change to Chromium, which drops what it has in flight (ERR_NETWORK_CHANGED), and `up` adds them.
 browser() {
-	docker run --rm --network host --ipc=host --add-host dex:127.0.0.1 -v "$ROOT/hub:/hub" -v "$WORK/code:/code" \
+	docker run --rm --network "container:$($COMPOSE ps -q caddy)" --ipc=host -v "$ROOT/hub:/hub" -v "$WORK/code:/code" \
 		-e HUB_STACK_URL=https://hub.localhost:18443 -e HUB_STACK_PREVIEW="${PREVIEW:-}" -e HUB_STACK_PROJECT="$NAME" -e HUB_STACK_CODE_FILE=/code/link-code -e HUB_STACK_ADMIN_PASSWORD="$EGZO_ADMIN_PASSWORD" \
 		egzo-hub-e2e pytest -q -p no:cacheprovider test_stack.py -k "$1"
 }
