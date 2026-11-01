@@ -63,22 +63,8 @@ gVisor on rootless Podman is untested.
 
 ### Using gVisor
 
-gVisor is a choice for the engine, not for egzo: egzo never picks a container runtime. Everything the engine starts, agents and
-sidecars, runs under its default runtime, which is the host administrator's decision. `egzo system check` shows which one that is.
-
-To run it under gVisor on Docker:
-
-1. Install `runsc` (use a recent release: the OpenCode TUI needs `release-20261012` or later).
-2. Register it with the host network option: `runsc install -- --network=host`.
-3. Set `"default-runtime": "runsc"` in `/etc/docker/daemon.json` and restart Docker.
-
-The host network option has a cost. gVisor's own network stack cannot reach Docker's embedded DNS, so without it no container
-can find another by name. With it, the sandbox uses the host's network stack, which gVisor documents as decreasing the isolation
-from the host. egzo's own network isolation (an internal network per agent, the proxy as its only way out) does not depend on
-it.
-
-For more details, see [`known-issues/gvisor-docker-embedded-dns.md`](../known-issues/gvisor-docker-embedded-dns.md) and
-[`known-issues/gvisor-terminal-quirks.md`](../known-issues/gvisor-terminal-quirks.md).
+gVisor is a choice for the engine, not for egzo: egzo never picks a container runtime, and everything the engine starts runs under
+its default runtime. [Using gVisor](gvisor.md) covers why you would, what it costs, the two `runsc` flags egzo needs, and why.
 
 ## Check the setup
 
