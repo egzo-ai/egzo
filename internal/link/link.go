@@ -684,6 +684,13 @@ func (l *Link) noteExposures(line StatusLine) {
 	l.exposed = exposed
 }
 
+// forgetExposures is for when the status feed stopped: what it said last may no longer be true.
+func (l *Link) forgetExposures() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.exposed = nil
+}
+
 func (l *Link) exposure(agent string, port int) (string, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

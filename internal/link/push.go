@@ -217,6 +217,7 @@ func (f *projectFeed) next(project Project, published Published, err error) (hub
 func (l *Link) pushStatus(ctx context.Context, lines *hublink.Lines, _ hublink.FeedStart) error {
 	ctx, send := sending(ctx)
 	return retry(ctx, send.failed, func() error {
+		defer l.forgetExposures() // unfollowed, it may be out of date: the link refuses until it hears again, and following reads the newest line
 		return l.options.Engine.FollowStatus(ctx, l.options.Project, func(line StatusLine) {
 			l.noteExposures(line) // first: the hub cannot ask for what it has not heard of
 			send.note(lines.Write(line))
