@@ -177,10 +177,7 @@ func (s *server) expose(agent string, port int, name, protocol string) (Exposure
 	if err := s.writeExposures(agent, list); err != nil {
 		return Exposure{}, err
 	}
-	text := strings.TrimSpace(fmt.Sprintf("%d/%s %s", port, protocol, name))
-	if _, err := s.events.append(Event{Type: "exposed", Agent: agent, Actor: "agent:" + agent, Text: text}); err != nil {
-		return Exposure{}, err
-	}
+	s.tellExposure(agent, "exposed", strings.TrimSpace(fmt.Sprintf("%d/%s %s", port, protocol, name)))
 	return s.addressed(agent, exposure, s.previewTemplate()), nil
 }
 
@@ -207,8 +204,17 @@ func (s *server) unexpose(agent string, port int) error {
 	if err := s.writeExposures(agent, kept); err != nil {
 		return err
 	}
-	_, err = s.events.append(Event{Type: "unexposed", Agent: agent, Actor: "agent:" + agent, Text: strconv.Itoa(port)})
-	return err
+	s.tellExposure(agent, "unexposed", strconv.Itoa(port))
+	return nil
+}
+
+// tellExposure records a change that is already made. An event that cannot be written does not undo it, so it is no failure of the call:
+// a call that failed would be tried again, find nothing to do, and still record nothing. The status log hears of it all the same.
+func (s *server) tellExposure(agent, kind, text string) {
+	if _, err := s.events.append(Event{Type: kind, Agent: agent, Actor: "agent:" + agent, Text: text}); err != nil {
+		logger.Error("cannot record a change of exposures", "agent", agent, "event", kind, "err", err)
+		s.registryChanged()
+	}
 }
 
 // forgetExposures is the end of an agent's: the next instance of the name starts with none.
