@@ -46,7 +46,7 @@ Be clear about these before running agents on something you care about.
   open the ports its template declares, and only those, by calling `expose(name, local)`. egzo then publishes them on the machine, through a relay,
   and anything that can connect to `bind` reaches the agent's server: `127.0.0.1` is this machine alone, a LAN address is the LAN. What it serves was
   written by the agent: open it in a browser profile that is not signed in to anything you care about, on a port no other site of yours uses (cookies
-  ignore ports). Without `local_ports`, nothing is published. The agent's network stays internal and the agent cannot connect to the relay; the relay
+  ignore ports). Without `local_ports`, nothing is published. The agent's network stays internal. The relay listens on both its networks, because rootless Podman may deliver to either, and closes whatever comes from the agent's address, so the agent can connect to it and reaches nothing through it. The relay
   asks the control sidecar at each new connection and a closed port refuses at once, while a connection that is open lasts until it ends.
 - **A port is open because the agent said so.** [`expose`](messaging.md#ports-an-agent-opens) opens a declared port for the hub or for the machine. The
   agent chooses when, and a prompt-injected agent can open any port its template declares: declare only what an agent should be able to serve, and

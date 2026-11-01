@@ -7,6 +7,12 @@
 // The relay listens on every port its instance declares, and lets a connection through only when the control sidecar says the agent has that
 // port open for the local machine. It asks at each new TCP connection and each new UDP session, so closing a port stops new ones at once. A
 // connection that is already open lasts until it ends, and a UDP session until it has been idle for a while.
+//
+// It listens on both its networks, because it cannot know which one the engine delivers to. Docker delivers to the network a port was published
+// on. Rootless Podman's forwarder takes one of the container's networks at each start, and it may be the agent's, so a relay that listened on one
+// side only would lose all its ports until its next start. So the agent can reach a listening socket, and what stops it is that the relay turns
+// away anything that comes from the agent's own address, before the gate and before any byte goes through. That is decided by the agent's address
+// and never by the network a connection came in on: a forwarder inside the container connects from the relay's own address, on either network.
 package relay
 
 import (
@@ -57,14 +63,16 @@ type Gate func(ctx context.Context, name string) (bool, error)
 
 // Options are what a relay runs with.
 type Options struct {
-	// Listen is the address the relay listens on, an IP of the network the outside reaches it through and never one of the agent's.
+	// Listen is the address the relay listens on; every address of the container when nil. The tests set it.
 	Listen net.IP
-	// Target is the agent's host name, resolved at each connection: the agent may not be up yet.
+	// Target is the agent's host name, resolved at each connection: the agent may not be up yet, and its address may change.
 	Target string
 	Ports  []Port
 	Gate   Gate
 	// Dial connects to the agent; net.Dialer.DialContext when nil. The tests replace it.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+	// Lookup finds the addresses of Target; net.DefaultResolver when nil. The tests replace it.
+	Lookup func(ctx context.Context, host string) ([]net.IP, error)
 	// MaxConnections, UDPIdle and DialTimeout replace the limits above, for the tests.
 	MaxConnections int
 	UDPIdle        time.Duration
@@ -75,6 +83,11 @@ type Options struct {
 func (o *Options) defaults() {
 	if o.Dial == nil {
 		o.Dial = (&net.Dialer{}).DialContext
+	}
+	if o.Lookup == nil {
+		o.Lookup = func(ctx context.Context, host string) ([]net.IP, error) {
+			return net.DefaultResolver.LookupIP(ctx, "ip", host)
+		}
 	}
 	if o.MaxConnections == 0 {
 		o.MaxConnections = MaxConnections
@@ -108,7 +121,11 @@ func Start(ctx context.Context, opts Options) (*Relay, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	r := &Relay{opts: opts, cancel: cancel, addrs: map[string]net.Addr{}}
 	for _, port := range opts.Ports {
-		address := net.JoinHostPort(opts.Listen.String(), strconv.Itoa(port.Port))
+		host := ""
+		if opts.Listen != nil {
+			host = opts.Listen.String()
+		}
+		address := net.JoinHostPort(host, strconv.Itoa(port.Port))
 		var err error
 		if port.Protocol == ProtocolUDP {
 			err = r.startUDP(ctx, port, address)
@@ -136,10 +153,34 @@ func (r *Relay) target(port Port) string {
 	return net.JoinHostPort(r.opts.Target, strconv.Itoa(port.Port))
 }
 
-// open asks the gate, and fails closed.
-func (r *Relay) open(ctx context.Context, port Port) bool {
+// fromAgent says whether a peer is the agent, or may be: an agent that cannot be looked up has no server to reach either.
+func (r *Relay) fromAgent(ctx context.Context, peer net.Addr) bool {
+	var from net.IP
+	switch a := peer.(type) {
+	case *net.TCPAddr:
+		from = a.IP
+	case *net.UDPAddr:
+		from = a.IP
+	}
+	addresses, err := r.opts.Lookup(ctx, r.opts.Target)
+	if err != nil || from == nil {
+		return true
+	}
+	for _, address := range addresses {
+		if address.Equal(from) {
+			return true
+		}
+	}
+	return false
+}
+
+// open turns the agent away, then asks the gate, and fails closed.
+func (r *Relay) open(ctx context.Context, port Port, peer net.Addr) bool {
 	ctx, cancel := context.WithTimeout(ctx, GateTimeout)
 	defer cancel()
+	if r.fromAgent(ctx, peer) {
+		return false
+	}
 	ok, err := r.opts.Gate(ctx, port.Name)
 	if err != nil {
 		r.opts.Log.Warn("the control sidecar did not answer: connection refused", "port", port.Name, "err", err)
@@ -188,7 +229,7 @@ func (r *Relay) startTCP(ctx context.Context, port Port, address string) error {
 // carry is one TCP connection: let through by the gate, then bytes both ways until both are done.
 func (r *Relay) carry(ctx context.Context, port Port, client net.Conn) {
 	defer client.Close()
-	if !r.open(ctx, port) {
+	if !r.open(ctx, port, client.RemoteAddr()) {
 		return
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, r.opts.DialTimeout)
@@ -281,10 +322,10 @@ func (r *Relay) startUDP(ctx context.Context, port Port, address string) error {
 }
 
 // serveUDP is one UDP session. The gate decides once, before the first datagram goes through. Replies come from the socket connected to the
-// agent, so only the agent's port can answer, and they go to this client alone. The agent cannot start a session.
+// agent, so only the agent's port can answer, and they go to this client alone. What the agent sends the relay itself starts nothing.
 func (r *Relay) serveUDP(ctx context.Context, port Port, listener net.PacketConn, client net.Addr, s *session) {
 	defer close(s.done)
-	if !r.open(ctx, port) {
+	if !r.open(ctx, port, client) {
 		return
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, r.opts.DialTimeout)

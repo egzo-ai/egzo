@@ -84,7 +84,7 @@ func TestTheRelayIsHardenedOnTheLocalPortsNetworkAndJoinsTheAgentsBeforeItStarts
 	coder.Ports = map[string]config.ResolvedPort{"web": {Port: 5173, Protocol: "http"}, "voice": {Port: 5432, Protocol: "udp"}}
 	project.Agents["coder"] = coder
 	project.LocalPorts = &config.ResolvedLocalPorts{Bind: "127.0.0.1", Host: "127.0.0.1", PoolLow: 20000, PoolHigh: 29999, MaxExposed: 10}
-	in := Inputs{Image: "egzo:test", Tokens: map[string]string{"coder": "tok"}, Relay: map[string]RelayInput{"coder": {Outside: map[string]int{"web": 20001, "voice": 20002}, Subnets: []string{"172.20.0.0/16"}}}}
+	in := Inputs{Image: "egzo:test", Tokens: map[string]string{"coder": "tok"}, Relay: map[string]RelayInput{"coder": {Outside: map[string]int{"web": 20001, "voice": 20002}}}}
 	desired, err := DesireInstance(project, "/p", in, "coder", InstanceIdentity{ID: "01JBX7Q0000000000000000000", Template: "coder", Actor: "operator", TemplateHash: "h"})
 	if err != nil {
 		t.Fatal(err)

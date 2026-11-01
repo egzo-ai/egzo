@@ -56,6 +56,11 @@ def serve(engine, worker, name):
 SERVING = []
 
 
+def internal(network):
+    """Whether a network is internal, in Docker's format or in Podman's own."""
+    return network.raw.get("Internal", network.raw.get("internal", False))
+
+
 @pytest.fixture(autouse=True)
 def nothing_open():
     """Whatever a spec opened is closed after it, for the agents the module has made so far."""
@@ -141,7 +146,7 @@ def test_a_project_with_local_ports_has_one_network_for_them_and_a_relay_for_eac
     plain = project.spawn("plain", "plain-one")
     try:
         networks = [r for r in engine.resources(project.name) if r.kind == "network" and r.name.endswith("_local_ports")]
-        assert len(networks) == 1 and not networks[0].raw["Internal"]
+        assert len(networks) == 1 and not internal(networks[0])
         assert relay_of(engine, project, "alpha") and relay_of(engine, project, "beta")
         assert relay_of(engine, project, plain) is None, "a template with no ports has no relay"
         rows = {row["name"]: row for row in json.loads(project.ok("ps --json").stdout)}
@@ -169,7 +174,7 @@ def test_the_agent_stays_on_its_internal_network_alone(project, engine, alpha):
     container = alpha.container
     assert list(container.raw["NetworkSettings"]["Networks"]) == [f"{project.name}_alpha"]
     network = next(r for r in engine.resources(project.name) if r.name == f"{project.name}_alpha")
-    assert network.raw["Internal"]
+    assert internal(network)
 
 
 # --- closed until expose, then open ------------------------------------------------------------------------------------
@@ -235,14 +240,16 @@ def test_the_address_is_the_same_after_stop_and_start_and_the_relay_stays_up(pro
 # --- no way in for the agent ---------------------------------------------------------------------------------------------
 
 
-def test_the_agent_has_no_route_out_and_cannot_connect_to_the_relay(project, engine, alpha):
+def test_the_agent_has_no_route_out_and_reaches_nothing_through_the_relay(project, engine, alpha):
     expose(alpha, "db")
+    expose(alpha, "voice")
     relay = relay_of(engine, project, "alpha")
     inside = relay.raw["NetworkSettings"]["Networks"][f"{project.name}_alpha"]["IPAddress"]
     outside = relay.raw["NetworkSettings"]["Networks"][f"{project.name}_local_ports"]["IPAddress"]
-    for address, what in ((inside, "the relay on the agent's own network"), (outside, "the relay on the network for local ports")):
-        for port in ("5432", "8080"):
-            assert alpha.exec(f"nc -z -w 2 {address} {port}").returncode != 0, f"the agent connected to {what}, port {port}"
+    # The relay listens on both its networks, because rootless Podman may deliver to either: on the agent's, the agent connects and is closed at once.
+    assert not alpha.exec(f"echo hello | nc -w 2 {inside} 5432").stdout.strip(), "the agent's bytes went through the relay"
+    assert not alpha.exec(f"echo ping | nc -u -w 2 {inside} 5432").stdout.strip(), "the agent's datagram went through the relay"
+    assert alpha.exec(f"nc -z -w 2 {outside} 5432").returncode != 0, "the agent has no route to the network for local ports"
     assert alpha.exec("nc -z -w 2 1.1.1.1 53").returncode != 0, "an agent has no route out"
     assert alpha.exec("ip route | grep -c default").stdout.strip() in ("0", ""), "no default route"
 

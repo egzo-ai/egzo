@@ -116,8 +116,10 @@ client -> published port -> relay (on <project>_local_ports and the agent's inte
   `createContainer`.
 - **It lives as long as the instance.** It stays up while the agent is stopped, which keeps the port taken and means `agent stop` and `agent start` do
   not touch it. A connection while the agent is down just fails.
-- **It listens only on the `<project>_local_ports` side**, never on the agent's network. Pass that network's subnet to the relay and bind the address
-  inside it. The agent must not be able to connect to the relay.
+- **It listens on both its networks, and turns the agent away.** Docker delivers to the network a port was published on, but rootless Podman's `rootlessport`
+  takes one of the container's networks at each start, the first in a Go map, so it may be the agent's. The relay looks up the agent at each new connection or
+  UDP session and closes anything from that address, before the gate and before any byte goes through. The agent can connect to the relay on its own
+  network, and reaches nothing. The check is on the agent's address and never on the network: Podman's forwarder connects from the relay's own address.
 - **The target** is the agent's container name, resolved at each connection: the agent may not be up yet.
 - **The gate:** on each new TCP connection or UDP session, the relay calls `GET /v1/expose` on control with the instance's `EGZO_TOKEN` and goes ahead only if
   that name is open with `where: local`. If control does not answer, the connection is refused. `unexpose` stops new connections. An established one
@@ -196,7 +198,7 @@ Each one is a command-literal test in the existing style. Agents share a module'
 - Two instances of one template expose the same name and get different addresses, each reaching its own server.
 - The address is the same after `agent stop` and `agent start`, and after a restart of the relay.
 - `agent rm` removes the relay. `project down` leaves none.
-- The agent cannot reach anything through the relay: with a relay attached it has no route out, and it cannot connect to the relay's listening port.
+- The agent cannot reach anything through the relay: with a relay attached it has no route out, and what it sends the relay is closed or dropped before the gate.
 - One more than `max_exposed` open locally in the project is refused, with the default and with a value set in the file, and `hub` exposures do not count towards it.
 - A local exposure is not served as a preview.
 

@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
@@ -80,34 +79,12 @@ func localAddress(local *config.ResolvedLocalPorts, port config.ResolvedPort, ou
 	return hostPort
 }
 
-// subnetsOf are the subnets of a network.
-func subnetsOf(ctx context.Context, c *engine.Client, name string) ([]string, error) {
-	inspected, err := c.API.NetworkInspect(ctx, name, network.InspectOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("the network %s for local ports: %w (run `egzo project up`)", name, err)
-	}
-	var subnets []string
-	for _, pool := range inspected.IPAM.Config {
-		if pool.Subnet != "" {
-			subnets = append(subnets, pool.Subnet)
-		}
-	}
-	if len(subnets) == 0 {
-		return nil, fmt.Errorf("the network %s has no subnet", name)
-	}
-	return subnets, nil
-}
-
 // startRelay makes and starts the relay of a new instance, on the pinned host ports it chooses, and returns the address of each declared port.
 // The host ports are free as far as the project's other relays say; a port something else holds is told by the engine when the relay starts,
 // and the relay is made again without it.
 func startRelay(ctx context.Context, c *engine.Client, p spawnPlan, tokens map[string]string, undo *undoStack, out io.Writer) (map[string]string, error) {
 	local := p.view.LocalPorts
 	agent := p.view.Agents[p.name]
-	subnets, err := subnetsOf(ctx, c, LocalPortsNetwork(p.project))
-	if err != nil {
-		return nil, err
-	}
 	observed, err := Observe(ctx, c, p.project)
 	if err != nil {
 		return nil, err
@@ -124,7 +101,7 @@ func startRelay(ctx context.Context, c *engine.Client, p spawnPlan, tokens map[s
 		if err != nil {
 			return nil, err
 		}
-		spec, err := p.relay(tokens, RelayInput{Outside: outside, Subnets: subnets})
+		spec, err := p.relay(tokens, RelayInput{Outside: outside})
 		if err != nil {
 			return nil, err
 		}
