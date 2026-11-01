@@ -328,6 +328,26 @@ func TestASilentServerRunsOutOfTime(t *testing.T) {
 	}
 }
 
+func TestALinkThatDoesNotAnswerRunsOutOfTimeAndGivesItsSlotBack(t *testing.T) {
+	limits := Options{DialTime: 50 * time.Millisecond, PerPreview: 1, Queue: time.Second}
+	dials := 0
+	front, _, _ := start(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }), limits, func(a *agent, _ *gate) {
+		a.dial = func(ctx context.Context) (net.Conn, error) {
+			if dials++; dials > 1 {
+				return net.Dial("tcp", a.server.Listener.Addr().String())
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	})
+	if got := get(t, front, host, "/").StatusCode; got != http.StatusGatewayTimeout {
+		t.Error(got)
+	}
+	if got := get(t, front, host, "/").StatusCode; got != http.StatusOK {
+		t.Error(got)
+	}
+}
+
 func TestOverTheLimitARequestWaitsThenSaysWhich(t *testing.T) {
 	for reason, want := range map[string]struct {
 		opts Options

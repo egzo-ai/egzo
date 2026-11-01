@@ -226,7 +226,7 @@ func follow[T any](lines *Lines, on func(T)) error {
 
 // call opens a stream for one verb and reads the replies up to the one that is done. The stream stays open: attach goes on on it.
 func (p *Peer) call(ctx context.Context, request Request, progress func(string), result any) (*yamux.Stream, *Lines, func(), error) {
-	stream, err := p.session.OpenStream()
+	stream, err := p.openStream(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -349,7 +349,7 @@ func (p *Peer) Spec(ctx context.Context) ([]byte, error) {
 // DialPort connects to a port an agent exposed. As with a net.Dialer, ctx covers the dial and nothing after it: the connection lasts until it
 // is closed or the link goes.
 func (p *Peer) DialPort(ctx context.Context, agent string, port int) (net.Conn, error) {
-	stream, err := p.session.OpenStream()
+	stream, err := p.openStream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +384,31 @@ func (p *Peer) DialPort(ctx context.Context, agent string, port int) (net.Conn, 
 			return failed(context.Canceled)
 		}
 		return &portConn{Stream: stream, reader: lines.Rest()}, nil
+	}
+}
+
+// openStream opens a stream within ctx. OpenStream knows no context, and waits while the far side leaves too many streams unanswered: past
+// ctx it goes on waiting on its own, until the session ends, and closes what it gets.
+func (p *Peer) openStream(ctx context.Context) (*yamux.Stream, error) {
+	type opened struct {
+		stream *yamux.Stream
+		err    error
+	}
+	done := make(chan opened, 1)
+	go func() {
+		stream, err := p.session.OpenStream()
+		done <- opened{stream, err}
+	}()
+	select {
+	case o := <-done:
+		return o.stream, o.err
+	case <-ctx.Done():
+		go func() {
+			if o := <-done; o.err == nil {
+				o.stream.Close()
+			}
+		}()
+		return nil, ctx.Err()
 	}
 }
 
