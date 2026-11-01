@@ -66,21 +66,21 @@ func (s *server) exposuresFile(agent string) string {
 	return filepath.Join(s.dir, "exposures", agent+".json")
 }
 
-// readExposures is what an agent has exposed, by port. It runs under exposureMu, or for a list that may be a moment old.
-func (s *server) readExposures(agent string) []Exposure {
+// readExposures is what an agent has exposed, by port. It runs under exposureMu, or for a list that may be a moment old. A list that cannot
+// be read is an error and never an empty list: writing one back would lose the ports in it.
+func (s *server) readExposures(agent string) ([]Exposure, error) {
 	data, err := os.ReadFile(s.exposuresFile(agent))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	var list []Exposure
-	if err == nil {
-		err = json.Unmarshal(data, &list)
+		return nil, nil
 	}
 	if err != nil {
-		logger.Error("cannot read the exposures of an agent", "agent", agent, "err", err)
-		return nil
+		return nil, err
 	}
-	return list
+	var list []Exposure
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, fmt.Errorf("the exposures of %s are damaged: %w", agent, err)
+	}
+	return list, nil
 }
 
 // writeExposures replaces an agent's list in one step: the ids in it are addresses somebody may have been given.
@@ -145,7 +145,10 @@ func (s *server) expose(agent string, port int, name, protocol string) (Exposure
 	}
 	s.exposureMu.Lock()
 	defer s.exposureMu.Unlock()
-	list := s.readExposures(agent)
+	list, err := s.readExposures(agent)
+	if err != nil {
+		return Exposure{}, err
+	}
 	at := -1
 	for i, e := range list {
 		if e.Port == port {
@@ -185,7 +188,10 @@ func (s *server) expose(agent string, port int, name, protocol string) (Exposure
 func (s *server) unexpose(agent string, port int) error {
 	s.exposureMu.Lock()
 	defer s.exposureMu.Unlock()
-	list := s.readExposures(agent)
+	list, err := s.readExposures(agent)
+	if err != nil {
+		return err
+	}
 	kept := make([]Exposure, 0, len(list))
 	for _, e := range list {
 		if e.Port != port {
@@ -201,7 +207,7 @@ func (s *server) unexpose(agent string, port int) error {
 	if err := s.writeExposures(agent, kept); err != nil {
 		return err
 	}
-	_, err := s.events.append(Event{Type: "unexposed", Agent: agent, Actor: "agent:" + agent, Text: strconv.Itoa(port)})
+	_, err = s.events.append(Event{Type: "unexposed", Agent: agent, Actor: "agent:" + agent, Text: strconv.Itoa(port)})
 	return err
 }
 
@@ -225,7 +231,11 @@ func (s *server) addressed(agent string, e Exposure, template string) Exposure {
 
 // exposedBy is what an agent has exposed, as readers get it.
 func (s *server) exposedBy(agent, template string) []Exposure {
-	list := s.readExposures(agent)
+	list, err := s.readExposures(agent)
+	if err != nil {
+		logger.Error("cannot read the exposures of an agent", "agent", agent, "err", err)
+		return nil
+	}
 	for i, e := range list {
 		list[i] = s.addressed(agent, e, template)
 	}
