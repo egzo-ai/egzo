@@ -26,6 +26,9 @@ func exposedIn(line links.StatusLine) map[string]exposedPort {
 	exposed := map[string]exposedPort{}
 	for _, a := range line.Agents {
 		for _, e := range a.Exposed {
+			if e.Where != hublink.WhereHub {
+				continue // a port open for the local machine is never served as a preview
+			}
 			exposed[e.ID] = exposedPort{agent: a.Agent, Exposure: e}
 		}
 	}

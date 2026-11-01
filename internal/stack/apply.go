@@ -440,14 +440,14 @@ type Report struct {
 	Exposed  []Exposure
 }
 
-// Exposure is a port an agent offers to people, as the control sidecar says it: what to hand them is Address, or Command.
+// Exposure is a port an agent has open, as the control sidecar says it: Where is hub or local, and Address is where people reach it.
 type Exposure struct {
+	Name     string `json:"name"`
 	Port     int    `json:"port"`
-	Name     string `json:"name,omitempty"`
 	Protocol string `json:"protocol"`
-	ID       string `json:"id"`
-	Address  string `json:"address,omitempty"`
-	Command  string `json:"command,omitempty"`
+	Where    string `json:"where"`
+	ID       string `json:"id,omitempty"`
+	Address  string `json:"address"`
 }
 
 // Row is one container of a project as `egzo ps` shows it.
@@ -518,7 +518,7 @@ func WriteStatus(rows []Row, now time.Time, out io.Writer) {
 		}
 		ports := make([]string, len(row.Exposed))
 		for i, e := range row.Exposed {
-			ports[i] = fmt.Sprintf("%d/%s", e.Port, termsafe.Line(e.Protocol))
+			ports[i] = termsafe.Line(e.Name) + ":" + termsafe.Line(e.Where)
 		}
 		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			row.Name, row.Service, row.State, row.Health, row.Activity, open, waiting, termsafe.Line(row.Actor), Age(now.Sub(row.Created)), stale, strings.Join(ports, ","), row.Status)

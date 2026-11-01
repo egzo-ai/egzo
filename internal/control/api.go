@@ -44,6 +44,8 @@ type server struct {
 	placeholderMu sync.Mutex
 	// exposureMu makes reading and changing an agent's exposures one step.
 	exposureMu sync.Mutex
+	// localMax is how many ports may be open for the local machine at once in the project; zero means local ports are off.
+	localMax int
 	// registry is signalled when an agent is registered or removed, so the status log writes the new list.
 	registry chan struct{}
 }
@@ -61,7 +63,8 @@ func newServer(dir string) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &server{dir: dir, events: events, registry: make(chan struct{}, 1)}, nil
+	localMax, _ := strconv.Atoi(os.Getenv("EGZO_LOCAL_MAX_EXPOSED")) // absent or unreadable: local ports are off
+	return &server{dir: dir, events: events, registry: make(chan struct{}, 1), localMax: max(localMax, 0)}, nil
 }
 
 func ensureState(dir string) error { return os.MkdirAll(dir, 0o755) }
@@ -84,6 +87,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /agents", s.agents)
 	mux.HandleFunc("PUT /agents/{name}", s.registerAgent)
 	mux.HandleFunc("DELETE /agents/{name}", s.unregisterAgent)
+	mux.HandleFunc("PUT /agents/{name}/ports", s.putPorts)
 	mux.HandleFunc("PUT /templates", s.putTemplates)
 	mux.HandleFunc("GET /templates", s.getTemplates)
 	mux.HandleFunc("PUT /preview-template", s.putPreviewTemplate)

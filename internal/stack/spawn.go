@@ -184,6 +184,8 @@ type spawnPlan struct {
 	worktrees          []Worktree
 	options            WorktreeOptions
 	homeExisted        bool
+	// localAddresses maps a port name to the address people use on the local machine, for an instance that has a relay.
+	localAddresses map[string]string
 	// container builds the container once the instance's token is known.
 	container func(tokens map[string]string) (ContainerSpec, error)
 }
@@ -245,6 +247,9 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 		return err
 	}
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
+	if err := putControlPorts(ctx, c, p.project, p.name, p.view.Agents[p.name].Ports, p.localAddresses); err != nil {
+		return err
+	}
 
 	if len(p.worktrees) > 0 {
 		// The base is cloned and fetched through the proxy as the instance, so its network and its binding come

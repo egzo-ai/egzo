@@ -30,6 +30,10 @@ type Template struct {
 	PromptText string
 	// Image is the harness image, resolved when `up` ran, or the image it built.
 	Image string
+	// LocalPorts and Hub are what the project says about where a declared port can open, for a template that declares ports: the instance is
+	// told them, and a change of either makes its instances stale. A template without ports does not depend on them.
+	LocalPorts *config.ResolvedLocalPorts `json:",omitempty"`
+	Hub        bool                       `json:",omitempty"`
 	// Placeholders maps each variable the agent gets to its placeholder text. A placeholder is not a
 	// secret. The text is made once and never changes, so the hash leaves it out: what decides whether
 	// an instance is stale is the profile's service, which names the variable and the secret.
@@ -84,6 +88,9 @@ func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user strin
 			Image:        image,
 			Placeholders: templatePlaceholders(project.Egress[agent.Egress], placeholders),
 		}
+		if len(agent.Ports) > 0 {
+			template.LocalPorts, template.Hub = project.LocalPorts, project.Hub != nil
+		}
 		template.Agent.Prompt = "" // the text is in PromptText: the path means nothing to a spawn
 		for _, mount := range agent.Workspaces {
 			template.Workspaces[mount.Name] = project.Workspaces[mount.Name]
@@ -135,6 +142,12 @@ func (p Published) View(instances map[string]string) *config.Resolved {
 		agent := template.Agent
 		agent.Image = template.Image
 		view.Agents[name] = agent
+		if template.LocalPorts != nil {
+			view.LocalPorts = template.LocalPorts
+		}
+		if template.Hub {
+			view.Hub = &config.ResolvedHub{} // only to say that a hub is named: an instance has no use for its address
+		}
 		for key, ws := range template.Workspaces {
 			view.Workspaces[key] = ws
 		}
@@ -155,6 +168,7 @@ func (p Published) AsProject(file *config.Resolved) *config.Resolved {
 		instances[name] = name
 	}
 	view := p.View(instances)
+	view.Hub, view.LocalPorts = nil, nil
 	if file != nil {
 		view.Secrets, view.SecretKey = file.Secrets, file.SecretKey
 		if file.Proxy != nil && file.Proxy.Upstream != nil {

@@ -209,6 +209,10 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 		ReadonlyRootfs: true,
 		Identity:       identity(controlService, kindControl),
 	}
+	if project.LocalPorts != nil {
+		// control enforces the bound, so changing it takes an `up`
+		control.Env = append(control.Env, fmt.Sprintf("EGZO_LOCAL_MAX_EXPOSED=%d", project.LocalPorts.MaxExposed))
+	}
 	desired.Control = control.Name
 
 	volumes := []VolumeSpec{controlVolume}

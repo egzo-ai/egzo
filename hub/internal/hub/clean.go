@@ -86,7 +86,7 @@ func cleanExposures(list []links.Exposure) []links.Exposure {
 		if len(out) == maxExposures {
 			break
 		}
-		if e.Port >= 1 && e.Port <= 65535 && (e.Protocol == hublink.ProtocolHTTP || e.Protocol == hublink.ProtocolTCP) && exposureID.MatchString(e.ID) {
+		if e.Port >= 1 && e.Port <= 65535 && (e.Protocol == hublink.ProtocolHTTP || e.Protocol == hublink.ProtocolTCP) && e.Where == hublink.WhereHub && exposureID.MatchString(e.ID) {
 			e.Name = word(e.Name, maxWord)
 			out = append(out, e)
 		}
