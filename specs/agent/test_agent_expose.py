@@ -147,6 +147,14 @@ def test_ps_shows_the_exposed_ports(team, pair):
     assert team.project.ps()[a.name]["PORTS"] == "3010/http,3011/tcp"
 
 
+def test_a_stopped_agent_shows_no_exposed_port(team, fresh):
+    a = fresh()
+    expose(a, 3016)
+    team.project.ok("agent stop", a.name)
+    assert team.project.ps()[a.name]["PORTS"] == ""
+    assert exposed(team.project, a.name) == []
+
+
 def test_an_agent_ls_shows_them_too(team, pair):
     a, _ = pair
     expose(a, 3012, name="shop")
