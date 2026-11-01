@@ -26,7 +26,9 @@ var (
 	ErrNotFound = errors.New("no such preview")
 	// ErrOffline is a preview whose project's link is not connected.
 	ErrOffline = errors.New("the project is offline")
-	errBusy    = errors.New("too many connections")
+	// errPreviewFull and errHubFull say which limit a request waited on.
+	errPreviewFull = errors.New("too many connections to the preview")
+	errHubFull     = errors.New("too many connections to the hub's previews")
 )
 
 // Target is where a preview is now.
@@ -270,8 +272,10 @@ func (s *Server) failed(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, context.Canceled):
 		return // the person left
-	case errors.Is(err, errBusy):
-		page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to this preview, or to the hub's previews: at most %d and %d. Try again.", s.opts.PerPreview, s.opts.PerHub))
+	case errors.Is(err, errPreviewFull):
+		page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to this preview: at most %d. Try again.", s.opts.PerPreview))
+	case errors.Is(err, errHubFull):
+		page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to the previews of this hub: at most %d. Try again.", s.opts.PerHub))
 	case errors.Is(err, ErrOffline):
 		page(w, http.StatusServiceUnavailable, "This project went offline: its link to the hub is not connected.")
 	case errors.Is(err, ErrNotFound):
@@ -324,12 +328,16 @@ func (l *limiter) take(ctx context.Context, key string, wait time.Duration) (fun
 			var once sync.Once
 			return func() { once.Do(func() { l.release(key) }) }, nil
 		}
+		full := errHubFull
+		if l.open[key] >= l.perPreview {
+			full = errPreviewFull
+		}
 		freed := l.freed
 		l.mu.Unlock()
 		select {
 		case <-freed:
 		case <-timeout.C:
-			return nil, errBusy
+			return nil, full
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}

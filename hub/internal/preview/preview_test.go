@@ -329,13 +329,26 @@ func TestASilentServerRunsOutOfTime(t *testing.T) {
 }
 
 func TestOverTheLimitARequestWaitsThenSaysWhich(t *testing.T) {
+	for reason, want := range map[string]struct {
+		opts Options
+		says string
+	}{
+		"preview": {Options{PerPreview: 1, PerHub: 10}, "this preview: at most 1."},
+		"hub":     {Options{PerPreview: 10, PerHub: 1}, "this hub: at most 1."},
+	} {
+		t.Run(reason, func(t *testing.T) { overTheLimit(t, want.opts, want.says) })
+	}
+}
+
+func overTheLimit(t *testing.T, opts Options, says string) {
+	opts.Queue = 100 * time.Millisecond
 	release := make(chan struct{})
 	front, _, _ := start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slow" {
 			<-release
 		}
 		io.WriteString(w, "ok")
-	}), Options{PerPreview: 1, Queue: 100 * time.Millisecond})
+	}), opts)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -347,7 +360,7 @@ func TestOverTheLimitARequestWaitsThenSaysWhich(t *testing.T) {
 	}()
 	time.Sleep(50 * time.Millisecond)
 	response := get(t, front, host, "/quick")
-	if got := text(t, response); response.StatusCode != http.StatusServiceUnavailable || !strings.Contains(got, "at most 1") {
+	if got := text(t, response); response.StatusCode != http.StatusServiceUnavailable || !strings.Contains(got, says) {
 		t.Errorf("%d %s", response.StatusCode, got)
 	}
 	close(release)
