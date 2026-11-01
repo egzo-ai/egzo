@@ -96,6 +96,20 @@ jobs:
         run: |
           set -o pipefail
           ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
+      # What known-issues/rootful-podman-intermittent-egress.md says confirms its netavark bug: the stale sysctl files and the
+      # bridges that have forwarding off. It is what is left at the end of the run, so it is a hint, not a proof.
+      - name: Network state of the Podman engine
+        if: failure() && startsWith(matrix.engine, 'podman')
+        run: |
+          {
+            echo "# /run/sysctl.d/10-netavark-*.conf"; ls -l /run/sysctl.d/ 2>&1
+            echo "# forwarding of the rootful bridges"; grep -H . /proc/sys/net/ipv4/conf/podman*/forwarding 2>&1
+            if [ "${{ matrix.engine }}" = podman-rootless ]; then
+              echo "# forwarding of the rootless bridges"
+              podman unshare --rootless-netns sh -c 'grep -H . /proc/sys/net/ipv4/conf/*/forwarding' 2>&1
+            fi
+          } | tee netstate-${{ matrix.name }}.log
+          scripts/ci-annotate.sh "${{ matrix.name }} network state" netstate-${{ matrix.name }}.log tail
       # The logs of a run need a login; annotations do not, so a failure is also written as annotations.
       - name: Annotate the failure
         if: failure()
@@ -111,4 +125,5 @@ jobs:
             specs-${{ matrix.name }}.log
             specs-${{ matrix.name }}.xml
             engine-${{ matrix.name }}.log
+            netstate-${{ matrix.name }}.log
           if-no-files-found: warn
