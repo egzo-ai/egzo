@@ -1,6 +1,7 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** Draft. Built so far: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward` (below).
+**Status.** In progress. Built so far: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward` (below), and the
+viewer role and invites ([hub-link.md](hub-link.md)).
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
 itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,
@@ -48,27 +49,37 @@ browser ──HTTPS──▶ hub (machine A) ◀──link connection, outbound 
 The agent decides what is a preview: it knows it started a demo, on which port, and what it is. The `egzo` MCP server gets two
 tools:
 
-- **`expose(port, name?)`**: records that the agent serves something on `port` of its own loopback, with an optional short name
-  ("shop"), and answers with **the preview's address** when a hub serves the project (`https://k7f3q9x2m4ad.egzo-preview.example.net/`),
-  or, without one, the command a person runs instead (`egzo agent port-forward coder-1 3000`). The agent passes the address to
-  its user. Exposing an exposed port again changes the name and answers the same address.
+- **`expose(port, name?, protocol?)`**: records that the agent serves something on `port` of its own loopback, with an optional
+  short name ("shop") and a protocol, `http` (the default) or `tcp`. For `http` it answers with **the preview's address** when a
+  hub serves the project (`https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`). Otherwise it answers with the command
+  a person runs instead (`egzo agent port-forward coder-1 3000`): without a hub, and for `tcp`, which the hub does not serve yet.
+  The agent passes the answer to its user. Exposing an exposed port again changes its name and protocol and keeps its id.
 - **`unexpose(port)`**: the preview is gone; the address answers 404.
+- **Previews are plain HTTP**: HTTP/1.1, WebSockets and event streams. A server that speaks TLS itself, or anything else, is a
+  `tcp` exposure. `udp` is not accepted: `engine exec` is a byte stream, and datagrams carried in one lose what UDP is for.
 - Nothing is checked at `expose` time: a server may start after it, and stop and start again. A preview of a port where nothing
   listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
 - The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status feed carries
   them, so the hub learns of a new preview from the link within a second.
-- **The id** in the address is made by control at the first `expose` of (instance id, port), random (80 bits, base32) and kept:
-  stable, so a restart of the agent, the sidecar or the hub keeps the address an agent already gave out; keyed by the instance
-  id, because a name can come back (`roadmap/instance-id.md`) and a new instance must not inherit the old one's address. Opaque,
-  never the project's or the agent's name: links travel in chat and logs.
-- **The address** is the id under the project's **preview domain**, which control learns from the hub (below). Without one, the
-  answer is the `port-forward` command. Control never needs to reach the hub.
+- **The id** in the address is made by control at the first `expose` of a port by an agent, random (80 bits, 16 characters of
+  base32) and kept: stable, so a restart of the agent, the sidecar or the hub keeps the address an agent already gave out. Control
+  keeps registrations by name and knows no instance id (`roadmap/instance-id.md`), so the exposures belong to the registration:
+  every removal unregisters the agent, and that deletes them, so a new instance of the name never inherits an old one's address.
+  Opaque, never the project's or the agent's name: links travel in chat and logs.
+- **The address** is made from a template control learns from the hub (below). Without one, the answer is the `port-forward`
+  command. Control never needs to reach the hub.
 
-### Where the preview domain comes from
+### Where the address comes from
 
 The domain belongs to the hub's deployment, not to the project. A project names its hub ([hub-link.md](hub-link.md)), and the
-hub gives its preview domain to the project's link at each connection; the link hands it to control. A project without `hub:`
-has none. The project file never names the domain, so a project moved to another hub gets that hub's.
+hub gives the project's link an **address template** at each connection, in the verdict that approves it; the link hands it to
+control, which keeps it on its volume. The template holds the scheme, the port if any, the domain and the hub's id of the project:
+`https://%s-p1a2b3c4d5e6.egzo-preview.example.net/`. So the project is in the host name: the hub knows which project a host belongs
+to without having heard from it, an offline project can say so, and no project can claim an address of another.
+
+A verdict that does not approve the project clears the template, and so does `up` when `hub:` is gone. The project file never
+names the domain, so a project moved to another hub gets that hub's. A template does not contain addresses: control keeps the ids,
+so a hub that moves to another domain moves every preview with it.
 
 ### For people without a hub
 
@@ -86,9 +97,12 @@ has none. The project file never names the domain, so a project moved to another
 
 ### Specs
 
-- `expose` without a preview domain answers the `port-forward` command; with one, the address; the same address again after
+- `expose` without an address template answers the `port-forward` command; with one, the address; the same address again after
   `expose` again, a restart of the agent and of the sidecar; another after the agent is removed and a new one has its name.
+- `expose` with `tcp` answers the `port-forward` command, with a template too; `udp` and anything else is refused.
 - `unexpose`; the exposures in the status log line and in `ps --json`; an agent cannot expose for another.
+- `egzo agent forward --announce` says it connected before any byte, and says nothing when nothing listens; `--close-on-eof` ends
+  at the end of stdin, and without it a half-closed client still gets its answer.
 - A server in an agent reached through `port-forward`: bytes both ways, a WebSocket upgrade, a large body, the server closing
   first, the client closing first; a server bound to `127.0.0.1` only; nothing listening; a stopped agent.
 - On every reference platform, gVisor included.
@@ -106,15 +120,24 @@ The workload is not new: a terminal is already a long-lived stream bridged to a 
 handle (below).
 
 The preview code is its own package (`hub/internal/preview`) that depends on two things only: authorizing a request (cookie to
-user and preview) and `DialPort(project, agent, port) (net.Conn, error)` on the `Engine` seam (faked in tests with `net.Pipe`).
-A preview service of its own would have to reach the links through the hub anyway, so every byte would still cross the hub's
-process; it is not worth a second service.
+user and preview) and `DialPort(ctx, agent, port) (net.Conn, error)` on the `Engine` seam (faked in tests with `net.Pipe`). A
+context covers the dial and nothing after it, as with `net.Dialer`: the connection ends with itself or with the link. A preview
+service of its own would have to reach the links through the hub anyway, so every byte would still cross the hub's process; it
+is not worth a second service.
+
+The verb is `forward`, with an agent and a port, and it knows no protocol: the stream is bytes, with `CloseWrite` for a half
+close, so a client for `tcp` exposures can use it as it is. The link refuses a port the agent did not expose, and picks the
+command from the exposure: `egzo agent forward --announce` always, so that a port where nothing listens is an answer and not a
+stream that ends, and `--close-on-eof` for `http`, which never half closes. A server that keeps talking to a client that left
+would otherwise hold its exec for up to `drainLimit`, and every reload of a page leaves one such connection.
 
 ### Addresses: one origin per preview, on a domain of its own
 
 A preview is code the agent wrote, served to people's browsers. On the hub's origin it would run with the viewer's hub session.
-So every preview has its own origin, `<id>.<EGZO_PREVIEW_DOMAIN>`, and the hub serves it on the preview listener only. The hub
-maps a host to (engine, project, instance, port) from the exposures it reads in the status stream; an unknown host is a 404.
+So every preview has its own origin, `<id>-<project>.<EGZO_PREVIEW_DOMAIN>`, and the hub serves it on the preview listener only.
+The host names the project; the hub maps the id to an agent and a port from the `http` exposures it reads in the status feed. An
+unknown host is a 404, and a project that is offline says so. `EGZO_PREVIEW_DOMAIN` needs `EGZO_PUBLIC_URL`, where the redirects
+below go.
 
 - **A separate registrable domain** for previews (`*.egzo-preview.example.net`, not `*.preview.example.com` next to the hub at
   `hub.example.com`). A sibling subdomain is the same *site* as the hub: `SameSite` cookies do not separate them, and a page
@@ -144,38 +167,44 @@ preview, no setting to make one, and no share link that works without signing in
 The link the agent gives out is a plain address, and signing in happens by redirects, because the hub's cookie never reaches a
 preview host, and must not:
 
-1. A request to `https://<id>.<domain>/...` without a preview cookie is redirected to the hub: `<EGZO_PUBLIC_URL>/preview/<id>?to=<path>`.
+1. A request to `https://<host>/...` without a preview cookie is redirected to the hub: `<EGZO_PUBLIC_URL>/preview/<host>?to=<path>`.
 2. The hub signs the person in if needed (password or SSO, as for any page), checks that they may view the preview, and
-   redirects back to `https://<id>.<domain>/_egzo/enter?ticket=...`, with a one-time ticket (seconds, bound to the user and the
+   redirects back to `https://<host>/_egzo/enter?ticket=...`, with a one-time ticket (seconds, bound to the user and the
    preview).
 3. The preview listener checks the ticket, sets its own host-only cookie for that preview, and redirects to the path first asked
    for.
 
 - Every request is checked again: the user is enabled, still may view it, and the preview still is exposed by that instance. A
-  disabled user or a removed role loses previews at the next request.
+  disabled user or a removed role loses previews at the next request. What makes no more requests (a WebSocket, an event stream)
+  ends as a terminal does: with the session, with the role, and with `unexpose`.
+- The preview cookie belongs to the hub session it came from, so it ends with it.
 - `/_egzo/` is the hub's on every preview host and never reaches the app. The preview cookie is stripped before the request goes
-  on; the rest (the app's own cookies, `Authorization`) is the app's.
+  on, and an answer cannot set it; the rest (the app's own cookies, `Authorization`) is the app's.
+- An upgrade or an unsafe method whose `Origin` is not the preview's own host is refused.
 - The audit log records who opened which preview (once per ticket, not per request).
 
 **Who may view a preview:** every role on the project, for every agent's previews: an agent exposes a port on purpose. The
 **viewer** role gets previews and nothing else; a person from outside gets it, and an account, through an invite
-([hub-link.md](hub-link.md), "Roles and invites").
+([hub-link.md](hub-link.md), "Roles and invites"). An operator with no role sees that a preview exists and grants themselves a
+role to open it, as for a terminal.
 
 ### The proxy
 
 - `httputil.ReverseProxy` with a transport that dials through `DialPort`. WebSocket upgrades pass (Vite's hot reload).
 - `Host` is rewritten to `localhost:<port>`: dev servers refuse unknown host names (Vite's `allowedHosts`). `X-Forwarded-Host`
-  and `X-Forwarded-Proto` say the real ones.
+  and `X-Forwarded-Proto` say the real ones. A `Location` that names `localhost:<port>` is written back to the preview's address.
 - Limits, because the server on the other side is untrusted: open streams per preview and per hub, response header size and
-  time, idle time. Going over is a 503 that says which limit, never a hub that slows down.
+  time, idle time. A request over the stream limit waits a moment, because a dev server's page opens hundreds of files at once;
+  after that it is a 503 that says which limit, never a hub that slows down.
+- The listener has limits of its own: the hub's 30 seconds to read a request would cut an upload short.
 - Redeploying the hub drops open previews, as it drops terminals today. A reload brings them back.
 
 ### The web app
 
 A **Previews** panel for the project's users, admins and owners (a viewer has links, not pages), on the agent page,
 and on the project page for every agent: each exposed port with its name and address,
-**Open**, and **Copy link**. No preview domain configured: the panel says what to set, and shows the `egzo agent port-forward`
-command.
+**Open**, and **Copy link**. No preview domain configured, or a `tcp` exposure: the panel shows the `egzo agent port-forward`
+command, and says what to set where that helps.
 
 ## Certificates for the preview domain: a wildcard, with DNS-01
 
@@ -193,26 +222,31 @@ everything after is simpler:
 The docs give recipes for Caddy and Traefik with a DNS provider's API, and the lighter way when the proxy should not hold
 credentials for the zone: **`acme-dns`**, a CNAME from `_acme-challenge.egzo-preview.example.net` to a small DNS server that
 only answers challenges (Caddy and lego support it). A team with its own CA (a private network) uses it instead, and every
-viewer's browser trusts the root once (Caddy's `tls internal` does this for a trial). `hub/compose.yaml` gets an optional Caddy
-service with the DNS-01 recipe, commented out.
+viewer's browser trusts the root once (Caddy's `tls internal` does this for a trial). Whatever is in front has to pass WebSockets
+and keep or forward `Host`, with `EGZO_TRUSTED_PROXIES` set. egzo ships no proxy: `make hub-stack` uses Caddy as a test, and
+an example compose file may follow.
 
 ## Order of work
 
-1. The `__Host-` cookies in the hub, with the unit test. Independent of the rest.
-2. Core: `egzo agent forward` and `egzo agent port-forward`, with specs. They do not wait for the link.
-3. After the link ([hub-link.md](hub-link.md)): the `expose` and `unexpose` tools, the exposures in the status feed and `ps`, the
-   preview domain from the hub through the link, with specs. Docs: `docs/messaging.md` (the tools), `docs/managing-projects.md`,
-   `docs/security.md`.
-4. Hub: `DialPort` on the seam (the link and the fake), `hub/internal/preview` (hosts, the sign-in redirects, tickets, proxy,
-   limits), `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`, the Previews panel. Unit tests with the fake engine, a Playwright
-   test, and `make hub-stack` with a linked project exposing `python3 -m http.server`, through Caddy (its internal CA).
-5. The viewer role and invites ([hub-link.md](hub-link.md)).
-6. Docs: `docs/hub.md` (previews, the certificate recipes, the separate domain), `docs/security.md` (agent code served to
-   people's browsers, and why it gets its own origin).
+Built: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward`, the link, the viewer role and invites.
+
+1. Core, with specs: `forward --announce` and `--close-on-eof`, the `expose` and `unexpose` tools, the exposures in the status feed
+   and `ps`, the address template from the hub through the link. Docs: `docs/messaging.md` (the tools),
+   `docs/managing-projects.md`, `docs/security.md`.
+2. The proxy: the `forward` verb and `DialPort` on the seam (the link and the fake), `hub/internal/preview` (hosts, proxy, limits),
+   `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`. Unit tests with the fake engine, and a test on a throttled link of what a large
+   preview does to a terminal on the same connection.
+3. Signing in: the redirects, tickets, the preview cookie, the role on each request, ending what is open, the audit log.
+4. The Previews panel, a Playwright test, and `make hub-stack` with a linked project exposing `python3 -m http.server`, through
+   Caddy (its internal CA). Docs: `docs/hub.md` (previews, what a proxy in front must do, the certificates, the separate domain),
+   `docs/security.md` (agent code served to people's browsers, and why it gets its own origin).
 
 ## Open questions
 
-- Whether a person may also open a port the agent did not expose, from the hub (the CLI's `port-forward` can).
+- How a person reaches a `tcp` exposure through the hub: a client on their machine, which needs the CLI to sign in to the hub,
+  and which roles may. The stream it needs is the `forward` verb, as it is.
+
+A person may not open a port the agent did not expose, from the hub: the link refuses it. The CLI's `port-forward` still can.
 
 ## Alternatives considered
 
