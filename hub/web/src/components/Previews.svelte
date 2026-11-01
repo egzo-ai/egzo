@@ -20,10 +20,8 @@
             <b>{p.name || p.port}</b> <span class="muted">{p.port}/{p.protocol}</span>
             {#if p.where === "local"}
               <!-- Text and never a link: it only works on that machine or its network, and a link says what the agent's project told the hub. -->
-              {#if p.address}
-                <code>{p.address}</code>
-                <button class="btn" data-size="sm" aria-label="Copy the address" onclick={() => copy(p.address)}>Copy</button>
-              {/if}
+              <code>{p.address}</code>
+              <button class="btn" data-size="sm" aria-label="Copy the address" onclick={() => copy(p.address)}>Copy</button>
               <span class="muted">on the project's machine</span>
             {:else if p.address}
               <a class="btn" data-size="sm" data-external target="_blank" rel="noopener noreferrer" href={p.address}>Open</a>

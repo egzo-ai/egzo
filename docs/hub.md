@@ -234,7 +234,7 @@ An agent that starts a demo [opens a port it declares](messaging.md#ports-an-age
 out, `https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`. The person opens it in their browser, and the hub carries it over the project's link
 to the agent's own loopback. Nothing is published, and the sandbox does not change. The agent's page and the project's page list the previews, with **Open**
 and **Copy link**. A port the agent opened for the [local machine](managing-projects.md#opening-an-agents-dev-server) is listed too, as an address to copy and never a link: it works only
-on that machine or its network, it has no sign-in, and a person with no role on the project sees that it exists and not where it is.
+on that machine or its network, and it has no sign-in. Everyone who can see the project sees the address.
 
 - **A preview is never public.** Every request needs a person signed in to the hub who holds a role on the project, any role. There is no anonymous preview
   and no setting for one. A person from outside gets the viewer role and an account from an [invite](hub-access.md). An operator with no role grants themselves one.

@@ -126,23 +126,20 @@ func TestWhatALinkSaysOfALocalPortIsChecked(t *testing.T) {
 	}
 }
 
-func TestALocalPortIsListedAndItsAddressGoesToWhoMayOpenAPreview(t *testing.T) {
+func TestALocalPortIsListedWithItsAddress(t *testing.T) {
 	r, f, id := linkedPreview(t)
 	f.Expose("coder-1", links.Exposure{Port: 5432, Name: "db", Protocol: hublink.ProtocolTCP, Where: hublink.WhereLocal, Address: "127.0.0.1:20417"})
-	find := func(maySee bool) *PreviewView {
-		for _, view := range r.hub.previewsOf(id, "coder-1", maySee) {
+	find := func() *PreviewView {
+		for _, view := range r.hub.previewsOf(id, "coder-1") {
 			if view.Where == hublink.WhereLocal {
 				return &view
 			}
 		}
 		return nil
 	}
-	eventually(t, "the local port to be listed", func() bool { return find(true) != nil })
-	if got := find(true); got.Address != "127.0.0.1:20417" || got.Name != "db" || got.Protocol != hublink.ProtocolTCP {
+	eventually(t, "the local port to be listed", func() bool { return find() != nil })
+	if got := find(); got.Address != "127.0.0.1:20417" || got.Name != "db" || got.Protocol != hublink.ProtocolTCP {
 		t.Errorf("%+v", got)
-	}
-	if got := find(false); got == nil || got.Address != "" {
-		t.Errorf("a person with no role was given %+v", got)
 	}
 }
 
