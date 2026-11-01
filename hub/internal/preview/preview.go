@@ -65,6 +65,8 @@ type Options struct {
 	PerPreview, PerHub int
 	// Queue is how long a request waits for a connection over those limits (10 seconds): a dev server's page asks for hundreds of files at once.
 	Queue time.Duration
+	// DialTime is how long a link has to reach a server (30 seconds): the transport does not end a dial when the request ends, so nothing else does.
+	DialTime time.Duration
 	// HeaderTime is how long a server has to start answering (60 seconds).
 	HeaderTime time.Duration
 	// HeaderBytes is how long its answer's headers may be (1 MiB).
@@ -82,6 +84,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Queue <= 0 {
 		o.Queue = 10 * time.Second
+	}
+	if o.DialTime <= 0 {
+		o.DialTime = 30 * time.Second
 	}
 	if o.HeaderTime <= 0 {
 		o.HeaderTime = time.Minute
@@ -258,7 +263,9 @@ func (s *Server) dial(ctx context.Context, _, address string) (net.Conn, error) 
 	if err != nil {
 		return nil, err
 	}
-	conn, err := s.backend.Dial(ctx, target)
+	dialing, cancel := context.WithTimeout(ctx, s.opts.DialTime)
+	defer cancel()
+	conn, err := s.backend.Dial(dialing, target)
 	if err != nil {
 		release()
 		return nil, err

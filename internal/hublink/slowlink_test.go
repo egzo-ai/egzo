@@ -150,6 +150,20 @@ func TestAPortThatCannotBeReachedIsAnAnswer(t *testing.T) {
 	}
 }
 
+func TestADialIsCutByItsContextWhileTheLinkLeavesStreamsUnanswered(t *testing.T) {
+	peer, _, _ := proved(t)
+	for range yamuxConfig().AcceptBacklog { // nobody accepts them on the link's side
+		if _, err := peer.session.OpenStream(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := peer.DialPort(ctx, "coder-1", 3000); !errors.Is(err, context.DeadlineExceeded) {
+		t.Error(err)
+	}
+}
+
 func TestADialIsCutByItsContext(t *testing.T) {
 	peer, link, _ := proved(t)
 	answering(t, link, func(Request, *Lines, *yamux.Stream) { select {} })
