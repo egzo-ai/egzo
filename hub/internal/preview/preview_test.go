@@ -379,6 +379,44 @@ func TestAWaitingRequestGetsTheSlotThatIsFreed(t *testing.T) {
 	}
 }
 
+// everywhere finds any id in any project, as a link that claims one can make it.
+type everywhere struct{ *agent }
+
+func (e everywhere) Find(_ context.Context, project, wanted string) (Target, error) {
+	return Target{Project: project, ID: wanted, Agent: "coder-1", Port: 3000}, nil
+}
+
+func TestAProjectCannotFillAnotherProjectsPreviewWithTheSameID(t *testing.T) {
+	release := make(chan struct{})
+	waiting := make(chan struct{})
+	a := &agent{t: t}
+	a.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			close(waiting)
+			<-release
+		}
+		io.WriteString(w, "ok")
+	}))
+	t.Cleanup(a.server.Close)
+	front := httptest.NewServer(New(everywhere{a}, &gate{}, Options{Domain: domain, Scheme: "https", PerPreview: 1, Queue: 100 * time.Millisecond}, nil))
+	t.Cleanup(front.Close)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		request, _ := http.NewRequest(http.MethodGet, front.URL+"/slow", nil)
+		request.Host = id + "-pattacker." + domain
+		if response, err := http.DefaultClient.Do(request); err == nil {
+			response.Body.Close()
+		}
+	}()
+	<-waiting
+	if got := get(t, front, host, "/").StatusCode; got != http.StatusOK {
+		t.Error(got)
+	}
+	close(release)
+	<-done
+}
+
 func TestOnePreviewDoesNotUseTheConnectionsOfAnother(t *testing.T) {
 	if poolKey(Target{ID: "a", Project: "p1", Port: 80}) == poolKey(Target{ID: "b", Project: "p1", Port: 80}) {
 		t.Error("the transport would mix them")

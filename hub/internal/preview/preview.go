@@ -252,7 +252,7 @@ func (s *Server) dial(ctx context.Context, _, address string) (net.Conn, error) 
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.limit.take(ctx, target.ID, s.opts.Queue)
+	release, err := s.limit.take(ctx, target.Project+"/"+target.ID, s.opts.Queue)
 	if err != nil {
 		return nil, err
 	}
@@ -311,17 +311,18 @@ func newLimiter(perPreview, total int) *limiter {
 	return &limiter{perPreview: perPreview, total: total, open: map[string]int{}, freed: make(chan struct{})}
 }
 
-func (l *limiter) take(ctx context.Context, id string, wait time.Duration) (func(), error) {
+// take waits for a slot of key, a preview's project and id together: an id means something in its project only, and a link says what its ids are.
+func (l *limiter) take(ctx context.Context, key string, wait time.Duration) (func(), error) {
 	timeout := time.NewTimer(wait)
 	defer timeout.Stop()
 	for {
 		l.mu.Lock()
-		if l.open[id] < l.perPreview && l.all < l.total {
-			l.open[id]++
+		if l.open[key] < l.perPreview && l.all < l.total {
+			l.open[key]++
 			l.all++
 			l.mu.Unlock()
 			var once sync.Once
-			return func() { once.Do(func() { l.release(id) }) }, nil
+			return func() { once.Do(func() { l.release(key) }) }, nil
 		}
 		freed := l.freed
 		l.mu.Unlock()
@@ -335,12 +336,12 @@ func (l *limiter) take(ctx context.Context, id string, wait time.Duration) (func
 	}
 }
 
-func (l *limiter) release(id string) {
+func (l *limiter) release(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.all--
-	if l.open[id]--; l.open[id] <= 0 {
-		delete(l.open, id)
+	if l.open[key]--; l.open[key] <= 0 {
+		delete(l.open, key)
 	}
 	close(l.freed)
 	l.freed = make(chan struct{})
