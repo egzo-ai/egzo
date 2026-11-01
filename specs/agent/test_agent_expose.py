@@ -154,15 +154,11 @@ def test_an_agent_ls_shows_them_too(team, pair):
     assert next(r for r in rows if r["name"] == a.name)["exposed"][0]["port"] == 3012
 
 
-def test_the_id_survives_a_restart_of_the_agent_and_of_the_sidecar(team, engine, fresh):
+def test_a_restart_of_the_sidecar_ends_nothing(team, engine, fresh):
     a = fresh()
-    first = expose(a, 3013)["id"]
-    team.project.ok("agent stop", a.name)
-    team.project.ok("agent start", a.name)
-    assert expose(a, 3013)["id"] == first
+    first = expose(a, 3015)
     assert engine.run("restart", f"{team.project.name}-control-1").returncode == 0
-    assert eventually(lambda: exposed(team.project, a.name), seconds=30)
-    assert expose(a, 3013)["id"] == first
+    assert eventually(lambda: [e["id"] for e in exposed(team.project, a.name)] == [first["id"]], seconds=30)
 
 
 def test_a_new_instance_of_a_name_inherits_nothing(team, fresh):

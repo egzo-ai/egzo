@@ -54,9 +54,12 @@ tools:
   hub serves the project (`https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`). Otherwise it answers with the command
   a person runs instead (`egzo agent port-forward coder-1 3000`): without a hub, and for `tcp`, which the hub does not serve yet.
   The agent passes the answer to its user. Exposing an exposed port again changes its name and protocol and keeps its id.
-- **`unexpose(port)`**: the preview is gone; the address answers 404.
+- **`unexpose(port)`**: the preview is gone; the address answers 404 until the port is exposed again.
 - **Previews are plain HTTP**: HTTP/1.1, WebSockets and event streams. A server that speaks TLS itself, or anything else, is a
   `tcp` exposure. `udp` is not accepted: `engine exec` is a byte stream, and datagrams carried in one lose what UDP is for.
+- **A restart of the agent ends its exposures**: the server is gone and the agent starts with no memory of them, so it starts with
+  nothing exposed and exposes what it needs, which its prompt can ask of it. The sandbox tells control before the harness starts,
+  so the first thing a harness does may be to expose a port. A restart of the sidecars ends nothing.
 - Nothing is checked at `expose` time: a server may start after it, and stop and start again. A preview of a port where nothing
   listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
 - The control sidecar keeps the exposures per instance, on its volume. The agent's removal removes them. The status feed carries
@@ -98,7 +101,8 @@ so a hub that moves to another domain moves every preview with it.
 ### Specs
 
 - `expose` without an address template answers the `port-forward` command; with one, the address; the same address again after
-  `expose` again, a restart of the agent and of the sidecar; another after the agent is removed and a new one has its name.
+  `expose` again; nothing exposed after a restart of the agent, and the same address when the port is exposed again; nothing changed
+  by a restart of the sidecar; another address after the agent is removed and a new one has its name.
 - `expose` with `tcp` answers the `port-forward` command, with a template too; `udp` and anything else is refused.
 - `unexpose`; the exposures in the status log line and in `ps --json`; an agent cannot expose for another.
 - `egzo agent forward --announce` says it connected before any byte, and says nothing when nothing listens; `--close-on-eof` ends
