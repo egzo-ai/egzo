@@ -288,7 +288,7 @@ func (s *Server) failed(w http.ResponseWriter, r *http.Request, err error) {
 		page(w, http.StatusGatewayTimeout, fmt.Sprintf("The server on port %d in %s did not answer in time.", target.Port, target.Agent))
 	default:
 		s.log.Info("a preview failed", "project", target.Project, "agent", target.Agent, "port", target.Port, "err", err)
-		page(w, http.StatusBadGateway, fmt.Sprintf("The server on port %d in %s did not answer as plain HTTP.", target.Port, target.Agent))
+		page(w, http.StatusBadGateway, fmt.Sprintf("Port %d in %s could not be reached, or did not answer as plain HTTP.", target.Port, target.Agent))
 	}
 }
 
