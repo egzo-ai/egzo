@@ -39,6 +39,28 @@ func Command(port int) []string {
 	return []string{"egzo", "agent", "forward", strconv.Itoa(port)}
 }
 
+// Connected is the line `egzo agent forward --announce` writes on stderr once it reached the server. Without it, a port where nothing listens
+// and a server that closed look the same to whoever holds the stream: a server says nothing until it is spoken to.
+const Connected = "connected"
+
+// AnnouncedCommand is Command for a client that has to know the connection stands before it hands over the stream. closeOnEOF is for a
+// client that never half closes, such as a proxy of HTTP: the end of its input means it left, so the command does not wait for the server.
+func AnnouncedCommand(port int, closeOnEOF bool) []string {
+	command := []string{"egzo", "agent", "forward", "--announce"}
+	if closeOnEOF {
+		command = append(command, "--close-on-eof")
+	}
+	return append(command, strconv.Itoa(port))
+}
+
+// Options change how Forward behaves.
+type Options struct {
+	// Connected, when not nil, is called once the server has been reached, before any byte is copied.
+	Connected func()
+	// CloseOnEOF ends the connection at the end of in, instead of leaving the way back open.
+	CloseOnEOF bool
+}
+
 // NotAPort is what ParsePort says about a port it refuses.
 const NotAPort = "is not a port: use a number from 1 to 65535"
 
@@ -134,17 +156,24 @@ func unreachable(err error) bool {
 
 // Forward copies bytes between in and out and a port of this machine's loopback, until the server closes. The end of in shuts down
 // the socket's write side and leaves the way back open, for as long as the server has something to say (drainTimeout), up to
-// drainLimit.
-func Forward(port int, in io.Reader, out io.Writer) error {
+// drainLimit. With CloseOnEOF the end of in ends it all.
+func Forward(port int, in io.Reader, out io.Writer, options Options) error {
 	conn, err := dial(port)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
+	if options.Connected != nil {
+		options.Connected()
+	}
 	drain, limit := drainTimeout, drainLimit
 	var inputEnded atomic.Bool
 	go func() {
 		_, _ = io.Copy(conn, in)
+		if options.CloseOnEOF {
+			_ = conn.Close()
+			return
+		}
 		_ = conn.CloseWrite()
 		inputEnded.Store(true)
 		_ = conn.SetReadDeadline(time.Now().Add(drain))

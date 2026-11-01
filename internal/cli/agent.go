@@ -61,26 +61,34 @@ func newAgentCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	var announce, closeOnEOF bool
 	forward := &cobra.Command{
 		Use:    "forward PORT",
 		Short:  "Carry one connection to a port of this container's loopback over stdin and stdout",
 		Hidden: true,
 		Long: "Connect to PORT on this container's loopback and copy bytes between it and stdin and stdout. What\n" +
 			"`egzo agent port-forward` runs in the agent's container, once per connection. It takes a port and never an\n" +
-			"address: it reaches nothing but this container.",
+			"address: it reaches nothing but this container. --announce says on stderr when it reached the server, and\n" +
+			"--close-on-eof ends at the end of stdin, for a client that never half closes.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			port, err := portforward.ParsePort(args[0])
 			if err != nil {
 				return err
 			}
-			if err := portforward.Forward(port, os.Stdin, os.Stdout); err != nil {
+			options := portforward.Options{CloseOnEOF: closeOnEOF}
+			if announce {
+				options.Connected = func() { fmt.Fprintln(os.Stderr, portforward.Connected) }
+			}
+			if err := portforward.Forward(port, os.Stdin, os.Stdout, options); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return ExitError{Code: 1}
 			}
 			return nil
 		},
 	}
+	forward.Flags().BoolVar(&announce, "announce", false, "say on stderr when the server has been reached")
+	forward.Flags().BoolVar(&closeOnEOF, "close-on-eof", false, "end at the end of stdin")
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
 		newAttachCommand(opts), newPortForwardCommand(opts), run, browserCommand, forward, newSSHSetupCommand())
