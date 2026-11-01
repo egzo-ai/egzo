@@ -524,3 +524,27 @@ func TestAnObservedLinkGivesBackTheSocketItWasMadeWith(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyAnAgentWithPortsIsToldThemAndTheEnvironmentSaysWhatTheProjectCanOpen(t *testing.T) {
+	project := desireProject()
+	coder := project.Agents["coder"]
+	coder.Ports = map[string]config.ResolvedPort{"web": {Port: 5173, Protocol: "http"}, "db": {Port: 5432, Protocol: "tcp"}}
+	project.Agents["coder"] = coder
+	project.LocalPorts = &config.ResolvedLocalPorts{Bind: "127.0.0.1", Host: "127.0.0.1", PoolLow: 20000, PoolHigh: 29999, MaxExposed: 10}
+	env := func(name string) []string {
+		spec, err := agentContainer(project, "/p", name, project.Agents[name], "n", Inputs{Tokens: map[string]string{name: "t"}}, engine.Identity{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return spec.Env
+	}
+	want := `EGZO_PORTS={"ports":{"db":"5432/tcp","web":"5173/http"},"hub":false,"local":true}`
+	if !slices.Contains(env("coder"), want) {
+		t.Errorf("%v", env("coder"))
+	}
+	for _, line := range env("review") {
+		if strings.HasPrefix(line, "EGZO_PORTS=") {
+			t.Errorf("an agent without ports got %s", line)
+		}
+	}
+}

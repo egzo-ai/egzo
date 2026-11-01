@@ -408,6 +408,18 @@ func agentContainer(
 	if prompt := in.Prompts[name]; prompt != "" {
 		env["EGZO_PROMPT"] = prompt
 	}
+	if len(agent.Ports) > 0 {
+		// only an agent with ports is told: the others learn nothing about them
+		ports := harness.Ports{Ports: map[string]string{}, Hub: project.Hub != nil, Local: project.LocalPorts != nil}
+		for portName, port := range agent.Ports {
+			ports.Ports[portName] = port.String()
+		}
+		encoded, err := json.Marshal(ports)
+		if err != nil {
+			return spec, err
+		}
+		env[harness.PortsEnv] = string(encoded)
+	}
 	if hasHome(agent) {
 		spec.Mounts = append(spec.Mounts, MountSpec{Source: homeVolume(project.Name, name), Target: homeDir})
 		if in.User != "" {

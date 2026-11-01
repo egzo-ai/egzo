@@ -60,6 +60,7 @@ def sandbox(shared_project, engine, egzo):
             vaults={"main": {"backend": "env"}},
             egress={"default": ANTHROPIC, "oauth": OAUTH},
             workspaces={"scratch": {}, "one": {}, "two": {}},
+            local_ports={"bind": "127.0.0.1"},
             agents={
                 "claude-code": agent(harness="claude-code", image=cc, workspaces=["scratch"], **quick),
                 "opencode": agent(harness="opencode", image=oc, workspaces=["scratch"], **quick),
@@ -71,6 +72,7 @@ def sandbox(shared_project, engine, egzo):
                 "oc-asks": agent(harness="opencode", image=oc, permissions="default"),
                 "cc-scripted": agent(harness="claude-code", image=cc, workspaces=["scratch"], env={"ANTHROPIC_BASE_URL": f"http://127.0.0.1:{STUB_PORT}"}, **quick),
                 "oc-scripted": agent(harness="opencode", image=oc, workspaces=["scratch"], model="anthropic/claude-sonnet-5-5", **quick),
+                "cc-ports": agent(harness="claude-code", image=cc, ports={"web": "5173/http", "db": "5432/tcp"}),
                 "emit": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "emit"}),
             },
         ),
@@ -177,6 +179,21 @@ def test_the_harness_runs_as_the_invoking_user_in_its_workspace_with_no_real_cre
     assert not [r for r in engine.resources(p.name) if r.kind == "volume" and r.name.endswith(f"{name}-home")]
 
 
+def test_an_agent_with_ports_is_told_them_and_one_without_is_told_nothing_about_ports(sandbox, engine):
+    p = sandbox
+    ported, plain = p.spawn("cc-ports", "cc-p", timeout=900), p.spawn("claude-code", "cc-q", timeout=900)
+    told = read(engine, p, ported, "$HOME/.egzo/instructions.md")
+    for needed in ("web (port 5173, http)", "db (port 5432, tcp)", "0.0.0.0", "expose(name, where)", "unexpose(name)", '"local"'):
+        assert needed in told, f"an agent with ports is not told {needed}"
+    assert '"hub"' not in told, "this project names no hub, so the agent is not offered one"
+    env = json.loads(env_of(engine, p, ported)["EGZO_PORTS"])
+    assert env == {"ports": {"web": "5173/http", "db": "5432/tcp"}, "hub": False, "local": True}
+    untold = read(engine, p, plain, "$HOME/.egzo/instructions.md")
+    assert "expose" not in untold and "0.0.0.0" not in untold
+    assert "EGZO_PORTS" not in env_of(engine, p, plain)
+    assert not [r for r in engine.resources(p.name) if r.name == f"{p.name}-{plain}-relay-1"], "an agent without ports has no relay"
+
+
 def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_report_to_control_and_reach_its_tools(sandbox, engine):
     p = sandbox
     scratch, two, model, asks = (p.spawn(t, name, timeout=900) for t, name in (("claude-code", "cc-a"), ("cc-two", "cc-b"), ("cc-model", "cc-c"), ("cc-asks", "cc-d")))
@@ -208,7 +225,7 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
 
     assert "--append-system-prompt" in cmdline(engine, p, scratch, "claude")
     instructions = read(engine, p, scratch, "$HOME/.egzo/instructions.md")
-    for needed in ("get_message", "list_messages", "resolve", "outcome", "update", "ask", "message(", "agents", "expose(", "unexpose("):
+    for needed in ("get_message", "list_messages", "resolve", "outcome", "update", "ask", "message(", "agents"):
         assert needed in instructions, f"the platform instructions do not mention {needed}"
 
     several_state = read_json(engine, p, two, "$HOME/.claude.json")
