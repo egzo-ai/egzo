@@ -19,17 +19,10 @@ pytestmark = pytest.mark.skipif(not URL, reason="needs the stack of e2e/stack.sh
 
 
 def password(page):
-    """Sends the sign-in form. The browser shares the machine's network, and Docker adding a network makes it drop a TLS connection in the
-    middle of a request (ERR_NETWORK_CHANGED): the form says it could not reach the hub, and a person would try again."""
+    """Sends the sign-in form."""
     page.get_by_label("Username").fill("admin")
     page.get_by_label("Password").fill(ADMIN_PASSWORD)
-    for _ in range(5):
-        failed = []
-        page.on("requestfailed", lambda request: failed.append(request.failure))
-        page.get_by_role("button", name="Sign in", exact=True).click()
-        page.wait_for_timeout(1500)
-        if not any("ERR_NETWORK_CHANGED" in (f or "") for f in failed):
-            return
+    page.get_by_role("button", name="Sign in", exact=True).click()
 
 
 def sign_in(page):
