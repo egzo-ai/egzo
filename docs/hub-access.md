@@ -60,7 +60,8 @@ An invite is a link with a one-time code. It is the only way to get an account.
 - **Nothing ties it to a person.** It is redeemed by whoever opens it and signs in, so hand it over as you would a password. The audit log says
   who made it and who used it.
 - **It carries what it grants:**
-  - **a role on a project**, made by the project's owner on its Members tab;
+  - **a role on a project**, made by the project's owner on its Members tab. An owner cannot see who else is on the hub or add them: that is how
+    a person who holds no role gets one, unless an owner who is also an operator adds them there;
   - **an account, with the flags below** (operator, project quota), made by an operator under Settings, Invites.
 - **An invite only adds.** It raises a role and never lowers it, and a quota only grows. An owner who opens a viewer's link stays an owner.
 - **It is worth what its maker can still give.** An invite is deleted when its maker is disabled, is no longer an owner of the project, or is no
