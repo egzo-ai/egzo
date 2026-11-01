@@ -6,7 +6,9 @@
 3. Secrets live only in sidecars. Agent containers are never given real credentials, so a compromised agent cannot leak
    what it does not have (it can still use them through the proxy for the hosts its profile allows).
 4. Each agent sits on its own internal network with no default route; the proxy is its only egress
-   and the control sidecar its only peer. Agents cannot reach each other directly.
+   and the control sidecar its only peer. Agents cannot reach each other directly. Nothing reaches an agent either, except the ports its template
+   declares by name, which stay closed until the agent opens one (`expose(name, where)`) for a hub or, through a relay, for the local machine
+   (`local_ports`, off by default).
 5. `specs/` (pytest, black-box, drives the real binary) is the specification.
 
 ## UX requirement (top priority, overrides convenience elsewhere)

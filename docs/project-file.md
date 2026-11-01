@@ -57,6 +57,28 @@ hub:
 An address is a scheme and a host, with an optional port. Plain `http://` works and `project check` warns: anyone on the way can then pose as the
 hub.
 
+## Local ports
+
+`local_ports:` turns on ports that an agent opens on the machine that runs the project. Without it they are off: nothing is published.
+
+```yaml
+local_ports:
+  bind: 192.168.8.242    # required: the IP to listen on
+  host: mybox.lan        # optional, defaults to bind; required for 0.0.0.0 and ::
+  pool: 20000-29999      # optional, this is the default
+  max_exposed: 10        # optional, this is the default
+```
+
+`bind` is the address the ports listen on and `host` the name people use for it, which is what an agent hands over. The smallest file is
+`local_ports: { bind: 127.0.0.1 }`, which only this machine can reach. `pool` is the range the ports are chosen from, one for each declared port
+of each instance. `max_exposed` is how many local ports may be open at once in the whole project; a preview for a hub does not count. A change to
+`max_exposed` takes an `egzo project up`, and lowering it below what is open closes nothing: it only refuses further exposures.
+
+There is no sign-in on a local port. Whoever can reach `bind` can use what the agent exposed, so `bind` is a decision about who that is:
+[what that means](security.md#what-it-does-not-protect-against).
+
+An address that is not on this machine is not checked: the relay fails to start and the engine's message is what `egzo agent spawn` shows.
+
 ## The secret key
 
 egzo keeps secrets of its own: the private key of the project CA, which every agent trusts, and the ssh identity of the
@@ -202,7 +224,21 @@ agents:
     resources: { cpus: 2, memory: 4g, pids: 4096 }
     permissions: bypass           # bypass (default) | default (the harness asks)
     env: { LOG_LEVEL: debug }     # plain settings; secret-looking values are rejected
+    ports:                        # what the agent may serve, by name; see below
+      web: "5173/http"
+      db: "5432/tcp"
 ```
+
+### Ports
+
+`ports:` declares every port the agent may serve, by name, as `PORT/PROTOCOL` with a protocol of `http`, `tcp` or `udp`. Nothing else can be opened,
+and a declared port is closed until the agent calls `expose(name, where)` ([messaging](messaging.md#ports-an-agent-opens)). A template with no
+`ports:` is told nothing about ports and gets no relay.
+
+`http` can be opened for a [hub](hub.md) (a preview) or for the local machine; `tcp` and `udp` only for the local machine, so they need
+`local_ports:`. `egzo project check` refuses a file with a port that could never open: an `http` port in a project with neither `hub:` nor
+`local_ports:`, a `tcp` or `udp` port without `local_ports:`, more than 32 ports in a template, a name outside `[a-z][a-z0-9-]*` or over 32
+characters, the same number twice (one `tcp` and one `udp` may share it), and more `tcp` and `udp` ports in a template than `max_exposed`.
 
 ## One file, several harnesses
 

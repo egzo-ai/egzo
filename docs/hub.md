@@ -170,6 +170,13 @@ The denials are kept in the hub's database for 30 days after they were last seen
 the hub's latest 1000 events of the project, in memory; further back, `egzo proxy log` reads the proxy's own log, as far as the
 engine keeps it. The schema of the audit trail is in [sandboxing agents](sandboxing.md#see-what-happened).
 
+## Ports the hub serves
+
+A project's template [declares](project-file.md#ports) the ports its agents may serve, and an agent opens one for the hub with `expose(name, hub)`. Only
+`http` ports can be opened for a hub, and the hub learns of them from the project's status feed. A port the agent opened with `where` set to `local` is
+a port on the project's machine: the hub never serves it, and the project's link refuses to forward to it. The preview addresses, the sign-in they need
+and the panel that lists them are in [roadmap/agent-ports.md](../roadmap/agent-ports.md); they are not all built yet.
+
 ## How the hub keeps up
 
 The hub does not poll. Each project's link pushes what changed, on one outbound connection, and the pages read what the hub already holds:

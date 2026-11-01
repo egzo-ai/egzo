@@ -11,6 +11,9 @@ host (an allowed name cannot front for another one), and a client that sends Enc
 name, is not tunneled but terminated like a credential host (this is what a browser does, see [browsing](browser.md)).
 Every decision is logged.
 
+Nothing reaches an agent from outside either, except the ports its template [declares](project-file.md#ports), and only once the agent opens one
+for the [hub](hub.md) or, in a project with [`local_ports`](project-file.md#local-ports), for the machine. The agent's network stays internal.
+
 ## A profile
 
 ```yaml

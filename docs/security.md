@@ -42,12 +42,15 @@ Be clear about these before running agents on something you care about.
   code. Every agent has its own worktree.
 - **The engine is trusted.** Anyone who can reach the engine socket controls the containers. On a rootful engine
   that is root-equivalent. Prefer a rootless engine. [The hub](hub.md) holds no engine access: it can do what the link below lets it, on the projects that linked.
-- **What you open with `egzo agent port-forward` is the agent's.** The command reaches into the sandbox through the engine and the agent cannot
-  use it to reach out, but the page your browser loads was written by the agent. Open it in a browser profile that is not signed in to anything
-  you care about, on a local port no other site of yours uses (cookies ignore ports).
-- **An exposed port is what the agent says it is.** [`expose`](messaging.md#ports-an-agent-offers) publishes nothing and changes nothing in the sandbox: it
-  records a claim, and its name and protocol are the agent's words. The list goes to everyone who can read the project's status, and each agent sees the
-  others' with `agents`.
+- **A local port is open to whoever can reach `bind`, with no sign-in.** In a project with [`local_ports`](project-file.md#local-ports) an agent can
+  open the ports its template declares, and only those, by calling `expose(name, local)`. egzo then publishes them on the machine, through a relay,
+  and anything that can connect to `bind` reaches the agent's server: `127.0.0.1` is this machine alone, a LAN address is the LAN. What it serves was
+  written by the agent: open it in a browser profile that is not signed in to anything you care about, on a port no other site of yours uses (cookies
+  ignore ports). Without `local_ports`, nothing is published. The agent's network stays internal and the agent cannot connect to the relay; the relay
+  asks the control sidecar at each new connection and a closed port refuses at once, while a connection that is open lasts until it ends.
+- **A port is open because the agent said so.** [`expose`](messaging.md#ports-an-agent-opens) opens a declared port for the hub or for the machine. The
+  agent chooses when, and a prompt-injected agent can open any port its template declares: declare only what an agent should be able to serve, and
+  keep `max_exposed` low. The names and the `where` go to everyone who can read the project's status, and each agent sees the others' with `agents`.
 - **The link holds the engine.** A project that names a [hub](managing-projects.md#linking-to-a-hub) runs a sidecar with the engine's socket
   mounted: on a rootful engine it is root-equivalent on its host, like the CLI. Agents do not reach it: it is on a network of its own. A hub that
   is taken over can do what its verbs do on the projects linked to it, which includes attaching to their agents: link only to a hub you trust. A
