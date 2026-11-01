@@ -489,18 +489,27 @@ func TestALinkHoldsFewStreamsOpenTowardsTheHub(t *testing.T) {
 		t.Errorf("%d streams were served and %d refused, want %d and 3", len(open), refused, maxFeeds)
 	}
 	open[0].Close() // a feed that ended leaves room for its next try
-	again, err := link.OpenStream()
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := NewLines(again)
-	if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
-		t.Fatal(err)
-	}
-	again.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var start FeedStart
-	if err := lines.Read(&start); err != nil {
-		t.Errorf("a feed opened again after one ended: %v", err)
+	// the hub hears of the end when it gets there, so a try can come before the room does, as a link's next try would
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		again, err := link.OpenStream()
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := NewLines(again)
+		if err := lines.Write(FeedOpen{Feed: FeedStatus}); err != nil {
+			t.Fatal(err)
+		}
+		again.SetReadDeadline(time.Now().Add(5 * time.Second))
+		var start FeedStart
+		err = lines.Read(&start)
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a feed opened again after one ended: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
