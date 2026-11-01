@@ -44,6 +44,8 @@ type Options struct {
 	LinkURL string
 	// OwnLink says the link endpoint has a listener of its own (LinkHandler), and is not on the UI's.
 	OwnLink bool
+	// PreviewDomain and PreviewScheme are where previews are served; an empty domain: nowhere.
+	PreviewDomain, PreviewScheme string
 }
 
 // Server is the hub's web application.
@@ -145,6 +147,9 @@ func (s *Server) Handler() http.Handler {
 	api("GET "+project+"/a/{agent}/terminal", s.terminal)
 	if !s.opts.OwnLink {
 		mux.HandleFunc("GET "+hublink.Path, s.link)
+	}
+	if s.opts.PreviewDomain != "" {
+		mux.HandleFunc("GET /preview/{host}", s.previewStart)
 	}
 	app := s.appHandler()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

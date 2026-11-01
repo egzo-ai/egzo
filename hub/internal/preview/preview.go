@@ -179,7 +179,7 @@ type routed struct {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host, ok := ParseHost(s.opts.HostOf(r), s.opts.Domain)
 	if !ok {
-		page(w, http.StatusNotFound, "There is no preview at this address.")
+		Page(w, http.StatusNotFound, "There is no preview at this address.")
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/_egzo/") {
@@ -187,7 +187,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.sameOrigin(r, host) {
-		page(w, http.StatusForbidden, "Cross-site request refused.")
+		Page(w, http.StatusForbidden, "Cross-site request refused.")
 		return
 	}
 	ctx, allowed := s.gate.Allow(w, r, host)
@@ -197,10 +197,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	target, err := s.backend.Find(ctx, host.Project, host.ID)
 	switch {
 	case errors.Is(err, ErrOffline):
-		page(w, http.StatusServiceUnavailable, "This project is offline: its link to the hub is not connected.")
+		Page(w, http.StatusServiceUnavailable, "This project is offline: its link to the hub is not connected.")
 		return
 	case err != nil:
-		page(w, http.StatusNotFound, "There is no preview at this address: the agent no longer exposes it.")
+		Page(w, http.StatusNotFound, "There is no preview at this address: the agent no longer exposes it.")
 		return
 	}
 	s.proxy.ServeHTTP(w, r.WithContext(context.WithValue(ctx, requestTarget{}, routed{target, host.Name})))
@@ -280,27 +280,27 @@ func (s *Server) failed(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, context.Canceled):
 		return // the person left
 	case errors.Is(err, errPreviewFull):
-		page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to this preview: at most %d. Try again.", s.opts.PerPreview))
+		Page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to this preview: at most %d. Try again.", s.opts.PerPreview))
 	case errors.Is(err, errHubFull):
-		page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to the previews of this hub: at most %d. Try again.", s.opts.PerHub))
+		Page(w, http.StatusServiceUnavailable, fmt.Sprintf("Too many connections to the previews of this hub: at most %d. Try again.", s.opts.PerHub))
 	case errors.Is(err, ErrOffline):
-		page(w, http.StatusServiceUnavailable, "This project went offline: its link to the hub is not connected.")
+		Page(w, http.StatusServiceUnavailable, "This project went offline: its link to the hub is not connected.")
 	case errors.Is(err, ErrNotFound):
-		page(w, http.StatusNotFound, "There is no preview at this address: the agent no longer exposes it.")
+		Page(w, http.StatusNotFound, "There is no preview at this address: the agent no longer exposes it.")
 	case strings.Contains(err.Error(), "nothing listens on port"):
-		page(w, http.StatusBadGateway, fmt.Sprintf("Nothing listens on port %d in %s now.", target.Port, target.Agent))
+		Page(w, http.StatusBadGateway, fmt.Sprintf("Nothing listens on port %d in %s now.", target.Port, target.Agent))
 	case strings.Contains(err.Error(), "is not running"):
-		page(w, http.StatusBadGateway, fmt.Sprintf("%s is not running.", target.Agent))
+		Page(w, http.StatusBadGateway, fmt.Sprintf("%s is not running.", target.Agent))
 	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timeout awaiting response headers"):
-		page(w, http.StatusGatewayTimeout, fmt.Sprintf("The server on port %d in %s did not answer in time.", target.Port, target.Agent))
+		Page(w, http.StatusGatewayTimeout, fmt.Sprintf("The server on port %d in %s did not answer in time.", target.Port, target.Agent))
 	default:
 		s.log.Info("a preview failed", "project", target.Project, "agent", target.Agent, "port", target.Port, "err", err)
-		page(w, http.StatusBadGateway, fmt.Sprintf("Port %d in %s could not be reached, or did not answer as plain HTTP.", target.Port, target.Agent))
+		Page(w, http.StatusBadGateway, fmt.Sprintf("Port %d in %s could not be reached, or did not answer as plain HTTP.", target.Port, target.Agent))
 	}
 }
 
-// page answers in plain text: no page of the hub's runs on a preview's origin.
-func page(w http.ResponseWriter, status int, text string) {
+// Page answers in plain text: no page of the hub's runs on a preview's origin.
+func Page(w http.ResponseWriter, status int, text string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")

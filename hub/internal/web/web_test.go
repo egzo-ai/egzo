@@ -41,6 +41,7 @@ type rig struct {
 	oidc     *oidctest.Provider
 	signIn   hub.SignInOptions
 	public   string // EGZO_PUBLIC_URL
+	previews string // EGZO_PREVIEW_DOMAIN
 }
 
 var ctx = context.Background()
@@ -89,7 +90,7 @@ func newRigWith(t *testing.T, options []func(*rig)) *rig {
 	}))
 	t.Cleanup(r.server.Close)
 	r.linkURL = r.server.URL
-	app, err := web.New(r.hub, sso, web.Options{SSOName: "Corp", LinkURL: r.linkURL}, urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	app, err := web.New(r.hub, sso, web.Options{SSOName: "Corp", LinkURL: r.linkURL, PreviewDomain: r.previews, PreviewScheme: "http"}, urls, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

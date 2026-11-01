@@ -52,6 +52,7 @@ const (
 	ManageRoles Action = "manage-roles" // grant and remove roles, invite
 	SeeMembers  Action = "see-members"  // see who holds what
 	Unlink      Action = "unlink"       // make the hub forget the project
+	Preview     Action = "preview"      // open an exposed port of an agent, from its link
 )
 
 // CLI is the actor string of the CLI and of agents spawned from it. No person is behind it on the hub: those agents are the
@@ -90,6 +91,8 @@ func Can(subject Subject, role Role, action Action, creator string) bool {
 		return role == Owner
 	case SeeMembers:
 		return role == Owner || subject.IsOperator
+	case Preview:
+		return role.AtLeast(Viewer) // every role: an agent exposes a port on purpose. Overseeing is not a role
 	}
 	return false
 }

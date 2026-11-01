@@ -121,6 +121,7 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID s
 		return err
 	}
 	h.endLostTerminals(project, targetID, role)
+	h.endLostPreviews(project, targetID, role)
 	audit.Allowed = true
 	return h.store.Audit(ctx, audit)
 }

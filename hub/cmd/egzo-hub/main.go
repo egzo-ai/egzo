@@ -17,6 +17,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/auth"
 	"github.com/egzo-ai/egzo/hub/internal/config"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/preview"
 	"github.com/egzo-ai/egzo/hub/internal/publicurl"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
@@ -72,19 +73,23 @@ func run(log *slog.Logger) error {
 		}
 		log.Info("single sign-on", "issuer", cfg.OIDCIssuer, "redirect", redirect)
 	}
-	app, err := web.New(h, sso, web.Options{SSOName: cfg.OIDCName, LinkURL: cfg.LinkURL, OwnLink: cfg.LinkListen != ""}, urls, log)
+	previewScheme, _, _ := strings.Cut(cfg.PublicURL, "://")
+	app, err := web.New(h, sso, web.Options{SSOName: cfg.OIDCName, LinkURL: cfg.LinkURL, OwnLink: cfg.LinkListen != "", PreviewDomain: cfg.PreviewDomain, PreviewScheme: previewScheme}, urls, log)
 	if err != nil {
 		return err
+	}
+
+	if cfg.PreviewDomain != "" {
+		h.ServePreviews(previewScheme, cfg.PreviewDomain) // before a link can connect: each hears it when it does
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go h.Run(ctx)
 
-	failed := make(chan error, 2)
-	serve := func(addr string, handler http.Handler, what string) *http.Server {
-		server := newServer(addr, handler, readLimit)
-		log.Info("egzo-hub listening", "for", what, "addr", addr, "version", version.Version)
+	failed := make(chan error, 3)
+	listen := func(server *http.Server, what string) *http.Server {
+		log.Info("egzo-hub listening", "for", what, "addr", server.Addr, "version", version.Version)
 		go func() {
 			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				failed <- fmt.Errorf("listen: %w", err)
@@ -92,9 +97,13 @@ func run(log *slog.Logger) error {
 		}()
 		return server
 	}
-	servers := []*http.Server{serve(cfg.Listen, app.Handler(), "people")}
+	servers := []*http.Server{listen(newServer(cfg.Listen, app.Handler(), readLimit), "people")}
 	if cfg.LinkListen != "" {
-		servers = append(servers, serve(cfg.LinkListen, app.LinkHandler(), "links"))
+		servers = append(servers, listen(newServer(cfg.LinkListen, app.LinkHandler(), readLimit), "links"))
+	}
+	if cfg.PreviewDomain != "" {
+		previews := preview.New(h.Previews(), app.PreviewGate(), preview.Options{Domain: cfg.PreviewDomain, Scheme: previewScheme, HostOf: urls.Host}, log)
+		servers = append(servers, listen(preview.Listener(cfg.PreviewListen, previews), "previews"))
 	}
 	select {
 	case err := <-failed:
