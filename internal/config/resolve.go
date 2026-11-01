@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,8 @@ type Resolved struct {
 	Name    string               `yaml:"name"`
 	// Hub is the hub the project links to, when it names one.
 	Hub *ResolvedHub `yaml:"hub,omitempty"`
+	// LocalPorts is set when the project turns local ports on.
+	LocalPorts *ResolvedLocalPorts `yaml:"local_ports,omitempty"`
 	// SecretKey is the reference of the project's secret key, which seals what egzo keeps at rest.
 	SecretKey  string                       `yaml:"secret_key"`
 	Vaults     map[string]ResolvedVault     `yaml:"vaults,omitempty"`
@@ -87,6 +90,150 @@ type ResolvedAgent struct {
 	Permissions string            `yaml:"permissions"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	Inject      ResolvedInject    `yaml:"inject"`
+	// Ports are the declared ports by name; nil when the template declares none.
+	Ports map[string]ResolvedPort `yaml:"ports,omitempty"`
+}
+
+// ResolvedPort is a declared port: its number and its protocol (http, tcp or udp).
+type ResolvedPort struct {
+	Port     int    `yaml:"port" json:"port"`
+	Protocol string `yaml:"protocol" json:"protocol"`
+}
+
+// String is the form the file writes, PORT/PROTOCOL.
+func (r ResolvedPort) String() string { return fmt.Sprintf("%d/%s", r.Port, r.Protocol) }
+
+// ResolvedLocalPorts is local_ports with its defaults applied.
+type ResolvedLocalPorts struct {
+	Bind       string `yaml:"bind" json:"bind"`
+	Host       string `yaml:"host" json:"host"`
+	PoolLow    int    `yaml:"pool_low" json:"pool_low"`
+	PoolHigh   int    `yaml:"pool_high" json:"pool_high"`
+	MaxExposed int    `yaml:"max_exposed" json:"max_exposed"`
+}
+
+// Defaults of local_ports.
+const (
+	DefaultPoolLow    = 20000
+	DefaultPoolHigh   = 29999
+	DefaultMaxExposed = 10
+)
+
+// MaxPorts is the most ports a template declares: the bound that keeps the status lines small.
+const MaxPorts = 32
+
+var portName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// Port protocols.
+const (
+	ProtocolHTTP = "http"
+	ProtocolTCP  = "tcp"
+	ProtocolUDP  = "udp"
+)
+
+// ParsePort reads PORT/PROTOCOL.
+func ParsePort(raw string) (ResolvedPort, bool) {
+	number, protocol, ok := strings.Cut(raw, "/")
+	if !ok || (protocol != ProtocolHTTP && protocol != ProtocolTCP && protocol != ProtocolUDP) {
+		return ResolvedPort{}, false
+	}
+	n, err := strconv.Atoi(number)
+	if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != number {
+		return ResolvedPort{}, false
+	}
+	return ResolvedPort{Port: n, Protocol: protocol}, true
+}
+
+// resolveLocalPorts checks local_ports and applies its defaults.
+func resolveLocalPorts(local *LocalPorts, p *problems) *ResolvedLocalPorts {
+	if local == nil {
+		return nil
+	}
+	resolved := &ResolvedLocalPorts{Bind: local.Bind, Host: local.Host, PoolLow: DefaultPoolLow, PoolHigh: DefaultPoolHigh, MaxExposed: DefaultMaxExposed}
+	ip := net.ParseIP(local.Bind)
+	switch {
+	case local.Bind == "":
+		p.addf("local_ports: bind is required: the IP address to listen on, such as 127.0.0.1")
+	case ip == nil:
+		p.addf("local_ports: bind %q is not an IP address", local.Bind)
+	case ip.IsUnspecified() && local.Host == "":
+		p.addf("local_ports: host is required when bind is %s: the name or address people use to reach this machine", local.Bind)
+	}
+	if resolved.Host == "" {
+		resolved.Host = local.Bind
+	}
+	if local.Pool != "" {
+		low, high, ok := parsePool(local.Pool)
+		if !ok {
+			p.addf("local_ports: pool %q is not a range like 20000-29999 within 1 to 65535", local.Pool)
+		} else {
+			resolved.PoolLow, resolved.PoolHigh = low, high
+		}
+	}
+	if local.MaxExposed != nil {
+		if *local.MaxExposed < 1 {
+			p.addf("local_ports: max_exposed must be at least 1")
+		} else {
+			resolved.MaxExposed = *local.MaxExposed
+		}
+	}
+	return resolved
+}
+
+func parsePool(raw string) (low, high int, ok bool) {
+	a, b, found := strings.Cut(raw, "-")
+	if !found {
+		return 0, 0, false
+	}
+	low, err1 := strconv.Atoi(a)
+	high, err2 := strconv.Atoi(b)
+	if err1 != nil || err2 != nil || low < 1 || high > 65535 || low > high {
+		return 0, 0, false
+	}
+	return low, high, true
+}
+
+// resolvePorts checks the ports an agent declares. The checks that need the project (local_ports, hub) are made here
+// too: a port that could never open is refused when the file is read.
+func resolvePorts(agent string, ports map[string]string, resolved *Resolved, p *problems) map[string]ResolvedPort {
+	if len(ports) == 0 {
+		return nil
+	}
+	if len(ports) > MaxPorts {
+		p.addf("agent %q: %d ports are declared, at most %d are allowed", agent, len(ports), MaxPorts)
+	}
+	out := map[string]ResolvedPort{}
+	byNumber := map[int][]bool{} // for each number, whether each port seen is udp
+	raw := 0                       // tcp and udp ports, which a relay opens
+	for _, name := range slices.Sorted(maps.Keys(ports)) {
+		if len(name) > 32 || !portName.MatchString(name) {
+			p.addf("agent %q: port name %q must start with a lowercase letter, hold only lowercase letters, digits and dashes, and be at most 32 characters", agent, name)
+			continue
+		}
+		port, ok := ParsePort(ports[name])
+		if !ok {
+			p.addf("agent %q: port %q is %q, not PORT/PROTOCOL: a number from 1 to 65535, then http, tcp or udp, like 5173/http", agent, name, ports[name])
+			continue
+		}
+		out[name] = port
+		// http runs over tcp, so it takes the tcp side of a number
+		if slices.Contains(byNumber[port.Port], port.Protocol == ProtocolUDP) {
+			p.addf("agent %q: port %d is declared twice: only one tcp and one udp port can share a number", agent, port.Port)
+		}
+		byNumber[port.Port] = append(byNumber[port.Port], port.Protocol == ProtocolUDP)
+		if port.Protocol != ProtocolHTTP {
+			raw++
+			if resolved.LocalPorts == nil {
+				p.addf("agent %q: port %q is %s, which opens only as a local port: add local_ports to the file", agent, name, port.Protocol)
+			}
+		} else if resolved.Hub == nil && resolved.LocalPorts == nil {
+			p.addf("agent %q: port %q is http and could never open: name a hub, or add local_ports to the file", agent, name)
+		}
+	}
+	if resolved.LocalPorts != nil && raw > resolved.LocalPorts.MaxExposed {
+		p.addf("agent %q: %d tcp and udp ports are declared but local_ports.max_exposed is %d: they could not all be open at once", agent, raw, resolved.LocalPorts.MaxExposed)
+	}
+	return out
 }
 
 // ResolvedBuild is an agent's build with its defaults: the context as the file wrote it (relative to the project
@@ -184,6 +331,7 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 	}
 	var warnings []string
 	resolved.Hub, warnings = resolveHub(file.Hub, dir, p)
+	resolved.LocalPorts = resolveLocalPorts(file.LocalPorts, p)
 	if file.Proxy.Image != "" || file.Proxy.Upstream != nil {
 		resolved.Proxy = &ResolvedProxy{Image: file.Proxy.Image, Upstream: resolveUpstream(file.Proxy.Upstream, dir, p)}
 	}
@@ -315,6 +463,7 @@ func resolveAgent(
 		Permissions: permissions,
 		Env:         agent.Env,
 		Inject:      resolveInject(name, agent, p),
+		Ports:       resolvePorts(name, agent.Ports, resolved, p),
 	}, warnings
 }
 
