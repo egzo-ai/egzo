@@ -443,3 +443,32 @@ func TestAnExistingMoreOpenFileBecomesPrivateWhenThePlanSaysSo(t *testing.T) {
 		t.Errorf("mode = %v", info.Mode().Perm())
 	}
 }
+
+func TestAnAgentWithPortsIsToldThemAndOneWithoutIsToldNothingAboutPorts(t *testing.T) {
+	none := string(Instructions("", nil))
+	for _, word := range []string{"expose", "0.0.0.0", "declares", "unexpose"} {
+		if strings.Contains(none, word) {
+			t.Errorf("an agent without ports is told about %q", word)
+		}
+	}
+	ports, err := ParsePorts(`{"ports":{"web":"5173/http","db":"5432/tcp"},"hub":true,"local":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	told := string(Instructions("my prompt", ports))
+	for _, needed := range []string{"web (port 5173, http)", "db (port 5432, tcp)", "0.0.0.0", "expose(name, where)", `"hub"`, `"local"`, "unexpose(name)", "my prompt"} {
+		if !strings.Contains(told, needed) {
+			t.Errorf("an agent with ports is not told %q:\n%s", needed, told)
+		}
+	}
+	local, _ := ParsePorts(`{"ports":{"db":"5432/tcp"},"hub":false,"local":true}`)
+	if text := string(Instructions("", local)); strings.Contains(text, `"hub"`) || !strings.Contains(text, `"local"`) {
+		t.Errorf("only the places this project has are offered:\n%s", text)
+	}
+	if none, err := ParsePorts(""); none != nil || err != nil {
+		t.Error("no value is no ports")
+	}
+	if _, err := ParsePorts("{"); err == nil {
+		t.Error("a value that is not JSON was taken")
+	}
+}

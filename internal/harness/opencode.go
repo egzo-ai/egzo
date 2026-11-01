@@ -132,7 +132,7 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		command = []string{"opencode"}
 	}
 	encoded, _ := json.MarshalIndent(config, "", "  ")
-	instructions := Instructions(opts.Prompt)
+	instructions := Instructions(opts.Prompt, opts.Ports)
 	return Plan{
 		Files: map[string]File{
 			configPath: {Content: encoded, Merge: true, Mode: 0o600, Replace: replace},

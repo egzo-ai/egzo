@@ -161,6 +161,11 @@ func runAgent(args []string) error {
 			options.Authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(agent+":"+token))
 		}
 		options.Prompt = os.Getenv("EGZO_PROMPT")
+		ports, err := harness.ParsePorts(os.Getenv(harness.PortsEnv))
+		if err != nil {
+			return err
+		}
+		options.Ports = ports
 		plan, err := integration.Plan(options, args)
 		if err != nil {
 			return err
