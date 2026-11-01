@@ -220,7 +220,8 @@ no valid owner: the operators see it, and grant a new owner or revoke it.
 2. **Core**: `hub:`, the `link` role, registration, the protocol with the verbs and streams, the pushed feeds, with specs.
 3. **The hub**: the link endpoint, the seam over the link, registration pages, projects by id; then remove the engines and
    everything listed above.
-4. **Previews** ([agent-ports.md](agent-ports.md)) over the link.
+4. **Previews** ([agent-ports.md](agent-ports.md)) over the link. Only `http` ports exposed with `where: hub` are previews
+   ([declared-local-ports.md](declared-local-ports.md)).
 5. **Roles and invites**: invites, the viewer role, the project quota, operators.
 
 ## Spike results

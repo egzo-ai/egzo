@@ -1,7 +1,11 @@
 # Roadmap: opening an agent's dev server from outside (port forward, hub previews)
 
-**Status.** In progress. Built so far: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward` (below), and the
-viewer role and invites ([hub-link.md](hub-link.md)).
+**Status.** In progress. Built so far: the `__Host-` cookies, `egzo agent forward` (below), and the viewer role and invites
+([hub-link.md](hub-link.md)).
+
+**What changed.** [declared-local-ports.md](declared-local-ports.md) replaces what this file said about the `expose` tool, `egzo agent
+port-forward` and raw TCP: ports are declared by name in the template, `expose(name, where)` opens one for the hub or for the local
+machine, and `port-forward` is gone. The preview design below (the hub listener, signing in, the certificates) stands.
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
 itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,
@@ -24,8 +28,8 @@ the browser. A port is the same, without a terminal:
 2. `POST /exec/{id}/start` hijacks the HTTP connection into a raw stream, over whatever carries the engine API.
 3. In the container, `egzo agent forward` connects to `127.0.0.1:3000` and copies bytes between that socket and its stdin and
    stdout. End of stdin shuts down the socket's write side; the server closing ends the command.
-4. The client copies bytes between its end of the stream and whoever wants the port. The client is the CLI
-   (`egzo agent port-forward`), or the project's link, for the hub, which carries the bytes over its connection.
+4. The client copies bytes between its end of the stream and whoever wants the port. For the hub the client is the project's link, which
+   carries the bytes over its connection.
 
 ```
 browser ──HTTPS──▶ hub (machine A) ◀──link connection, outbound from B──  link (machine B) ──exec──▶ agent container
@@ -46,31 +50,17 @@ browser ──HTTPS──▶ hub (machine A) ◀──link connection, outbound 
 
 ### The agent exposes a port: the `expose` tool
 
-The agent decides what is a preview: it knows it started a demo, on which port, and what it is. The `egzo` MCP server gets two
-tools:
+Replaced by [declared-local-ports.md](declared-local-ports.md): the template declares each port by name, and the agent calls
+`expose(name, where)` with `where` set to `hub` or `local`. What stays from this design, for `hub`:
 
-- **`expose(port, name?, protocol?)`**: records that the agent serves something on `port` of its own loopback, with an optional
-  short name ("shop") and a protocol, `http` (the default) or `tcp`. For `http` it answers with **the preview's address** when a
-  hub serves the project (`https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`). Otherwise it answers with the command
-  a person runs instead (`egzo agent port-forward coder-1 3000`): without a hub, and for `tcp`, which the hub does not serve yet.
-  The agent passes the answer to its user. Exposing an exposed port again changes its name and protocol and keeps its id.
-- **`unexpose(port)`**: the preview is gone; the address answers 404 until the port is exposed again.
-- **Previews are plain HTTP**: HTTP/1.1, WebSockets and event streams. A server that speaks TLS itself, or anything else, is a
-  `tcp` exposure. `udp` is not accepted: `engine exec` is a byte stream, and datagrams carried in one lose what UDP is for.
-- **A restart of the agent ends its exposures**: the server is gone and the agent starts with no memory of them, so it starts with
-  nothing exposed and exposes what it needs, which its prompt can ask of it. The sandbox tells control before the harness starts,
-  so the first thing a harness does may be to expose a port. A restart of the sidecars ends nothing.
-- Nothing is checked at `expose` time: a server may start after it, and stop and start again. A preview of a port where nothing
-  listens says so to the viewer ("nothing listens on port 3000 in coder-1 now").
-- The control sidecar keeps the exposures per agent name, next to the registration, on its volume. The agent's removal removes them. The status feed carries
-  them, so the hub learns of a new preview from the link within a second.
+- **A restart of the agent ends its exposures**, and a restart of the sidecars ends nothing. Control keeps the exposures per agent name,
+  next to the registration, and the agent's removal removes them. The status feed carries them.
 - **The id** in the address is an HMAC of the agent's registration and the port under the project key (80 bits, 16 characters of
-  base32): stable, so an agent that exposes a port again gets back the address it already gave out, and nothing has to be kept
-  for that. Control keeps registrations by name and knows no instance id (`roadmap/instance-id.md`), so the exposures belong to the
-  registration: every removal unregisters the agent, and a new instance of the name, with a registration of its own, never
+  base32): stable, so an agent that exposes a port again gets back the address it already gave out. A new instance of the name never
   inherits an old one's address. Opaque, never the project's or the agent's name: links travel in chat and logs.
-- **The address** is made from a template control learns from the hub (below). Without one, the answer is the `port-forward`
-  command. Control never needs to reach the hub.
+- **The address** is made from a template control learns from the hub (below). Without one, `hub` is refused. Control never needs to
+  reach the hub.
+- Previews are plain HTTP: HTTP/1.1, WebSockets and event streams. Nothing is checked at `expose` time: a server may start after it.
 
 ### Where the address comes from
 
@@ -84,31 +74,21 @@ A verdict that does not approve the project clears the template, and so does `up
 names the domain, so a project moved to another hub gets that hub's. A template does not contain addresses: control keeps the ids,
 so a hub that moves to another domain moves every preview with it.
 
-### For people without a hub
+### The in-container verb
 
 - **`egzo agent forward <port>`**, the in-container role above, like `egzo agent attach`. Loopback only (`127.0.0.1`, then
   `::1`). A port where nothing listens is an exit status and one line on stderr that the client shows.
-- **`egzo agent port-forward <agent> [[address:]local:]port`** on the host, like `kubectl port-forward`: listens on
-  `127.0.0.1:<local>` (default: the same number) of the machine where it runs, and opens one exec per connection it accepts. With
-  `DOCKER_HOST=ssh://box` on a laptop, the port is on the laptop. Ctrl-C ends it; it ends by itself when the agent stops. It
-  forwards any port, exposed or not: whoever holds the engine holds the agent anyway. `port-forward` first asks the image's egzo
-  whether it can forward: what a failed exec says goes down the stream, so a client would read it as the server's words.
 - **A client gone and a server that ignores it.** The end of stdin shuts down the socket's write side, because the client may only
   have ended its input. A stream cannot tell that from a client that left, so `egzo agent forward` gives the server a minute of
   silence after the end of stdin, then exits.
 - **`egzo agent ls`** / **`egzo ps --json`** show the exposed ports.
 
+People without a hub use `local` ports, through a relay: see [declared-local-ports.md](declared-local-ports.md).
+
 ### Specs
 
-- `expose` without an address template answers the `port-forward` command; with one, the address; the same address again after
-  `expose` again; nothing exposed after a restart of the agent, and the same address when the port is exposed again; nothing changed
-  by a restart of the sidecar; another address after the agent is removed and a new one has its name.
-- `expose` with `tcp` answers the `port-forward` command, with a template too; `udp` and anything else is refused.
-- `unexpose`; the exposures in the status log line and in `ps --json`; an agent cannot expose for another.
 - `egzo agent forward --announce` says it connected before any byte, and says nothing when nothing listens; `--close-on-eof` ends
   at the end of stdin, and without it a half-closed client still gets its answer.
-- A server in an agent reached through `port-forward`: bytes both ways, a WebSocket upgrade, a large body, the server closing
-  first, the client closing first; a server bound to `127.0.0.1` only; nothing listening; a stopped agent.
 - On every reference platform, gVisor included.
 
 ## The hub: previews
@@ -210,8 +190,7 @@ role to open it, as for a terminal.
 
 A **Previews** panel for the project's users, admins and owners (a viewer has links, not pages), on the agent page,
 and on the project page for every agent: each exposed port with its name and address,
-**Open**, and **Copy link**. No preview domain configured, or a `tcp` exposure: the panel shows the `egzo agent port-forward`
-command, and says what to set where that helps.
+**Open**, and **Copy link**. No preview domain configured: the panel says what to set where that helps.
 
 ## Certificates for the preview domain: a wildcard, with DNS-01
 
@@ -235,7 +214,7 @@ an example compose file may follow.
 
 ## Order of work
 
-Built: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward`, the link, the viewer role and invites.
+Built: the `__Host-` cookies, `egzo agent forward`, the link, the viewer role and invites.
 
 1. Core, with specs: `forward --announce` and `--close-on-eof`, the `expose` and `unexpose` tools, the exposures in the status feed
    and `ps`, the address template from the hub through the link. Docs: `docs/messaging.md` (the tools),
@@ -251,9 +230,9 @@ Built: the `__Host-` cookies, `egzo agent forward` and `egzo agent port-forward`
 ## Open questions
 
 - How a person reaches a `tcp` exposure through the hub: a client on their machine, which needs the CLI to sign in to the hub,
-  and which roles may. The stream it needs is the `forward` verb, as it is.
+  and which roles may. The stream it needs is the `forward` verb, as it is. Raw ports are local only for now.
 
-A person may not open a port the agent did not expose, from the hub: the link refuses it. The CLI's `port-forward` still can.
+A person may not open a port the agent did not expose, from the hub: the link refuses it.
 
 ## Alternatives considered
 
