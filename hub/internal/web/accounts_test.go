@@ -158,7 +158,7 @@ func TestADisabledUserIsRefusedLosesTheirSessionsAndTheirTerminals(t *testing.T)
 	if code, _ := bob.get("/session"); code != 401 {
 		t.Errorf("the disabled user's session = %d", code)
 	}
-	if final := r.browser().sso(r.server.URL+"/login/start", "bob"); final.Path != "/login" || final.Query().Get("error") != "Sign-in refused." {
+	if final := r.browser().sso(r.server.URL+"/login/start", "bob"); final.Path != "/login" || final.Query().Get("error") != "refused" {
 		t.Errorf("a disabled user's sign-in ended on %s", final)
 	}
 	_, users := op.get("/users")
@@ -302,12 +302,12 @@ func TestTheStarterAccountLinksSSOAndThenSignsInWithIt(t *testing.T) {
 	}
 
 	// a second account at the same provider is refused; so is an account of somebody else
-	if final := admin.link("boss2"); !strings.Contains(final.Query().Get("error"), "Unlink it first") {
+	if final := admin.link("boss2"); final.Query().Get("error") != "issuer_linked" {
 		t.Errorf("a second account at one provider: %s", final)
 	}
 	r.browser().signIn("alice")
 	admin.del("/me/identities/" + ids[0]["id"].(string))
-	if final := admin.link("alice"); !strings.Contains(final.Query().Get("error"), "already belongs to alice") {
+	if final := admin.link("alice"); final.Query().Get("error") != "identity_taken" {
 		t.Errorf("somebody else's account: %s", final)
 	}
 }
@@ -438,5 +438,26 @@ func TestAnOperatorReadsTheWholeHubsAuditLogAndNobodyElse(t *testing.T) {
 	last := entries[0]["id"].(float64)
 	if _, older := root.get(fmt.Sprintf("/audit?before=%d", int64(last))); len(list(older, "entries")) != len(entries)-1 {
 		t.Errorf("the page after the newest entry = %v", older)
+	}
+}
+
+func TestAFailedSignInSaysWhyWithACodeAndNotWithTheAddressesText(t *testing.T) {
+	r := newRig(t)
+	b := r.browser()
+	b.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := b.client.Get(b.base + "/login/start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	sent, _ := url.Parse(resp.Header.Get("Location"))
+	q := url.Values{"state": {sent.Query().Get("state")}, "error": {"Call 555-0100 to keep your account"}}
+	resp, err = b.client.Get(b.base + "/auth/callback?" + q.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Location"); got != "/login?error=provider_refused" {
+		t.Errorf("the callback sent the browser to %q", got)
 	}
 }

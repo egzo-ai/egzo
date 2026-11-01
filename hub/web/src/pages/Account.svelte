@@ -3,11 +3,12 @@
   import { app, errorText, refreshSession, toast } from "../lib/app.svelte";
   import { ask } from "../lib/confirm.svelte";
   import { nav } from "../lib/router.svelte";
+  import { failureText } from "../lib/signin";
   import type { Identity } from "../lib/types";
   import PersonCell from "../components/PersonCell.svelte";
 
   const params = $derived(new URLSearchParams(nav.path.split("?")[1] ?? ""));
-  const error = $derived(params.get("error"));
+  const error = $derived(failureText(params.get("error")));
   const linked = $derived(params.get("linked") === "1");
   let busy = $state(false);
 

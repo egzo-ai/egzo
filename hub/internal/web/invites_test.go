@@ -26,7 +26,7 @@ func codeOf(t *testing.T, r *rig, made json_) string {
 func TestAStrangerAtTheProviderIsRefusedAndNoAccountIsMade(t *testing.T) {
 	r := newRig(t)
 	final := r.browser().sso(r.server.URL+"/login/start", "stranger")
-	if final.Path != "/login" || !strings.Contains(final.Query().Get("error"), "takes an invite") {
+	if final.Path != "/login" || final.Query().Get("error") != "no_invite" {
 		t.Errorf("the sign-in ended on %s", final)
 	}
 	if _, err := r.store.UserByName(ctx, "stranger"); err == nil {

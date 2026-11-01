@@ -355,13 +355,13 @@ func (s *Server) providerURL(w http.ResponseWriter, r *http.Request, next, link,
 
 func (s *Server) loginStart(w http.ResponseWriter, r *http.Request) {
 	if s.auth == nil {
-		s.loginFail(w, r, "Single sign-on is not configured.")
+		s.loginFail(w, r, failNoSSO)
 		return
 	}
 	target, err := s.providerURL(w, r, r.URL.Query().Get("next"), "", "")
 	if err != nil {
 		s.log.Error("login", "err", err)
-		s.loginFail(w, r, err.Error())
+		s.loginFail(w, r, failLogin)
 		return
 	}
 	http.Redirect(w, r, target, http.StatusFound)
@@ -385,33 +385,34 @@ func (s *Server) linkStart(w http.ResponseWriter, r *http.Request, user store.Us
 func (s *Server) loginCallback(w http.ResponseWriter, r *http.Request) {
 	c, err := s.readCookie(r, loginCookie)
 	if err != nil || s.auth == nil {
-		s.loginFail(w, r, "The login did not start here. Try again.")
+		s.loginFail(w, r, failNotStarted)
 		return
 	}
 	http.SetCookie(w, s.cookie(r, loginCookie, "", -time.Hour))
 	l, ok := decodeLoginState(c.Value)
 	if !ok {
-		s.loginFail(w, r, "The login state is damaged. Try again.")
+		s.loginFail(w, r, failState)
 		return
 	}
 	if r.URL.Query().Get("state") != l.state || l.state == "" {
-		s.loginFail(w, r, "The login state does not match. Try again.")
+		s.loginFail(w, r, failState)
 		return
 	}
 	fail := s.loginFail
 	if l.link != "" {
-		fail = func(w http.ResponseWriter, r *http.Request, message string) {
-			http.Redirect(w, r, "/settings/account?error="+url.QueryEscape(message), http.StatusSeeOther)
+		fail = func(w http.ResponseWriter, r *http.Request, code string) {
+			http.Redirect(w, r, "/settings/account?error="+code, http.StatusSeeOther)
 		}
 	}
 	if e := r.URL.Query().Get("error"); e != "" {
-		fail(w, r, "The login provider refused: "+e)
+		s.log.Warn("the login provider refused", "error", e, "description", r.URL.Query().Get("error_description"))
+		fail(w, r, failProvider)
 		return
 	}
 	claims, err := s.auth.Complete(r.Context(), s.urls.Base(r)+"/auth/callback", r.URL.Query().Get("code"), l.nonce, l.verifier)
 	if err != nil {
 		s.log.Warn("login failed", "err", err)
-		fail(w, r, "Login failed: "+err.Error())
+		fail(w, r, failLogin)
 		return
 	}
 	profile := store.Profile{Email: claims.Email, EmailVerified: claims.EmailVerified, Name: claims.Name, PreferredUsername: claims.PreferredUsername, Picture: claims.Picture}
@@ -422,24 +423,29 @@ func (s *Server) loginCallback(w http.ResponseWriter, r *http.Request) {
 	user, identityID, unspent, err := s.hub.IdentityLogin(r.Context(), claims.Issuer, claims.Subject, profile, l.invite)
 	switch {
 	case errors.Is(err, hub.ErrNoInvite):
-		fail(w, r, "An account on this hub takes an invite. Ask a project's owner or an operator for one, and open its link.")
+		fail(w, r, failNoInvite)
 		return
 	case errors.Is(err, hub.ErrBadInvite):
-		fail(w, r, inviteGone)
+		fail(w, r, failBadInvite)
+		return
+	case errors.Is(err, hub.ErrSignInRefused):
+		fail(w, r, failRefused)
 		return
 	case err != nil:
-		fail(w, r, capitalize(err.Error())+".")
+		s.log.Warn("login failed", "err", err)
+		fail(w, r, failLogin)
 		return
 	}
 	token, err := s.hub.Store().NewSession(r.Context(), user.ID, store.MethodIdentity, identityID, s.session)
 	if err != nil {
-		fail(w, r, err.Error())
+		s.log.Error("login", "err", err)
+		fail(w, r, failLogin)
 		return
 	}
 	http.SetCookie(w, s.cookie(r, sessionCookie, token, s.session))
 	if unspent {
 		if _, err := s.hub.AcceptInvite(r.Context(), user, l.invite); err != nil {
-			http.Redirect(w, r, "/?invite="+url.QueryEscape(inviteGone), http.StatusSeeOther)
+			http.Redirect(w, r, "/?invite=gone", http.StatusSeeOther)
 			return
 		}
 	}
@@ -454,18 +460,18 @@ func (s *Server) linkCallback(w http.ResponseWriter, r *http.Request, l loginSta
 		user, err = s.hub.Store().SessionUser(r.Context(), c.Value)
 	}
 	if err != nil || user.ID != l.link {
-		s.loginFail(w, r, "The link was started by somebody who is no longer signed in here. Sign in and try again.")
+		s.loginFail(w, r, failLinkStale)
 		return
 	}
 	if _, err := s.hub.LinkIdentity(r.Context(), user, claims.Issuer, claims.Subject, profile); err != nil {
-		var taken *store.IdentityTakenError
 		switch {
-		case errors.As(err, &taken):
-			fail(w, r, "That account at the provider already belongs to "+taken.Username+". An operator can disable that user and remove the account from it.")
+		case errors.As(err, new(*store.IdentityTakenError)):
+			fail(w, r, failIdentityTaken)
 		case errors.Is(err, hub.ErrIssuerLinked):
-			fail(w, r, "You already have an account at this provider linked. Unlink it first.")
+			fail(w, r, failIssuerLinked)
 		default:
-			fail(w, r, "Linking failed: "+err.Error())
+			s.log.Warn("linking failed", "err", err)
+			fail(w, r, failLink)
 		}
 		return
 	}
@@ -479,9 +485,26 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// loginFail sends the browser back to the sign-in screen with what went wrong; the app shows it as text.
-func (s *Server) loginFail(w http.ResponseWriter, r *http.Request, message string) {
-	http.Redirect(w, r, "/login?error="+url.QueryEscape(message), http.StatusSeeOther)
+// Why a sign-in or a link failed, as the app hears it in the address. An address can be written by anybody, so what it shows is never taken from
+// one: it has words for these codes (hub/web/src/lib/signin.ts) and for nothing else, and the details are in the hub's log.
+const (
+	failNoSSO         = "no_sso"
+	failNotStarted    = "not_started"
+	failState         = "bad_state"
+	failProvider      = "provider_refused"
+	failLogin         = "login_failed"
+	failNoInvite      = "no_invite"
+	failBadInvite     = "bad_invite"
+	failRefused       = "refused"
+	failLinkStale     = "link_stale"
+	failIdentityTaken = "identity_taken"
+	failIssuerLinked  = "issuer_linked"
+	failLink          = "link_failed"
+)
+
+// loginFail sends the browser back to the sign-in screen with the code of what went wrong.
+func (s *Server) loginFail(w http.ResponseWriter, r *http.Request, code string) {
+	http.Redirect(w, r, "/login?error="+code, http.StatusSeeOther)
 }
 
 // --- terminals of a session --------------------------------------------------------------------------------------------------
