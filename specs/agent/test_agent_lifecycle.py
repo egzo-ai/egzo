@@ -17,7 +17,7 @@ import pytest
 from conftest import LABEL_PREFIX
 from support import custom, spec
 
-PS_COLUMNS = ["NAME", "SERVICE", "STATE", "HEALTH", "ACTIVITY", "OPEN", "WAITING", "ACTOR", "AGE", "STALE", "STATUS"]
+PS_COLUMNS = ["NAME", "SERVICE", "STATE", "HEALTH", "ACTIVITY", "OPEN", "WAITING", "ACTOR", "AGE", "STALE", "PORTS", "STATUS"]
 
 
 @pytest.fixture(scope="module")
