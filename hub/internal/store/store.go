@@ -979,8 +979,9 @@ type AuditEntry struct {
 	Allowed        bool
 }
 
+// Audit writes an entry. What it records has happened, so a request that went away in the meantime does not stop it.
 func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO audit (at, actor, action, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	_, err := s.db.ExecContext(context.WithoutCancel(ctx), `INSERT INTO audit (at, actor, action, project, agent, detail, allowed) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		time.Now().Unix(), e.Actor, e.Action, e.Project, e.Agent, e.Detail, boolInt(e.Allowed))
 	return err
 }

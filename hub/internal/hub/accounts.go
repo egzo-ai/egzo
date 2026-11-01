@@ -152,14 +152,14 @@ func (h *Hub) PasswordLogin(ctx context.Context, username, password string) (sto
 			}
 			h.log.Info("password sign-in refused: no such user", "username", username)
 		} else {
-			_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: fmt.Sprintf("refused: password for %q", user.Username)})
+			h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: fmt.Sprintf("refused: password for %q", user.Username)})
 		}
 		return store.User{}, ErrBadLogin
 	}
 	if err := h.store.MarkLogin(ctx, user.ID); err != nil {
 		return store.User{}, err
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: "password", Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.signin", Detail: "password", Allowed: true})
 	return user, nil
 }
 
@@ -173,7 +173,7 @@ func (h *Hub) IdentityLogin(ctx context.Context, issuer, subject string, p store
 	}
 	user, identityID, spent, created, err := h.store.LoginIdentity(ctx, issuer, subject, p, invite)
 	if errors.Is(err, store.ErrDisabled) {
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: "hub", Action: "user.signin", Detail: fmt.Sprintf("refused: a disabled user, at %s as %s", issuer, subject)})
+		h.record(ctx, store.AuditEntry{Actor: "hub", Action: "user.signin", Detail: fmt.Sprintf("refused: a disabled user, at %s as %s", issuer, subject)})
 		return store.User{}, "", false, ErrSignInRefused
 	}
 	if errors.Is(err, store.ErrNoInvite) || errors.Is(err, store.ErrBadInvite) {
@@ -184,7 +184,7 @@ func (h *Hub) IdentityLogin(ctx context.Context, issuer, subject string, p store
 		return store.User{}, "", false, err
 	}
 	if created {
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: fmt.Sprintf("%s, at %s", user.Username, issuer), Allowed: true})
+		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: fmt.Sprintf("%s, at %s", user.Username, issuer), Allowed: true})
 		h.auditRedeemed(ctx, user, spent)
 	}
 	return user, identityID, invite != "" && !created, nil
@@ -199,7 +199,7 @@ func (h *Hub) LinkIdentity(ctx context.Context, user store.User, issuer, subject
 	identity, err := h.store.LinkIdentity(ctx, user.ID, issuer, subject, p)
 	if err != nil {
 		entry.Detail = "refused: " + err.Error() + ": " + entry.Detail
-		_ = h.store.Audit(ctx, entry)
+		h.record(ctx, entry)
 		return store.Identity{}, err
 	}
 	entry.Allowed = true
@@ -258,7 +258,7 @@ func (h *Hub) SetDisabled(ctx context.Context, actor store.User, targetID string
 	changed, ended, err := h.store.SetDisabled(ctx, targetID, on)
 	if errors.Is(err, store.ErrOperator) {
 		entry.Detail = "refused: an operator: " + entry.Detail
-		_ = h.store.Audit(ctx, entry)
+		h.record(ctx, entry)
 		return nil, ErrCannotDisable
 	}
 	if err != nil || !changed {

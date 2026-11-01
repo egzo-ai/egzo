@@ -89,7 +89,7 @@ func (h *Hub) createInvite(ctx context.Context, user store.User, i store.Invite)
 	if err != nil {
 		return store.Invite{}, "", err
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "invite.create", Project: i.Project, Detail: made.ID + ": " + grantsOf(i), Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "invite.create", Project: i.Project, Detail: made.ID + ": " + grantsOf(i), Allowed: true})
 	return made, code, nil
 }
 
@@ -197,11 +197,11 @@ func (h *Hub) RegisterLocal(ctx context.Context, code, username, password string
 	if err != nil {
 		return store.User{}, err
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: user.Username + ", with a password", Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "user.create", Detail: user.Username + ", with a password", Allowed: true})
 	h.auditRedeemed(ctx, user, i)
 	return user, nil
 }
 
 func (h *Hub) auditRedeemed(ctx context.Context, user store.User, i store.Invite) {
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "invite.redeem", Project: i.Project, Detail: i.ID + ": " + grantsOf(i), Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "invite.redeem", Project: i.Project, Detail: i.ID + ": " + grantsOf(i), Allowed: true})
 }

@@ -308,6 +308,13 @@ func (h *Hub) authorize(ctx context.Context, user store.User, id, agent string, 
 	return role, nil
 }
 
+// record writes an entry for something that has been decided already: the action stands, so a failure is for the log.
+func (h *Hub) record(ctx context.Context, entry store.AuditEntry) {
+	if err := h.store.Audit(ctx, entry); err != nil {
+		h.log.Error("the audit log was not written", "action", entry.Action, "actor", entry.Actor, "project", entry.Project, "err", err)
+	}
+}
+
 // require checks one action that writes its own entry when it is done: only a refusal is written here.
 func (h *Hub) require(ctx context.Context, user store.User, id string, action rbac.Action, audit string) error {
 	role, err := h.access(ctx, user, id)
@@ -315,7 +322,7 @@ func (h *Hub) require(ctx context.Context, user store.User, id string, action rb
 		return err
 	}
 	if !rbac.Can(user.Subject(), role, action, "") {
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: audit, Project: id, Detail: fmt.Sprintf("refused: %s needs more than %s", action, role)})
+		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: audit, Project: id, Detail: fmt.Sprintf("refused: %s needs more than %s", action, role)})
 		return ErrForbidden
 	}
 	return nil

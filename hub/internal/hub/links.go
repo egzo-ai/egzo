@@ -126,7 +126,7 @@ func (h *Hub) register(ctx context.Context, hello links.Hello, code string) (sto
 	case errors.Is(err, store.ErrKeyTaken):
 		return h.store.RegistrationByKey(ctx, hello.Key)
 	case errors.Is(err, store.ErrOverQuota):
-		_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(reg.Owner), Action: "project.register", Detail: "refused: the project quota is used up: " + hello.Project + " on " + hello.Host})
+		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(reg.Owner), Action: "project.register", Detail: "refused: the project quota is used up: " + hello.Project + " on " + hello.Host})
 		return reg, ErrBadCode
 	case errors.Is(err, store.ErrBadCode):
 		return reg, ErrBadCode
@@ -134,7 +134,7 @@ func (h *Hub) register(ctx context.Context, hello links.Hello, code string) (sto
 		return reg, err
 	}
 	h.log.Info("a project registered", "project", reg.Name, "host", reg.Host, "id", reg.ID)
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(reg.Owner), Action: "project.register", Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(reg.Owner), Action: "project.register", Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
 	return reg, nil
 }
 
@@ -283,7 +283,7 @@ func (h *Hub) forget(ctx context.Context, reg store.Registration, state, action,
 	h.mu.Unlock()
 	h.feeds.forget(reg.ID)
 	h.forgetTasks(reg.ID)
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: actor, Action: action, Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: actor, Action: action, Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
 	return nil
 }
 
@@ -293,7 +293,7 @@ func (h *Hub) requireOperator(ctx context.Context, user store.User, action, proj
 	if user.IsOperator {
 		return nil
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: action, Project: project, Detail: "refused: only an operator may do that"})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: action, Project: project, Detail: "refused: only an operator may do that"})
 	return ErrForbidden
 }
 
@@ -312,7 +312,7 @@ func (h *Hub) CreateLinkCode(ctx context.Context, user store.User) (store.LinkCo
 			return store.LinkCode{}, "", err
 		}
 		if have >= user.ProjectQuota {
-			_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.create", Detail: fmt.Sprintf("refused: %d of %d projects", have, user.ProjectQuota)})
+			h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.create", Detail: fmt.Sprintf("refused: %d of %d projects", have, user.ProjectQuota)})
 			return store.LinkCode{}, "", ErrOverQuota
 		}
 	}
@@ -320,7 +320,7 @@ func (h *Hub) CreateLinkCode(ctx context.Context, user store.User) (store.LinkCo
 	if err != nil {
 		return store.LinkCode{}, "", err
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.create", Detail: made.ID, Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.create", Detail: made.ID, Allowed: true})
 	return made, code, nil
 }
 
@@ -357,7 +357,7 @@ func (h *Hub) CancelLinkCode(ctx context.Context, user store.User, id string) er
 		}
 		return err
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.cancel", Detail: id, Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "linkcode.cancel", Detail: id, Allowed: true})
 	return nil
 }
 
@@ -407,7 +407,7 @@ func (h *Hub) Revoke(ctx context.Context, user store.User, id, why string) error
 	if err != nil {
 		return err
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "project.revoke", Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "project.revoke", Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
 	if c := h.connected(reg.ID); c != nil {
 		c.served.Store(false)
 		if _, err := h.tell(ctx, c); err != nil {

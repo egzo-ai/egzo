@@ -82,7 +82,7 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID s
 		Detail: fmt.Sprintf("%s -> %q", targetID, role)}
 	refuse := func(err error, why string) error {
 		audit.Detail = "refused: " + why + audit.Detail
-		_ = h.store.Audit(ctx, audit)
+		h.record(ctx, audit)
 		return err
 	}
 	if !rbac.Can(actor.Subject(), actorRole, rbac.SeeMembers, "") {
@@ -184,7 +184,7 @@ func (h *Hub) SetOperator(ctx context.Context, actor store.User, targetID string
 	changed, err := h.store.SetOperator(ctx, targetID, on)
 	if errors.Is(err, store.ErrLastOperator) {
 		entry.Detail = "refused: the last operator: " + entry.Detail
-		_ = h.store.Audit(ctx, entry)
+		h.record(ctx, entry)
 		return ErrLastOperator
 	}
 	if errors.Is(err, store.ErrDisabled) {

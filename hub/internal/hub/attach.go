@@ -89,7 +89,7 @@ func (h *Hub) Attach(ctx context.Context, user store.User, project, agent string
 	if previous != nil {
 		detail = "took over from " + previous.name
 	}
-	_ = h.store.Audit(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "agent.attach", Project: project, Agent: agent, Detail: detail, Allowed: true})
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "agent.attach", Project: project, Agent: agent, Detail: detail, Allowed: true})
 	return att, nil
 }
 
