@@ -576,6 +576,18 @@ def test_the_audit_log_shows_who_did_what_and_what_was_refused(hub, page, new_pe
     expect(audit.locator("tr.refused")).to_contain_text("alice")
 
 
+def test_an_operator_reads_what_was_done_on_the_whole_hub(hub, page, new_person):
+    sign_in(page, hub, "admin")
+    alice = new_person("alice")
+    alice.goto(hub.url + "/settings/audit")
+    expect(alice.get_by_role("heading", name="Forbidden")).to_be_visible()
+
+    page.goto(hub.url + "/settings/audit")
+    audit = page.get_by_test_id("audit")
+    expect(audit).to_contain_text("user.signin")
+    expect(audit.locator("tbody tr").first).to_be_visible()
+
+
 def test_the_spec_and_the_logs_are_read_only_text(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + single_hub.p("web"))

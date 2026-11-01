@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
+  AgentAnswer, AuditEntry, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -105,6 +105,7 @@ export const api = {
   /** The hub forgets the project; it keeps running on its machine. */
   unlinkProject: (id: string) => request<{ ok: true }>("POST", `${project(id)}/unlink`),
   audit: (id: string) => request<{ entries: AuditEntry[] }>("GET", `${project(id)}/audit`).then((r) => r.entries),
+  hubAudit: (before?: number) => request<{ entries: HubAuditEntry[] }>("GET", `/audit${before ? `?before=${before}` : ""}`).then((r) => r.entries),
   network: (id: string, agentName = "") =>
     request<Network>("GET", `${project(id)}/network${agentName ? "?agent=" + enc(agentName) : ""}`),
 

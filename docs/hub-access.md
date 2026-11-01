@@ -138,7 +138,7 @@ operator cannot be removed.
 
 - **An operator oversees.** They see every project, its owners, its agents and their state, and the links. They manage the users, the invites and the
   quotas, and can revoke any project.
-- **To go further they give themselves a role.** A terminal, logs, a project's network, its timeline and its audit log take a role on the project,
+- **To go further they give themselves a role.** A terminal, logs, a project's network, its timeline and its Audit log tab take a role on the project,
   as they do for anybody. An operator grants it on the project's Members tab: it is written to the project's audit log and listed there like any
   grant, so the owners can see it. An owner can remove it. An operator can take their own role back, even an owner's, as long as the project has another
   owner.
@@ -157,7 +157,8 @@ The quota on a user, under **Settings, Users** or in the invite that made them, 
   was revoked or unlinked no longer counts.
 
 Everything anyone does on a project, allowed or refused, is in the project's audit log, with the address it came from: who opened and closed a
-terminal and why it ended, each role change from what to what, and what an invite changed for whoever spent it.
+terminal and why it ended, each role change from what to what, and what an invite changed for whoever spent it. Operators read the log of the whole
+hub under **Settings, Audit log**, with no role needed: sign-ins, users, quotas, operators, invites and link codes, and what is left of projects that are gone.
 
 An open terminal lasts as long as the right to it: a role change that takes the right away closes it at once, and it ends with the session that
 opened it, 12 hours after signing in at most. The agent's session goes on.

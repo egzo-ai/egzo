@@ -859,3 +859,20 @@ func TestAnAuditEntryOutlivesTheRequestThatMadeIt(t *testing.T) {
 		t.Errorf("entries = %v, %v", entries, err)
 	}
 }
+
+func TestTheWholeAuditLogReadsInPagesNewestFirst(t *testing.T) {
+	s := open(t)
+	for _, project := range []string{"", "p1", "gone"} {
+		if err := s.Audit(ctx, AuditEntry{Actor: "hub", Action: "a", Project: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.AuditAll(ctx, 0, 2)
+	if err != nil || len(first) != 2 || first[0].Project != "gone" || first[1].Project != "p1" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	rest, err := s.AuditAll(ctx, first[1].ID, 2)
+	if err != nil || len(rest) != 1 || rest[0].Project != "" {
+		t.Errorf("the rest = %+v, %v", rest, err)
+	}
+}

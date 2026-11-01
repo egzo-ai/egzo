@@ -679,6 +679,25 @@ func (s *Server) setRole(w http.ResponseWriter, r *http.Request, user store.User
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// auditJSON is one entry of the audit log. ID, Project and ProjectName are in the hub's log, which spans the projects; ProjectName is empty for a
+// project that is gone, whose name is in the entry that says so.
+type auditJSON struct {
+	ID          int64     `json:"id,omitempty"`
+	At          time.Time `json:"at"`
+	Actor       string    `json:"actor"`
+	Action      string    `json:"action"`
+	Project     string    `json:"project,omitempty"`
+	ProjectName string    `json:"projectName,omitempty"`
+	Agent       string    `json:"agent"`
+	Detail      string    `json:"detail"`
+	Allowed     bool      `json:"allowed"`
+	Client      string    `json:"client,omitempty"`
+}
+
+func auditOf(e store.AuditEntry, n namer) auditJSON {
+	return auditJSON{At: e.At, Actor: n.actor(e.Actor), Action: e.Action, Agent: e.Agent, Detail: e.Detail, Allowed: e.Allowed, Client: e.Client}
+}
+
 func (s *Server) audit(w http.ResponseWriter, r *http.Request, user store.User) {
 	entries, err := s.hub.Audit(r.Context(), user, r.PathValue("project"), 100)
 	if err != nil {
@@ -686,18 +705,40 @@ func (s *Server) audit(w http.ResponseWriter, r *http.Request, user store.User) 
 		return
 	}
 	n := s.namer(r.Context())
-	type row struct {
-		At      time.Time `json:"at"`
-		Actor   string    `json:"actor"`
-		Action  string    `json:"action"`
-		Agent   string    `json:"agent"`
-		Detail  string    `json:"detail"`
-		Allowed bool      `json:"allowed"`
-		Client  string    `json:"client,omitempty"`
-	}
-	rows := make([]row, 0, len(entries))
+	rows := make([]auditJSON, 0, len(entries))
 	for _, e := range entries {
-		rows = append(rows, row{At: e.At, Actor: n.actor(e.Actor), Action: e.Action, Agent: e.Agent, Detail: e.Detail, Allowed: e.Allowed, Client: e.Client})
+		rows = append(rows, auditOf(e, n))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": rows})
+}
+
+// hubAudit is the audit log of the whole hub, newest first; ?before= goes on from an entry's id.
+func (s *Server) hubAudit(w http.ResponseWriter, r *http.Request, user store.User) {
+	limit := 100
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 500 {
+		limit = v
+	}
+	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	entries, err := s.hub.HubAudit(r.Context(), user, before, limit)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	projects, err := s.hub.Store().Registrations(r.Context())
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	names := map[string]string{}
+	for _, p := range projects {
+		names[p.ID] = p.Name
+	}
+	n := s.namer(r.Context())
+	rows := make([]auditJSON, 0, len(entries))
+	for _, e := range entries {
+		row := auditOf(e, n)
+		row.ID, row.Project, row.ProjectName = e.ID, e.Project, names[e.Project]
+		rows = append(rows, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": rows})
 }
