@@ -106,6 +106,12 @@ type AgentStatus struct {
 	Exposed  []Exposure
 }
 
+// What an exposed port speaks. A hub serves `http` as a preview; `tcp` is any other stream.
+const (
+	ProtocolHTTP = "http"
+	ProtocolTCP  = "tcp"
+)
+
 // Exposure is a port an agent offers to people. The protocol says what is behind it: `http`, or `tcp` for any other stream. The stream
 // that reaches it is the same for both.
 type Exposure struct {

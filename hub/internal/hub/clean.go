@@ -4,7 +4,10 @@
 package hub
 
 import (
+	"regexp"
+
 	"github.com/egzo-ai/egzo/hub/internal/links"
+	"github.com/egzo-ai/egzo/internal/hublink"
 	corenames "github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/termsafe"
 )
@@ -20,7 +23,11 @@ const (
 	maxHost      = 253
 	maxActor     = 128
 	maxMessage   = 500 // why a project was turned away
+	maxExposures = 32  // as control keeps them
 )
+
+// exposureID is the form of an exposure's id, which becomes part of a host name.
+var exposureID = regexp.MustCompile(`^[a-z2-7]{16}$`)
 
 func word(text string, n int) string { return termsafe.Truncate(termsafe.Line(text), n) }
 
@@ -72,6 +79,21 @@ func cleanProject(p links.Project) links.Project {
 	return out
 }
 
+// cleanExposures keeps the ports that can be what a link says they are.
+func cleanExposures(list []links.Exposure) []links.Exposure {
+	var out []links.Exposure
+	for _, e := range list {
+		if len(out) == maxExposures {
+			break
+		}
+		if e.Port >= 1 && e.Port <= 65535 && (e.Protocol == hublink.ProtocolHTTP || e.Protocol == hublink.ProtocolTCP) && exposureID.MatchString(e.ID) {
+			e.Name = word(e.Name, maxWord)
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // cleanStatus keeps what the hub shows of what the agents are doing.
 func cleanStatus(line links.StatusLine) links.StatusLine {
 	agents := make([]links.AgentStatus, 0, min(len(line.Agents), maxAgents))
@@ -80,7 +102,7 @@ func cleanStatus(line links.StatusLine) links.StatusLine {
 			break
 		}
 		if corenames.Instance(a.Agent) {
-			a.Status, a.Activity = word(a.Status, maxText), word(a.Activity, maxWord)
+			a.Status, a.Activity, a.Exposed = word(a.Status, maxText), word(a.Activity, maxWord), cleanExposures(a.Exposed)
 			agents = append(agents, a)
 		}
 	}

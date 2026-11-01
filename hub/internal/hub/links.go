@@ -179,6 +179,7 @@ func (h *Hub) verdict(ctx context.Context, reg store.Registration) links.Verdict
 		if owner, err := h.store.User(ctx, reg.Owner); err == nil {
 			v.Owner = owner.Username
 		}
+		v.Preview = h.previewTemplate(reg.ID)
 	}
 	return v
 }
@@ -424,6 +425,7 @@ func (h *Hub) Revoke(ctx context.Context, user store.User, id, why string) error
 	h.mu.Lock()
 	delete(h.held, reg.ID)
 	h.mu.Unlock()
+	h.feeds.forgetExposed(reg.ID)
 	return nil
 }
 

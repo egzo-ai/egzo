@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +39,8 @@ type Engine struct {
 	feedSilent bool // it follows nothing: a control sidecar that logs no status
 	audit      []links.AuditEvent
 	auditSince []time.Time // the since of every connection that was served
+	exposed    map[string][]links.Exposure
+	servers    map[string]*server // what listens in an agent, by "agent:port"
 
 	// the connection
 	current  *Connection
@@ -53,7 +57,7 @@ func New(name, host string, templates ...string) *Engine {
 	if err != nil {
 		panic(err)
 	}
-	e := &Engine{key: public, host: host, attached: map[string]int{}, feedEvery: 30 * time.Second,
+	e := &Engine{key: public, host: host, attached: map[string]int{}, feedEvery: 30 * time.Second, exposed: map[string][]links.Exposure{}, servers: map[string]*server{},
 		project: links.Project{Name: name, Up: true, Templates: templates, Services: []links.Service{{Name: "control", State: "running", ID: "control-1"}, {Name: "proxy", State: "running", ID: "proxy-1"}}}}
 	e.current = &Connection{Engine: e, closed: make(chan struct{})}
 	close(e.current.closed)
@@ -595,6 +599,87 @@ func (e *Engine) Attach(ctx context.Context, agent string, term links.Terminal) 
 	return nil
 }
 
+// Expose has an agent expose a port, as the status feed says it. Without an agent's exposures: Unexpose.
+func (e *Engine) Expose(agent string, exposure links.Exposure) {
+	e.mu.Lock()
+	e.exposed[agent] = append(e.exposed[agent], exposure)
+	e.mu.Unlock()
+	e.push("change")
+}
+
+// Unexpose takes a port back.
+func (e *Engine) Unexpose(agent string, port int) {
+	e.mu.Lock()
+	kept := []links.Exposure{}
+	for _, exposure := range e.exposed[agent] {
+		if exposure.Port != port {
+			kept = append(kept, exposure)
+		}
+	}
+	e.exposed[agent] = kept
+	e.mu.Unlock()
+	e.push("change")
+}
+
+// Listen starts a server in an agent. Nothing else in the fake listens: a port with no server is a port where nothing listens.
+func (e *Engine) Listen(agent string, port int, handler http.Handler) {
+	s := &server{conns: make(chan net.Conn), done: make(chan struct{})}
+	e.mu.Lock()
+	e.servers[fmt.Sprintf("%s:%d", agent, port)] = s
+	e.mu.Unlock()
+	go (&http.Server{Handler: handler}).Serve(s)
+}
+
+// server takes the connections DialPort makes.
+type server struct {
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+func (s *server) Accept() (net.Conn, error) {
+	select {
+	case conn := <-s.conns:
+		return conn, nil
+	case <-s.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (s *server) Close() error   { s.once.Do(func() { close(s.done) }); return nil }
+func (s *server) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)} }
+
+// DialPort reaches a server of Listen, through a pipe.
+func (e *Engine) DialPort(ctx context.Context, agent string, port int) (net.Conn, error) {
+	e.mu.Lock()
+	a, err := e.agent(agent)
+	if err == nil && a.State != "running" {
+		err = fmt.Errorf("agent %q is %s", agent, a.State)
+	}
+	listening := e.servers[fmt.Sprintf("%s:%d", agent, port)]
+	closed := e.current.closed
+	if err == nil {
+		e.record("dial %s %d", agent, port)
+	}
+	e.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if listening == nil {
+		return nil, fmt.Errorf("nothing listens on port %d", port)
+	}
+	near, far := net.Pipe()
+	select {
+	case listening.conns <- far:
+		go func() { <-closed; near.Close() }()
+		return near, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-closed:
+		return nil, ErrDropped
+	}
+}
+
 // Events lists the project's events.
 func (e *Engine) Events(ctx context.Context, agent string, limit int) ([]links.Event, error) {
 	e.mu.Lock()
@@ -681,7 +766,7 @@ func (e *Engine) Published(ctx context.Context) (links.Published, error) {
 func (e *Engine) statusLine(reason string) links.StatusLine {
 	line := links.StatusLine{Time: time.Now().UTC(), Reason: reason, Interval: e.feedEvery, Agents: []links.AgentStatus{}}
 	for _, a := range e.project.Agents {
-		line.Agents = append(line.Agents, links.AgentStatus{Agent: a.Name, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Updated: line.Time})
+		line.Agents = append(line.Agents, links.AgentStatus{Agent: a.Name, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Updated: line.Time, Exposed: e.exposed[a.Name]})
 	}
 	return line
 }

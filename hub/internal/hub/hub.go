@@ -42,6 +42,7 @@ type Hub struct {
 	feeds    *feedManager            // the status and audit trails the links push
 	signIn   SignInOptions           // set by SetupSignIn
 	tasks    taskList                // what the hub does on the projects (tasks.go)
+	previews previewSite             // set by ServePreviews
 }
 
 // New builds a hub; log may be nil.
