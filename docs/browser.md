@@ -1,6 +1,6 @@
 # Browsing
 
-Every `claude-code` and `opencode` agent has a browser. The harness images carry Chromium and the Playwright MCP server,
+Every `claude-code`, `opencode` and `codex` agent has a browser. The harness images carry Chromium and the Playwright MCP server,
 and egzo registers it with the harness next to its own `egzo` server, so the agent can open pages, click, fill forms and
 take screenshots with the usual `browser_*` tools. There is nothing to install and no image to build. What the browser can
 reach is what the agent's [egress profile](sandboxing.md) lets it reach, like everything else.

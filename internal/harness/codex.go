@@ -34,6 +34,10 @@ const codexKey = "sk-proj-egzo-placeholder-0000000000000000000000000000000000000
 // which work only through the proxy. Spawn sets it when the project has one.
 const EnvCodexAuth = "EGZO_CODEX_AUTH"
 
+// codexBrowserEnv is what the browser's server needs of the agent's environment. Codex starts an MCP server with a short list of
+// variables and the ones named here: without the proxy, Chromium looks hosts up itself, and the sandbox has no DNS.
+var codexBrowserEnv = []string{"HTTPS_PROXY", "https_proxy", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE"}
+
 // SignInHost is any: Codex signs in wherever its profile's OAuth service is (the built-in `chatgpt`, or one of the user's).
 func (codex) SignInHost() string { return "" }
 
@@ -97,7 +101,8 @@ func (c codex) Plan(o Options, args []string) (Plan, error) {
 	}
 	if o.hasBrowser() {
 		overrides = append(overrides, "mcp_servers.playwright.command="+tomlString(browserCommand[0]),
-			"mcp_servers.playwright.args=["+strings.Join(tomlStrings(browserCommand[1:]), ",")+"]")
+			"mcp_servers.playwright.args=["+strings.Join(tomlStrings(browserCommand[1:]), ",")+"]",
+			"mcp_servers.playwright.env_vars=["+strings.Join(tomlStrings(codexBrowserEnv), ",")+"]")
 	}
 
 	command := append([]string{}, args...)
