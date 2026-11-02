@@ -142,11 +142,11 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
-- **Discovery, the rest** (a Refresh button, showing how fresh a listing is): see [discovery.md](discovery.md).
+- **When a project was last heard from**, on the project list. The link pushes what changes, so nothing needs a Refresh button, but a person should see how fresh the page is.
 - **The timelines without a command in the sidecar.** The status is streamed, but the project and agent timelines, the spec and the
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
   the templates once per five minutes. Following the event stream the way the status is followed (a second line type on the
   sidecar's standard output, or a stream of its own) would remove the last periodic command.
 - **Hub settings, later parts** (removing users, a richer users list): see [hub-settings.md](hub-settings.md).
-- **Incompatible controls** (the rest of it: a version the hub can compare): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
+- **Versions, for 1.0**: the rule for changing the link's protocol, and what is left of telling an old release from a broken one: see [hub-link.md](hub-link.md#versions).
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

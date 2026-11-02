@@ -69,5 +69,5 @@ healthy (tested with `syslog`); Podman `k8s-file` (which `json-file` is an alias
 - The hub shows a project whose status log cannot be followed as: its agents running, with a banner that carries the reason (the
   engine's error, or "the control sidecar writes no status"). The terminal, start, stop and remove all work. Only live activity and
   the "waiting" question are missing. An outdated control sidecar that writes no status lines is the same signal
-  ([control-compatibility](../roadmap/control-compatibility.md)).
+  ([hub-link: Versions](../roadmap/hub-link.md#versions)).
 - `egzo project up` does not check the driver; `egzo system check` does.

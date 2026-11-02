@@ -115,10 +115,7 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 
 - **A WebSocket carrying yamux** ([chosen in the spike](#spike-results)): it passes reverse proxies and company proxies that an
   HTTP/2 stream to a backend does not. One stream per verb, per terminal and per preview connection; the feeds have one each.
-- **A versioned protocol.** Link and hub are separate releases on separate machines: the protocol says its version at the
-  handshake, and a hub refuses a link it does not speak with a message that says which to upgrade
-  ([control-compatibility.md](control-compatibility.md) becomes this). Before 1.0, one version at a time: no ranges, no
-  compatibility shims.
+- **A versioned protocol.** Link and hub are separate releases on separate machines: see [Versions](#versions).
 - **The protocol lives in core** (`internal/hublink`: the messages and the hub's side, with no engine in it; `internal/link`: the link's
   side), and the hub imports `hublink`, so core still never imports the hub. The hub stops importing `stack`, `engine` and their
   dependencies (compose-go, the Docker client).
@@ -131,6 +128,33 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
   and links that present a code only. The UI stays where it is.
 - **What a link says is untrusted.** A linked project speaks for itself only; its names, status lines and audit events are data,
   shown escaped, limited in size and rate.
+
+## Versions
+
+Link and hub are released apart and run on different machines, so what each speaks has to be said out loud. Before 1.0 there is one version at a time: no ranges,
+no compatibility shims.
+
+**Built.**
+
+- The handshake carries `hublink.Version`. A hub refuses a link it does not speak and says which side to upgrade: "this hub speaks protocol 2 and the link
+  speaks 1: upgrade the project (a newer egzo, then `egzo project up`)". The link stops dialling and says so.
+- A status line carries its format, `v`. A line of another format is an error that says to update the hub.
+- A project that writes no status is `unavailable` after 90 seconds, and its running agents show as running, never "starting". That covers the symptom that started
+  this: the hub once showed an agent as **Starting** for ever, because an older control sidecar answered `404` and the error was swallowed.
+
+The hub no longer talks to a control sidecar. The link does, and `up` makes both from one image, so they are one release. That removes the need for a
+control API version the hub can compare, and for a typed result from every control call: what the hub sees is the protocol above.
+
+**Needed for 1.0.0.**
+
+- **The change rule.** Adding a verb, a feed or a field is free. A change or a removal bumps `hublink.Version`. After 1.0 a hub supports the current version and one
+  older, written down and checked by a test. Open: how wide the window is, and whether the status format keeps its own number.
+- **A verb a link does not know.** A newer hub asking an older link for something new should turn off one feature and not the project. That needs the link to say what it
+  supports at the handshake.
+- **The CLI and an older control.** Until `up` runs, a newer CLI talks to a control sidecar of the release before. `egzo ps` and `egzo system check` should say so and
+  name the fix.
+- **`up` and a rebuilt image.** Check that `up` recreates a sidecar whose image tag is the same and whose build is older.
+- **An agent's image.** `Stale` covers a template that changed, not an image built by an older egzo. A version label on the harness image could say so, as a hint.
 
 ## What changed in the hub
 
