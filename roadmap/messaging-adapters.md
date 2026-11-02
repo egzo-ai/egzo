@@ -84,9 +84,8 @@ Nothing else goes through the API.
 - **The place** (who can see and speak): the platform. A private channel protects an agent: the adapter only receives what it can view.
 - **The person**: the hub. **A viewer can never talk to an agent**, in chat or anywhere else: an agent can do a great deal, and a viewer is the web proxy only, often a person
   from outside. Chat needs the `user` role or above. Answering a question and interrupting use the same permission, and the hub checks it on every message.
-- **Open: a `user` and another person's agent.** This page used to let any role steer any agent of the project, knowingly. The `user` role now operates and attaches to
-  its own agents only, so that would let chat do what a terminal may not. The proposal is that chat follows attach: a `user` talks to their own agents, and `admin` and
-  `owner` to all of them. To decide before building.
+- **A `user` and another person's agent.** A `user` of the project can talk to its other agents, not only their own. This is a sensitive point: the `user` role operates and
+  attaches to its own agents only, so chat reaches agents a terminal does not. It needs careful evaluation before building.
 
 ## Trust
 
@@ -127,7 +126,8 @@ One bot per guild. `/egzo register` is the link flow. Agents are added one at a 
 - One NATS topic per agent (`.in`, `.out`), adapters subscribe to all agents; the hub only relays. Adapters are trusted.
 - Two HTTP calls from adapters to the hub: link an account, and may add. Everything else is on the bus.
 - The hub double-checks every message `.in`; a refused message is dropped and audited, with no reply.
-- A viewer can never talk to an agent. Chat needs `user` or above, in a place the agent was added to; the platform decides the place.
+- A viewer can never talk to an agent. Chat needs `user` or above, in a place the agent was added to; the platform decides the place. A `user` can talk to other agents of the
+  project, not only their own (a sensitive point, see "Who decides what").
 - The hub reaches agents through the link: a `send` verb and an `events` feed. Nothing reaches a project any other way.
 - Ids are `<project>/<agent>`, with the id of the registration, in commands, `actor` strings and audit; principal `agent:<project>/<name>`.
 - No `via` field in core: the hub audits the platform identity from the message `.in`.
@@ -139,6 +139,6 @@ One bot per guild. `/egzo register` is the link flow. Agents are added one at a 
 
 ## Open questions
 
-- Whether a `user` may talk to another person's agent (above).
+- What a `user` talking to another person's agent can lead to, and whether it needs limits (above). Evaluate carefully before building.
 - To verify while building: embed `nats-server` in the hub binary with JetStream on a volume (prototype first); test whether the Discord bot receives content for a role
   mention without the Message Content intent.
