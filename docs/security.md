@@ -7,7 +7,7 @@ and [messaging](messaging.md).
 ## What egzo enforces
 
 - **A container per agent**, on a network of its own with no route to the outside. It can reach only the proxy and
-  the control sidecar. Agents cannot reach each other or your LAN.
+  the control sidecar: a relay for its local ports turns it away. Agents cannot reach each other or your LAN.
 - **The only way out is the proxy**, which allows only HTTPS to the hosts of the agent's egress profile, refuses
   private and internal addresses (cloud metadata, your network, other agents' networks), limits connections and
   logs every decision. Nothing is allowed unless the profile says so.

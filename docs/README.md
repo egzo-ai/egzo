@@ -13,16 +13,16 @@ detail, and the executable specs in `specs/` are the status report.
 ## Using egzo
 
 3. [The project file](project-file.md): `egzo.yaml` by example
-4. [Managing projects](managing-projects.md): `project up`, `agent spawn`, `agent attach`, `agent rm`, `project down`
+4. [Managing projects](managing-projects.md): `project up`, `agent spawn`, `agent attach`, opening a dev server, `agent rm`, `project down`
 5. [Workspaces](workspaces.md): directories, git worktrees, and what removing an agent deletes
 6. [Messaging](messaging.md): sending tasks, questions from agents, agents talking to each other
-7. [Supported harnesses](harnesses.md): Claude Code and OpenCode
+7. [Supported harnesses](harnesses.md): Claude Code, OpenCode and Codex
 8. [Overriding base images](images.md): adding tools to an agent
 9. [Browsing](browser.md): the browser every agent has, and what it may reach
 
 ## The hub (web UI)
 
-10. [The hub](hub.md): running it, linking projects, the terminal in the browser, settings
+10. [The hub](hub.md): running it, linking projects, the terminal in the browser, previews, settings
 11. [Hub access](hub-access.md): the starter account, single sign-on, invites, people, roles, operators, quotas
 12. [The hub API](hub-api.md): the JSON API the web app talks to
 

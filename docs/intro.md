@@ -2,7 +2,7 @@
 
 Egzo is Docker Compose for AI coding agents. You describe agents as **templates** in one `egzo.yaml`, start as many
 **instances** as you need, each in its own sandbox, and attach to any of them with the real TUI of the harness
-(Claude Code, OpenCode). Egzo does not re-render anything: detach, reattach, scrollback and keys behave as usual.
+(Claude Code, OpenCode, Codex). Egzo does not re-render anything: detach, reattach, scrollback and keys behave as usual.
 
 Three ideas carry the design:
 
@@ -30,7 +30,8 @@ In short:
 
 - `egzo project up` starts the **proxy** and the **control** sidecar and publishes the templates. It starts no agent.
 - `egzo agent spawn <template>` makes an **instance**: a container, its own network, home volume and git worktrees (all in engine volumes).
-- An agent can reach only the proxy and the control sidecar, never another agent and never your network.
+- An agent can reach only the proxy and the control sidecar, never another agent and never your network. Nothing reaches an agent either, except a port its
+  template [declares](project-file.md#ports) once it opens it.
 - Messages and status flow through harness hooks and a small MCP tool set (`egzo` tools such as `resolve`, `ask`),
   not through screen scraping.
 - [The hub](hub.md), optional, is a web UI over the projects that link to it: what every agent is doing, and their
@@ -60,6 +61,6 @@ something misbehaves, see [troubleshooting](troubleshooting.md).
 ## Status
 
 Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
-credential injection, git workspaces, Claude Code and OpenCode, message delivery, and the operator commands. Not yet:
+credential injection, git workspaces, Claude Code, OpenCode and Codex, message delivery, declared ports, and the operator commands. Not yet:
 the `pi` harness; the Podman and gVisor spec runs are reported in CI but are not required checks. A separate web UI, [the hub](hub.md), is built and is not part
 of the CLI. Binaries and images are published for Linux (amd64 and arm64), still as early 0.x releases ([`roadmap/initial-release.md`](../roadmap/initial-release.md)).

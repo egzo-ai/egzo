@@ -73,6 +73,9 @@ hub last heard, and `offlineSince` says since when.
 longer than three heartbeats) `unavailable` (the sidecar is not running, or writes no status), or `offline` (the link is not connected), with the reason in
 `message`. Unless the feed is `live`, every running agent is `unknown`.
 
+**`previews`.** An agent has `previews: [{port, name, protocol, where, address}]`, the ports it has open. With `where` set to `hub`, `address` is a preview to
+open. With `where` set to `local`, it is a port on the project's machine, which the app shows as text to copy and never as a link.
+
 ## The terminal websocket
 
 Binary frames are the terminal's bytes in both directions. Text frames are JSON control messages. Up: `{"type":"resize","cols":N,"rows":N}`

@@ -170,13 +170,6 @@ The denials are kept in the hub's database for 30 days after they were last seen
 the hub's latest 1000 events of the project, in memory; further back, `egzo proxy log` reads the proxy's own log, as far as the
 engine keeps it. The schema of the audit trail is in [sandboxing agents](sandboxing.md#see-what-happened).
 
-## Ports the hub serves
-
-A project's template [declares](project-file.md#ports) the ports its agents may serve, and an agent opens one for the hub with `expose(name, hub)`. Only
-`http` ports can be opened for a hub, and the hub learns of them from the project's status feed. A port the agent opened with `where` set to `local` is
-a port on the project's machine: the hub never serves it, and the project's link refuses to forward to it. The preview addresses, the sign-in they need
-and the panel that lists them are in [roadmap/agent-ports.md](../roadmap/agent-ports.md); they are not all built yet.
-
 ## How the hub keeps up
 
 The hub does not poll. Each project's link pushes what changed, on one outbound connection, and the pages read what the hub already holds:
@@ -231,7 +224,7 @@ refuses to start and says to remove `hub.db` (users and roles are then set up ag
 ## Previews
 
 An agent that starts a demo [opens a port it declares](messaging.md#ports-an-agent-opens) for the hub, and with `EGZO_PREVIEW_DOMAIN` set it gets an address to give
-out, `https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`. The person opens it in their browser, and the hub carries it over the project's link
+out, `https://k7f3q9x2m4ad3v8w-p1a2b3c4d5e6.egzo-preview.example.net/`. Only an `http` port can be opened for a hub. The person opens it in their browser, and the hub carries it over the project's link
 to the agent's own loopback. Nothing is published, and the sandbox does not change. The agent's page and the project's page list the previews, with **Open**
 and **Copy link**. A port the agent opened for the [local machine](managing-projects.md#opening-an-agents-dev-server) is listed too, as an address to copy and never a link: it works only
 on that machine or its network, and it has no sign-in. Everyone who can see the project sees the address.
@@ -274,7 +267,7 @@ make hub-web            # the web app (Svelte, Vite) into internal/web/dist, whi
 make hub-web-test       # its type check and unit tests
 make hub-build          # bin/egzo-hub
 make hub-e2e            # the browser tests (Playwright, in docker), against the hub with fake projects linked to it
-make hub-stack          # the whole stack for real: image, Dex as single sign-on (a test fixture, e2e/), a project that links itself, a real terminal
+make hub-stack          # the whole stack for real: image, Dex and Caddy (test fixtures, e2e/), a project that links itself, a real terminal and a real preview
 make hub-image
 ```
 
@@ -285,7 +278,7 @@ in `e2e/`, and the integration and stack runs above. Core's specs-first rule doe
 ### The web app
 
 `web/` is a Svelte 5 + TypeScript single-page app built by Vite. The hub serves it for every address that is not the API, so the
-app's own routes (`/e/lab/p/web/a/coder-1`) survive a reload. The design it implements is in `roadmap/egzo-design/` (tokens,
+app's own routes (`/p/p1a2b3c4d5e6/a/coder-1`) survive a reload. The design it implements is in `roadmap/egzo-design/` (tokens,
 components and the clickable prototype). The API it talks to is described in [the hub API](hub-api.md).
 
 ```sh

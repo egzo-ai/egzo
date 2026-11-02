@@ -186,7 +186,7 @@
     <text x="1014" y="406" font-weight="600">Executable spec</text>
     <text x="1014" y="422" fill="#475569">pytest in specs/ is the status report:</text>
     <text x="1014" y="438" fill="#475569">red = not built yet</text>
-    <text x="1014" y="466" font-weight="600">Later: egzo-hub</text>
+    <text x="1014" y="466" font-weight="600">Optional: egzo-hub</text>
     <text x="1014" y="482" fill="#475569">web UI to observe and operate many</text>
     <text x="1014" y="498" fill="#475569">projects; YAML + CLI stay the only way</text>
     <text x="1014" y="514" fill="#475569">to change a project</text>
