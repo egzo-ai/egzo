@@ -1,0 +1,91 @@
+# One way to run the hub for a team, with tools egzo does not ship: Caddy in front with certificates from Let's Encrypt (DNS
+# challenge at Cloudflare), sign-in with GitHub through Dex, no password. See docs/hub.md, "Example: Caddy and GitHub".
+#
+#   cp .env.example .env     # fill it in
+#   docker compose up -d
+#
+# A variable named with no value comes from .env. Each service gets only the ones it needs.
+name: egzo-hub
+
+services:
+  caddy:
+    # Built on this machine from caddy/Dockerfile, never pulled. A new version in .env is a new tag, which up builds.
+    build:
+      context: ./caddy
+      args:
+        CADDY_VERSION:
+        CADDY_CLOUDFLARE_VERSION:
+    image: egzo-hub-caddy:${CADDY_VERSION}-cloudflare-${CADDY_CLOUDFLARE_VERSION}
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"                     # redirects to https only: the certificates come over DNS
+    environment:
+      ACME_EMAIL:
+      CLOUDFLARE_API_TOKEN:
+      EGZO_HUB_HOST:
+      EGZO_LINK_HOST:
+      EGZO_AUTH_HOST:
+      EGZO_PREVIEW_DOMAIN:
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data            # the certificates and the ACME account
+      - caddy-config:/config
+    networks:
+      hub:
+        ipv4_address: 172.29.80.10  # the hub's EGZO_TRUSTED_PROXIES
+        aliases:
+          - ${EGZO_AUTH_HOST}       # the hub reaches Dex at the issuer's address through Caddy, without leaving the host
+
+  hub:
+    image: ghcr.io/egzo-ai/egzo-hub:${EGZO_HUB_VERSION}
+    restart: unless-stopped
+    environment:
+      EGZO_PUBLIC_URL: https://${EGZO_HUB_HOST}
+      EGZO_LINK_URL: https://${EGZO_LINK_HOST}
+      EGZO_LINK_LISTEN: ":8443"
+      EGZO_PREVIEW_DOMAIN:
+      EGZO_TRUSTED_PROXIES: 172.29.80.10
+      EGZO_OIDC_ISSUER: https://${EGZO_AUTH_HOST}/dex
+      EGZO_OIDC_CLIENT_ID: egzo-hub
+      EGZO_OIDC_CLIENT_SECRET:
+      EGZO_OIDC_NAME: GitHub
+      EGZO_LOCAL_LOGIN:
+      EGZO_ADMIN_PASSWORD:
+    volumes:
+      - hub-data:/data
+    networks:
+      - hub
+    depends_on:
+      - caddy
+      - dex
+
+  dex:
+    image: ghcr.io/dexidp/dex:${DEX_VERSION}
+    restart: unless-stopped
+    command: ["dex", "serve", "/etc/dex/config.yaml.tpl"]
+    environment:
+      EGZO_HUB_HOST:
+      EGZO_AUTH_HOST:
+      EGZO_OIDC_CLIENT_SECRET:
+      GITHUB_CLIENT_ID:
+      GITHUB_CLIENT_SECRET:
+      GITHUB_ORG:
+    volumes:
+      - ./dex.yaml.tpl:/etc/dex/config.yaml.tpl:ro
+      - dex-data:/var/dex
+    networks:
+      - hub
+
+networks:
+  hub:
+    ipam:
+      config:
+        - subnet: 172.29.80.0/24    # if your network uses it, change it and the two addresses above
+
+volumes:
+  hub-data:
+  caddy-data:
+  caddy-config:
+  dex-data:

@@ -1,0 +1,26 @@
+# TLS for the hub, its link endpoint, Dex and the previews. Every certificate comes from Let's Encrypt over the DNS challenge at
+# Cloudflare, so no port has to be open for it. The host names come from .env.
+{
+	email {$ACME_EMAIL}
+	acme_dns cloudflare {$CLOUDFLARE_API_TOKEN}
+}
+
+# The web UI, for people.
+{$EGZO_HUB_HOST} {
+	reverse_proxy hub:8080
+}
+
+# The link endpoint, for projects: what they name in `hub:`. It serves no page.
+{$EGZO_LINK_HOST} {
+	reverse_proxy hub:8443
+}
+
+# Dex, the sign-in with GitHub.
+{$EGZO_AUTH_HOST} {
+	reverse_proxy dex:5556
+}
+
+# The previews: one host per preview, under one wildcard certificate.
+*.{$EGZO_PREVIEW_DOMAIN} {
+	reverse_proxy hub:8081
+}

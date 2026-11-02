@@ -25,7 +25,7 @@ services:
       - hub
 
   dex:
-    image: ghcr.io/dexidp/dex:v2.41.1
+    image: ghcr.io/dexidp/dex:v2.46.1
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     environment:
       EGZO_OIDC_CLIENT_SECRET: ${EGZO_OIDC_CLIENT_SECRET:?}

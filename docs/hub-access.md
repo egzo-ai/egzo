@@ -34,6 +34,7 @@ Then set `EGZO_OIDC_ISSUER` (exactly as the provider writes it, trailing slash i
 | Keycloak | `https://keycloak.example.com/realms/<realm>` |
 | Authentik | `https://authentik.example.com/application/o/<application slug>/` |
 | Google | `https://accounts.google.com` (make the OAuth app "Internal" to keep it to your Workspace) |
+| GitHub | Dex's issuer, `https://auth.example.com/dex`: GitHub does not speak OpenID Connect, Dex does. See [the example](hub.md#example-caddy-and-github) |
 
 Signing in with the provider is not enough: somebody the hub does not know is refused, and nothing is stored for them, until they come
 with an [invite](#invites).

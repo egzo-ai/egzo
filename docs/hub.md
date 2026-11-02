@@ -55,7 +55,65 @@ link: not registered: run `egzo project register`
 
 In the hub, open **Settings, Links** and click **Link a project**. Run `egzo project register` and paste the code it shows. See
 [Linking a project](#linking-a-project). Over plain `http://` anyone on the way can pose as the hub and read the code, and `project check`
-warns: use https for anything but a trial.
+warns: use https for anything but a trial. For a team, see [the example with Caddy and GitHub](#example-caddy-and-github).
+
+## Example: Caddy and GitHub
+
+The hub works behind any proxy that does [what has to be in front](#what-has-to-be-in-front), with any OpenID Connect provider.
+[`hub/examples/caddy-github`](../hub/examples/caddy-github) is one way to put it together, with tools egzo does not ship: Caddy in
+front, sign-in with GitHub through Dex, no password. It uses four host names:
+
+| Host | Serves |
+|---|---|
+| `hub.example.com` | the web UI |
+| `link.example.com` | the link endpoint: what projects name in `hub:`. It serves no page |
+| `auth.example.com` | Dex, between the hub and GitHub |
+| `*.egzo-preview.example.net` | the [previews](#previews), on a domain of their own |
+
+Caddy gets every certificate from Let's Encrypt over the DNS challenge at Cloudflare, the wildcard included, so no port has to be open
+for it. Caddy has no DNS provider built in, so compose builds its image with the Cloudflare plugin on this machine, as Caddy's docs
+do ([its README](../hub/examples/caddy-github/README.md#caddy-is-built-here)). GitHub's OAuth apps do not speak OpenID Connect, so Dex sits in between: the hub signs people in at Dex, and Dex sends them to GitHub.
+
+Before starting:
+
+1. **DNS.** Both domains at Cloudflare, a record to this machine for each host, and `*` in the preview domain. Make them DNS only (grey
+   cloud): Cloudflare's proxy would end TLS itself.
+2. **A Cloudflare API token** for both zones, with the permissions [the plugin asks for](https://github.com/caddy-dns/cloudflare#configuration).
+3. **A GitHub OAuth app** (Settings, Developer settings, OAuth Apps, of your organization or your account) with the callback URL
+   `https://auth.example.com/dex/callback`. With `GITHUB_ORG` set, only the organization's members get through, and an organization that
+   restricts third-party access has to approve the app.
+
+```sh
+mkdir egzo-hub && cd egzo-hub
+for f in compose.yaml Caddyfile dex.yaml.tpl .env.example caddy/Dockerfile README.md; do
+  curl -fsSL --create-dirs -o "$f" "https://raw.githubusercontent.com/egzo-ai/egzo/main/hub/examples/caddy-github/$f"
+done
+cp .env.example .env            # the host names, the tokens, the GitHub app, a password for the first start
+docker compose up -d            # the first start builds Caddy: a few minutes
+```
+
+**The first start links `admin` to GitHub.** The password sign-in can only be turned off once an operator signs in with GitHub, so
+`.env` starts with `EGZO_LOCAL_LOGIN=true` and `EGZO_ADMIN_PASSWORD`. Open `https://hub.example.com`, sign in as `admin`, open your
+account (your name at the bottom of the sidebar), click **Link** and sign in with GitHub. Then set `EGZO_LOCAL_LOGIN=false` in `.env`, remove the password and run
+`docker compose up -d` again. The sign-in page now has **Sign in with GitHub** only, and `admin` is your GitHub account.
+
+Then [invite](hub-access.md#invites) the team, and link projects to the link host:
+
+```yaml
+hub: https://link.example.com
+```
+
+- **Everyone needs a GitHub account**, the viewer of a preview included: with the password off, an invite has no **Create an account**.
+- **The hub reaches Dex through Caddy**, at `https://auth.example.com`, on the compose network (`auth.example.com` is an alias of Caddy
+  there), so the machine does not have to reach its own public address.
+- **`EGZO_TRUSTED_PROXIES` is Caddy's fixed address**, `172.29.80.10`. When `172.29.80.0/24` is taken where it runs, change the subnet
+  and both addresses in `compose.yaml`.
+- **Off the internet**: publish `443` on a private address only (`"100.101.102.103:443:443"` for a tailnet). The certificates still come
+  over DNS; people and projects then need to reach that address.
+- **Back up `hub-data`**, the hub's database. Dex and Caddy make theirs again (Caddy asks for new certificates).
+- **To update**, change a version in `.env` (the hub, Dex, Caddy, the Cloudflare plugin) and run `docker compose up -d`; a new Caddy
+  version is built first. See [Updating](../hub/examples/caddy-github/README.md#updating). Before 1.0 a hub release with a new database
+  schema [refuses the old database](#settings).
 
 ## Linking a project
 
