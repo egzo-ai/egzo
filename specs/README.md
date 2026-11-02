@@ -33,8 +33,7 @@ specs with what to set up.
 
 A spec that needs a feature a platform lacks is marked to fail there (strict xfail), so it shows as unsupported on
 that platform. Today none does: the one gVisor spec checks, from inside an agent, that it runs under gVisor exactly
-when the platform says so. Nothing is probed or skipped: egzo is asked, and the outcome is the result. The specs have so far only run on one
-developer machine: see `known-issues/reference-platform-ci-matrix.md`.
+when the platform says so. Nothing is probed or skipped: egzo is asked, and the outcome is the result. CI runs them on every platform: see `known-issues/reference-platform-ci-matrix.md`.
 
 Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootstrap pip with
 `get-pip.py`.

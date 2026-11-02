@@ -10,8 +10,8 @@ The specs must pass in CI on every supported platform before 1.0.0 ([ci-test-mat
 
 - `release.yml` ran. A tag without a `v` (`0.4.1`) builds the `linux/amd64` and `linux/arm64` binaries with `SHA256SUMS`
   (attached to the GitHub release), then the multi-arch sidecar image and the two harness images, pushed to `ghcr.io/egzo-ai/`
-  (`egzo`, `egzo-harness-claude-code`, `egzo-harness-opencode`) with provenance. A tag with a `-` is a pre-release and is not
-  tagged `latest`. The three packages are public (they pull without a login).
+  (`egzo`, `egzo-harness-claude-code`, `egzo-harness-opencode`, `egzo-harness-codex`) with provenance. A tag with a `-` is a pre-release and is not
+  tagged `latest`. The packages are public (they pull without a login).
 - The harness packages are pinned with build arguments (`CLAUDE_CODE_VERSION`, `OPENCODE_VERSION`, `PLAYWRIGHT_MCP_VERSION`).
 - `docs/install.md` tells how to download and check a release.
 
