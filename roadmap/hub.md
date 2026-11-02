@@ -46,8 +46,8 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
   - **admin**: the same on every agent of the project.
   - **owner**: admin, plus granting and removing roles, and unlinking. Destroying a project (`project down`) is not a hub action, by design: the CLI does it.
 - An owner cannot remove themselves or drop their own permissions. An owner can remove other owners. A project keeps a valid owner.
-- Chat from Discord needs no fourth permission: in a channel an agent was added to, any registered user with a role on
-  the project may talk to it (see "Who decides what" in [messaging-adapters.md](messaging-adapters.md)). It is not shown in the web UI.
+- Chat needs no permission of its own: a person talks to an agent from a channel it was added to, with `user` or above. **A viewer can never talk to an agent.** See
+  "Who decides what" in [messaging-adapters.md](messaging-adapters.md), which also leaves open whether a `user` may talk to another person's agent.
 
 ## Web UI
 
@@ -140,7 +140,7 @@ In `hub/`, with the decisions above unless listed under "Not yet".
 
 ## Not yet
 
-- **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
+- **The messaging adapters** (the link's `send` verb and `events` feed, embedded NATS, the hub's two calls, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
 - **When a project was last heard from**, on the project list. The link pushes what changes, so nothing needs a Refresh button, but a person should see how fresh the page is.
 - **The timelines without a command in the sidecar.** The status is streamed, but the project and agent timelines, the spec and the
