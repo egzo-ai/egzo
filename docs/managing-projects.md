@@ -8,7 +8,7 @@ with `ps`, `logs`, `exec`, `start`, `stop`, `restart`, `events` and `proxy` at t
 
 ## The model
 
-- `egzo project up` converges the project's **infrastructure** (the proxy, the control sidecar, networks, the CA) to the file
+- `egzo project up` converges the project's **infrastructure** (the proxy, the control sidecar, the link of a project with a hub, networks, the CA) to the file
   and **publishes the templates**. It starts no agent, and it never removes or recreates a running instance.
 - `egzo agent spawn` makes an **instance** from a template. Spawning needs no edit of `egzo.yaml`.
 - An instance is named by you (`issue-412`) or by egzo (`coder-1`). A template can be spawned as often as you like;
@@ -52,8 +52,8 @@ project with a [hub](hub.md) can open an `http` port for it instead: `expose(web
 the two at a time.
 
 A local port goes through a small relay, a container of its own that lives as long as the instance: its port stays the same through `agent stop`
-and `agent start` and a reboot, and `agent rm` frees it. Between `stop` and `start` a connection just fails. The agent's own network stays internal
-and the agent cannot reach the relay. Closing a port (`unexpose`) stops new connections; ones that are open last until they close.
+and `agent start` and a reboot, and `agent rm` frees it. Between `stop` and `start` a connection just fails. The agent's own network stays internal.
+The relay turns away whatever comes from the agent, so an agent reaches nothing through it. Closing a port (`unexpose`) stops new connections; ones that are open last until they close.
 
 `egzo ps` lists what is open under `PORTS` (`web:hub,db:local`), and `egzo ps --json` has the address of each. See [messaging](messaging.md#ports-an-agent-opens)
 for what an agent is told, and [security](security.md) for what a local port gives away.
@@ -72,7 +72,7 @@ Link code:
 link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 ```
 
-An operator of the hub makes the code, under Settings, Links, and it is good once, for 15 minutes. `register` asks for it without showing it, or reads
+An operator of the hub, or anybody with a project quota, makes the code, under Settings, Links, and it is good once, for 15 minutes. `register` asks for it without showing it, or reads
 it from stdin when that is not a terminal (`egzo project register < code.txt`). There is no flag for it, and it goes to the link through
 `engine exec`, so it is never in your shell's history, in `ps` or in the project file. Keep it out of the file: a file can be committed.
 
@@ -90,8 +90,8 @@ it takes. `egzo ps` and `egzo project check` say where it stands:
 A code that is wrong, expired or used gets one answer, which does not say which. After a project is revoked, the hub can ask it nothing and the link
 pushes nothing, and a code does not help: an operator has to **Forget** it first, and `egzo project register` then makes it a new project on the hub,
 with no roles. Once registered, the hub can do what its
-verbs say and no more: spawn from the project's own templates, start, stop and remove instances, attach to their sessions, and read logs, events
-and the published templates. It cannot run a container, mount a path or run a command of its choosing.
+verbs say and no more: spawn from the project's own templates, start, stop and remove instances, attach to their sessions, reach the ports agents opened
+for it, and read logs, events and the published templates. It cannot run a container, mount a path or run a command of its choosing.
 
 - **Behind a company proxy**, set `HTTPS_PROXY` when you run `up`: it is handed to the link, credentials included, and never shows in `inspect`.
   A proxy that inspects TLS must let WebSockets through (Squid: `http_upgrade_request_protocols websocket allow all`) and the hub's `ca` must name

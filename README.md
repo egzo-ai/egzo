@@ -37,7 +37,8 @@ does the rest.
 - **[Built-in browser](docs/browser.md).** Batteries included with Chromium and the Playwright MCP pre-installed in our default
   harness images.
 - **[Your own tools](docs/images.md).** Add software to a harness image, or run any image with the `custom` harness.
-- **[The hub](docs/hub.md).** A web UI: every project and agent, terminals in the browser, single sign-on and per-project roles.
+- **[Ports](docs/project-file.md#ports).** Declare the ports an agent may serve. It opens one when you need it, on your machine or through the hub.
+- **[The hub](docs/hub.md).** A web UI: every project and agent, terminals in the browser, previews of what agents build, single sign-on and per-project roles.
 
 ## Quick start
 
