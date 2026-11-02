@@ -1,7 +1,8 @@
 # Roadmap: a CI test matrix for the specs
 
-The specs (`specs/`) are the specification and the status report, but they have only ever run on one developer
-machine: `.github/workflows/ci.yml` runs the Go tests, the linters and the hub's tests, never the specs. Until they run on every platform egzo claims to support, "works on Podman" and "gVisor works" are not claims
+**Status.** Running: `.github/workflows/specs.yml` runs the specs on every reference platform. What is left is [Work to do](#work-to-do).
+
+The specs (`specs/`) are the specification and the status report, and until they pass on every platform egzo claims to support, "works on Podman" and "gVisor works" are not claims
 the docs can make. Background: `known-issues/reference-platform-ci-matrix.md`; how a run picks its platform:
 `specs/README.md`.
 
@@ -102,8 +103,7 @@ A cell provides what its scenario names and nothing else: a `docker` cell has no
       toolchains and prints `df`; check the first run.
 - [ ] Publish the results: a status table in the docs, replacing "works on this machine" with the platforms that
       actually pass. Update `docs/install.md` (engine table) and `docs/troubleshooting.md` (known problems) from it.
-- [ ] Triage the first full run: fix, or document in `known-issues/`, whatever fails on the platforms never run before
-      (rootful and rootless Podman, `docker-gvisor`).
+- [x] Triage the first full run: rootless Podman, gVisor and arm64 pass, and rootful Podman's failures are in `known-issues/`.
 - [ ] Keep unit tests (`go test -race ./...`) and `make lint` (staticcheck, govulncheck) as separate, cheaper jobs.
 
 ## Related

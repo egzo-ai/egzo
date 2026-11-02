@@ -1,6 +1,6 @@
 # Roadmap: `build:` on an agent (Compose style)
 
-**Status.** Being built: the specs are the status. How egzo builds was decided on 2026-10-26 (see "How egzo builds").
+**Status.** Built ([docs/images.md](../docs/images.md#let-egzo-build-it), `specs/project/test_project_build.py`). How egzo builds was decided on 2026-10-26 (see "How egzo builds").
 
 ## Why
 

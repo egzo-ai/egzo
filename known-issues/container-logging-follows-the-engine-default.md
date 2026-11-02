@@ -1,6 +1,6 @@
 # Container logs follow the engine's default, and agent status needs a readable log
 
-Status: **built** (written 2026-10-15; the hub follows the log, `egzo system check` tries the driver).
+Status: **built** (written 2026-10-15; a project's link follows the log and pushes it to the hub, `egzo system check` tries the driver).
 
 ## What egzo v1 does
 
@@ -29,10 +29,10 @@ overriding the engine's default where the user asks for it. Not in v1. It is a s
 ## Why the log has to be readable
 
 The hub learns what an agent is doing (activity, a waiting question, the status line) from the control sidecar, and asking it with
-`docker exec` on a timer costs too much. So the control sidecar writes its status as JSON lines on its **standard output**: one on
+`docker exec` on a timer would cost too much. So the control sidecar writes its status as JSON lines on its **standard output**: one on
 every change, and one every 30 seconds (`EGZO_STATUS_INTERVAL` on the sidecar), each a complete snapshot of the project's agents.
-Everything else it says goes to standard error, as JSON. The hub follows the container's log through the engine's log API
-(`ContainerLogs`, standard output only, `follow`), one stream per project, and keeps the newest line. That needs a log the engine can
+Everything else it says goes to standard error, as JSON. The project's link follows the container's log through the engine's log API
+(`ContainerLogs`, standard output only, `follow`) and pushes each line, and the hub keeps the newest. That needs a log the engine can
 stream back; the engines tell the two streams apart whatever the driver. The same reading is already needed by the git jobs
 (`prep` containers return their output through the log) and by `egzo logs`, so a driver that cannot be read breaks those too, and
 `egzo system check` fails on it. A log that cannot be followed makes the hub show the project's agents as **running**, with a
