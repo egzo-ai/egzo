@@ -96,3 +96,11 @@ func TestTOMLStringsEscapeWhatTOMLNeeds(t *testing.T) {
 		t.Errorf("tomlString = %s", got)
 	}
 }
+
+func TestCodexPassesItsBrowserTheProxy(t *testing.T) {
+	set := overrides(must(codex{}.Plan(withBrowser(options(t), true), nil)).Command)
+	want := `mcp_servers.playwright.env_vars=["HTTPS_PROXY","https_proxy","NO_PROXY","NODE_EXTRA_CA_CERTS","SSL_CERT_FILE"]`
+	if !slices.Contains(set, want) {
+		t.Errorf("missing -c %s in %q", want, set)
+	}
+}
