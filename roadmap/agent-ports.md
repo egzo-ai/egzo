@@ -1,14 +1,11 @@
-# Roadmap: opening an agent's dev server from outside (port forward, hub previews)
+# Roadmap: hub previews, opening an agent's dev server from a browser
 
-**Status.** Built, for `http` through the hub. Raw TCP and UDP are local only: see below.
-
-**What changed.** [declared-local-ports.md](declared-local-ports.md) replaces what this file said about the `expose` tool, `egzo agent
-port-forward` and raw TCP: ports are declared by name in the template, `expose(name, where)` opens one for the hub or for the local
-machine, and `port-forward` is gone. The preview design below (the hub listener, signing in, the certificates) stands.
+**Status.** Built. This page is the design of previews, an `http` port served through the hub. Which ports an agent can open, and how it opens
+them for the hub or for the machine, is in [declared-local-ports.md](declared-local-ports.md). Raw TCP and UDP are local only.
 
 Need: an agent builds a web app and starts a demo server in its sandbox (`npm run dev`, `python3 -m http.server`, the hub
 itself). It tells its user "the demo is live at <link>", and the user opens the link in their own browser, from their machine,
-to try it. Today they cannot:
+to try it. On its own, the sandbox does not allow that:
 
 - an agent is on an internal network of its own, shared only with the control sidecar and the proxy; nothing is published on
   the host, and an internal network cannot publish a port;
@@ -47,10 +44,9 @@ browser ──HTTPS──▶ hub (machine A) ◀──link connection, outbound 
 
 ## Core (specs first)
 
-### The agent exposes a port: the `expose` tool
+### What `expose` means for a preview
 
-Replaced by [declared-local-ports.md](declared-local-ports.md): the template declares each port by name, and the agent calls
-`expose(name, where)` with `where` set to `hub` or `local`. What stays from this design, for `hub`:
+The template declares each port by name, and the agent calls `expose(name, "hub")` ([declared-local-ports.md](declared-local-ports.md)):
 
 - **A restart of the agent ends its exposures**, and a restart of the sidecars ends nothing. Control keeps the exposures per agent name,
   next to the registration, and the agent's removal removes them. The status feed carries them.
@@ -109,7 +105,7 @@ service of its own would have to reach the links through the hub anyway, so ever
 is not worth a second service.
 
 The verb is `forward`, with an agent and a port, and it knows no protocol: the stream is bytes, with `CloseWrite` for a half
-close, so a client for `tcp` exposures can use it as it is. The link refuses a port the agent did not expose, and picks the
+close. The link refuses a port the agent did not expose for the hub, and picks the
 command from the exposure: `egzo agent forward --announce` always, so that a port where nothing listens is an answer and not a
 stream that ends, and `--close-on-eof` for `http`, which never half closes. A server that keeps talking to a client that left
 would otherwise hold its exec for up to `drainLimit`, and every reload of a page leaves one such connection.
@@ -168,7 +164,7 @@ preview host, and must not:
 
 **Who may view a preview:** every role on the project, for every agent's previews: an agent exposes a port on purpose. The
 **viewer** role gets previews and nothing else; a person from outside gets it, and an account, through an invite
-([hub-link.md](hub-link.md), "Roles and invites"). An operator with no role sees that a preview exists and grants themselves a
+([hub-link.md](hub-link.md), "Roles and invites"). An operator with no role sees a preview and its address, and grants themselves a
 role to open it, as for a terminal.
 
 ### The proxy
@@ -188,8 +184,8 @@ role to open it, as for a terminal.
 ### The web app
 
 A **Previews** panel for the project's users, admins and owners (a viewer has links, not pages), on the agent page,
-and on the project page for every agent: each exposed port with its name and address,
-**Open**, and **Copy link**. No preview domain configured: the panel says what to set where that helps.
+and on the project page for every agent: each preview with its name, **Open** and **Copy link**. A port the agent opened for the
+machine is listed too, as an address to copy and never a link: it has no sign-in and works only on that machine or its network.
 
 ## Certificates for the preview domain: a wildcard, with DNS-01
 
@@ -211,28 +207,6 @@ viewer's browser trusts the root once (Caddy's `tls internal` does this for a tr
 and keep or forward `Host`, with `EGZO_TRUSTED_PROXIES` set. egzo ships no proxy: `make hub-stack` uses Caddy as a test, and
 an example compose file may follow.
 
-## Order of work
-
-Built: the `__Host-` cookies, `egzo agent forward`, the link, the viewer role and invites.
-
-1. Core, with specs: `forward --announce` and `--close-on-eof`, the `expose` and `unexpose` tools, the exposures in the status feed
-   and `ps`, the address template from the hub through the link. Docs: `docs/messaging.md` (the tools),
-   `docs/managing-projects.md`, `docs/security.md`.
-2. The proxy: the `forward` verb and `DialPort` on the seam (the link and the fake), `hub/internal/preview` (hosts, proxy, limits),
-   `EGZO_PREVIEW_DOMAIN` and `EGZO_PREVIEW_LISTEN`. Unit tests with the fake engine, and a test on a throttled link of what a large
-   preview does to a terminal on the same connection.
-3. Signing in: the redirects, tickets, the preview cookie, the role on each request, ending what is open, the audit log.
-4. The Previews panel, a Playwright test, and `make hub-stack` with a linked project exposing `python3 -m http.server`, through
-   Caddy (its internal CA). Docs: `docs/hub.md` (previews, what a proxy in front must do, the certificates, the separate domain),
-   `docs/security.md` (agent code served to people's browsers, and why it gets its own origin).
-
-## Open questions
-
-- How a person reaches a `tcp` exposure through the hub: a client on their machine, which needs the CLI to sign in to the hub,
-  and which roles may. The stream it needs is the `forward` verb, as it is. Raw ports are local only for now.
-
-A person may not open a port the agent did not expose, from the hub: the link refuses it.
-
 ## Alternatives considered
 
 - **A certificate per preview host, on demand** (Caddy's `on_demand_tls`, with the hub answering its `ask` endpoint so only its
@@ -244,8 +218,9 @@ A person may not open a port the agent did not expose, from the hub: the link re
   with the same limits as on demand.
 - **Ports found by the hub** (`/proc/net/tcp` through an exec) instead of declared: needs no tool, but the agent still has no
   address to give, and anything listening (a debugger, a database) would be offered as a preview.
-- **Publishing a port** (`docker run -p`): only at creation, so the agent is recreated; an internal network cannot publish; a
-  remote hub would need a route to the engine host besides the engine API; the server must listen on `0.0.0.0`.
+- **Publishing a port** (`docker run -p`) for a preview: only at creation, so the agent is recreated; an internal network cannot
+  publish; a remote hub would need a route to the engine host besides the engine API; the server must listen on `0.0.0.0`. A relay
+  does publish [local ports](declared-local-ports.md), which have no hub in the way and no sign-in.
 - **The hub joining the agent's network**: breaks one network per agent, a remote hub cannot, and loopback servers stay
   unreachable.
 - **The proxy sidecar as an ingress**: it is on every agent's network, but has no published port either, and loopback servers
