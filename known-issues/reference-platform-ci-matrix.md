@@ -1,42 +1,27 @@
-# The specs have only ever run on one developer machine
+# The specs run on one operating system, and only Docker is required
 
-Status: **open** (written 2026-10-04). Needs CI infrastructure.
+Status: **open** (written 2026-10-04, revised 2026-11-02). The plan is in [`roadmap/ci-test-matrix.md`](../roadmap/ci-test-matrix.md).
 
-## What the engine scenarios are
+The specs run on GitHub Actions, one fresh VM per reference platform (`.github/workflows/specs.yml`). `--engine` picks the platform, which says what the host
+is like, not what egzo is asked to do:
 
-`--engine` picks a **reference platform**, which says what the host the specs run on is like, not what
-egzo is asked to do:
+| scenario | the host is | in CI |
+|---|---|---|
+| `docker` | a typical rootful Docker host, no gVisor | required |
+| `docker-arm64` | the same, on arm64 | experimental |
+| `docker-gvisor` | Docker with `runsc` as the engine's default runtime | experimental |
+| `podman-rootless` | a rootless Podman host, no gVisor | experimental |
+| `podman` | a rootful Podman host, no gVisor | experimental, and not a supported platform |
 
-| scenario | the host is |
-|---|---|
-| `docker` | a typical rootful Docker host, no gVisor |
-| `docker-gvisor` | the same, with `runsc` as the engine's default runtime |
-| `podman` | a rootful Podman host, no gVisor |
-| `podman-rootless` | a rootless Podman host, no gVisor |
-
-egzo never chooses a container runtime, so a `-gvisor` scenario is a host whose engine has `runsc` as its default
-runtime: everything it starts runs under gVisor. There is no `podman-gvisor` scenario yet (it would be Podman with
-`runsc` as the default in `containers.conf`).
+egzo never chooses a container runtime, so a `-gvisor` scenario is a host whose engine has `runsc` as its default runtime. There is no `podman-gvisor` scenario yet.
 
 ## What is missing
 
-- No spec has run on any host except this developer machine (Docker, gVisor available, rootless and
-  rootful Podman installed). `.github/workflows/ci.yml` runs the Go unit tests, the linters and the hub's tests, never the specs. The Podman and gVisor scenarios were never run in full.
-- gVisor can only be checked properly on a pair of reference platforms, one with gVisor as the default runtime and one
-  without: "an agent runs under gVisor on the first and not on the second" has to be seen on real hosts.
-- The reference platforms are not defined beyond the engine: operating system, distribution, kernel,
-  cgroup version and firewall backend all change how rootful Podman and rootless networking behave
-  (see `rootful-podman-intermittent-egress.md`).
-
-## What to set up
-
-A CI matrix, one machine per reference platform, each running `pytest --engine <scenario>`:
-engine scenarios x the operating systems and distributions we support (to be chosen). Each cell
-provides what its scenario names, and nothing else. A spec that needs a feature a scenario lacks is a strict xfail there, so a cell that unexpectedly passes or fails is a finding.
+- **One operating system.** Every cell is Ubuntu 26.04. Distribution, kernel, cgroup version and firewall backend all change how rootful Podman and rootless
+  networking behave (see `rootful-podman-intermittent-egress.md`), so a pass says little about another distribution.
+- **Experimental cells cannot fail a run.** A red cell is visible, and nothing stops a merge on it. A pull request runs the Docker cell only, so a change that breaks another
+  platform shows up after it lands, on the push to `main` or the nightly run.
 
 ## Until then
 
-Do not read a green local run as "supported on Podman" or "gVisor works". It means "works on this
-machine, for the scenario that was selected".
-
-The plan for it is in `roadmap/ci-test-matrix.md`.
+Read a green cell as "works on Ubuntu 26.04 for that platform", and not as "works on Podman".

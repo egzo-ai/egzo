@@ -2,8 +2,8 @@
 
 **Status.** Built, as below; "Not now" is open. From [#54](https://github.com/egzo-ai/egzo/issues/54).
 
-Every action of the hub that calls an engine can take from a second to a minute: spawn, start, stop, remove, and later project
-up / down and saving an engine. Today:
+Every action of the hub on a project can take from a second to a minute: spawn, start, stop, remove. This page was written when the hub still called engines, so
+read "engine" as the project's link. Before tasks:
 
 - **Spawn** answers at once and runs in the background, but the project lists the spawn as a row of its own, with no name when
   none was asked. The engine's events bring the agent's row while the spawn still runs, so for a while there are two rows, then

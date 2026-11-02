@@ -87,7 +87,6 @@ engine's default logging: if `egzo logs` prints nothing for a container that sho
   times out; a project that comes up broken stays broken. It reproduces without egzo, appears host-level and is open
   (`known-issues/rootful-podman-intermittent-egress.md`). Rootful Podman is not supported for now: use Docker or rootless Podman.
 - **`pi` has no integration**, because it has no MCP support (`known-issues/mcp-support-is-required.md`).
-- **Platforms other than the developer's machine have not been run** by the specs
-  (`known-issues/reference-platform-ci-matrix.md`).
+- **The specs run on Ubuntu 26.04 only**, and only Docker is a required check (`known-issues/reference-platform-ci-matrix.md`).
 
 Please report anything else with the output of `egzo system check` and `egzo version`.

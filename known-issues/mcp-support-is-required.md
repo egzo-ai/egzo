@@ -9,7 +9,7 @@ egzo's agent-facing verbs (`list_messages`, `get_message`, `resolve`, `update`, 
 sidecar at `http://control:7777/mcp`. So a harness has to be able to talk MCP over streamable HTTP, with a
 fixed header for the agent's credentials, to be integrated.
 
-- **Claude Code** and **OpenCode**, the two integrated harnesses, both do, and the specs cover it
+- **Claude Code**, **OpenCode** and **Codex**, the integrated harnesses, all do, and the specs cover it
   (`harness/test_harness_integrations.py`: the `egzo` MCP server is in each one's configuration).
 - **pi** (Mario Zechner's coding agent) has no MCP support, deliberately: its design leaves it out, and
   people reach MCP servers through a bridge (`mcporter` or an extension). It is still an accepted harness
@@ -41,6 +41,6 @@ neither MCP nor a shell cannot be supported.
 
 ## Why it is deferred
 
-v1 integrates Claude Code and OpenCode. pi would need its own image, its hooks (or a quiescence-based idle
+v1 integrates Claude Code, OpenCode and Codex. pi would need its own image, its hooks (or a quiescence-based idle
 signal), the CLI front end and its specs, for one more harness. The message model (a short typed line with a random message id, the message fetched through the tool) is built
 with the MCP front end only.

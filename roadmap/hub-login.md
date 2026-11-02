@@ -223,8 +223,8 @@ the provider's keys, identity is issuer plus `sub`. To be generic enough without
 
 `docs/hub-access.md` is written around this:
 
-- **Quick start**: `docker compose up`, set `EGZO_SECRET_KEY`, read the `admin` password in `docker compose logs hub`.
-- **Reaching it**: one port, meant for a private network (a LAN, Tailscale, a tunnel), not the open internet. `EGZO_PUBLIC_URL`
+- **Quick start**: set `EGZO_PUBLIC_URL`, `docker compose up`, read the `admin` password in `docker compose logs hub`.
+- **Reaching it**: meant for a private network (a LAN, Tailscale, a tunnel), not the open internet. `EGZO_PUBLIC_URL`
   and `EGZO_TRUSTED_PROXIES` when a proxy is in front. A few lines; how to self-host is not the hub's docs' job.
 - **Single sign-on**: the client to register (confidential or public with PKCE, authorization code, the redirect address, the
   scopes), the variables, linking from the starter account, and a table of the failures (redirect mismatch, issuer mismatch,

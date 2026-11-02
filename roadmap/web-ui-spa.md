@@ -1,6 +1,6 @@
 # Roadmap: the hub web UI as a Svelte single-page app, on an API-first back-end
 
-**Status.** Built (see "What was built" at the end). A rewrite of the front end and of the layer that serves it. [hub.md](hub.md) describes what
+**Status.** Built (see "What was built" at the end). It predates projects [linking to the hub](hub-link.md): its engines and `/e/{engine}/` addresses are gone. A rewrite of the front end and of the layer that serves it. [hub.md](hub.md) describes what
 the hub does and is built; this item changes how its UI is built and served, and **adds no hub feature**: no new
 operation, permission, data or setting. The new things are in the front end only (layouts, shortcuts, navigation).
 

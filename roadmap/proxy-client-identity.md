@@ -1,6 +1,6 @@
 # Roadmap: who a proxy connection is from
 
-**Status.** Being built: the specs are the status. Extends [proxy-audit.md](proxy-audit.md) (the event schema) and
+**Status.** Built. Extends [proxy-audit.md](proxy-audit.md) (the event schema) and
 [browser-access.md](browser-access.md) (how Chromium gets through the proxy). No backward compatibility: a wrong-credentials event
 no longer has an `agent`.
 

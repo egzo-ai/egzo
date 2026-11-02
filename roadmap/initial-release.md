@@ -4,8 +4,7 @@ This page tracks what has to be true before egzo 1.0.0, and what to re-check in 
 published as early 0.x releases (tags `0.0.1-rc1` to `0.4.1`; GitHub releases from `0.1.1`), so "initial release" now means
 the first one that can be recommended.
 
-The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matrix.md](ci-test-matrix.md)). The solution
-(runners, hosted or self-hosted, which CI) is not chosen; the requirement is that the matrix runs somewhere automated.
+The specs must pass in CI on every supported platform before 1.0.0 ([ci-test-matrix.md](ci-test-matrix.md)).
 
 ## Done
 
@@ -28,8 +27,7 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
 - [x] `ci.yml` builds every image (`docker-bake.hcl`) for amd64 and arm64 without pushing, so a broken Dockerfile shows before a
       tag does: one job per architecture on a runner of that architecture, Go cross-compiled, with a registry cache per architecture
       that main and releases write.
-- [ ] **arm64 has to be run**, not only built: no spec runs on arm64, and the browser has not been tried there. Until then do not
-      claim arm64 support beyond "builds".
+- [ ] **arm64 has to become a required platform.** The specs run on it, the browser ones included, in the `docker-arm64` cell, which is experimental so far.
 - [ ] Optional: keyless cosign signing of the images and the binaries.
 - [x] Native arm runners (`ubuntu-26.04-arm`) instead of QEMU: the images build on them, and the release pushes each architecture by
       digest and then tags both together.
@@ -37,9 +35,10 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
       right binary, verifies its checksum and installs it, for a `curl ... | sh` style install and perhaps a package
       (Homebrew tap, `.deb`). Then update `docs/install.md` to lead with it and keep the manual download as the fallback.
 - [ ] Check the name, domain, org and registry (DESIGN.md, "Naming": availability was never really checked).
-- [ ] **A CI matrix running the specs** on every reference platform ([`ci-test-matrix.md`](ci-test-matrix.md),
-      `known-issues/reference-platform-ci-matrix.md`). `ci.yml` runs only the Go tests, linters and hub tests today. The CI solution is
-      undecided; until the matrix runs, "supported on Podman" or "gVisor works" are not claims to make.
+- [x] **A CI matrix running the specs** on every reference platform (`specs.yml`, [`ci-test-matrix.md`](ci-test-matrix.md)).
+- [ ] **The cells of the supported platforms are required.** Only `docker` is so far: `docker-gvisor`, `podman-rootless` and `docker-arm64` are experimental
+      (`known-issues/reference-platform-ci-matrix.md`).
+- [ ] **Versions.** The rule for changing the link's protocol, and the rest of telling an old release from a broken one ([hub-link.md](hub-link.md#versions)).
 - [ ] **Re-check the rootful Podman egress bug and decide whether rootful Podman is supported in 1.0.0.** Docker and rootless Podman are
       supported now; rootful Podman is not. The cause looks like containers/netavark#1497 (a stale per-bridge sysctl file switches
       forwarding off on a reused bridge name; fix proposed in #1498). Before 1.0.0: see whether the fix is released, run the `podman`
@@ -50,13 +49,8 @@ The specs must run in CI on every reference platform before 1.0.0 ([ci-test-matr
       `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost
       notes into `DESIGN.md` or drop them, then delete the file and this link. Its R-nn and T-nn ids refer to the deleted
       `TODO.md` and mean nothing to outsiders.
-- [ ] **Address the CodeQL alerts and adjust its configuration.** 17 alerts are open on `main` (Security, Code scanning), none
-      triaged. Review the real ones: archive extraction in `internal/stack/workspaces.go` (`go/zipslip`, `go/unsafe-unzip-symlink`;
-      probably false positives behind the `filepath.Rel` and `linkLeaves` guards, but it unpacks what a container wrote, so prove
-      it with a spec). `safeNext` (`go/bad-redirect-check`) was a real open redirect
-      (a tab or newline in `next`) and is fixed. Dismiss the rest with a reason. Then configure the scan: `paths-ignore` for `specs/` and
-      `roadmap/` (11 of the 17 are URL-substring checks in specs and the design mockups), decide whether the `python` analysis is
-      worth a runner, and keep it out of the required checks.
+- [ ] **Triage the code scanning alerts and adjust the configuration.** Review each, fix the real ones and dismiss the rest with a reason. Then configure the scan:
+      `paths-ignore` for `specs/` and `roadmap/`, decide whether the `python` analysis is worth a runner, and keep it out of the required checks.
 
 ## Documentation review against the published artifacts
 
