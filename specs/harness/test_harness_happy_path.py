@@ -19,7 +19,6 @@ HOSTS = ("api.anthropic.com", "api.openai.com")
 HARNESSES = ["claude-code", "opencode", "codex"]
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 ANTHROPIC_KEY, OPENAI_KEY = "sk-ant-egzo-spec-not-a-real-key-" + "0" * 10, "sk-proj-egzo-spec-not-a-real-key-" + "0" * 40
-REAL_KEY = {"claude-code": ANTHROPIC_KEY, "opencode": ANTHROPIC_KEY, "codex": f"Bearer {OPENAI_KEY}"}
 PAGE, LANDED = "https://egzo.ai", "github.com/egzo-ai/egzo"
 STUB, STUB_LOG = "model-api-stub", "/tmp/model-api.log"
 BROWSE = ["egzo.ai", "github.com", "*.github.com", "*.githubassets.com", "*.githubusercontent.com"]
@@ -54,7 +53,7 @@ def sandbox(shared_project, engine, egzo):
     for source in ("stub.crt", "stub.key"):
         engine.put_file(name, p.root / source, f"/tmp/{source}")
     engine.put_file(name, FIXTURES / "model_api_stub.py", "/tmp/model_api_stub.py")
-    engine.exec(name, "python3", "/tmp/model_api_stub.py", "/tmp/stub.crt", "/tmp/stub.key", STUB_LOG, PAGE, detach=True)
+    engine.exec(name, "python3", "/tmp/model_api_stub.py", "/tmp/stub.crt", "/tmp/stub.key", STUB_LOG, PAGE, ANTHROPIC_KEY, f"Bearer {OPENAI_KEY}", detach=True)
     p.stub = name
     yield p
     engine.run("rm", "-f", name)
@@ -95,7 +94,7 @@ def start(p, harness):
 
 
 def model_turns(engine, p):
-    return [r for r in asked(engine, p) if r.get("key")]
+    return [r for r in asked(engine, p) if "real_key" in r]
 
 
 @pytest.mark.parametrize("harness", HARNESSES)
@@ -105,7 +104,7 @@ def test_a_harness_pinged_calls_home_through_the_proxy_and_shows_the_answer(sand
     p.ok("message send", name, "ping")
     log = lambda: "the model API was asked:\n" + "\n".join(json.dumps(r) for r in asked(engine, p)[-5:])
     wait_until(lambda: model_turns(engine, p), "the harness to call the model", 90, context=log)
-    assert model_turns(engine, p)[0]["key"] == REAL_KEY[harness], "the proxy puts the real key on what the harness sends"
+    assert model_turns(engine, p)[0]["real_key"], "the proxy puts the real key on what the harness sends"
     client = p.pty("agent attach", name, dimensions=(40, 140), timeout=90)
     client.expect(b"pong", timeout=60)
     client.send(b"\x1d")

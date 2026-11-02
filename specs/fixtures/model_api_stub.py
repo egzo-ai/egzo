@@ -3,8 +3,8 @@
 
 """A stand-in for the model APIs, as api.anthropic.com (POST /v1/messages) and api.openai.com (POST /v1/responses). It does not think. With the
 file /tmp/browse it asks for the browser, once, to open URL, and after that, or without the file, it answers pong. Every model request is a
-JSON line in the log: the path, the key it carried, the names of the tools it offered, and what a tool answered.
-Usage: model_api_stub.py CERT KEY LOG URL"""
+JSON line in the log: the path, whether it carried one of the real keys, the names of the tools it offered, and what a tool answered.
+Usage: model_api_stub.py CERT KEY LOG URL REAL_KEY..."""
 
 import json
 import os
@@ -13,6 +13,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 CERT, KEY, LOG, URL = sys.argv[1:5]
+REAL_KEYS = set(sys.argv[5:])
 CALL = "call_egzo_spec"
 
 
@@ -113,7 +114,7 @@ class Handler(BaseHTTPRequestHandler):
         api = "anthropic" if self.path.split("?")[0].endswith("/v1/messages") else "openai" if self.path.split("?")[0].endswith("/responses") else None
         call = next_call(request) if api else None
         with open(LOG, "a") as log:
-            log.write(json.dumps({"path": self.path, "key": self.headers.get("x-api-key") or self.headers.get("Authorization"),
+            log.write(json.dumps({"path": self.path, "real_key": (self.headers.get("x-api-key") or self.headers.get("Authorization")) in REAL_KEYS,
                                   "tools": tool_names(request), "results": tool_results(request), "called": call and call[0]}) + "\n")
         if api == "anthropic":
             return self.anthropic(request, call)
@@ -129,6 +130,7 @@ class Handler(BaseHTTPRequestHandler):
 
 server = ThreadingHTTPServer(("0.0.0.0", 443), Handler)
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 context.load_cert_chain(CERT, KEY)
 server.socket = context.wrap_socket(server.socket, server_side=True)
 open(LOG, "a").close()
