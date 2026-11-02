@@ -47,7 +47,7 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
   - **owner**: admin, plus granting and removing roles, and unlinking. Destroying a project (`project down`) is not a hub action, by design: the CLI does it.
 - An owner cannot remove themselves or drop their own permissions. An owner can remove other owners. A project keeps a valid owner.
 - Chat needs no permission of its own: a person talks to an agent from a channel it was added to, with `user` or above. **A viewer can never talk to an agent.** See
-  "Who decides what" in [messaging-adapters.md](messaging-adapters.md), which also leaves open whether a `user` may talk to another person's agent.
+  "Who decides what" in [messaging-adapters.md](messaging-adapters.md), which also covers a `user` talking to another person's agent: allowed, sensitive, and to evaluate carefully before building.
 
 ## Web UI
 

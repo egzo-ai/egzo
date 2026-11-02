@@ -49,8 +49,7 @@ The specs must pass in CI on every supported platform before 1.0.0 ([ci-test-mat
       `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost
       notes into `DESIGN.md` or drop them, then delete the file and this link. Its R-nn and T-nn ids refer to the deleted
       `TODO.md` and mean nothing to outsiders.
-- [ ] **Triage the code scanning alerts and adjust the configuration.** Review each, fix the real ones and dismiss the rest with a reason. Then configure the scan:
-      `paths-ignore` for `specs/` and `roadmap/`, decide whether the `python` analysis is worth a runner, and keep it out of the required checks.
+- [ ] **Fix any CodeQL issue before 1.0.**
 
 ## Documentation review against the published artifacts
 
