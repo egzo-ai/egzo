@@ -108,16 +108,16 @@ egzo project register</pre>
       </section>
     {/if}
     {#if codes.length}
+      <p class="muted" style="margin:0">Codes not used yet. A code is seen only when it is made: to use one you no longer have, cancel it and make another.</p>
       <div class="table-wrap">
         <table class="table" data-testid="link-codes">
-          <thead><tr><th>Code</th><th>Made by</th><th>Expires</th><th></th></tr></thead>
+          <thead><tr><th>Made by</th><th>Expires</th><th></th></tr></thead>
           <tbody>
             {#each codes as c (c.id)}
               <tr data-code={c.id}>
-                <td class="muted">{c.id}</td>
                 <td>{c.createdBy}</td>
                 <td class="muted" title={stamp(c.expiresAt)}>{until(c.expiresAt)}</td>
-                <td class="actions"><button class="btn" data-size="sm" aria-label="Cancel code {c.id}" onclick={() => cancelCode(c)}>Cancel</button></td>
+                <td class="actions"><button class="btn" data-size="sm" aria-label="Cancel code made by {c.createdBy}, expires {until(c.expiresAt)}" onclick={() => cancelCode(c)}>Cancel</button></td>
               </tr>
             {/each}
           </tbody>
