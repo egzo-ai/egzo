@@ -8,6 +8,7 @@ or with one of these sites down shows red specs that say nothing about egzo. Wha
 - **`example.com`, `example.org`**: the egress and audit specs (`proxy/test_proxy_egress.py`, `service/test_service_commands.py`,
   `project/test_project_operations.py`, `browser/test_browser.py`) fetch real pages through the proxy to prove allow and deny (also `test_egress.py`, `test_secrets.py`). Several other
   specs only use the names as strings in a config and need nothing.
+- **`egzo.ai`, `github.com`**: `harness/test_harness_happy_path.py` opens egzo.ai in each harness's browser and follows its redirect to the project on GitHub.
 - **`httpbin.org`, `httpbingo.org`**: the injection and placeholder specs in `proxy/test_proxy_secrets.py` and `browser/test_browser.py` need a server that echoes back
   the headers and body it received. These are third-party sites, and `httpbingo.org` has no say in our uptime.
 - **`github.com`**: the git workspace specs clone a public repository (`workspace/test_git_workspaces.py`, `workspace/test_workspace_commands.py`, parts of
