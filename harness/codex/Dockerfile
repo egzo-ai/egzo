@@ -2,7 +2,7 @@
 # Build: docker build --build-arg BASE_IMAGE=ghcr.io/egzo-ai/egzo-harness-base:<version> -t egzo-harness-codex harness/codex
 # The base image (harness/base) has git, the browser and the egzo entrypoint; this one adds the TUI.
 ARG BASE_IMAGE=ghcr.io/egzo-ai/egzo-harness-base:latest
-ARG CODEX_VERSION=0.164.0
+ARG CODEX_VERSION=0.166.0
 FROM ${BASE_IMAGE}
 ARG CODEX_VERSION
 
