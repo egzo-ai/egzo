@@ -1,60 +1,21 @@
-# Roadmap: hub settings, with engines and users
+# Roadmap: hub settings
 
-**Status.** The first slice is built (see "What was built"); "Later" is open; removing a user was replaced by disabling one
-in [hub-login.md](hub-login.md). **The bypass below is gone:** an operator oversees every project and grants themselves a role, see
-[hub-access.md](../docs/hub-access.md#operators), and "Engines" went with the engines. Before it, the hub had one operator, set at the
-first login, and no way to change that; engines were the operator's page and there was no list of users.
+**Status.** Built, for operators, with the later items below still open. [docs/hub-access.md](../docs/hub-access.md#operators) says how operators work.
+An operator oversees every project and grants themselves a role to go further, so nothing here bypasses roles. Engines are gone: projects
+[link themselves](hub-link.md).
 
-The need: a hub-level **Settings** area, outside any project, with two views:
+## What is built
 
-- **Engines**: what the Engines page is today (add, edit, remove, confirm an ssh host key), moved under Settings.
-- **Users**: every person who has signed in, and the hub-level access they hold. The first hub-level access is the
-  **operator** status, so the operator can hand it to someone else, or take it back.
-
-## The model
-
-- **An operator bypasses the grant system.** No grants are written for them. In every access check an operator counts as **owner of
-  every project** the hub has scanned, on every engine. This replaces `claimOrphans`: nothing gives an operator owner rows any more,
-  and the one special case in the model ("the operator owns the orphans") becomes "an operator is an implicit owner". It supersedes
-  the earlier plan, in [hub.md](hub.md), of materializing the access.
-- **More than one operator.** `users.is_operator` stays, but it is no longer "exactly one": `Store.Operator()` (one row) and the
-  "very first user" rule are the places that assume it. The first login still becomes the operator. With bypass, granting or
-  revoking operator takes effect at once, with no grants to create or clean up.
-- **Only for projects that exist.** The bypass applies to a project in a scan (`access()` in `hub.go`), not to any
-  `(engine, project)` string. An unknown project is still not found.
-- **Visibility grows.** Today an operator has no access to a project that has a real owner. With the bypass an operator reaches every
-  project, other people's agents and terminals included. Operators can already add engines, so the trust is the same, but say it in the
-  docs. Every action stays in the audit log under the operator's name.
-- **CLI projects.** Agents spawned from the CLI belong to "the operator" (`rbac.Operator`, the actor label `operator`). `rbac.Can`
-  already reads that as `subject.IsOperator`, so with several operators it means any of them; the UI shows "operator (CLI)".
-- **Roles on projects are unchanged** and stay on the project's Members tab. Only an operator manages engines and users.
+- **Settings**, an area outside any project: **Links**, **Invites**, **Users**, the hub's **Audit** log, and **Account**, which everyone has.
+- **Several operators, the last one protected.** `Store.SetOperator` counts and writes in one transaction and returns `ErrLastOperator`, and it is the only
+  way to change the flag.
+- **Disabling a user** replaced removing one ([hub-login.md](hub-login.md), "Disabling users"): the audit log, messages and agent labels name people by
+  username. An operator cannot be disabled until they stop being one.
+- **Break-glass**: `EGZO_LOCAL_LOGIN=true` and `EGZO_ADMIN_PASSWORD`, and a restart, bring `admin` back as an operator. What comes back is oversight: `admin`
+  reaches a project's terminals by granting itself a role, on the record.
 
 ## Later
 
-- **Break-glass.** Settled by [hub-login.md](hub-login.md): `EGZO_LOCAL_LOGIN=true` and `EGZO_ADMIN_PASSWORD`, and a restart, bring `admin` back as an
-  operator, so no setting of its own is needed. With operators no longer owning everything, what comes back is oversight: `admin` reaches a project's
-  terminals by granting itself a role, on the record.
-- **A hub-level audit view.** Step 3 writes the entries; showing them (a log under Settings, or the project table with an empty
-  project) is separate.
-- **Remove a user.** Replaced by disabling a user, in [hub-login.md](hub-login.md) ("Disabling users"): the audit log, messages and agent labels name people by username, so the row is never deleted.
-  Open: whether to expose it, and what happens to the agents they created (the actor label stays, as a name that no longer resolves).
-- **A richer users list.** First and last sign-in, the projects each person holds a role on (it answers "what can this person see?"),
-  search for a long list.
-- **Later hub-level things** (auth settings, defaults, retention) would land in the same area. Do not build them now.
-
-## What was built
-
-- **The bypass.** `Hub.access` returns owner for an operator on any project of a known engine; when the engine's last scan listed
-  its projects, the project must be on it. `Projects` lists every scanned project for an operator, with `operator: true`. The
-  claiming is gone: `claimOrphans`, `ClaimIfOrphan` and `HasOwner` are removed, and nothing writes grants for an operator. An
-  engine that did not answer is not "not found" for an operator: the call reports the engine.
-- **Locked Members rows.** `Members` lists the operators after the grants, as owner with `operator` set (a grant left on a person
-  who became an operator is not listed twice); `Candidates` leaves them out; `SetRole` refuses an operator target with
-  `ErrOperatorAccess` before any other rule. Home and the project page say "operator" where a role would be.
-- **Several operators, the last one protected.** `Store.SetOperator` counts and writes in one transaction and returns
-  `ErrLastOperator` (409 `conflict`); it is the only way to change the flag.
-- **Users.** `GET /users`, `PUT /users/{id}` `{isOperator}`, operators only; the audit entries `operator.grant` and
-  `operator.revoke` (refusals too) have no engine and no project. A change that changes nothing is not audited.
-- **Settings.** An operator-only Settings entry in the sidebar, with Engines (moved; `/engines` and `/settings` land on
-  `/settings/engines`) and Users. Keys: `g e`, `g u`; both are in the command menu.
-- The recovery from a lost operator sign-in is written in `docs/hub-access.md`.
+- **Remove a user.** Open: whether to offer it at all, and what happens to the agents they created (the actor label stays, as a name that no longer resolves).
+- **A richer users list.** The projects each person holds a role on (it answers "what can this person see?"), search for a long list.
+- **Later hub-level things** (defaults, retention) would land in the same area. Do not build them now.

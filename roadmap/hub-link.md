@@ -1,12 +1,11 @@
 # Roadmap: a project links itself to a hub
 
-**Status.** Core, the hub, and roles and invites are built (steps 2, 3 and 5 of the [order of work](#order-of-work)): the hub no longer connects to
-engines. Previews (step 4), which the viewer role waits for, and the rewrite of [messaging-adapters.md](messaging-adapters.md) and
-[discovery.md](discovery.md) are open.
+**Status.** Built: the link, the hub on top of it, roles and invites, and previews ([agent-ports.md](agent-ports.md)). The hub no longer connects to engines.
+What is left is [Open questions](#open-questions).
 
 ## Why
 
-The hub connects to engines (a unix socket, tcp+TLS, ssh) and pulls everything through the engine API. That model cracks:
+The hub used to connect to engines (a unix socket, tcp+TLS, ssh) and pull everything through the engine API. That model cracked:
 
 - **The hub holds root-equivalent access to every engine**: a socket, a TLS client certificate, an ssh key. A compromised hub owns
   every host behind it.
@@ -30,7 +29,7 @@ hub: https://my-egzo.example.org
   proxy). The link holds one outbound HTTPS connection to the hub on port 443, which NAT and company proxies pass. Nothing on the
   project's host listens on anything.
 - **The hub asks, the link does.** Down the connection the hub sends egzo's verbs: list, spawn, start, stop, remove, attach, open a
-  preview stream. The link runs them on its own engine with the core packages the hub calls today (`stack.Spawn`,
+  preview stream. The link runs them on its own engine with the core packages (`stack.Spawn`,
   `RemoveInstances`, `Observe`, `ExecStream`). Up the connection the link pushes the project as it changes, the agents' status
   feed and the proxy's audit trail.
 - **The link exposes egzo's verbs and nothing else.** The hub cannot run a container, mount a path or exec a command of its
@@ -96,7 +95,7 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 - On a network of its own, with a route out to the hub. Never on an agent's network: the agents do not reach it, and it does not
   reach them except through the engine, like the CLI.
 - It reaches its engine through the engine's socket, mounted by `up`: it is root-equivalent on its host, like the CLI that
-  created it, and like the hub's quick start today. Rootless Podman keeps that to the user's account.
+  created it. Rootless Podman keeps that to the user's account.
 - It runs as the sidecars' user with the socket's group as its primary group. Only the engine's host knows that group and the CLI may
   be elsewhere, so `up` reads it with a throwaway container that mounts the socket. The socket's path is the one the CLI dials when
   that is a unix socket, and `/var/run/docker.sock` otherwise.
@@ -133,7 +132,7 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 - **What a link says is untrusted.** A linked project speaks for itself only; its names, status lines and audit events are data,
   shown escaped, limited in size and rate.
 
-## What changes in the hub
+## What changed in the hub
 
 Removed, with their code, settings and docs:
 
@@ -151,8 +150,6 @@ Changed:
   the audit log keep their logic; what they call goes over the connection.
 - **Roles and invites** replace today's roles and the operators' implicit ownership (below).
 - **The quick start**: the hub without the socket, and a project on the same machine linking to it.
-- [messaging-adapters.md](messaging-adapters.md) and [discovery.md](discovery.md) are rewritten for the link: the operator API
-  and the event stream they use are reached through it instead of `engine exec`.
 - `EGZO_SECRET_KEY` went: nothing is left for it to protect. `EGZO_PUBLIC_URL` or `EGZO_LINK_URL` is required instead, and a link's proof is
   checked against that address, never one taken from a request.
 
@@ -169,16 +166,14 @@ Built, as [hub-access.md](../docs/hub-access.md) describes. What the text below 
 - What a quota counts is who connected a project, not who owns it now.
 - A local account signs in with `EGZO_LOCAL_LOGIN` on, and there is no password reset.
 
-**Signing in is not enough: an invite is required.** Today a person who signs in with single sign-on gets an account with no
-access, and waits for a grant. With a company-wide provider that is everyone in the company. Instead, the hub needs an **invite
-system**: a person needs a sign-in **and** a valid invite, and an account without one is refused.
+**Signing in is not enough: an invite is required.** With a company-wide provider, an account for everyone who signs in would be everyone in
+the company. So a person needs a sign-in **and** a valid invite, and an account without one is refused.
 
 - An invite is a link with a one-time code: single use, expiring, revocable. It carries what it grants: a role on a project (sent
   by the project's owner), or the flags below (sent by an operator).
 - It is redeemed by whoever signs in with it, by password or single sign-on. Nothing is matched by email
   ([hub-access.md](../docs/hub-access.md)).
-- A person from outside (the viewer of a preview) needs an account: the invite is also how they get one, so the hub needs local
-  accounts made from an invite, not only `admin` and single sign-on.
+- A person from outside (the viewer of a preview) needs an account: the invite is also how they get one, as a local account made from it.
 
 Roles are assigned on projects:
 
@@ -200,7 +195,7 @@ Flags on users:
 - **project quota**: how many projects the person may connect to the hub. 0 cannot create. Operators bypass it. It can be
   over-subscribed: lowering a quota under what a person already has removes nothing, it stops new ones.
 
-A person disabled by an operator loses everything at once, as today. Their projects stay linked, so a project can be left with
+A person disabled by an operator loses everything at once. Their projects stay linked, so a project can be left with
 no valid owner: the operators see it, and grant a new owner or revoke it.
 
 ## Specs and tests

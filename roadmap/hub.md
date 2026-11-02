@@ -1,9 +1,7 @@
 # Roadmap: egzo-hub and web UI
 
-**Status.** The hub and its web UI are built (`hub/`, see [docs/hub.md](../docs/hub.md) and "Built" at the end of
-this page). The messaging adapters (NATS, `egzo-discord`) are a separate item: [messaging-adapters.md](messaging-adapters.md). Login through Dex
-and "the first user is an operator" were replaced by [hub-login.md](hub-login.md). The hub connecting to engines was replaced by projects
-linking to it ([hub-link.md](hub-link.md)): this page keeps what still holds, and engines are gone from it.
+**Status.** The hub and its web UI are built (`hub/`, see [docs/hub.md](../docs/hub.md) and "Built" at the end of this page). The messaging adapters
+(NATS, `egzo-discord`) are planned: [messaging-adapters.md](messaging-adapters.md).
 
 Core implements none of this; what core guarantees for it is summarised in DESIGN.md, "Not in core".
 
@@ -26,15 +24,15 @@ Core implements none of this; what core guarantees for it is summarised in DESIG
 ## Deployment
 
 - A docker-compose project. No TLS termination: users put a TLS reverse proxy in front (out of scope); the hub
-  exposes one high port.
+  exposes one port for people and links, and one for previews.
 - The public host is derived safely from `X-Forwarded-Host` and the related headers, following best practice (trust
   them only from a configured proxy).
 - All configuration comes from environment variables, set in the compose file.
 
 ## Users and login
 
-- **OIDC through Dex**, bundled as a compose service. The hub only speaks OIDC to it; the user plugs their provider
-  (GitHub first) into Dex with Dex's own documentation. No provider code in the hub.
+- **Local accounts and OIDC**, as [hub-login.md](hub-login.md) describes. The hub only speaks OIDC, to any provider. Dex is a test fixture of
+  `make hub-stack` and is not part of the compose stack. No provider code in the hub.
 - An account takes an invite; signing in is not enough ([hub-access.md](../docs/hub-access.md)).
 - **Operators** oversee every project and grant themselves a role to go further; operators make and remove other operators, and the last one stays.
 
@@ -118,7 +116,7 @@ and attach leave no trace in core: the hub writes its own audit log for them, wi
 In `hub/`, with the decisions above unless listed under "Not yet".
 
 - The model: a separate module, projects that link themselves, observe and operate only, secrets never read, roles in the hub's database.
-- Login through OIDC (Dex in the compose stack), with an invite for anyone new; operators oversee every project. Roles viewer / user / admin / owner per project, "own agents" by the `actor` label, an owner cannot
+- Login with a local account or OIDC, with an invite for anyone new; operators oversee every project. Roles viewer / user / admin / owner per project, "own agents" by the `actor` label, an owner cannot
   remove or lower themselves. Every operation is audited, allowed or refused.
 - Projects that link ([hub-link.md](hub-link.md)): the link endpoint, registrations made with a link code, projects by id, offline since a
   time, tasks interrupted when a link drops. What the link pushes replaces every listing and every log followed through an engine, and a
@@ -135,22 +133,20 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   the project's Activity tab lists them.
 - Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
   the terminal websocket.
+- Previews ([agent-ports.md](agent-ports.md)): an agent's `http` port served to people's browsers on an origin of its own, signed in by redirects with one-time
+  tickets, with the role checked on every request. Local ports ([declared-local-ports.md](declared-local-ports.md)) are listed next to them as addresses to copy.
 - Tests: Go unit tests with the seam faked, and core's real link against the endpoint; Playwright tests of the pages; `make hub-stack` (the
-  compose stack: hub image, Dex, a real project that links itself, a real terminal).
+  compose stack: hub image, Dex, Caddy in front, a real project that links itself, a real terminal and a real preview).
 
 ## Not yet
 
 - **The messaging adapters** (embedded NATS, the hub API for link and expose, `egzo-discord`): see
   [messaging-adapters.md](messaging-adapters.md).
-- **Roles and invites, and previews over the link**: see [hub-link.md](hub-link.md), "Order of work".
-- **Previews of an agent's dev server** (one origin per preview on a domain of its own), and the
-  `__Host-` session cookie they need first: see [agent-ports.md](agent-ports.md). An agent opens a declared port for the hub with
-  `expose(name, "hub")`; see [declared-local-ports.md](declared-local-ports.md).
 - **Discovery, the rest** (a Refresh button, showing how fresh a listing is): see [discovery.md](discovery.md).
 - **The timelines without a command in the sidecar.** The status is streamed, but the project and agent timelines, the spec and the
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
   the templates once per five minutes. Following the event stream the way the status is followed (a second line type on the
   sidecar's standard output, or a stream of its own) would remove the last periodic command.
-- **Hub settings, later parts** (a hub-level audit view, removing users, a richer users list): see [hub-settings.md](hub-settings.md).
+- **Hub settings, later parts** (removing users, a richer users list): see [hub-settings.md](hub-settings.md).
 - **Incompatible controls** (the rest of it: a version the hub can compare): see [control-compatibility.md](control-compatibility.md), needed for 1.0.0.
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

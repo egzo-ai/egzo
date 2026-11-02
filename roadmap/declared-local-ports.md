@@ -1,16 +1,13 @@
-# Plan: declared ports, hub or local
+# Roadmap: declared ports, hub or local
 
-Status: agreed, not built. Branch: `declared-local-ports`, from `main`, one PR. It replaces what `roadmap/agent-ports.md` says about `expose`,
-`port-forward` and raw TCP. The preview design in that file (hub listener, sign-in, certificates) stands. PRs #75 and #76 are out of scope: they are
-reworked after this lands.
-
-egzo is pre-1.0: replace things outright, with no aliases, no migration and no deprecation.
+**Status.** Built. Every port an agent may serve is declared in its project file, and stays closed until the agent opens it. The user's side of this is in
+[docs/project-file.md](../docs/project-file.md) and [docs/messaging.md](../docs/messaging.md), and previews are in [agent-ports.md](agent-ports.md).
 
 ## The design in short
 
 - Every port an agent may serve is declared by name in its template. Nothing else can ever open.
 - A declared port is closed until the agent calls `expose(name, where)`, with `where` either `hub` or `local`, never both.
-- `hub` is a preview, as built in #73 and #74. It takes an `http` port and a project connected to a hub.
+- `hub` is a preview. It takes an `http` port and a project connected to a hub.
 - `local` is a port on the machine, through a small relay. It needs `local_ports` in the file, which is off by default, and no hub.
 - `tcp` and `udp` are local only.
 - `expose` answers the one address where the app can be reached.
@@ -152,39 +149,15 @@ Do not use a host port range in `-p`: the engine would choose again.
 - `Template` gets the project's local ports and whether it names a hub, so `templateHash` covers them and a changed `local_ports` makes instances stale,
   and the existing stale flow applies. `Published.View` must carry them into `DesireInstance`.
 
-## What the hub changes
+## What the hub does with it
 
-Little: `hub` exposures go through the same path as today.
+`hub` exposures are previews.
 
 - `hublink.Exposure` gets `Where`, and the status feed carries it along with `Name`.
 - `Link.noteExposures` and `hub/internal/hub/previews.go` `exposedIn` keep only `where: hub`. A local exposure must never be served as a preview. Test both.
-- `tcp` no longer reaches the hub, but leave the `forward` code as it is: hub TCP may come later.
-- The panel is #76's work, and is not touched here.
-
-## Work, in order
-
-Specs first for core. A spec for something not built yet fails: no `xfail`, `skip` or `todo` for that. Commit each step when it works.
-
-1. **Roadmap.** Commit this file and trim `roadmap/agent-ports.md` to point here. Update the mentions in `roadmap/hub.md`, `hub-link.md`, `hub-settings.md`,
-   `messaging-adapters.md`, `windows-and-macos.md` and `support-engine-named-volumes.md` where they describe what changes.
-2. **Project file.** Specs in `specs/project/test_project_ports.py` for every refusal above and for a file that passes. `internal/config`: `Agent.Ports`,
-   `File.LocalPorts`, their resolved forms, checks in `resolve.go`, and `keys.go` picks the keys up from the types.
-3. **`expose` by name.** Rewrite `specs/agent/test_agent_expose.py`, `test_agent_expose_boot.py` and `test_agent_expose_hub.py`. Change `internal/control/exposures.go`,
-   `agentapi.go` (`POST /v1/expose` with `{name, where}`, `DELETE /v1/expose/{name}`, a new `GET /v1/expose`), `mcp.go`, `api.go` (`PUT /v1/agents/{name}/ports`,
-   removal with the registration), `events.go`, `internal/stack/apply.go` and `engine_commands.go` (`ps` shows `web:hub,db:local` under `PORTS`, `--json`
-   has the address), and the hub changes above. Update `specs/fixtures/fakehub/main.go` and `specs/hubkit.py`, and the test projects, whose agents must now
-   declare ports.
-4. **Instructions.** `EGZO_PORTS` and `harness.Instructions`, with a spec in `specs/harness/test_harness_integrations.py`: an agent with ports is told them and
-   one without is told nothing about ports.
-5. **The relay.** `internal/relay` with unit tests, including TCP half close, UDP sessions, limits, idle timeout and a refused gate. Then the stack changes. Specs in
-   `specs/agent/test_agent_local_ports.py`, listed below.
-6. **Remove `port-forward`.** Delete `internal/cli/portforward.go` and its test, `specs/agent/test_agent_port_forward.py`, and what only it uses in
-   `internal/portforward` (`Mapping`, `ParseMapping`, `Command`). Keep `Forward`, `AnnouncedCommand`, `Connected` and `specs/agent/test_agent_forward_verb.py`.
-   Check `specs/clitree.py` and `specs/test_meta.py` for the command tree.
-7. **Docs.** `docs/project-file.md` (both new keys), `docs/managing-projects.md` (replace "Opening an agent's dev server"), `docs/messaging.md` (the ports section),
-   `docs/hub.md`, `docs/security.md`, `docs/sandboxing.md`, `DESIGN.md`, `docs/README.md`, `known-issues/mcp-support-is-required.md`. `security.md` must stop saying nothing is
-   published. It says what is: only declared ports, only when an agent exposes them, only in a project with `local_ports`, and with no sign-in, so `bind` is
-   a decision about who can reach the app.
+- `tcp` no longer reaches the hub. The `forward` verb stays a byte stream, so hub TCP could come later.
+- The link also carries a local port's address, which the hub checks for its shape and lists in the Previews panel as text to copy. Everyone who can see
+  the project sees it: hiding what is open would protect nothing.
 
 ## Specs for local ports
 
@@ -204,20 +177,3 @@ Each one is a command-literal test in the existing style. Agents share a module'
 
 A spec that uses something a reference platform lacks is a strict `xfail` on that platform only. Rootless Podman is one to watch for `bind` and for
 the relay's second network.
-
-## Working rules
-
-- Update every spec this work touches. Locally run only the specs you added or changed, by file, with `--engine docker`, and never the whole suite: CI does that.
-- Run the Go unit tests with `-race`: `go test -race ./...` and `make hub-test` for `hub/`.
-- No load or scale experiments. The machine has 8 GB and runs live agents. A probe with a container or two, under a hard `timeout`, with cleanup, is fine.
-- Core never imports `hub/`. `internal/link` must not import `internal/control`: shared constants go in `hublink`.
-- Control stays without an engine socket: agents can reach it.
-- Never watch the whole CI matrix. Debug one cell at a time with `pytest -x`.
-- Push and open the PR only when the user asks. Target `main`.
-
-## Done when
-
-- Every step above is committed on `declared-local-ports`, Go tests pass with `-race`, and the added and changed specs pass locally.
-- A project with `local_ports: { bind: 127.0.0.1 }` and a `5432/tcp` port, with no hub, can have an agent expose it and be reached at the address it answered.
-- A project with neither `hub` nor `local_ports` and no ports behaves exactly as it does today, with no extra container or network.
-- Nothing in the code, docs or specs still mentions `port-forward` or `expose` with a port number.
