@@ -97,7 +97,7 @@ Whether the shim lives in this repository (a `python/` directory, tested in CI) 
 
 - Name and shape of the mode (`inject.mode: pull`, or a harness `kind`).
 - Whether `wait_for_message` returns one message or a batch, and the longest timeout (a proxy or an HTTP client may cut an idle call).
-- Where the shim lives and how it is versioned against the control API ([control-compatibility.md](control-compatibility.md)).
+- Where the shim lives and how it is versioned against the control API ([hub-link.md](hub-link.md#versions) has the rule for the link).
 - What the hub shows for an agent with no terminal.
 
 ## Tests
