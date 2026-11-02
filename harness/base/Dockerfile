@@ -5,9 +5,9 @@
 ARG EGZO_IMAGE=ghcr.io/egzo-ai/egzo:latest
 # The pinned versions of Node (its official build, checked against these hashes) and of the Playwright MCP server (its Chromium
 # comes with it). scripts/bump-pins.sh proposes new ones; it checks Node's signed checksums before it writes the hashes.
-ARG NODE_VERSION=24.22.1
-ARG NODE_SHA256_AMD64=6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
-ARG NODE_SHA256_ARM64=dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
+ARG NODE_VERSION=24.22.2
+ARG NODE_SHA256_AMD64=48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75
+ARG NODE_SHA256_ARM64=eb187837a2230d4047161ac0be008584e16b46f726e9c9490ee35dc6b17d9ba8
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 FROM ${EGZO_IMAGE} AS egzo
 
