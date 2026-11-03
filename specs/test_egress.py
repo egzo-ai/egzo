@@ -113,10 +113,11 @@ def test_the_anthropic_service_is_built_in(project):
 
 def test_the_claude_service_is_built_in_as_a_sign_in(project):
     """A Claude subscription, signed in from Claude Code's own /login: the proxy keeps the sign-in, no vault holds a secret.
-    Claude Code has no revoke URL: its logout forgets the tokens locally."""
+    Claude Code has no revoke URL: its logout forgets the tokens locally. The connectors of the claude.ai account are reached
+    at mcp-proxy.anthropic.com with the same token."""
     resolved = project.resolved(spec(egress={"default": {"services": {"claude": {"credential": {"method": "oauth"}}}}}))
     service = profile(resolved, "default")["services"]["claude"]
-    assert service["hosts"] == ["api.anthropic.com"] and "paths" not in service
+    assert service["hosts"] == ["api.anthropic.com", "mcp-proxy.anthropic.com"] and "paths" not in service
     assert service["credential"] == {"method": "oauth", "token_url": "https://platform.claude.com/v1/oauth/token"}
 
 
