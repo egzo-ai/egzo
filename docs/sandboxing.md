@@ -40,7 +40,7 @@ egress:
 |---|---|---|
 | `anthropic` | `api.anthropic.com` | `x-api-key: <secret>` |
 | `anthropic-oauth` | `api.anthropic.com` | `Authorization: Bearer <token>` (a Claude subscription token from `claude setup-token`) |
-| `claude` | `api.anthropic.com` | a Claude subscription signed in from Claude Code: the stand-in bearer token becomes the real one (an [OAuth service](#oauth-services)) |
+| `claude` | `api.anthropic.com`, `mcp-proxy.anthropic.com` (claude.ai connectors) | a Claude subscription signed in from Claude Code: the stand-in bearer token becomes the real one (an [OAuth service](#oauth-services)) |
 | `opencode` | `opencode.ai` | `Authorization: Bearer <key>` (the API key of an OpenCode Go or Console workspace: a service account's) |
 | `chatgpt` | `chatgpt.com`, under `/backend-api/` | a ChatGPT sign-in: the stand-in bearer token becomes the real one (an [OAuth service](#oauth-services)) |
 | `github` | `github.com`, `api.github.com` | `Authorization: Basic base64(x-access-token:<secret>)` (git over HTTPS refuses a bearer token) |

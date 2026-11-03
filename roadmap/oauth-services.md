@@ -184,7 +184,10 @@ stand-ins. It is a second user of the mechanism, next to `claude setup-token`, w
 
 ### Built
 
-- The built-in `claude` service: `api.anthropic.com` and the token URL above, no `revoke_url`.
+- The built-in `claude` service: `api.anthropic.com` and the token URL above, no `revoke_url`. Also
+  `mcp-proxy.anthropic.com`: Claude Code lists the claude.ai account's connectors from `api.anthropic.com/v1/mcp_servers`,
+  then reaches each at `mcp-proxy.anthropic.com/v1/mcp/{server_id}` with the same bearer token; without it there the
+  connectors fail with `CLAUDEAI_BEARER_REJECTED` (the stand-in reaches Anthropic).
 - The `claude-code` harness sets no `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` placeholder with it: either would win
   over the sign-in.
 - **Agents after the first.** Spawn gives a new agent the sign-in's stand-in refresh token and scope

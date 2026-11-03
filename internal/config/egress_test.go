@@ -287,6 +287,14 @@ func TestTheAnthropicOAuthServiceIsBuiltInAndSendsABearerToken(t *testing.T) {
 	}
 }
 
+// Claude Code sends a claude.ai sign-in's token to the MCP proxy too, for the account's connectors.
+func TestTheClaudeServiceCoversTheConnectorProxy(t *testing.T) {
+	service, ok := builtinService("claude")
+	if !ok || !reflect.DeepEqual(service.Hosts, []string{"api.anthropic.com", "mcp-proxy.anthropic.com"}) {
+		t.Errorf("service = %+v, ok = %v", service, ok)
+	}
+}
+
 func TestPlaceholderServices(t *testing.T) {
 	const login = `hosts: [app.example.com], credential: main/KEY, placeholder: SITE_PASSWORD`
 
