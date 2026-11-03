@@ -277,7 +277,6 @@ func (s *Server) signInOptions(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"local": s.hub.SignIn().LocalLogin, "sso": ""}
 	if s.auth != nil {
 		out["sso"] = s.opts.SSOName
-		out["redirect"] = s.urls.Base(r) + "/auth/callback"
 	}
 	writeJSON(w, http.StatusOK, out)
 }

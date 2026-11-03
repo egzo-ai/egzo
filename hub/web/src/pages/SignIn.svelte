@@ -59,7 +59,6 @@
     {/if}
     {#if options?.sso}
       <p><a class="btn" data-variant="primary" data-size="lg" data-external href="/login/start?next={encodeURIComponent(next)}">Sign in with {options.sso}</a></p>
-      {#if options.redirect}<p class="boot">The redirect address to register at the provider: <code>{options.redirect}</code></p>{/if}
     {/if}
     {#if options && !options.local && !options.sso}
       <p class="boot">There is no way to sign in: the hub has local login turned off and no single sign-on.</p>
