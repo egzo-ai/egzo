@@ -8,7 +8,7 @@ with any OpenID Connect provider; this is an example of putting it together, not
 |---|---|
 | `compose.yaml` | Caddy, the hub and Dex |
 | `.env.example` | everything you set: versions, host names, tokens, the GitHub app. Copy it to `.env` |
-| `Caddyfile` | TLS for the four host names, and where each goes |
+| `Caddyfile` | TLS for the three host names, and where each goes |
 | `caddy/Dockerfile` | Caddy with the Cloudflare plugin, built on this machine |
 | `dex.yaml.tpl` | Dex with GitHub as its only connector, filled in from the environment when Dex starts |
 

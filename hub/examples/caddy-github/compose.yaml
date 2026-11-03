@@ -25,7 +25,6 @@ services:
       ACME_EMAIL:
       CLOUDFLARE_API_TOKEN:
       EGZO_HUB_HOST:
-      EGZO_LINK_HOST:
       EGZO_AUTH_HOST:
       EGZO_PREVIEW_DOMAIN:
     volumes:
@@ -43,8 +42,6 @@ services:
     restart: unless-stopped
     environment:
       EGZO_PUBLIC_URL: https://${EGZO_HUB_HOST}
-      EGZO_LINK_URL: https://${EGZO_LINK_HOST}
-      EGZO_LINK_LISTEN: ":8443"
       EGZO_PREVIEW_DOMAIN:
       EGZO_TRUSTED_PROXIES: 172.29.80.10
       EGZO_OIDC_ISSUER: https://${EGZO_AUTH_HOST}/dex

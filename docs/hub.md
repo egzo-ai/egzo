@@ -61,12 +61,11 @@ warns: use https for anything but a trial. For a team, see [the example with Cad
 
 The hub works behind any proxy that does [what has to be in front](#what-has-to-be-in-front), with any OpenID Connect provider.
 [`hub/examples/caddy-github`](../hub/examples/caddy-github) is one way to put it together, with tools egzo does not ship: Caddy in
-front, sign-in with GitHub through Dex, no password. It uses four host names:
+front, sign-in with GitHub through Dex, no password. It uses three host names:
 
 | Host | Serves |
 |---|---|
-| `hub.example.com` | the web UI |
-| `link.example.com` | the link endpoint: what projects name in `hub:`. It serves no page |
+| `hub.example.com` | the web UI, and the address projects name in `hub:` |
 | `auth.example.com` | Dex, between the hub and GitHub |
 | `*.egzo-preview.example.net` | the [previews](#previews), on a domain of their own |
 
@@ -97,10 +96,10 @@ docker compose up -d            # the first start builds Caddy: a few minutes
 account (your name at the bottom of the sidebar), click **Link** and sign in with GitHub. Then set `EGZO_LOCAL_LOGIN=false` in `.env`, remove the password and run
 `docker compose up -d` again. The sign-in page now has **Sign in with GitHub** only, and `admin` is your GitHub account.
 
-Then [invite](hub-access.md#invites) the team, and link projects to the link host:
+Then [invite](hub-access.md#invites) the team, and link projects to the hub:
 
 ```yaml
-hub: https://link.example.com
+hub: https://hub.example.com
 ```
 
 - **Everyone needs a GitHub account**, the viewer of a preview included: with the password off, an invite has no **Create an account**.
@@ -109,7 +108,8 @@ hub: https://link.example.com
 - **`EGZO_TRUSTED_PROXIES` is Caddy's fixed address**, `172.29.80.10`. When `172.29.80.0/24` is taken where it runs, change the subnet
   and both addresses in `compose.yaml`.
 - **Off the internet**: publish `443` on a private address only (`"100.101.102.103:443:443"` for a tailnet). The certificates still come
-  over DNS; people and projects then need to reach that address.
+  over DNS; people and projects then need to reach that address. For projects outside it, the link endpoint can have a host of its own,
+  public while the UI is not ([Reaching it](#reaching-it)).
 - **Back up `hub-data`**, the hub's database. Dex and Caddy make theirs again (Caddy asks for new certificates).
 - **To update**, change a version in `.env` (the hub, Dex, Caddy, the Cloudflare plugin) and run `docker compose up -d`; a new Caddy
   version is built first. See [Updating](../hub/examples/caddy-github/README.md#updating). Before 1.0 a hub release with a new database
