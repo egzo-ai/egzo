@@ -8,7 +8,9 @@ ARG CLAUDE_CODE_VERSION
 
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
 
+# DISABLE_TELEMETRY rather than CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: the latter also turns off the feature flags
+# Remote Control (/rc) needs. A project that wants it off sets disableRemoteControl in its Claude Code settings.
 ENV EGZO_HARNESS=claude-code \
     DISABLE_AUTOUPDATER=1 \
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    DISABLE_TELEMETRY=1
 CMD ["claude"]
