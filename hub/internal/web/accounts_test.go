@@ -18,7 +18,7 @@ import (
 func TestTheSignInPageIsToldWhichWaysInExist(t *testing.T) {
 	r := newRig(t)
 	code, out := r.browser().get("/signin")
-	if code != 200 || out["local"] != true || out["sso"] != "Corp" || out["redirect"] != r.server.URL+"/auth/callback" {
+	if code != 200 || out["local"] != true || out["sso"] != "Corp" {
 		t.Errorf("signin = %d %v", code, out)
 	}
 	noSSO := newRigWith(t, []func(*rig){func(r *rig) { r.signIn.Issuer = "" }})

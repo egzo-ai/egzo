@@ -35,7 +35,6 @@ export interface SignInOptions {
   local: boolean;
   /** What the single sign-on button says; "" without single sign-on. */
   sso: string;
-  redirect?: string;
 }
 
 export interface Session {
