@@ -44,10 +44,11 @@ var builtinServices = map[string]ResolvedService{
 		Inject: &Inject{Header: "Authorization", Value: "Bearer {secret}"},
 	},
 	// A Claude subscription (Pro, Max, Team, Enterprise), signed in from Claude Code's own /login (its token URL in
-	// @anthropic-ai/claude-code 2.1.310). Claude Code sends the token to api.anthropic.com only, for the model and its account;
+	// @anthropic-ai/claude-code 2.1.310). Claude Code sends the token to api.anthropic.com, for the model and its account, and
+	// to mcp-proxy.anthropic.com, for the connectors of the claude.ai account (/v1/mcp/{server_id}, in 2.1.314);
 	// its logout forgets the tokens locally, so there is no revoke URL.
 	"claude": {
-		Hosts: []string{"api.anthropic.com"},
+		Hosts: []string{"api.anthropic.com", "mcp-proxy.anthropic.com"},
 		Credential: &Credential{
 			Method:   MethodOAuth,
 			TokenURL: "https://platform.claude.com/v1/oauth/token",
