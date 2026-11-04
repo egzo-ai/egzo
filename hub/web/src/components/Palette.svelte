@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { app, seesLinks, toggleTheme } from "../lib/app.svelte";
   import { href, navigate } from "../lib/router.svelte";
-  import { cycleLayout, openTerm, showPage, workspace } from "../lib/workspace.svelte";
+  import { cycleLayout, openTerm, roomMade, showPage, workspace } from "../lib/workspace.svelte";
   import { toast } from "../lib/app.svelte";
 
   interface Item { group: string; label: string; hint?: string; run: () => void }
@@ -20,14 +20,14 @@
       out.push({ group: "Go to", label: "Users", run: () => { showPage(); navigate(href.users()); } });
     }
     out.push({ group: "Go to", label: "Your account", run: () => { showPage(); navigate(href.account()); } });
+    // every project, then every agent: a group is listed once
+    for (const p of app.projects) out.push({ group: "Projects", label: p.name, hint: p.host, run: () => { showPage(); navigate(href.project(p.id)); } });
     for (const p of app.projects) {
-      out.push({ group: "Projects", label: p.name, hint: p.host, run: () => { showPage(); navigate(href.project(p.id)); } });
       for (const a of p.agents) {
         out.push({
           group: "Agents", label: `${p.name}/${a.name}`, hint: p.host + " · " + (a.running ? "attach" : "stopped"),
           run: () => {
-            if (a.running && openTerm(p.id, a.name)) return;
-            if (a.running) toast("Too many terminals are open. Close one first.", "error");
+            if (a.running) roomMade(openTerm(p.id, a.name));
             else { showPage(); navigate(href.agent(p.id, a.name)); }
           },
         });

@@ -11,13 +11,12 @@
 
   const route = $derived(nav.route);
   const offline = $derived(app.projects.filter((p) => p.offlineSince).length);
-  const totalWaiting = $derived(app.projects.reduce((n, p) => n + p.agents.filter((a) => a.waiting).length, 0));
 </script>
 
 <header class="hubbar">
   <a class="brand" href={href.home()} aria-label="egzo hub, all projects"><Logo /><b>egzo<span>/hub</span></b></a>
   <nav class="hubbar-links" aria-label="Hub">
-    <a href={href.home()} aria-current={route.name === "home" ? "page" : undefined}>Projects{#if totalWaiting}&nbsp;<span class="qcount" title="{totalWaiting} waiting for an answer">{totalWaiting}?</span>{/if}</a>
+    <a href={href.home()} aria-current={route.name === "home" ? "page" : undefined}>Projects</a>
     {#if seesLinks()}
       <a href={href.settings()} aria-current={route.name === "settings" && route.tab !== "account" ? "page" : undefined} aria-label={offline ? `Settings: ${offline} of ${app.projects.length} projects offline` : "Settings"}>
         Settings{#if offline}<span class="warn">&nbsp;⌁ {offline} offline</span>{/if}

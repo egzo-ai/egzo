@@ -107,7 +107,7 @@
   <ErrorPage error={failure} />
 {:else}
   <div style="display:grid;gap:var(--space-4)">
-    <p class="dim" style="margin:0">Everybody with an account. An operator manages the links, the invites and the users and oversees every project; going further takes a role, like for anybody. The quota is how many projects a person may connect: 0 cannot, an operator is not held to it, and lowering it removes nothing.</p>
+    <p class="dim" style="margin:0">Everyone with an account on this hub. <b>Projects</b> is how many projects each person may connect: 0 means none. Operators have no limit.</p>
     {#if disabled}
       <label class="check"><input type="checkbox" bind:checked={showDisabled} /> Show disabled users ({disabled})</label>
     {/if}
@@ -153,6 +153,6 @@
         </tbody>
       </table>
     </div>
-    {#if users && operators < 2}<p class="help" style="margin:0">There is one operator, and the last one cannot be removed. Make somebody else an operator first.</p>{/if}
+    {#if users && operators < 2}<p class="help" style="margin:0">This hub needs at least one operator. Make someone else an operator before removing this one.</p>{/if}
   </div>
 {/if}

@@ -11,7 +11,6 @@
 
   const onPage = $derived(workspace.active === null);
   const route = $derived(nav.route);
-  const offline = $derived(app.projects.filter((p) => p.offlineSince).length);
 
   function agentOf(t: Term) {
     return app.projects.find((p) => p.id === t.project)?.agents.find((a) => a.name === t.agent);
@@ -51,8 +50,6 @@
 
   // the nav belongs to one project: its pages and its open terminals; other projects are one click away on the project list
   const terms = $derived(scopedTerms());
-  const elsewhere = $derived(workspace.terms.length - terms.length);
-  const waitingElsewhere = $derived(app.projects.filter((p) => p.id !== workspace.scope).reduce((n, p) => n + p.agents.filter((a) => a.waiting).length, 0));
 
   function termKey(e: KeyboardEvent, t: Term) {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showTerm(t.id); }
@@ -77,6 +74,7 @@
         ...(p.role === "overseer" ? [] : [["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]]),
         ...(admin ? [["audit", "Audit log", null]] : []),
         ...(p.role === "owner" || app.user?.isOperator ? [["members", "Members", null]] : []),
+        ...(p.role === "owner" || app.user?.isOperator ? [["advanced", "Advanced", null]] : []),
       ] as [import("../lib/router.svelte").ProjectTab, string, number | null][],
     };
   });
@@ -84,8 +82,8 @@
 
 <nav class="side" aria-label="Project">
   <div class="side-head">
-    <a class="back" href={href.home()} aria-label="All projects" title="All projects{waitingElsewhere ? ` (${waitingElsewhere} waiting elsewhere)` : ""}" onclick={showPage}>
-      <span class="arrow">←</span>{#if waitingElsewhere}<span class="qcount">{waitingElsewhere}?</span>{/if}
+    <a class="back" href={href.home()} aria-label="All projects" title="All projects" onclick={showPage}>
+      <span class="arrow">←</span>
     </a>
     {#if sections}
       {@const p = sections.project}
@@ -111,15 +109,10 @@
       {@const p = sections.project}
       <div class="side-list" style="padding-top:var(--space-2)">
         {#each sections.list as [tab, name, count]}
-          {@const ic = ({ agents: "users", templates: "file", activity: "pulse", network: "swap", spec: "list", audit: "shield", members: "key" } as Record<string, string>)[tab] ?? "list"}
-          <a class="nav-item" href={href.project(p.id, tab)} title={name} aria-current={onPage && route.name === "project" && route.tab === tab ? "page" : undefined} onclick={showPage}>
+          {@const ic = ({ agents: "users", templates: "file", activity: "pulse", network: "swap", spec: "list", audit: "shield", members: "key", advanced: "more" } as Record<string, string>)[tab] ?? "list"}
+          <a class="nav-item" href={href.project(p.id, tab)} title={name} aria-current={onPage && ((route.name === "project" && route.tab === tab) || (route.name === "agent" && tab === "agents")) ? "page" : undefined} onclick={showPage}>
             <span class="ic"><Icon name={ic} size="sm" /></span><span class="nm">{name}</span><span class="end"><span class="n">{count ?? ""}</span></span>
           </a>
-          {#if tab === "agents" && route.name === "agent" && route.project === p.id}
-            <div class="nav-sub">
-              <a class="nav-item" href={href.agent(p.id, route.agent)} aria-current={onPage ? "page" : undefined} onclick={showPage}><span class="nm">↳ {route.agent}</span></a>
-            </div>
-          {/if}
         {/each}
       </div>
     {/if}
@@ -166,18 +159,9 @@
         <p class="side-empty">No terminal open in this project. Use <b>Attach</b> on an agent; it opens here and stays open while you browse.</p>
       {/each}
     </div>
-    {#if elsewhere}
-      <a class="side-elsewhere" href={href.home()} onclick={showPage}>+{elsewhere} open in other projects</a>
-    {/if}
   </div>
 
 <div class="side-foot">
-    {#if seesLinks()}
-      <a class="health" href={href.settings()} data-down={offline ? "" : undefined} aria-current={onPage && route.name === "settings" ? "page" : undefined} aria-label={offline ? `Settings: ${offline} of ${app.projects.length} projects offline` : "Settings"} onclick={showPage}>
-        <Icon name="server" size="sm" /><span class="t">Settings</span>
-        {#if offline}<span class="warn hide-rail">⌁ {offline} offline</span>{/if}
-      </a>
-    {/if}
     <div class="row">
       <a class="me" data-testid="signed-in-as" href={href.account()} title="Your account" onclick={showPage}>
         {#if app.user}<Avatar user={app.user} me />{/if}<span class="t">{app.user?.username}{#if app.user?.isOperator}&nbsp;· operator{/if}</span>

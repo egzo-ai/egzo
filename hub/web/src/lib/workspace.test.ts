@@ -98,9 +98,12 @@ describe("the workspace", () => {
     expect(termById("web/a")).toMatchObject({ epoch: 1, takeover: true });
   });
 
-  it("refuses to open more terminals than the limit", () => {
-    for (let i = 0; i < 12; i++) expect(openTerm("web", `a${i}`)).toBe(true);
-    expect(openTerm("web", "one-too-many")).toBe(false);
-    expect(openTerm("web", "a3")).toBe(true); // one already open is only brought forward
+  it("closes the least recently used terminal to open one more than the limit", () => {
+    for (let i = 0; i < 12; i++) expect(openTerm("web", `a${i}`)).toBeUndefined();
+    showTerm("web/a0"); // used again: a1 is now the least recent
+    expect(openTerm("web", "one-too-many")?.id).toBe("web/a1");
+    expect(workspace.terms.map((t) => t.agent)).not.toContain("a1");
+    expect(workspace.terms).toHaveLength(12);
+    expect(openTerm("web", "a3")).toBeUndefined(); // one already open is only brought forward
   });
 });

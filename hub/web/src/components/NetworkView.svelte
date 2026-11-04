@@ -123,14 +123,16 @@
     <header class="row">
       <h2 class="h-section" id="log-h">Connections</h2>
       <span class="grow"></span>
-      <input class="input" data-size="sm" placeholder="Host" aria-label="Filter by host" bind:value={hostFilter} style="width:18ch" />
-      {#if !agent && agents.length > 1}
-        <select class="select" aria-label="Filter by agent" bind:value={agentFilter}>
-          <option value="">every agent</option>
-          {#each agents as a}<option value={a}>{a}</option>{/each}
-        </select>
-      {/if}
-      <label class="check"><input type="checkbox" bind:checked={deniedOnly} /> denied and failed only</label>
+      <div class="filters">
+        <input class="input" placeholder="Filter by host" aria-label="Filter by host" bind:value={hostFilter} />
+        {#if !agent && agents.length > 1}
+          <select class="select" aria-label="Filter by agent" bind:value={agentFilter}>
+            <option value="">every agent</option>
+            {#each agents as a}<option value={a}>{a}</option>{/each}
+          </select>
+        {/if}
+        <label class="check"><input type="checkbox" bind:checked={deniedOnly} /> denied and failed only</label>
+      </div>
     </header>
     <div class="table-wrap">
       <table class="table" data-testid="connections">
@@ -142,7 +144,7 @@
               {#if !agent}<td>{#if c.agent}{c.agent}{:else if c.claimedAgent}<span class="muted" title="the name the client sent; its credentials were wrong">{c.claimedAgent}?</span>{:else}<span class="muted" title="no credentials">–</span>{/if}</td>{/if}
               <td><span class="name">{c.host}</span>{#if c.server} <span class="badge">ssh {c.server}</span>{/if}</td>
               <td class="wrap">{c.protocol}{#if c.mode}{" "}· {c.mode}{/if}{#if c.requests}{" "}· {c.requests} request{c.requests === 1 ? "" : "s"}{/if}{#if c.commands.length}{" "}· {c.commands.length} command{c.commands.length === 1 ? "" : "s"}{/if}{#each [...c.injected] as [service, n]}<span class="pill cred" data-s="secret" data-testid="injected" title="the proxy set the credential of service {service} on {n} of {times(c.requests)}"><Icon name="key" size="sm" />{service}</span>{/each}{#each [...c.substituted] as [service, n]}<span class="pill cred" data-s="secret" data-testid="substituted" title="the proxy swapped the placeholder of service {service} for its secret in {n} of {times(c.requests)}"><Icon name="swap" size="sm" />{service}</span>{/each}{#if c.withoutCredential}<span class="pill cred" data-s="nokey" data-testid="without-credential" title="{times(c.withoutCredential)} outside the paths of service {c.service} went without its credential">{c.withoutCredential} without credential</span>{/if}</td>
-              <td class="wrap">{#if c.decision}<span class="pill" data-s={decisionKind(c.decision)}>{c.decision}</span>{/if}{#if c.reason && c.decision !== "allow"} <span class="muted">{c.reason.text}</span>{/if}</td>
+              <td class="wrap decision">{#if c.decision}<span class="pill" data-s={decisionKind(c.decision)}>{c.decision}</span>{/if}{#if c.reason && c.decision !== "allow"}<span class="reason muted">{c.reason.text}</span>{/if}</td>
               <td>{#if c.durationMs !== null}{bytes(c.bytesUp)} ↑ {bytes(c.bytesDown)} ↓ · {duration(c.durationMs)}{:else}<span class="muted">open</span>{/if}</td>
             </tr>
             {#if expandedConn === c.conn}
@@ -166,15 +168,20 @@
         </tbody>
       </table>
     </div>
-    <p class="muted" style="font-size:var(--text-xs);margin:0">The latest connections the hub heard. Further back, <code>egzo proxy log</code> reads the proxy's own log, as far as the engine keeps it.</p>
+    <p class="muted" style="font-size:var(--text-xs);margin:var(--space-2) var(--space-3)">The latest connections the hub heard. Further back, <code>egzo proxy log</code> reads the proxy's own log, as far as the engine keeps it.</p>
   </section>
 {:else if !failure}
   <p class="muted">Loading…</p>
 {/if}
 
 <style>
-  header.row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; padding: var(--space-3); }
-  .check { display: inline-flex; gap: 6px; align-items: center; font-size: var(--text-sm); }
+  header.row { display: flex; gap: var(--space-2) var(--space-4); align-items: center; flex-wrap: wrap; padding: var(--space-2) var(--space-3); height: auto; min-height: 32px; }
+  .filters { display: flex; gap: var(--space-2) var(--space-3); align-items: center; flex-wrap: wrap; }
+  .filters .input, .filters .select { width: auto; height: var(--control-h-sm); font-size: var(--text-xs); }
+  .filters .input { width: 22ch; }
+  .check { display: inline-flex; gap: 6px; align-items: center; font-size: var(--text-xs); white-space: nowrap; }
+  td.decision { min-width: 22ch; }
+  .reason { display: block; font-size: var(--text-xs); margin-top: 2px; }
   .hint { margin: 0 var(--space-3) var(--space-2); font-size: var(--text-sm); }
   tr.fixed td { opacity: 0.65; }
   tr.detail td { white-space: normal; background: var(--surface-2); }

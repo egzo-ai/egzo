@@ -20,8 +20,7 @@
       .filter((p) => (p.name + " " + p.host).toLowerCase().includes(text.trim().toLowerCase()))
       .map((p) => {
         const running = p.agents.filter((a) => a.running).length;
-        const waiting = p.agents.filter((a) => a.waiting).length;
-        return { p, running, waiting, stopped: p.agents.length - running };
+        return { p, running, stopped: p.agents.length - running };
       }),
   );
 </script>
@@ -64,7 +63,7 @@
     <p class="muted">No project matches. <a href={href.home()}>Show all</a></p>
   {:else if rows.length && view === "tiles"}
     <div class="tiles" data-testid="projects">
-      {#each rows as { p, running, waiting, stopped } (p.id)}
+      {#each rows as { p, running, stopped } (p.id)}
         {@const n = openIn(p.id)}
         <a class="tile" href={href.project(p.id)} data-project={p.name}>
           <header>
@@ -74,7 +73,6 @@
           <div class="stats">
             <span class="muted">{p.templates.length} template{p.templates.length === 1 ? "" : "s"} ·</span>
             <span class="counts">{#if running}<span><span class="dot" data-s="running"></span>{running} running</span>{/if}{#if stopped}<span><span class="dot" data-s="stopped"></span>{stopped} stopped</span>{/if}{#if !p.agents.length}<span class="muted">no agents</span>{/if}</span>
-            {#if waiting}<span class="pill" data-s="waiting">{waiting} waiting</span>{/if}
             {#if p.offlineSince}<span class="pill" data-s="unreachable" data-testid="offline" title="offline since {stamp(p.offlineSince)}">offline {ago(p.offlineSince)}</span>{:else if !p.up}<span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}
             {#if p.ownerless}<span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
           </div>
@@ -88,15 +86,14 @@
   {:else if rows.length}
     <div class="table-wrap">
       <table class="table" data-testid="projects">
-        <thead><tr><th>Project</th><th>Host</th><th>Templates</th><th>Agents</th><th>Questions</th><th>Your role</th></tr></thead>
+        <thead><tr><th>Project</th><th>Host</th><th>Templates</th><th>Agents</th><th>Your role</th></tr></thead>
         <tbody>
-          {#each rows as { p, running, waiting, stopped } (p.id)}
+          {#each rows as { p, running, stopped } (p.id)}
             <tr data-row tabindex="-1" data-project={p.name}>
               <td><a class="name" href={href.project(p.id)}>{p.name}</a>{#if p.offlineSince} <span class="pill" data-s="unreachable" data-testid="offline" title="offline since {stamp(p.offlineSince)}">offline {ago(p.offlineSince)}</span>{:else if !p.up} <span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}{#if p.ownerless} <span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}</td>
               <td class="muted">{p.host}</td>
               <td class="muted">{p.templates.join(", ") || "–"}</td>
               <td><span class="counts">{#if running}<span><span class="dot" data-s="running"></span>{running} running</span>{/if}{#if stopped}<span><span class="dot" data-s="stopped"></span>{stopped} stopped</span>{/if}{#if !p.agents.length}<span class="muted">no agents</span>{/if}</span></td>
-              <td>{#if waiting}<span class="pill" data-s="waiting">{waiting} waiting</span>{:else}<span class="muted">–</span>{/if}</td>
               <td>{#if p.role === "overseer"}<span class="badge" title="You oversee it as an operator, with no role on it">operator</span>{:else}{p.role}{/if}</td>
             </tr>
           {/each}

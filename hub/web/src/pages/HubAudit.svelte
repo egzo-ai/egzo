@@ -42,7 +42,7 @@
 {#if failure}
   <ErrorPage error={failure} />
 {:else if entries}
-  <p class="muted">Everything done on this hub, on projects and off them, those that are gone included.</p>
+  <p class="muted">Everything done on this hub, including on projects that have since been removed.</p>
   <AuditTable {entries} hub />
   {#if more}<p><button class="btn" onclick={older}>Older</button></p>{/if}
 {:else}
