@@ -214,12 +214,12 @@
   <ErrorPage error={failure} />
 {:else if project}
   <div class="page">
-    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(id)}>{project.name}</a> <span class="muted" data-testid="host">on {project.host}</span></nav>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(id)}>{project.name}</a> <span class="muted">on <span data-testid="host">{project.host}</span></span></nav>
     <div class="phead">
       <h1 class="h-page">{tabs.find(([t]) => t === tab)?.[1] ?? project.name}</h1>
       {#if project.ownerless}<span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
       <span class="grow"></span>
-      {#if project.canSpawn && (tab === "agents" || tab === "templates")}<button class="btn" data-variant="primary" aria-label="Spawn an agent" onclick={() => openSpawn()} disabled={!project.up}>Spawn agent</button>{/if}
+      {#if project.canSpawn && (tab === "agents" || tab === "templates")}<button class="btn" data-variant="primary" onclick={() => openSpawn()} disabled={!project.up}>Spawn agent</button>{/if}
     </div>
 
     {#if project.offlineSince}

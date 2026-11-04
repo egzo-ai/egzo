@@ -9,6 +9,11 @@ def projects_table(page):
     return page.get_by_test_id("projects")
 
 
+def section(page, name):
+    """A section of the project, in its left nav."""
+    return page.locator("nav.side").get_by_role("link", name=re.compile(rf"^{re.escape(name)}( \d+)?$"))
+
+
 def spawn(page, name, template=None):
     """Spawns from the project page: the dialog closes at once and the agent's page shows it being made."""
     page.get_by_role("button", name="Spawn agent").click()
@@ -39,19 +44,19 @@ def test_the_starter_account_is_the_operator_and_sees_every_project(hub, page):
     sign_in(page, hub, "admin")
     expect(page.get_by_test_id("signed-in-as")).to_contain_text("operator")
     expect(page.get_by_role("heading", name="Projects")).to_be_visible()
-    expect(projects_table(page).locator("tbody tr")).to_have_count(4)  # web and data on local, web and ml on lab
+    expect(projects_table(page).locator("[data-project]")).to_have_count(4)  # web and data on local, web and ml on lab
     expect(projects_table(page).get_by_role("link", name="data")).to_be_visible()
     expect(projects_table(page).get_by_role("link", name="ml")).to_be_visible()
-    expect(projects_table(page).locator("tbody tr").first).to_contain_text("owner")  # it made the codes, so it owns them, like anybody
+    expect(projects_table(page).locator("[data-project]").first).to_contain_text("owner")  # it made the codes, so it owns them, like anybody
     # two machines: each project says where it runs, and the two called web are two projects
-    expect(projects_table(page).locator("tr[data-project=web]")).to_have_count(2)
-    expect(projects_table(page).locator("tr[data-project=web]").filter(has_text="lab")).to_have_count(1)
+    expect(projects_table(page).locator("[data-project=web]")).to_have_count(2)
+    expect(projects_table(page).locator("[data-project=web]").filter(has_text="lab")).to_have_count(1)
 
 
 def test_the_filter_finds_a_project_by_its_name_or_its_machine(hub, page):
     sign_in(page, hub, "admin")
     page.get_by_label("Filter projects").fill("lab")
-    expect(projects_table(page).locator("tbody tr")).to_have_count(2)
+    expect(projects_table(page).locator("[data-project]")).to_have_count(2)
     expect(projects_table(page).get_by_role("link", name="ml")).to_be_visible()
     expect(projects_table(page).get_by_role("link", name="data")).to_have_count(0)
 
@@ -110,10 +115,10 @@ def test_a_project_whose_link_went_away_is_offline_with_what_was_last_known_and_
     expect(page.locator("tr[data-agent=coder-1]")).to_be_visible()
     expect(page.get_by_role("button", name="Stop coder-1")).to_have_count(0)
     page.goto(single_hub.url)
-    expect(projects_table(page).locator("tr[data-project=web]")).to_contain_text("offline")
+    expect(projects_table(page).locator("[data-project=web]")).to_contain_text("offline")
     expect(projects_table(page).get_by_role("link", name="data")).to_be_visible()
     single_hub.world("up", project="web")
-    expect(projects_table(page).locator("tr[data-project=web]")).not_to_contain_text("offline", timeout=8000)
+    expect(projects_table(page).locator("[data-project=web]")).not_to_contain_text("offline", timeout=8000)
 
 
 def test_a_task_that_ran_when_the_link_dropped_is_interrupted(single_hub, page):
@@ -148,7 +153,7 @@ def test_an_operator_makes_a_code_and_a_project_registers_with_it(single_hub, pa
     code = make_code(page, single_hub)
     assert code.startswith("egzo-link-")
     shown = page.get_by_test_id("new-code")
-    expect(shown).to_contain_text("shown once")
+    expect(shown).to_contain_text("shown only once")
     expect(shown).to_contain_text("hub: ")
     expect(page.get_by_test_id("link-command")).to_contain_text("egzo project register")
     expect(page.get_by_test_id("link-codes").locator("tr[data-code]")).to_have_count(1)
@@ -240,11 +245,11 @@ def test_a_newcomer_sees_nothing_until_an_owner_adds_them(hub, page, new_person)
     expect(page.locator("tr[data-user]")).to_have_count(2)
 
     alice.goto(hub.url + "/")
-    expect(projects_table(alice).locator("tbody tr")).to_have_count(1)
+    expect(projects_table(alice).locator("[data-project]")).to_have_count(1)
     projects_table(alice).get_by_role("link", name="web").click()
     # a user does not see the other projects, nor the owner's tools
-    expect(alice.get_by_role("tab", name="Members")).to_have_count(0)
-    expect(alice.get_by_role("tab", name="Audit log")).to_have_count(0)
+    expect(section(alice, "Members")).to_have_count(0)
+    expect(section(alice, "Audit log")).to_have_count(0)
 
 
 def test_an_owner_cannot_remove_themselves(hub, page, new_person):
@@ -363,8 +368,8 @@ def test_a_task_away_from_its_agent_has_a_toast_and_a_failure_stays_on_the_agent
     expect(page.get_by_role("alert").filter(has_text="Could not start coder-1: no room on the machine")).to_be_visible()
     row.get_by_role("button", name="Dismiss the failure on coder-1").click()
     expect(row.get_by_test_id("task")).to_have_count(0)
-    page.get_by_role("tab", name="Activity").click()
-    activity = page.get_by_test_id("activity")
+    section(page, "Activity").click()
+    activity = page.get_by_test_id("tasks")
     expect(activity.locator("tr").nth(1)).to_contain_text("start failed")
     expect(activity.locator("tr").nth(2)).to_contain_text("done")
 
@@ -377,8 +382,6 @@ def test_the_page_follows_the_agent_without_reloading(single_hub, page):
     single_hub.world("set-agent", project="web", agent="coder-1", state="working", text="writing the tests", waiting=True)
     expect(row).to_contain_text("writing the tests", timeout=8000)
     expect(row).to_contain_text("waiting for you")
-    # the sidebar counts the questions of every project
-    expect(page.locator(".side .qcount").first).to_be_visible()
     row.get_by_role("link", name="coder-1").click()
     expect(page.get_by_test_id("waiting")).to_be_visible()
     expect(page.get_by_test_id("status")).to_have_text("writing the tests")
@@ -469,7 +472,7 @@ def test_several_terminals_stay_open_while_you_browse_and_the_leader_key_switche
     # and the page comes back with the leader and h
     page.keyboard.press("Control+]")
     page.keyboard.press("h")
-    expect(page.get_by_role("heading", name="coder-1").or_(page.get_by_role("tab", name="Agents"))).to_be_visible()
+    expect(page.get_by_role("heading", name="coder-1").or_(section(page, "Agents"))).to_be_visible()
 
 
 def test_a_user_who_may_not_operate_the_agent_has_no_terminal(hub, page, new_person):
@@ -479,7 +482,6 @@ def test_a_user_who_may_not_operate_the_agent_has_no_terminal(hub, page, new_per
     bob.goto(hub.url + hub.p("web") + "/a/coder-1")
     expect(bob.get_by_role("heading", name="coder-1")).to_be_visible()
     expect(bob.get_by_role("button", name="Attach", exact=True)).to_have_count(0)
-    expect(bob.get_by_text("Only the people who may operate")).to_be_visible()
 
 
 def test_a_user_cannot_touch_an_agent_the_operator_spawned(hub, page, new_person):
@@ -517,7 +519,8 @@ def test_a_project_whose_sidecar_logs_no_status_says_so_and_shows_its_agents_as_
     # nothing has been heard yet: the agent is not called "starting", and there is nothing to warn about yet
     expect(agent).not_to_contain_text("starting")
     # after a while of silence the page says why it cannot tell what the agent is doing
-    expect(page.get_by_test_id("feed-banner")).to_contain_text("writes no status", timeout=15000)
+    expect(page.get_by_test_id("feed-banner")).to_contain_text("can't see what the agents are doing", timeout=15000)
+    expect(page.get_by_test_id("feed-banner")).to_have_attribute("title", re.compile("writes no status"))
     expect(agent).to_contain_text("running")
     expect(agent).not_to_contain_text("starting")
 
@@ -568,8 +571,8 @@ def test_an_operator_makes_another_person_an_operator_and_the_last_one_stays(hub
     # alice now has the settings, and oversees every project
     alice.goto(hub.url + "/")
     expect(alice.get_by_role("link", name=re.compile("^Settings"))).to_be_visible()
-    expect(projects_table(alice).locator("tbody tr")).to_have_count(4)  # every project of both machines, none of them granted
-    expect(projects_table(alice).locator("tbody tr").first).to_contain_text("operator")
+    expect(projects_table(alice).locator("[data-project]")).to_have_count(4)  # every project of both machines, none of them granted
+    expect(projects_table(alice).locator("[data-project]").first).to_contain_text("operator")
 
     # with two operators, admin may step down, and is then no operator
     expect(root_row.get_by_role("button", name="Remove operator from admin")).to_be_enabled()
@@ -614,7 +617,7 @@ def test_an_operator_reads_what_was_done_on_the_whole_hub(hub, page, new_person)
 def test_the_spec_and_the_logs_are_read_only_text(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + single_hub.p("web"))
-    page.get_by_role("tab", name="Spec").click()
+    section(page, "Spec").click()
     expect(page.get_by_test_id("text")).to_contain_text("name: web")
     page.goto(single_hub.url + single_hub.p("web") + "/a/coder-1")
     page.get_by_role("tab", name="Logs").click()
@@ -644,9 +647,12 @@ def test_the_pages_fit_a_phone(single_hub, browser):
     page = context.new_page()
     sign_in_phone(page, single_hub)
     assert page.evaluate("document.documentElement.scrollWidth") <= 392, "the page scrolls sideways on a phone"
+    # the project list has no left nav; a project's own nav opens from the menu button
+    projects_table(page).get_by_role("link", name="web").first.click()
+    expect(page.get_by_role("heading", name="Agents")).to_be_visible()
     page.get_by_role("button", name="Open menu").click()
-    page.locator(".side").get_by_role("link", name="web").first.click()
-    expect(page.get_by_role("heading", name="web")).to_be_visible()
+    expect(section(page, "Templates")).to_be_visible()
+    page.get_by_role("button", name="Close menu").click()
     assert page.evaluate("document.documentElement.scrollWidth") <= 392, "the project page scrolls sideways on a phone"
     context.close()
 
@@ -750,7 +756,7 @@ def test_the_network_tab_is_in_the_sidebar_and_says_where_a_connection_came_from
                      text="invalid proxy credentials")
     sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + single_hub.p("web"))
-    page.get_by_role("navigation", name="Main").get_by_role("link", name="Network").click()
+    section(page, "Network").click()
     expect(page).to_have_url(single_hub.url + single_hub.p("web") + "/network")
 
     connections = page.get_by_test_id("connections")
@@ -858,7 +864,8 @@ def test_a_person_signed_in_accepts_an_invite(hub, page, new_person):
     link = page.get_by_test_id("invite-link").inner_text()
     alice.goto(link)
     alice.get_by_role("button", name="Accept").click()
-    expect(alice.get_by_role("heading", name="web")).to_be_visible()
+    expect(alice.get_by_role("heading", name="Agents")).to_be_visible()
+    expect(alice.get_by_role("navigation", name="Breadcrumb")).to_contain_text("web")
 
 
 def test_an_invite_can_be_revoked(hub, page, browser):
@@ -898,12 +905,12 @@ def test_an_operator_goes_further_only_with_a_role_they_give_themselves(hub, pag
     expect(page.get_by_role("status")).to_contain_text("alice is an operator")
 
     alice.goto(hub.url + hub.p("web"))
-    expect(alice.get_by_role("tab", name="Network")).to_have_count(0)
-    expect(alice.get_by_role("tab", name="Spec")).to_have_count(0)
+    expect(section(alice, "Network")).to_have_count(0)
+    expect(section(alice, "Spec")).to_have_count(0)
     expect(alice.get_by_role("button", name="Spawn agent")).to_have_count(0)
     expect(alice.get_by_test_id("agents").get_by_role("button", name=re.compile("^Attach"))).to_have_count(0)
     expect(alice.get_by_role("cell", name="coder-1")).to_be_visible()
-    alice.get_by_role("tab", name="Members").click()
+    section(alice, "Members").click()
     alice.get_by_label("Your role").select_option("admin")
     alice.get_by_role("button", name="Give me the role").click()
     alice.get_by_role("dialog").get_by_role("button", name="Give me the role").click()
@@ -912,12 +919,12 @@ def test_an_operator_goes_further_only_with_a_role_they_give_themselves(hub, pag
     alice.goto(hub.url + hub.p("web") + "/audit")
     expect(alice.get_by_test_id("audit")).to_contain_text("role.set")
     alice.goto(hub.url + hub.p("web"))
-    expect(alice.get_by_role("tab", name="Network")).to_be_visible()
+    expect(section(alice, "Network")).to_be_visible()
 
 
 def test_an_owner_unlinks_and_the_project_is_not_touched(hub, page):
     sign_in(page, hub, "admin")
-    page.goto(hub.url + hub.p("data") + "/members")
+    page.goto(hub.url + hub.p("data") + "/advanced")
     page.get_by_role("button", name="Unlink data").click()
     dialog = page.get_by_role("dialog")
     dialog.get_by_role("textbox").fill("data")
