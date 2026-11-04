@@ -48,8 +48,9 @@
     }
   }
   $effect(() => poll(loadProject));
+  const readsSpec = $derived(tab === "spec" && !!project && project.role !== "overseer");
   $effect(() => {
-    if (tab === "spec") void api.spec(id).then((t) => (spec = t)).catch((e) => toast(errorText(e), "error"));
+    if (readsSpec) void api.spec(id).then((t) => (spec = t)).catch((e) => toast(errorText(e), "error"));
   });
   // what each template gives an agent comes from the project's spec snapshot: read again when the project publishes other templates
   const templateKey = $derived(project && project.role !== "overseer" && !offline ? project.templates.join(",") : null);
@@ -78,7 +79,7 @@
   // the sections are in the left nav; the page only says which one it is
   const tabs = $derived.by(() => {
     const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["templates", "Templates", project?.templates.length ?? null]];
-    if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
+    if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canMembers) list.push(["members", "Members", null]);
     list.push(["advanced", "Advanced", null]);
@@ -216,7 +217,7 @@
   <div class="page">
     <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(id)}>{project.name}</a> <span class="muted">on <span data-testid="host">{project.host}</span></span></nav>
     <div class="phead">
-      <h1 class="h-page">{tabs.find(([t]) => t === tab)?.[1] ?? project.name}</h1>
+      <h1 class="h-page">{tabs.find(([t]) => t === (tab === "spec" ? "advanced" : tab))?.[1] ?? project.name}</h1>
       {#if project.ownerless}<span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
       <span class="grow"></span>
       {#if project.canSpawn && (tab === "agents" || tab === "templates")}<button class="btn" data-variant="primary" onclick={() => openSpawn()} disabled={!project.up}>Spawn agent</button>{/if}
@@ -304,11 +305,20 @@
       {#if activity}<TaskTable project={id} tasks={activity} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}
       <NetworkView project={id} />
-    {:else if tab === "spec"}
-      {#if spec === null}<p class="muted">Loading…</p>{:else}<SpecView text={spec} />{/if}
     {:else if tab === "audit"}
       {#if audit}<AuditTable entries={audit} />{:else}<p class="muted">Loading…</p>{/if}
-    {:else if tab === "advanced"}
+    {:else if tab === "advanced" || tab === "spec"}
+      <!-- what is rarely needed: the project's health, and the spec it runs under -->
+      {#if project.role !== "overseer"}
+        <div class="tabs" role="tablist" aria-label="Advanced sections">
+          <a class="tab" role="tab" href={href.project(id, "advanced")} aria-selected={tab === "advanced"}>Health</a>
+          <a class="tab" role="tab" href={href.project(id, "spec")} aria-selected={tab === "spec"}>Spec</a>
+        </div>
+      {/if}
+      {#if tab === "spec"}
+        {#if project.role === "overseer"}<p class="muted">The spec takes a role on the project.</p>
+        {:else if spec === null}<p class="muted">Loading…</p>{:else}<p class="muted" style="margin:0">The project file as the project last applied it, with references to secrets, never their values.</p><SpecView text={spec} />{/if}
+      {:else}
       <section class="panel" aria-labelledby="health" data-testid="health">
         <header><h2 class="h-section" id="health">Health</h2></header>
         <div class="table-wrap" style="border:0;border-radius:0">
@@ -345,6 +355,7 @@
             <div class="btn-group"><button class="btn" data-variant="danger" onclick={unlink}>Unlink {project.name}</button></div>
           </div>
         </section>
+      {/if}
       {/if}
     {:else if tab === "members"}
       {#if members}<MembersTable {project} data={members} invites={invites} reload={loadMembers} />{:else}<p class="muted">Loading…</p>{/if}
