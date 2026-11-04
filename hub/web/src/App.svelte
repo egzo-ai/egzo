@@ -4,7 +4,8 @@
   import { app, boot, projectName, signOut } from "./lib/app.svelte";
   import { keys, startKeyboard } from "./lib/keyboard.svelte";
   import { nav, navigate, startRouter } from "./lib/router.svelte";
-  import { reset, restore, showPage, workspace } from "./lib/workspace.svelte";
+  import { reset, restore, showPage, termById, workspace } from "./lib/workspace.svelte";
+  import HubBar from "./components/HubBar.svelte";
   import ConfirmHost from "./components/ConfirmHost.svelte";
   import KeyRef from "./components/KeyRef.svelte";
   import LeaderHud from "./components/LeaderHud.svelte";
@@ -51,6 +52,12 @@
       (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", links: "Links", invites: "Invites", audit: "Audit log", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : r.name === "invite" ? "Invite · " : "") + "egzo hub";
   });
 
+  // the project the left nav is dedicated to; hub pages (projects, settings) have none and no left nav
+  $effect(() => {
+    const r = nav.route;
+    workspace.scope = termById(workspace.active)?.project ?? (r.name === "project" || r.name === "agent" ? r.project : null);
+  });
+
   const routeKey = $derived.by(() => {
     const r = nav.route;
     return r.name === "project" ? `p:${r.project}` : r.name === "agent" ? `a:${r.project}/${r.agent}` : r.name;
@@ -74,10 +81,10 @@
 {:else if nav.route.name === "invite"}
   {#if app.ready}<Invite />{/if}
 {:else if app.ready && app.user}
-  <div class="app" data-rail={workspace.rail ? "" : undefined} data-fullscreen={workspace.fullscreen && workspace.active ? "" : undefined} data-nav-open={workspace.navOpen ? "" : undefined}>
-    <Sidebar onsignout={leave} />
+  <div class="app" data-hub={workspace.scope === null ? "" : undefined} data-rail={workspace.rail ? "" : undefined} data-fullscreen={workspace.fullscreen && workspace.active ? "" : undefined} data-nav-open={workspace.navOpen ? "" : undefined}>
+    {#if workspace.scope !== null}<Sidebar onsignout={leave} />{/if}
     <main class="stage">
-      <Mbar />
+      {#if workspace.scope === null}<HubBar onsignout={leave} />{:else}<Mbar />{/if}
       <div class="viewport">
         <div class="hubview" hidden={workspace.active !== null}>
           {#if app.offline}

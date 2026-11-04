@@ -43,7 +43,14 @@ export const workspace = $state({
   rail: false,
   fullscreen: false,
   navOpen: false,
+  /** The project the nav is dedicated to: the one of the terminal in view, else the one of the page. Null on hub pages. */
+  scope: null as string | null,
 });
+
+/** The open terminals of the project in scope (all of them when none is). */
+export function scopedTerms(project: string | null = workspace.scope): Term[] {
+  return project === null ? workspace.terms : workspace.terms.filter((t) => t.project === project);
+}
 
 function persist(): void {
   try {
@@ -89,11 +96,14 @@ export function showTerm(id: string): void {
   if (!workspace.terms.some((t) => t.id === id)) return;
   workspace.active = id;
   workspace.navOpen = false;
+  // panes only ever show terminals of one project
+  const project = termById(id)!.project;
+  workspace.panes = workspace.panes.filter((p) => termById(p)?.project === project);
   const at = workspace.panes.indexOf(id);
   if (at >= 0) {
     workspace.focusPane = at;
   } else {
-    const panes = fillPanes(workspace.terms.map((t) => t.id), workspace.panes, workspace.layout);
+    const panes = fillPanes(scopedTerms(project).map((t) => t.id), workspace.panes, workspace.layout);
     if (panes.length < workspace.layout) {
       panes.push(id);
     } else {
@@ -117,7 +127,7 @@ export function closeTerm(id: string): void {
   if (index < 0) return;
   workspace.terms.splice(index, 1);
   persist();
-  const ids = workspace.terms.map((t) => t.id);
+  const ids = scopedTerms().map((t) => t.id);
   workspace.panes = fillPanes(ids, workspace.panes.filter((p) => p !== id), workspace.layout);
   if (workspace.active === id) {
     const next = workspace.panes[Math.min(workspace.focusPane, workspace.panes.length - 1)] ?? ids[0] ?? null;
@@ -129,7 +139,7 @@ export function closeTerm(id: string): void {
 
 /** The terminal after (or before) the one in view, going through the page as one more stop. */
 export function stepTerm(delta: 1 | -1): void {
-  const stops: (string | null)[] = [null, ...workspace.terms.map((t) => t.id)];
+  const stops: (string | null)[] = [null, ...scopedTerms().map((t) => t.id)];
   const i = stops.indexOf(workspace.active);
   const next = stops[(i + delta + stops.length) % stops.length] ?? null;
   if (next === null) showPage();
@@ -137,13 +147,13 @@ export function stepTerm(delta: 1 | -1): void {
 }
 
 export function goTerm(n: number): void {
-  const term = workspace.terms[n - 1];
+  const term = scopedTerms()[n - 1];
   if (term) showTerm(term.id);
 }
 
 export function setLayout(layout: Layout): void {
   workspace.layout = layout;
-  const ids = workspace.terms.map((t) => t.id);
+  const ids = scopedTerms().map((t) => t.id);
   if (workspace.active === null && ids.length) workspace.active = ids[0]!;
   workspace.panes = fillPanes(ids, workspace.panes, layout);
   workspace.focusPane = Math.max(0, workspace.panes.indexOf(workspace.active ?? ""));

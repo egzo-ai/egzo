@@ -3,9 +3,13 @@
   import { ago, stamp } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
   import { inviteFailedText } from "../lib/signin";
+  import { workspace } from "../lib/workspace.svelte";
   import Icon from "../components/Icon.svelte";
 
   let text = $state("");
+  let view = $state<"tiles" | "list">((() => { try { return localStorage.getItem("egzo.projectView") === "list" ? "list" : "tiles"; } catch { return "tiles"; } })());
+  $effect(() => { try { localStorage.setItem("egzo.projectView", view); } catch { /* ignore */ } });
+  const openIn = (id: string) => workspace.terms.filter((t) => t.project === id).length;
 
   // the sign-in worked, and the invite it came with did not
   const inviteFailed = $derived(new URLSearchParams(nav.path.split("?")[1] ?? "").has("invite"));
@@ -26,6 +30,10 @@
   <div class="phead">
     <h1 class="h-page">Projects</h1><span class="muted">{app.projects.length}</span><span class="grow"></span>
     {#if app.projects.length}
+      <div class="seg" role="group" aria-label="View">
+        <button aria-pressed={view === "tiles"} onclick={() => (view = "tiles")} title="Tiles"><Icon name="grid" size="sm" /></button>
+        <button aria-pressed={view === "list"} onclick={() => (view = "list")} title="List"><Icon name="list" size="sm" /></button>
+      </div>
       <div class="search">
         <label class="sr-only" for="q">Filter projects</label><Icon name="search" />
         <input id="q" class="input" placeholder="Filter projects" bind:value={text} data-filter-input /><span class="kbd">/</span>
@@ -54,6 +62,31 @@
     </div>
   {:else if rows.length === 0 && app.projects.length}
     <p class="muted">No project matches. <a href={href.home()}>Show all</a></p>
+  {:else if rows.length && view === "tiles"}
+    <div class="tiles" data-testid="projects">
+      {#each rows as { p, running, waiting, stopped } (p.id)}
+        {@const n = openIn(p.id)}
+        <a class="tile" href={href.project(p.id)} data-project={p.name}>
+          <header>
+            <span class="ini" aria-hidden="true">{p.name.slice(0, 2)}</span>
+            <span class="who"><b>{p.name}</b><small>{p.host}</small></span>
+          </header>
+          <span class="agentsbar" aria-hidden="true">
+            {#if p.agents.length}<i class="r" style:width="{(running - waiting) / p.agents.length * 100}%"></i><i class="w" style:width="{waiting / p.agents.length * 100}%"></i><i class="s" style:width="{stopped / p.agents.length * 100}%"></i>{/if}
+          </span>
+          <div class="stats">
+            <span>{running} running of {p.agents.length}</span>
+            {#if waiting}<span class="pill" data-s="waiting">{waiting} waiting</span>{/if}
+            {#if p.offlineSince}<span class="pill" data-s="unreachable" data-testid="offline" title="offline since {stamp(p.offlineSince)}">offline {ago(p.offlineSince)}</span>{:else if !p.up}<span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}
+            {#if p.ownerless}<span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
+          </div>
+          <footer>
+            <span>{#if p.role === "overseer"}operator{:else}{p.role}{/if}</span><span class="grow"></span>
+            {#if n}<span title="open terminals"><Icon name="term" size="sm" /> {n} open</span>{/if}
+          </footer>
+        </a>
+      {/each}
+    </div>
   {:else if rows.length}
     <div class="table-wrap">
       <table class="table" data-testid="projects">

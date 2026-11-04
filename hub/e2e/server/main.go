@@ -68,6 +68,12 @@ func run(scenario string) error {
 	}
 
 	hubListener, providerListener, controlListener, previewListener := listen(), listen(), listen(), listen()
+	if a := os.Getenv("EGZO_E2E_HUB_ADDR"); a != "" { // preview experiment: serve the hub where a person can reach it
+		hubListener.Close()
+		if hubListener, err = net.Listen("tcp", a); err != nil {
+			return err
+		}
+	}
 	issuer := "http://" + providerListener.Addr().String()
 	provider := oidctest.New(issuer, "hub", "secret")
 	go http.Serve(providerListener, provider.Handler())
@@ -78,6 +84,9 @@ func run(scenario string) error {
 	}
 	address := "http://" + hubListener.Addr().String()
 	urls, _ := publicurl.New(address, nil)
+	if os.Getenv("EGZO_E2E_HUB_ADDR") != "" { // behind the preview proxy: the address comes from the request
+		urls, _ = publicurl.New("", []string{"0.0.0.0/0", "::/0"})
+	}
 	// a browser takes every name under .localhost for this machine
 	domain := fmt.Sprintf("preview.localhost:%d", previewListener.Addr().(*net.TCPAddr).Port)
 	h.ServePreviews("http", domain)
