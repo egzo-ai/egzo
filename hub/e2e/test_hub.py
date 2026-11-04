@@ -202,17 +202,6 @@ def test_a_revoked_project_can_be_forgotten(single_hub, page):
     expect(row).to_have_count(0)
 
 
-def test_the_timeline_of_a_project_that_is_offline_says_so(single_hub, page):
-    sign_in(page, single_hub, "admin")
-    single_hub.world("down", project="web")
-    page.goto(single_hub.url + single_hub.p("web") + "/timeline")
-    expect(page.get_by_test_id("timeline-offline")).to_be_visible()
-    page.goto(single_hub.url + single_hub.p("web") + "/a/coder-1")
-    expect(page.get_by_test_id("timeline-offline")).to_be_visible()
-    expect(page.get_by_text("Loading…")).to_have_count(0)
-    single_hub.world("up", project="web")
-
-
 def test_an_operator_revokes_a_project_and_it_leaves_the_hub(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.get_by_role("link", name=re.compile("^Settings")).click()
@@ -630,12 +619,6 @@ def test_the_spec_and_the_logs_are_read_only_text(single_hub, page):
     page.goto(single_hub.url + single_hub.p("web") + "/a/coder-1")
     page.get_by_role("tab", name="Logs").click()
     expect(page.get_by_test_id("text")).to_contain_text("log of coder-1")
-
-
-def test_the_timeline_of_a_project(single_hub, page):
-    sign_in(page, single_hub, "admin")
-    page.goto(single_hub.url + single_hub.p("web") + "/timeline")
-    expect(page.get_by_test_id("timeline")).to_contain_text("refactoring the parser on local")
 
 
 def test_the_command_menu_opens_an_agent_terminal(single_hub, page):

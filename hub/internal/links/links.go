@@ -28,8 +28,6 @@ type Engine interface {
 	// DialPort connects to a port an agent exposed. ctx covers the dial and nothing after it, as with a net.Dialer: the connection lasts until
 	// it is closed or the link goes.
 	DialPort(ctx context.Context, agent string, port int) (net.Conn, error)
-	// Events returns the latest events of the project's control sidecar (message texts left out), oldest first.
-	Events(ctx context.Context, agent string, limit int) ([]Event, error)
 	// Logs returns the end of an agent's, or a sidecar's, container log.
 	Logs(ctx context.Context, container string, tail int) (string, error)
 	// Spec returns the project's published templates as indented JSON, without any secret value.

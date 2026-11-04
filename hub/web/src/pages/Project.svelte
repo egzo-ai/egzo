@@ -9,7 +9,7 @@
   import { suggestName } from "../lib/names";
   import { href, nav, navigate, type ProjectTab } from "../lib/router.svelte";
   import { followTask, onScreen } from "../lib/tasks";
-  import type { AuditEntry, Invite, Members, Project, Task, TimelineEvent } from "../lib/types";
+  import type { AuditEntry, Invite, Members, Project, Task } from "../lib/types";
   import { openTerm, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
   import Icon from "../components/Icon.svelte";
@@ -19,7 +19,6 @@
   import Pill from "../components/Pill.svelte";
   import SpecView from "../components/SpecView.svelte";
   import TaskTable from "../components/TaskTable.svelte";
-  import Timeline from "../components/Timeline.svelte";
   import ErrorPage from "./ErrorPage.svelte";
 
   let { id, tab }: { id: string; tab: ProjectTab } = $props();
@@ -27,7 +26,6 @@
   let project = $state<Project | null>(null);
   const offline = $derived(!!project?.offlineSince);
   let failure = $state<unknown>(null);
-  let events = $state<TimelineEvent[] | null>(null);
   let spec = $state<string | null>(null);
   let audit = $state<AuditEntry[] | null>(null);
   let members = $state<Members | null>(null);
@@ -48,13 +46,6 @@
     }
   }
   $effect(() => poll(loadProject));
-  $effect(() => {
-    // read from the control sidecar, which runs a command in it: slowly. A project that is offline has nobody to ask.
-    if (tab !== "timeline" || offline) return;
-    return poll(async () => {
-      events = await api.events(id, "", 60);
-    }, 15000);
-  });
   $effect(() => {
     if (tab === "spec") void api.spec(id).then((t) => (spec = t)).catch((e) => toast(errorText(e), "error"));
   });
@@ -80,7 +71,7 @@
   const waiting = $derived(agents.filter((a) => a.waiting).length);
   const tabs = $derived.by(() => {
     const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null]];
-    if (project?.role !== "overseer") list.push(["timeline", "Timeline", null], ["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
+    if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canMembers) list.push(["members", "Members", null]);
     return list;
@@ -262,8 +253,6 @@
           </tbody>
         </table>
       </div>
-    {:else if tab === "timeline"}
-      {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
     {:else if tab === "activity"}
       {#if activity}<TaskTable project={id} tasks={activity} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}

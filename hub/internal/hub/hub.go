@@ -359,21 +359,6 @@ func (h *Hub) creatorOf(ctx context.Context, id, agent string) (string, error) {
 	return found, err
 }
 
-// Events returns the timeline of a project, or of one agent.
-func (h *Hub) Events(ctx context.Context, user store.User, id, agent string, limit int) ([]links.Event, error) {
-	if _, err := h.inspect(ctx, user, id); err != nil {
-		return nil, err
-	}
-	var events []links.Event
-	ctx, cancel := context.WithTimeout(ctx, readLimit)
-	defer cancel()
-	err := h.call(ctx, id, func(ctx context.Context, e links.Engine) (err error) {
-		events, err = e.Events(ctx, agent, limit)
-		return err
-	})
-	return events, err
-}
-
 // Logs returns the end of a container's log: an agent or a sidecar. Administrators only: a log can show what an agent printed
 // from another user's session.
 func (h *Hub) Logs(ctx context.Context, user store.User, id, container string, tail int) (string, error) {

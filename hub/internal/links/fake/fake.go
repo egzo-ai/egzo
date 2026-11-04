@@ -29,7 +29,6 @@ type Engine struct {
 	host       string
 	project    links.Project
 	published  *links.Published
-	events     []links.Event
 	calls      []string
 	attached   map[string]int
 	gate       chan struct{} // while not nil, a spawn, start, stop or removal waits for it to close: Hold, Release
@@ -320,13 +319,6 @@ func (e *Engine) SetServices(services ...links.Service) {
 	e.project.Services = services
 	e.mu.Unlock()
 	e.push("change")
-}
-
-// AddEvent records an event of the project.
-func (e *Engine) AddEvent(ev links.Event) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.events = append(e.events, ev)
 }
 
 // Calls lists what was done to the project, as "verb agent actor".
@@ -678,25 +670,6 @@ func (e *Engine) DialPort(ctx context.Context, agent string, port int) (net.Conn
 	case <-closed:
 		return nil, ErrDropped
 	}
-}
-
-// Events lists the project's events.
-func (e *Engine) Events(ctx context.Context, agent string, limit int) ([]links.Event, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err := e.dropped(); err != nil {
-		return nil, err
-	}
-	var out []links.Event
-	for _, ev := range e.events {
-		if agent == "" || ev.Agent == agent {
-			out = append(out, ev)
-		}
-	}
-	if limit > 0 && len(out) > limit {
-		out = out[len(out)-limit:]
-	}
-	return out, nil
 }
 
 // Logs returns a log.

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/hub"
-	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
@@ -431,37 +430,6 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request, user store.User) 
 	p := s.projectOf(view, n)
 	p.Agents = nil // the project carries the other agents; this answer is about one
 	writeJSON(w, http.StatusOK, map[string]any{"project": p, "agent": s.agentOf(agent, n)})
-}
-
-type eventJSON struct {
-	Time  time.Time `json:"time"`
-	Type  string    `json:"type"`
-	Agent string    `json:"agent"`
-	Actor string    `json:"actor"`
-	Text  string    `json:"text"`
-}
-
-// events answers the timeline of a project, or of one agent with ?agent=, newest first.
-func (s *Server) events(w http.ResponseWriter, r *http.Request, user store.User) {
-	limit := 40
-	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 200 {
-		limit = v
-	}
-	events, err := s.hub.Events(r.Context(), user, r.PathValue("project"), r.URL.Query().Get("agent"), limit)
-	if err != nil {
-		s.problem(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": s.eventRows(events, s.namer(r.Context()))})
-}
-
-func (s *Server) eventRows(events []links.Event, n namer) []eventJSON {
-	rows := make([]eventJSON, 0, len(events))
-	for i := len(events) - 1; i >= 0; i-- { // newest first
-		e := events[i]
-		rows = append(rows, eventJSON{Time: e.Time, Type: e.Type, Agent: e.Agent, Actor: n.actor(e.Actor), Text: e.Text})
-	}
-	return rows
 }
 
 // spawn is answered at once: the task runs on in the hub, and the agent is in the project from now on (hub/internal/hub/tasks.go).

@@ -207,17 +207,6 @@ img.avatar { object-fit: cover; padding: 0; }
 .avatar[data-me] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .presence[data-live] .avatar { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--status-running); }
 
-/* ── Timeline / logs ────────────────────────────────────────────────── */
-.timeline { list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); }
-.timeline li { display: grid; grid-template-columns: 9ch 12ch 1fr; gap: var(--space-3); padding: 6px var(--space-3); border-bottom: 1px solid var(--border); align-items: baseline; }
-.timeline li:last-child { border-bottom: 0; }
-.timeline time { color: var(--text-3); }
-.timeline .type { font-size: var(--text-xs); }
-.timeline .type[data-t="ask"] { color: var(--status-waiting); }
-.timeline .type[data-t="error"] { color: var(--status-error); }
-.timeline .type[data-t="attach"], .timeline .type[data-t="takeover"] { color: var(--accent-text); }
-.timeline .type[data-t="status"], .timeline .type[data-t="spawn"], .timeline .type[data-t="start"], .timeline .type[data-t="stop"] { color: var(--text-2); }
-.timeline .text { min-width: 0; overflow-wrap: anywhere; }
 .log { margin: 0; padding: var(--space-3); background: var(--term-bg); color: var(--term-fg); font-size: 12px; line-height: 1.45; overflow: auto; border-radius: var(--radius-2); border: 1px solid var(--border); white-space: pre; }
 .log .ts { color: var(--term-bright-black); }
 .log .err { color: var(--term-red); }

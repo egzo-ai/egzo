@@ -74,7 +74,7 @@
       list: [
         ["agents", "Agents", p.agents.length],
         ["services", "Services", null],
-        ...(p.role === "overseer" ? [] : [["timeline", "Timeline", null], ["network", "Network", null], ["spec", "Spec", null]]),
+        ...(p.role === "overseer" ? [] : [["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]]),
         ...(admin ? [["audit", "Audit log", null]] : []),
         ...(p.role === "owner" || app.user?.isOperator ? [["members", "Members", null]] : []),
       ] as [import("../lib/router.svelte").ProjectTab, string, number | null][],
@@ -111,7 +111,7 @@
       {@const p = sections.project}
       <div class="side-list" style="padding-top:var(--space-2)">
         {#each sections.list as [tab, name, count]}
-          {@const ic = ({ agents: "users", services: "server", timeline: "pulse", network: "swap", spec: "file", audit: "shield", members: "key" } as Record<string, string>)[tab] ?? "list"}
+          {@const ic = ({ agents: "users", services: "server", activity: "pulse", network: "swap", spec: "file", audit: "shield", members: "key" } as Record<string, string>)[tab] ?? "list"}
           <a class="nav-item" href={href.project(p.id, tab)} title={name} aria-current={onPage && route.name === "project" && route.tab === tab ? "page" : undefined} onclick={showPage}>
             <span class="ic"><Icon name={ic} size="sm" /></span><span class="nm">{name}</span><span class="end"><span class="n">{count ?? ""}</span></span>
           </a>

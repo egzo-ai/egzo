@@ -11,7 +11,6 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/links/fake"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 )
@@ -270,24 +269,18 @@ func TestSpawnStopStartAndRemoveAreTasks(t *testing.T) {
 	}
 }
 
-func TestAnAgentWaitingOnAQuestionAndTheTimelineWithoutMessageTexts(t *testing.T) {
+func TestAnAgentWaitingOnAQuestion(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")
 	a := agent("coder-1", "operator")
 	a.Waiting = true
 	r.fakes["web"].SetAgent(a)
-	r.fakes["web"].AddEvent(links.Event{Seq: 1, Time: time.Now(), Type: "status", Agent: "coder-1", Actor: "agent:coder-1", Text: "parsing the grammar"})
 	b := r.browser()
 	b.signIn("admin")
 	_, v := b.get("/p/" + r.id("web") + "/a/coder-1")
 	got := v["agent"].(map[string]any)
 	if got["waiting"] != true || got["status"] != "reading the code" || got["activity"] != "idle" {
 		t.Errorf("agent = %v", got)
-	}
-	_, events := b.get("/p/" + r.id("web") + "/events?agent=coder-1")
-	rows := list(events, "events")
-	if len(rows) != 1 || rows[0]["text"] != "parsing the grammar" || rows[0]["type"] != "status" {
-		t.Errorf("events = %v", events)
 	}
 	_, projects := b.get("/projects")
 	if w := list(projects, "projects")[0]["agents"].([]any)[0].(map[string]any)["waiting"]; w != true {
