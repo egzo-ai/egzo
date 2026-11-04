@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, UserRow,
+  AgentAnswer, AuditEntry, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, Template, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -94,6 +94,7 @@ export const api = {
   task: (id: string, task: string) => request<{ task: Task }>("GET", `${project(id)}/tasks/${enc(task)}`).then((r) => r.task),
   /** Takes an ended task off its agent. */
   dismissTask: (id: string, task: string) => request<{ ok: true }>("DELETE", `${project(id)}/tasks/${enc(task)}`),
+  templates: (id: string) => request<{ templates: Template[] }>("GET", `${project(id)}/templates`).then((r) => r.templates),
   spec: (id: string) => request<{ text: string }>("GET", `${project(id)}/spec`).then((r) => r.text),
   members: (id: string) => request<Members>("GET", `${project(id)}/members`),
   setRole: (id: string, user: string, role: string) =>

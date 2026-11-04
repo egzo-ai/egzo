@@ -689,7 +689,25 @@ func (e *Engine) Spec(ctx context.Context) ([]byte, error) {
 	if err := e.dropped(); err != nil {
 		return nil, err
 	}
-	return []byte("name: " + e.project.Name + "\nagents: [" + strings.Join(e.project.Templates, ", ") + "]\n"), nil
+	// a spec snapshot as `egzo project up` stores it, with a plausible resolved template for each name
+	var b strings.Builder
+	b.WriteString("created-by: egzo/dev\nspec-version: \"1\"\nconfig:\n  name: " + e.project.Name + "\n  agents:\n")
+	for i, t := range e.project.Templates {
+		harness, model, egress := "claude-code", "claude-sonnet-5-5", "default"
+		if i%2 == 1 {
+			harness, model, egress = "opencode", "claude-haiku-5-5", "locked"
+		}
+		b.WriteString("    " + t + ":\n      harness: " + harness + "\n      workdir: /workspace/repo\n      egress: " + egress +
+			"\n      workspaces:\n        - { name: repo, mount: /workspace/repo, mode: rw }\n        - { name: docs, mount: /workspace/docs, mode: ro }" +
+			"\n      model: " + model + "\n      prompt: ./prompts/" + t + ".md\n      resources: { cpus: 2, memory: 4g }\n      permissions: bypass" +
+			"\n      env: { LOG_LEVEL: debug }\n")
+		if i%2 == 0 {
+			b.WriteString("      ports:\n        web: { port: 5173, protocol: http }\n")
+		}
+	}
+	b.WriteString("  egress:\n    default:\n      allow: [platform.claude.com, github.com, registry.npmjs.org]\n      services: { anthropic: {}, github: {} }\n" +
+		"    locked:\n      allow: [platform.claude.com]\n      services: { anthropic: {} }\n")
+	return []byte(b.String()), nil
 }
 
 // SetFeedSilent makes the status feed say nothing, as a control sidecar that logs no status does.

@@ -391,13 +391,14 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Offline   *time.Time `json:"offlineSince"`
 		Feed      feedJSON   `json:"feed"`
 		Up        bool       `json:"up"`
+		Templates []string   `json:"templates"`
 		Agents    []agent    `json:"agents"`
 	}
 	out := struct {
 		Projects []project `json:"projects"`
 	}{Projects: []project{}}
 	for _, ref := range refs {
-		p := project{ID: ref.ID, Name: ref.Project.Name, Host: ref.Host, Role: ref.Role, Ownerless: ref.Ownerless, Offline: offlineOf(ref.Offline), Feed: feedOf(ref.Feed), Up: ref.Project.Up, Agents: []agent{}}
+		p := project{ID: ref.ID, Name: ref.Project.Name, Host: ref.Host, Role: ref.Role, Ownerless: ref.Ownerless, Offline: offlineOf(ref.Offline), Feed: feedOf(ref.Feed), Up: ref.Project.Up, Templates: append([]string{}, ref.Project.Templates...), Agents: []agent{}}
 		running := map[string]string{}
 		for _, t := range ref.Tasks {
 			running[t.Agent] = t.Verb

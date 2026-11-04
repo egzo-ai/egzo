@@ -71,11 +71,9 @@
             <span class="ini" aria-hidden="true">{p.name.slice(0, 2)}</span>
             <span class="who"><b>{p.name}</b><small>{p.host}</small></span>
           </header>
-          <span class="agentsbar" aria-hidden="true">
-            {#if p.agents.length}<i class="r" style:width="{(running - waiting) / p.agents.length * 100}%"></i><i class="w" style:width="{waiting / p.agents.length * 100}%"></i><i class="s" style:width="{stopped / p.agents.length * 100}%"></i>{/if}
-          </span>
           <div class="stats">
-            <span>{running} running of {p.agents.length}</span>
+            <span class="muted">{p.templates.length} template{p.templates.length === 1 ? "" : "s"} ·</span>
+            <span class="counts">{#if running}<span><span class="dot" data-s="running"></span>{running} running</span>{/if}{#if stopped}<span><span class="dot" data-s="stopped"></span>{stopped} stopped</span>{/if}{#if !p.agents.length}<span class="muted">no agents</span>{/if}</span>
             {#if waiting}<span class="pill" data-s="waiting">{waiting} waiting</span>{/if}
             {#if p.offlineSince}<span class="pill" data-s="unreachable" data-testid="offline" title="offline since {stamp(p.offlineSince)}">offline {ago(p.offlineSince)}</span>{:else if !p.up}<span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}
             {#if p.ownerless}<span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
@@ -90,17 +88,14 @@
   {:else if rows.length}
     <div class="table-wrap">
       <table class="table" data-testid="projects">
-        <thead><tr><th>Project</th><th>Host</th><th>Agents</th><th>Questions</th><th>Your role</th></tr></thead>
+        <thead><tr><th>Project</th><th>Host</th><th>Templates</th><th>Agents</th><th>Questions</th><th>Your role</th></tr></thead>
         <tbody>
           {#each rows as { p, running, waiting, stopped } (p.id)}
             <tr data-row tabindex="-1" data-project={p.name}>
               <td><a class="name" href={href.project(p.id)}>{p.name}</a>{#if p.offlineSince} <span class="pill" data-s="unreachable" data-testid="offline" title="offline since {stamp(p.offlineSince)}">offline {ago(p.offlineSince)}</span>{:else if !p.up} <span class="pill" data-s="warn" title="the project's sidecars are not running">down</span>{/if}{#if p.ownerless} <span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}</td>
               <td class="muted">{p.host}</td>
-              <td>
-                <span class="agentsbar" aria-hidden="true">
-                  {#if p.agents.length}<i class="r" style:width="{(running - waiting) / p.agents.length * 100}%"></i><i class="w" style:width="{waiting / p.agents.length * 100}%"></i><i class="s" style:width="{stopped / p.agents.length * 100}%"></i>{/if}
-                </span>{running} running of {p.agents.length}
-              </td>
+              <td class="muted">{p.templates.join(", ") || "–"}</td>
+              <td><span class="counts">{#if running}<span><span class="dot" data-s="running"></span>{running} running</span>{/if}{#if stopped}<span><span class="dot" data-s="stopped"></span>{stopped} stopped</span>{/if}{#if !p.agents.length}<span class="muted">no agents</span>{/if}</span></td>
               <td>{#if waiting}<span class="pill" data-s="waiting">{waiting} waiting</span>{:else}<span class="muted">–</span>{/if}</td>
               <td>{#if p.role === "overseer"}<span class="badge" title="You oversee it as an operator, with no role on it">operator</span>{:else}{p.role}{/if}</td>
             </tr>

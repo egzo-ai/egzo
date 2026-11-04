@@ -85,9 +85,9 @@ function pageKey(e: KeyboardEvent): boolean {
       row.querySelector<HTMLElement>("a.name")?.click();
       return true;
     }
-    case "a": case "s": {
-      const scope = e.key === "a" && row ? row : document;
-      const button = scope.querySelector<HTMLElement>(`[data-key="${e.key}"]`);
+    case "a": {
+      // attach, on an agent's page
+      const button = document.querySelector<HTMLElement>('[data-key="a"]');
       if (!button) return false;
       button.click();
       return true;

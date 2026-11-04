@@ -9,7 +9,7 @@
   import { suggestName } from "../lib/names";
   import { href, nav, navigate, type ProjectTab } from "../lib/router.svelte";
   import { followTask, onScreen } from "../lib/tasks";
-  import type { AuditEntry, Invite, Members, Project, Task } from "../lib/types";
+  import type { Agent, AuditEntry, Invite, Members, Project, Task, Template } from "../lib/types";
   import { openTerm, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
   import Icon from "../components/Icon.svelte";
@@ -34,6 +34,8 @@
   let spawning = $state(false);
   let spawnForm = $state({ template: "", name: "", suggested: "" });
   let spawnError = $state("");
+  let templates = $state<Template[] | null>(null);
+  let templatesError = $state("");
   let submitting = $state(false);
 
   async function loadProject() {
@@ -48,6 +50,12 @@
   $effect(() => poll(loadProject));
   $effect(() => {
     if (tab === "spec") void api.spec(id).then((t) => (spec = t)).catch((e) => toast(errorText(e), "error"));
+  });
+  // what each template gives an agent comes from the project's spec snapshot: read again when the project publishes other templates
+  const templateKey = $derived(project && project.role !== "overseer" && !offline ? project.templates.join(",") : null);
+  $effect(() => {
+    if (templateKey === null) return;
+    api.templates(id).then((t) => { templates = t; templatesError = ""; }).catch((e) => (templatesError = errorText(e)));
   });
   async function loadAudit() {
     audit = await api.audit(id);
@@ -70,19 +78,34 @@
   const running = $derived(agents.filter((a) => a.running).length);
   const waiting = $derived(agents.filter((a) => a.waiting).length);
   const tabs = $derived.by(() => {
-    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["services", "Services", project?.services.length ?? null]];
+    const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["templates", "Templates", project?.templates.length ?? null]];
     if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canMembers) list.push(["members", "Members", null]);
     return list;
   });
 
+  // the agents tab is by template: each published one, then the templates agents were made from that the project no longer has
+  const groups = $derived.by(() => {
+    const names = [...(project?.templates ?? [])];
+    for (const a of agents) if (a.template && !names.includes(a.template)) names.push(a.template);
+    const out = names.map((name) => ({
+      name,
+      published: project?.templates.includes(name) ?? false,
+      detail: templates?.find((t) => t.name === name),
+      agents: agents.filter((a) => a.template === name),
+    }));
+    const loose = agents.filter((a) => !a.template);
+    if (loose.length) out.push({ name: "", published: false, detail: undefined, agents: loose });
+    return out;
+  });
+
   function suggest(template: string): string {
     return suggestName(template, agents.map((a) => a.name));
   }
 
-  function openSpawn() {
-    const template = project?.templates[0] ?? "";
+  function openSpawn(chosen?: string) {
+    const template = chosen ?? project?.templates[0] ?? "";
     const suggested = suggest(template);
     spawnForm = { template, name: suggested, suggested };
     spawnError = "";
@@ -155,6 +178,38 @@
   }
 </script>
 
+{#snippet row(a: Agent)}
+  {@const open = workspace.terms.some((t) => t.project === id && t.agent === a.name)}
+  {@const busy = a.task?.state === "running"}
+  {@const made = a.state !== ""}
+                <tr data-agent={a.name} aria-selected={open} aria-busy={busy}>
+                  <td><a class="name" href={href.agent(id, a.name)}>{a.name}</a>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}{#if a.denied} <a class="pill" data-s="error" data-testid="denied" href={href.agent(id, a.name, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}</td>
+                  <td>{#if a.template}<a class="dim" href={href.project(id, "templates")}>{a.template}</a>{#if !project?.templates.includes(a.template)} <span class="pill" data-s="warn" title="the project no longer publishes this template">retired</span>{/if}{:else}<span class="muted">–</span>{/if}</td>
+                  <td>
+                    {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} />{/if}
+                    {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
+                  </td>
+                  <td class="wrap" style="white-space:normal;min-width:18ch">
+                    {#if a.task && busy}<span class="muted" data-testid="task-step">{a.task.step || "…"} · {a.task.creator}</span>
+                    {:else if a.task}<span class="status" style:color="var(--status-error)" data-testid="task-error">{a.task.error}</span>
+                    {:else}<span class="status" style:color={a.waiting ? "var(--status-waiting)" : undefined}>{a.status}</span>{/if}
+                  </td>
+                  <td>{#if !made}<span class="muted">—</span>{:else if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
+                  <td>{a.creator}</td>
+                  <td class="actions">
+                    <span class="row-actions">
+                      {#if a.task?.canDismiss}<button class="btn" data-size="sm" data-icon-only aria-label="Dismiss the failure on {a.name}" title="Dismiss" onclick={() => dismiss(a.task!)}><Icon name="x" size="sm" /></button>{/if}
+                      {#if made && a.canOperate && !offline}
+                        <button class="btn" data-size="sm" aria-label="{open ? 'Open terminal of' : 'Attach'} {a.name}" disabled={!a.running || busy} onclick={() => attach(a.name)}><Icon name="attach" size="sm" />{open ? "Open terminal" : "Attach"}</button>
+                        {#if a.running}<button class="btn" data-size="sm" data-icon-only aria-label="Stop {a.name}" title="Stop" disabled={busy} onclick={() => act(a.name, "stop")}><Icon name="stop" size="sm" /></button>
+                        {:else}<button class="btn" data-size="sm" data-icon-only aria-label="Start {a.name}" title="Start" disabled={busy} onclick={() => act(a.name, "start")}><Icon name="play" size="sm" /></button>{/if}
+                        <button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove {a.name}" title="Remove" disabled={busy} onclick={() => act(a.name, "rm")}><Icon name="trash" size="sm" /></button>
+                      {/if}
+                    </span>
+                  </td>
+                </tr>
+{/snippet}
+
 {#if failure}
   <ErrorPage error={failure} />
 {:else if project}
@@ -165,7 +220,7 @@
       <span class="muted" data-testid="host">{project.host}</span>
       {#if project.role === "overseer"}<span class="badge" title="You oversee it as an operator, with no role on it">operator</span>{:else}<span class="badge" title="your role">{project.role}</span>{/if}{#if project.ownerless} <span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
       <span class="grow"></span>
-      {#if project.canSpawn}<button class="btn" data-variant="primary" data-key="s" aria-label="Spawn agent" aria-keyshortcuts="s" onclick={openSpawn} disabled={!project.up}>Spawn agent <span class="kbd">s</span></button>{/if}
+      {#if project.canSpawn}<button class="btn" data-variant="primary" aria-label="Spawn an agent" onclick={() => openSpawn()} disabled={!project.up}>Spawn agent</button>{/if}
     </div>
     <div class="metaline">
       <span><span class="k">agents</span> {running} running{#if waiting}&nbsp;· {waiting} waiting{/if}&nbsp;· {agents.length - running} stopped</span>
@@ -199,60 +254,64 @@
       {#if agents.length}
         <div class="table-wrap">
           <table class="table" data-testid="agents">
-            <thead><tr><th>Agent</th><th>Activity</th><th>Status</th><th>Terminal</th><th>Spawned by</th><th></th></tr></thead>
-            <tbody>
-              {#each agents as a (a.name)}
-                {@const open = workspace.terms.some((t) => t.project === id && t.agent === a.name)}
-                {@const busy = a.task?.state === "running"}
-                {@const made = a.state !== ""}
-                <tr data-row tabindex="-1" data-agent={a.name} aria-selected={open} aria-busy={busy}>
-                  <td><a class="name" href={href.agent(id, a.name)}>{a.name}</a> <span class="muted">{a.template}</span>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}{#if a.denied} <a class="pill" data-s="error" data-testid="denied" href={href.agent(id, a.name, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}</td>
-                  <td>
-                    {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} />{/if}
-                    {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
-                  </td>
-                  <td class="wrap" style="white-space:normal;min-width:18ch">
-                    {#if a.task && busy}<span class="muted" data-testid="task-step">{a.task.step || "…"} · {a.task.creator}</span>
-                    {:else if a.task}<span class="status" style:color="var(--status-error)" data-testid="task-error">{a.task.error}</span>
-                    {:else}<span class="status" style:color={a.waiting ? "var(--status-waiting)" : undefined}>{a.status}</span>{/if}
-                  </td>
-                  <td>{#if !made}<span class="muted">—</span>{:else if a.holder}<span class="presence" data-live><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{:else}<span class="muted">free</span>{/if}</td>
-                  <td>{a.creator}</td>
-                  <td class="actions">
-                    <span class="row-actions">
-                      {#if a.task?.canDismiss}<button class="btn" data-size="sm" data-icon-only aria-label="Dismiss the failure on {a.name}" title="Dismiss" onclick={() => dismiss(a.task!)}><Icon name="x" size="sm" /></button>{/if}
-                      {#if made && a.canOperate && !project.offlineSince}
-                        <button class="btn" data-size="sm" data-key="a" aria-label="{open ? 'Open terminal of' : 'Attach'} {a.name}" disabled={!a.running || busy} onclick={() => attach(a.name)}><Icon name="attach" size="sm" />{open ? "Open terminal" : "Attach"}</button>
-                        {#if a.running}<button class="btn" data-size="sm" data-icon-only aria-label="Stop {a.name}" title="Stop" disabled={busy} onclick={() => act(a.name, "stop")}><Icon name="stop" size="sm" /></button>
-                        {:else}<button class="btn" data-size="sm" data-icon-only aria-label="Start {a.name}" title="Start" disabled={busy} onclick={() => act(a.name, "start")}><Icon name="play" size="sm" /></button>{/if}
-                        <button class="btn" data-variant="danger" data-size="sm" data-icon-only aria-label="Remove {a.name}" title="Remove" disabled={busy} onclick={() => act(a.name, "rm")}><Icon name="trash" size="sm" /></button>
-                      {/if}
-                    </span>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
+            <thead><tr><th>Agent</th><th>Template</th><th>Activity</th><th>Status</th><th>Terminal</th><th>Spawned by</th><th></th></tr></thead>
+            <tbody>{#each agents as a (a.name)}{@render row(a)}{/each}</tbody>
           </table>
         </div>
         {#each agents.filter((a) => a.previews?.length) as a (a.name)}
           <h3 class="h-section">Previews of {a.name}</h3>
           <Previews agent={a.name} previews={a.previews} heading={false} />
         {/each}
-        <p class="muted" style="font-size:var(--text-xs);margin:0"><span class="kbd">j</span> <span class="kbd">k</span> move · <span class="kbd">Enter</span> open · <span class="kbd">a</span> attach · <span class="kbd">s</span> spawn</p>
       {:else}
-        <div class="empty"><h2>No agent yet</h2><p>Spawn one from a template{#if project.templates.length === 0}. The project has published no template: run <code>egzo project up</code> on the project{/if}.</p></div>
+        <div class="empty"><h2>No agent yet</h2><p>An agent is made from one of the project's <a href={href.project(id, "templates")}>templates</a>{#if project.templates.length === 0}. The project has published no template: run <code>egzo project up</code> on the project{/if}.</p></div>
       {/if}
-    {:else if tab === "services"}
-      <div class="table-wrap">
-        <table class="table" data-testid="services">
-          <thead><tr><th>Service</th><th>State</th><th>Health</th></tr></thead>
-          <tbody>
-            {#each project.services as s}
-              <tr><td>{s.name}</td><td><Pill kind={s.state === "running" ? "running" : "stopped"} label="{s.name}: {s.state}" /></td><td>{s.health || "–"}</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+    {:else if tab === "templates"}
+      {#if groups.length}
+        {#if templatesError}<p class="muted" style="margin:0">What the templates give an agent cannot be read: {templatesError}</p>{/if}
+        <div class="tgroups">
+          {#each groups as g (g.name)}
+            {@const d = g.detail}
+            {@const up = g.agents.filter((a) => a.running).length}
+            <section class="tgroup" data-testid="template" data-template={g.name} data-retired={!g.published ? "" : undefined}>
+              <header class="tg-head">
+                <span class="tg-ini" aria-hidden="true">{(g.name || "?").slice(0, 2)}</span>
+                <div class="tg-title">
+                  <h2>{g.name || "No template"}{#if !g.published && g.name} <span class="pill" data-s="warn" title="the project no longer publishes this template: its agents run on what it was">retired</span>{/if}</h2>
+                  {#if d}
+                    <div class="tg-sub">
+                      <span title="harness">{d.harness}</span>
+                      {#if d.model}<span title="model">{d.model}</span>{/if}
+                      {#if d.image}<span title="image">{d.image}</span>{:else if d.built}<span title="the image is built by egzo project up">built image</span>{/if}
+                      {#if d.permissions && d.permissions !== "bypass"}<span title="permissions">asks before acting</span>{/if}
+                    </div>
+                  {:else if g.published && !templates && !templatesError && project.role !== "overseer" && !offline}
+                    <div class="tg-sub muted">Reading the template…</div>
+                  {/if}
+                </div>
+                {#if project.canSpawn && g.published}<button class="btn" data-size="sm" aria-label="Spawn an agent from {g.name}" onclick={() => openSpawn(g.name)} disabled={!project.up}><Icon name="plus" size="sm" />Spawn agent</button>{/if}
+              </header>
+              {#if d}
+                <dl class="tg-facts">
+                  <div><dt>workspaces</dt><dd>{#each d.workspaces as w}<span class="chip" title={w.mount}>{w.name}{#if w.mode === "ro"} <small>read-only</small>{/if}</span>{:else}<span class="muted">none</span>{/each}</dd></div>
+                  <div><dt>network</dt><dd><span class="chip" title="egress profile">{d.egress.profile}</span> <span class="muted">{d.egress.allow.length} host{d.egress.allow.length === 1 ? "" : "s"}{#if d.egress.services.length}, {d.egress.services.length} service{d.egress.services.length === 1 ? "" : "s"}{/if}{#if d.egress.ssh.length}, {d.egress.ssh.length} ssh{/if}</span></dd></div>
+                  <div><dt>ports</dt><dd>{#each d.ports as p}<span class="chip">{p.name} <small>{p.port}/{p.protocol}</small></span>{:else}<span class="muted">none</span>{/each}</dd></div>
+                </dl>
+              {/if}
+              <div class="tg-inst">
+                <span class="h-section">Agents</span>
+                {#if g.agents.length}
+                  <a class="counts" href={href.project(id)}>{#if up}<span><span class="dot" data-s="running"></span>{up} running</span>{/if}{#if g.agents.length - up}<span><span class="dot" data-s="stopped"></span>{g.agents.length - up} stopped</span>{/if}</a>
+                  <span class="muted">{g.agents.map((a) => a.name).join(", ")}</span>
+                {:else}
+                  <span class="muted">none made from it yet</span>
+                {/if}
+              </div>
+            </section>
+          {/each}
+        </div>
+      {:else}
+        <div class="empty"><h2>No template</h2><p>The project has published no template: run <code>egzo project up</code> on the project.</p></div>
+      {/if}
     {:else if tab === "activity"}
       {#if activity}<TaskTable project={id} tasks={activity} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}

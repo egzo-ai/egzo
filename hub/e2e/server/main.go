@@ -156,7 +156,7 @@ func (w *world) add(machine, project string, prepare func(*fake.Engine), templat
 }
 
 func (w *world) seed(machine string) error {
-	e, err := w.add(machine, "web", nil, "coder", "reviewer")
+	e, err := w.add(machine, "web", nil, "coder", "reviewer", "planner")
 	if err != nil {
 		return err
 	}

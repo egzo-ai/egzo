@@ -294,3 +294,24 @@ html, body { height: 100%; }
   .hubbar .goto { width: auto; }
   .hubbar .goto .t, .hubbar .goto .kbd, .hubbar .brand b { display: none; }
 }
+
+/* Agents by template */
+.tgroups { display: grid; gap: var(--space-4); }
+.tgroup { border: 1px solid var(--border); border-radius: var(--radius-3); background: var(--surface-1); display: grid; gap: var(--space-3); padding: var(--space-4); min-width: 0; }
+.tgroup[data-retired] { border-style: dashed; }
+.tg-head { display: flex; align-items: center; gap: var(--space-3); min-width: 0; flex-wrap: wrap; }
+.tg-ini { display: grid; place-items: center; flex: none; width: 36px; height: 36px; font-size: var(--text-sm); text-transform: uppercase; color: var(--accent-text); border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-2); }
+.tg-title { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.tg-title h2 { margin: 0; font-size: var(--text-md); display: flex; align-items: center; gap: var(--space-2); }
+.tg-sub { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); font-size: var(--text-xs); color: var(--text-2); }
+.tg-sub span + span::before { content: "·"; color: var(--text-3); margin-right: var(--space-3); }
+.tg-facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-2) var(--space-4); font-size: var(--text-xs); }
+.tg-facts div { display: grid; gap: 2px; min-width: 0; }
+.tg-facts dt { color: var(--text-3); text-transform: uppercase; letter-spacing: var(--tracking-label); font-size: var(--text-2xs); }
+.tg-facts dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-1); background: var(--bg); font-size: var(--text-xs); }
+.chip small { color: var(--text-3); font-size: var(--text-2xs); }
+.tgroup .table-wrap { margin: 0 calc(-1 * var(--space-2)); }
+.counts { display: inline-flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.counts > span { display: inline-flex; align-items: center; gap: 6px; }
+.tg-inst { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; padding-top: var(--space-2); border-top: 1px solid var(--border); font-size: var(--text-xs); }

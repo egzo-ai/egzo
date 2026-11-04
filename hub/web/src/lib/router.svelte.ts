@@ -1,7 +1,7 @@
 // A small router over the History API. The hub serves index.html for every address, so these paths survive a reload.
 
-export type ProjectTab = "agents" | "services" | "activity" | "network" | "spec" | "audit" | "members";
-export const projectTabs: ProjectTab[] = ["agents", "services", "activity", "network", "spec", "audit", "members"];
+export type ProjectTab = "agents" | "templates" | "activity" | "network" | "spec" | "audit" | "members";
+export const projectTabs: ProjectTab[] = ["agents", "templates", "activity", "network", "spec", "audit", "members"];
 
 export type AgentTab = "overview" | "activity" | "network" | "logs";
 
