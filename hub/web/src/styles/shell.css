@@ -246,3 +246,51 @@ html, body { height: 100%; }
   .leader .keys { grid-template-columns: 1fr 1fr; }
 }
 .side-head .close-nav { display: none; }
+
+/* ═══ Two levels of nav ═══
+   Hub pages (projects, settings): no left nav, a top bar. A project (its pages and its terminals): the left nav is dedicated to it. */
+.app[data-hub] { grid-template-columns: minmax(0, 1fr); }
+.hubbar { grid-row: 1; display: flex; align-items: center; gap: var(--space-3); height: 48px; padding: 0 var(--space-4); background: var(--surface-1); border-bottom: 1px solid var(--border); min-width: 0; }
+.hubbar .brand { flex: none; }
+.hubbar .grow { flex: 1; }
+.hubbar .goto { margin: 0; width: 220px; }
+.hubbar-links { display: flex; gap: var(--space-1); }
+.hubbar-links a { display: inline-flex; align-items: center; height: 30px; padding: 0 var(--space-3); color: var(--text-2); text-decoration: none; border-radius: var(--radius-1); font-size: var(--text-sm); }
+.hubbar-links a:hover { background: var(--surface-2); color: var(--text); }
+.hubbar-links a[aria-current="page"] { color: var(--text); background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.hubbar-links .warn { color: var(--status-unreachable); font-size: var(--text-xs); }
+.hubbar .me { height: 30px; }
+
+.side .back { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px; flex: none; color: var(--text-2); text-decoration: none; border-radius: var(--radius-1); border: 1px solid var(--border-strong); }
+.side .back:hover { background: var(--surface-2); color: var(--text); }
+.side .proj-title { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; color: var(--text); text-decoration: none; }
+.side .proj-title .who { display: grid; min-width: 0; line-height: 1.15; }
+.side .proj-title .who b, .side .proj-title .who small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side .proj-title .who small { font-size: var(--text-2xs); color: var(--text-3); }
+.side .proj-title .ini { display: grid; place-items: center; flex: none; width: 24px; height: 24px; font-size: var(--text-2xs); text-transform: uppercase; color: var(--accent-text); border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-1); }
+.app:not([data-hub]) .side-head { height: 52px; }
+.side-elsewhere { display: block; margin: var(--space-2) var(--space-3) 0; font-size: var(--text-2xs); color: var(--text-3); text-decoration: none; }
+.side-elsewhere:hover { color: var(--accent-text); }
+.app[data-rail] .side .proj-title .who, .app[data-rail] .side .proj-title .pill, .app[data-rail] .side-elsewhere { display: none; }
+.app[data-rail] .side .proj-title { flex: none; }
+
+/* Project tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); }
+.tile { display: grid; gap: var(--space-3); align-content: start; padding: var(--space-4); min-height: 150px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-3);
+  color: var(--text); text-decoration: none; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.tile:hover { border-color: var(--accent-line); background: var(--surface-2); }
+.tile:focus-visible { outline-offset: 2px; }
+.tile header { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.tile .ini { display: grid; place-items: center; flex: none; width: 40px; height: 40px; font-size: var(--text-md); text-transform: uppercase; color: var(--accent-text); border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius-2); }
+.tile .who { display: grid; min-width: 0; }
+.tile .who b { font-size: var(--text-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .who small { color: var(--text-3); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .stats { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; font-size: var(--text-xs); color: var(--text-2); }
+.tile .agentsbar { width: 100%; height: 4px; margin: 0; }
+.tile footer { display: flex; gap: var(--space-2); align-items: center; font-size: var(--text-2xs); color: var(--text-3); margin-top: auto; }
+.tile footer .grow { flex: 1; }
+@media (max-width: 720px) {
+  .hubbar { padding: 0 var(--space-2); gap: var(--space-2); }
+  .hubbar .goto { width: auto; }
+  .hubbar .goto .t, .hubbar .goto .kbd, .hubbar .brand b { display: none; }
+}

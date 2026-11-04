@@ -2,7 +2,7 @@
   import { app, projectName, seesLinks, toggleTheme } from "../lib/app.svelte";
   import { taskDoing } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
-  import { closeTerm, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
+  import { closeTerm, scopedTerms, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import Logo from "./Logo.svelte";
@@ -49,8 +49,10 @@
     return `${t.agent}, ${projectName(t.project)}, ${stateText[s]}${s === "connected" && a && a.activity !== "unknown" ? ", " + a.activity : ""}${t.unread ? ", new output" : ""}`;
   }
 
-  const waitingIn = (id: string) => app.projects.find((p) => p.id === id)?.agents.filter((a) => a.waiting).length ?? 0;
-  const totalWaiting = $derived(app.projects.reduce((n, p) => n + p.agents.filter((a) => a.waiting).length, 0));
+  // the nav belongs to one project: its pages and its open terminals; other projects are one click away on the project list
+  const terms = $derived(scopedTerms());
+  const elsewhere = $derived(workspace.terms.length - terms.length);
+  const waitingElsewhere = $derived(app.projects.filter((p) => p.id !== workspace.scope).reduce((n, p) => n + p.agents.filter((a) => a.waiting).length, 0));
 
   function termKey(e: KeyboardEvent, t: Term) {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showTerm(t.id); }
@@ -64,8 +66,7 @@
   }
 
   const sections = $derived.by(() => {
-    if (route.name !== "project" && route.name !== "agent") return null;
-    const p = app.projects.find((x) => x.id === route.project);
+    const p = app.projects.find((x) => x.id === workspace.scope);
     if (!p) return null;
     const admin = p.role === "admin" || p.role === "owner";
     return {
@@ -81,9 +82,21 @@
   });
 </script>
 
-<nav class="side" aria-label="Main">
+<nav class="side" aria-label="Project">
   <div class="side-head">
-    <a class="brand" href={href.home()} aria-label="egzo hub, all projects"><Logo /><b>egzo<span>/hub</span></b></a>
+    <a class="back" href={href.home()} aria-label="All projects" title="All projects{waitingElsewhere ? ` (${waitingElsewhere} waiting elsewhere)` : ""}" onclick={showPage}>
+      <span class="arrow">←</span>{#if waitingElsewhere}<span class="qcount">{waitingElsewhere}?</span>{/if}
+    </a>
+    {#if sections}
+      {@const p = sections.project}
+      <a class="proj-title" href={href.project(p.id)} title="{p.name} on {p.host}" onclick={showPage}>
+        <span class="ini" aria-hidden="true">{p.name.slice(0, 2)}</span>
+        <span class="who"><b>{p.name}</b><small>{p.host}</small></span>
+        {#if p.offlineSince}<span class="pill" data-s="unreachable" style="height:16px;font-size:10px">offline</span>{:else if !p.up}<span class="pill" data-s="warn" style="height:16px;font-size:10px">down</span>{/if}
+      </a>
+    {:else}
+      <span class="proj-title"><span class="who"><b>{workspace.scope}</b></span></span>
+    {/if}
     <button class="btn collapse" data-variant="quiet" data-size="sm" data-icon-only aria-label="{workspace.rail ? 'Expand' : 'Collapse'} sidebar" title="{workspace.rail ? 'Expand' : 'Collapse'} sidebar (Ctrl+] b)" onclick={() => (workspace.rail = !workspace.rail)}>
       <Icon name={workspace.rail ? "chev-r" : "single"} size="sm" />
     </button>
@@ -94,9 +107,26 @@
   </button>
 
   <div class="side-scroll">
-    <div class="side-h"><span class="label">Terminals</span><span class="count">{workspace.terms.length || ""}</span></div>
+    {#if sections}
+      {@const p = sections.project}
+      <div class="side-list" style="padding-top:var(--space-2)">
+        {#each sections.list as [tab, name, count]}
+          {@const ic = ({ agents: "users", services: "server", timeline: "pulse", network: "swap", spec: "file", audit: "shield", members: "key" } as Record<string, string>)[tab] ?? "list"}
+          <a class="nav-item" href={href.project(p.id, tab)} title={name} aria-current={onPage && route.name === "project" && route.tab === tab ? "page" : undefined} onclick={showPage}>
+            <span class="ic"><Icon name={ic} size="sm" /></span><span class="nm">{name}</span><span class="end"><span class="n">{count ?? ""}</span></span>
+          </a>
+          {#if tab === "agents" && route.name === "agent" && route.project === p.id}
+            <div class="nav-sub">
+              <a class="nav-item" href={href.agent(p.id, route.agent)} aria-current={onPage ? "page" : undefined} onclick={showPage}><span class="nm">↳ {route.agent}</span></a>
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+
+    <div class="side-h"><span class="label">Terminals</span><span class="count">{terms.length || ""}</span></div>
     <div class="side-list" role="listbox" aria-label="Open terminals">
-      {#each workspace.terms as t, i (t.id)}
+      {#each terms as t, i (t.id)}
         {@const sel = workspace.active === t.id}
         {@const s = shownState(t)}
         {@const a = agentOf(t)}
@@ -130,53 +160,18 @@
             <span class="n">{i + 1}</span>
             <button class="x" aria-label="Close {t.agent}" onclick={(e) => { e.stopPropagation(); closeTerm(t.id); }}><Icon name="x" size="sm" /></button>
           </span>
-          <span class="where">{projectName(t.project)}</span>
           <span class="what" data-t={wt}>{w}</span>
         </div>
       {:else}
-        <p class="side-empty">No terminal open. Use <b>Attach</b> on an agent; it opens here and stays open while you browse.</p>
+        <p class="side-empty">No terminal open in this project. Use <b>Attach</b> on an agent; it opens here and stays open while you browse.</p>
       {/each}
     </div>
-    <div class="side-add">
-      <button class="btn" data-variant="quiet" data-size="sm" style="width:100%;justify-content:flex-start" aria-label="Attach an agent" onclick={() => (app.palette = true)}>
-        <Icon name="plus" size="sm" /><span class="t">Attach an agent</span>
-      </button>
-    </div>
-
-    <div class="side-h"><span class="label">Projects</span><span class="count">{app.projects.length}</span></div>
-    <div class="side-list">
-      <a class="nav-item" href={href.home()} aria-current={onPage && route.name === "home" ? "page" : undefined} onclick={showPage}>
-        <span class="ic"><Icon name="list" size="sm" /></span><span class="nm">All projects</span>
-        <span class="end">{#if totalWaiting}<span class="qcount" title="{totalWaiting} waiting for an answer">{totalWaiting}?</span>{/if}</span>
-      </a>
-      {#each app.projects as p (p.id)}
-        {@const current = (route.name === "project" || route.name === "agent") && route.project === p.id}
-        {@const q = waitingIn(p.id)}
-        <a class="nav-item proj" href={href.project(p.id)} title="{p.name} on {p.host}" onclick={showPage}>
-          <span class="ic"><Icon name={current ? "chev-d" : "chev-r"} size="sm" /></span><span class="ini" aria-hidden="true">{p.name.slice(0, 2)}</span>
-          <span class="nm">{p.name}</span>
-          <span class="end">
-            {#if q}<span class="qcount" title="{q} waiting for an answer">{q}?</span>{/if}
-            {#if p.offlineSince}<span class="pill" data-s="unreachable" style="height:16px;font-size:10px">offline</span>{:else if !p.up}<span class="pill" data-s="warn" style="height:16px;font-size:10px">down</span>{/if}
-          </span>
-        </a>
-        {#if current && sections}
-          <div class="nav-sub">
-            {#each sections.list as [tab, name, count]}
-              <a class="nav-item" href={href.project(p.id, tab)} aria-current={onPage && route.name === "project" && route.tab === tab ? "page" : undefined} onclick={showPage}>
-                <span class="nm">{name}</span><span class="end"><span class="n">{count ?? ""}</span></span>
-              </a>
-            {/each}
-            {#if route.name === "agent"}
-              <a class="nav-item" href={href.agent(p.id, route.agent)} aria-current={onPage ? "page" : undefined} onclick={showPage}><span class="nm">↳ {route.agent}</span></a>
-            {/if}
-          </div>
-        {/if}
-      {/each}
-    </div>
+    {#if elsewhere}
+      <a class="side-elsewhere" href={href.home()} onclick={showPage}>+{elsewhere} open in other projects</a>
+    {/if}
   </div>
 
-  <div class="side-foot">
+<div class="side-foot">
     {#if seesLinks()}
       <a class="health" href={href.settings()} data-down={offline ? "" : undefined} aria-current={onPage && route.name === "settings" ? "page" : undefined} aria-label={offline ? `Settings: ${offline} of ${app.projects.length} projects offline` : "Settings"} onclick={showPage}>
         <Icon name="server" size="sm" /><span class="t">Settings</span>
