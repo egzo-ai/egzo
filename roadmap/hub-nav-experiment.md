@@ -19,6 +19,7 @@ browser e2e (`hub/e2e/test_hub.py`) expects the old sidebar, the projects table 
 - **An Advanced section** in the project's left nav, holding what is rarely needed: a **Health** card (the project's link to the
   hub, whether agent status comes through, and the control and proxy services with their state and health check: what the
   Services tab showed) for everyone with access, and **Unlink this project**, moved out of Members, for those who may unlink.
+  The **Spec** (the project file as last applied) is its second tab, out of the left nav; its address stays `/p/{project}/spec`.
 - **No question counts** on the project list, the top bar or the back button: messaging is not in the hub yet, so they were a
   piece of a feature that is missing. An agent's own "waiting" state still shows on its row and its terminal.
 - **The agent page has no Overview tab.** Its template, who made it, when, and who holds its terminal are one line under its
@@ -31,6 +32,6 @@ browser e2e (`hub/e2e/test_hub.py`) expects the old sidebar, the projects table 
 
 - **Services tab: removed.** What it showed (the control and proxy services and their state) is in the Health card of the
   Advanced section now. A project whose services are down still gets its banner on every page.
-- **What else the Advanced section holds.** Candidates: Spec (the raw resolved project file), perhaps Network and the Audit log.
+- **What else the Advanced section holds.** It has Health and Spec; perhaps Network and the Audit log.
   Whether the left nav shows it folded.
 - **Messaging in the hub**: questions from agents and answering them. The hub shows nothing of it until it is designed.
