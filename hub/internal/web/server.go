@@ -133,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	api("GET "+project+"/tasks/{id}", s.task)
 	api("DELETE "+project+"/tasks/{id}", s.dismissTask)
 	api("GET "+project+"/spec", s.spec)
+	api("GET "+project+"/templates", s.templates)
 	api("GET "+project+"/members", s.members)
 	api("POST "+project+"/members", s.setRole)
 	api("GET "+project+"/invites", s.projectInvites)

@@ -81,6 +81,7 @@ export interface ProjectBrief {
   offlineSince: string | null;
   feed: Feed;
   up: boolean;
+  templates: string[];
   agents: AgentBrief[];
 }
 
@@ -166,6 +167,19 @@ export interface Project {
   /** May see who holds what: an owner, or an operator. */
   canMembers: boolean;
   canAudit: boolean;
+}
+
+/** What a template gives an agent, read from the project's spec snapshot. */
+export interface Template {
+  name: string;
+  harness: string;
+  image: string;
+  built: boolean;
+  model: string;
+  permissions: string;
+  workspaces: { name: string; mount: string; mode: string }[];
+  egress: { profile: string; allow: string[]; services: string[]; ssh: string[] };
+  ports: { name: string; port: number; protocol: string }[];
 }
 
 export interface AgentAnswer {
