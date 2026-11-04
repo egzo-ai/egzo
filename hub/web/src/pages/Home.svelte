@@ -65,7 +65,7 @@
     <div class="tiles" data-testid="projects">
       {#each rows as { p, running, stopped } (p.id)}
         {@const n = openIn(p.id)}
-        <a class="tile" href={href.project(p.id)} data-project={p.name}>
+        <a class="tile" href={href.project(p.id)} data-project={p.name} aria-label="{p.name} on {p.host}">
           <header>
             <span class="ini" aria-hidden="true">{p.name.slice(0, 2)}</span>
             <span class="who"><b>{p.name}</b><small>{p.host}</small></span>

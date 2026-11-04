@@ -10,7 +10,7 @@
 </script>
 
 <div class="table-wrap">
-  <table class="table" data-testid="activity">
+  <table class="table" data-testid="tasks">
     <thead><tr><th>When</th><th>Who</th><th>What</th>{#if agentColumn}<th>Agent</th>{/if}<th>Result</th><th>Took</th><th>Detail</th></tr></thead>
     <tbody>
       {#each tasks as t (t.id)}

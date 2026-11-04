@@ -4,6 +4,7 @@ Run by `make hub-stack` (e2e/stack.sh), never by the plain `pytest`: it needs HU
 """
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,11 @@ ADMIN_PASSWORD = os.environ.get("HUB_STACK_ADMIN_PASSWORD")
 PREVIEW = os.environ.get("HUB_STACK_PREVIEW")
 
 pytestmark = pytest.mark.skipif(not URL, reason="needs the stack of e2e/stack.sh (make hub-stack)")
+
+
+def section(page, name):
+    """A section of the project, in its left nav."""
+    return page.locator("nav.side").get_by_role("link", name=re.compile(rf"^{re.escape(name)}( \d+)?$"))
 
 
 def password(page):
@@ -91,7 +97,7 @@ def test_a_real_project_that_registered_links_dex_and_works_with_the_project(pag
 
     # the project that linked is the admin's: it made the code
     page.get_by_test_id("projects").get_by_role("link", name=PROJECT).click()
-    expect(page.get_by_role("heading", name=PROJECT)).to_be_visible()
+    expect(page.get_by_role("navigation", name="Breadcrumb")).to_contain_text(PROJECT)
     expect(page.get_by_role("heading", name="No agent yet")).to_be_visible()
 
     page.get_by_role("button", name="Spawn agent").click()
@@ -115,11 +121,11 @@ def test_a_real_project_that_registered_links_dex_and_works_with_the_project(pag
     page.get_by_role("button", name="Remove", exact=True).click()
     page.get_by_role("dialog").get_by_role("button", name="Remove", exact=True).click()
     expect(page.get_by_role("heading", name="No agent yet")).to_be_visible(timeout=60000)
-    page.get_by_role("tab", name="Activity").click()
+    section(page, "Activity").click()
     for verb in ("remove", "stop", "spawn"):
-        expect(page.get_by_test_id("activity")).to_contain_text(verb)
+        expect(page.get_by_test_id("tasks")).to_contain_text(verb)
 
-    page.get_by_role("tab", name="Audit log").click()
+    section(page, "Audit log").click()
     audit = page.get_by_test_id("audit")
     for action in ("agent.spawn", "agent.attach", "agent.stop", "agent.rm"):
         expect(audit).to_contain_text(action)
@@ -127,22 +133,22 @@ def test_a_real_project_that_registered_links_dex_and_works_with_the_project(pag
 
 def test_a_project_whose_link_stopped_is_offline_since_and_can_only_be_looked_at(page):
     sign_in(page)
-    row = page.get_by_test_id("projects").locator(f"tr[data-project={PROJECT}]")
+    row = page.get_by_test_id("projects").locator(f"[data-project={PROJECT}]")
     expect(row).to_contain_text("offline", timeout=60000)  # the hub notices at the next keep-alive at the latest
-    row.get_by_role("link", name=PROJECT).click()
+    row.click()  # a tile is a link to its project
     expect(page.get_by_test_id("offline")).to_contain_text("Offline since")
     expect(page.get_by_role("button", name="Spawn agent")).to_have_count(0)
 
 
 def test_a_project_that_came_back_is_the_same_project(page):
     sign_in(page)
-    row = page.get_by_test_id("projects").locator(f"tr[data-project={PROJECT}]")
+    row = page.get_by_test_id("projects").locator(f"[data-project={PROJECT}]")
     expect(row).to_have_count(1)
     expect(row).not_to_contain_text("offline", timeout=30000)
-    row.get_by_role("link", name=PROJECT).click()
+    row.click()  # a tile is a link to its project
     expect(page.get_by_role("button", name="Spawn agent")).to_be_enabled(timeout=30000)
-    page.get_by_role("tab", name="Activity").click()
-    expect(page.get_by_test_id("activity")).to_contain_text("spawn")  # what it did before is still its history
+    section(page, "Activity").click()
+    expect(page.get_by_test_id("tasks")).to_contain_text("spawn")  # what it did before is still its history
 
 
 def test_a_project_that_unlinked_is_forgotten(page):
