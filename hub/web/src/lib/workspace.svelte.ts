@@ -1,5 +1,6 @@
 // The workspace: the open terminals and how they are shown. It lives above the router, so a terminal survives every navigation;
 // only closing one destroys it. The list of open terminals is kept in sessionStorage and reattached on a reload.
+import { projectName, toast } from "./app.svelte";
 import type { TermState } from "./termsession";
 
 export type Layout = 1 | 2 | 4;
@@ -16,10 +17,14 @@ export interface Term {
   epoch: number;
   /** The next connection takes the terminal over. */
   takeover: boolean;
+  /** When it was last shown, in the order of this page's use: the least recent is closed to make room. */
+  used: number;
 }
 
 export const MAX_TERMS = 12;
 const STORE_KEY = "egzo.terminals";
+
+let uses = 0;
 
 export const termId = (project: string, agent: string) => `${project}/${agent}`;
 
@@ -73,7 +78,7 @@ function add(project: string, agent: string): Term {
   const id = termId(project, agent);
   let term = workspace.terms.find((t) => t.id === id);
   if (!term) {
-    term = { id, project, agent, state: "connecting", holder: "", message: "", unread: false, epoch: 0, takeover: false };
+    term = { id, project, agent, state: "connecting", holder: "", message: "", unread: false, epoch: 0, takeover: false, used: ++uses };
     workspace.terms.push(term);
     term = workspace.terms[workspace.terms.length - 1]!; // the reactive proxy
     persist();
@@ -83,13 +88,24 @@ function add(project: string, agent: string): Term {
 
 export const termById = (id: string | null) => workspace.terms.find((t) => t.id === id);
 
-/** Open a terminal (or bring the open one forward) and show it. Returns false when too many are open. */
-export function openTerm(project: string, agent: string): boolean {
+/** Open a terminal (or bring the open one forward) and show it. When MAX_TERMS are open already, the one used least recently is
+ * closed to make room: it is returned, so the caller can say so. */
+export function openTerm(project: string, agent: string): Term | undefined {
   const id = termId(project, agent);
-  if (!workspace.terms.some((t) => t.id === id) && workspace.terms.length >= MAX_TERMS) return false;
+  let closed: Term | undefined;
+  if (!workspace.terms.some((t) => t.id === id) && workspace.terms.length >= MAX_TERMS) {
+    closed = workspace.terms.reduce((a, b) => (b.used < a.used ? b : a));
+    closed = { ...closed };
+    closeTerm(closed.id);
+  }
   add(project, agent);
   showTerm(id);
-  return true;
+  return closed;
+}
+
+/** Say which terminal openTerm closed to make room, if it closed one. */
+export function roomMade(closed: Term | undefined): void {
+  if (closed) toast(`Closed the terminal of ${closed.agent} (${projectName(closed.project)}), the least recently used: ${MAX_TERMS} stay open at most.`);
 }
 
 export function showTerm(id: string): void {
@@ -113,7 +129,10 @@ export function showTerm(id: string): void {
     workspace.focusPane = panes.indexOf(id);
   }
   const term = termById(id);
-  if (term) term.unread = false;
+  if (term) {
+    term.unread = false;
+    term.used = ++uses;
+  }
 }
 
 /** Show the page again; the terminals stay open and mounted. */

@@ -89,7 +89,7 @@
   <ErrorPage error={failure} />
 {:else}
   <div style="display:grid;gap:var(--space-4)">
-    <p class="dim" style="margin:0">The projects linked to this hub. A project names its hub in its own file and connects itself; this hub holds no way into its machine.</p>
+    <p class="dim" style="margin:0">The projects connected to this hub. To connect another one, click <b>Link a project</b> and follow the steps.</p>
     <div class="btn-group">
       <button class="btn" data-variant="primary" disabled={busy || !app.account.canLink} onclick={makeCode}>Link a project</button>
       {#if !app.user?.isOperator}<span class="muted" data-testid="quota">{app.account.connectedProjects} of {app.user?.projectQuota} projects</span>{/if}
@@ -97,7 +97,7 @@
     {#if made}
       <section class="panel" data-testid="new-code" style="max-width:80ch">
         <div class="pad" style="display:grid;gap:var(--space-3)">
-          <p style="margin:0">This code is shown once. It registers one project, as you, until {stamp(made.expiresAt)}. Whoever holds it can use it: hand it over the way you would a password.</p>
+          <p style="margin:0">This code is shown only once. It connects one project to this hub, in your name, until {stamp(made.expiresAt)}. Keep it secret, like a password.</p>
           <dl class="kv">
             <dt>code</dt><dd><code data-testid="link-code">{made.code}</code></dd>
           </dl>
@@ -108,7 +108,7 @@ egzo project register</pre>
       </section>
     {/if}
     {#if codes.length}
-      <p class="muted" style="margin:0">Codes not used yet. A code is seen only when it is made: to use one you no longer have, cancel it and make another.</p>
+      <p class="muted" style="margin:0">Codes that have not been used yet. If you lost one, cancel it and make a new one.</p>
       <div class="table-wrap">
         <table class="table" data-testid="link-codes">
           <thead><tr><th>Made by</th><th>Expires</th><th></th></tr></thead>

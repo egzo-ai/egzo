@@ -63,7 +63,7 @@
   <ErrorPage error={failure} />
 {:else}
   <div style="display:grid;gap:var(--space-4)">
-    <p class="dim" style="margin:0">Nobody gets in without an invite: an account at the login provider is not enough. An invite here makes an account with what you pick; a project's owner invites to a role on their project, on its Members tab.</p>
+    <p class="dim" style="margin:0">People need an invite to get an account on this hub. To give someone access to one project only, invite them from that project's Members page.</p>
     <form class="toolbar" onsubmit={create}>
       <div class="field"><label for="n-quota">Projects they may connect</label>
         <input id="n-quota" class="input" style="width:12ch" type="number" min="0" bind:value={quota} /></div>

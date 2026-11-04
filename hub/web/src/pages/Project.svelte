@@ -10,7 +10,7 @@
   import { href, nav, navigate, type ProjectTab } from "../lib/router.svelte";
   import { followTask, onScreen } from "../lib/tasks";
   import type { Agent, AuditEntry, Invite, Members, Project, Task, Template } from "../lib/types";
-  import { openTerm, workspace } from "../lib/workspace.svelte";
+  import { openTerm, roomMade, workspace } from "../lib/workspace.svelte";
   import AuditTable from "../components/AuditTable.svelte";
   import Icon from "../components/Icon.svelte";
   import MembersTable from "../components/MembersTable.svelte";
@@ -75,13 +75,13 @@
   // an agent the project does not have (yet, or any more) is in the list while a task runs on it, and a spawn that failed until it is
   // dismissed: such an agent has a task and no state
   const agents = $derived(project?.agents ?? []);
-  const running = $derived(agents.filter((a) => a.running).length);
-  const waiting = $derived(agents.filter((a) => a.waiting).length);
+  // the sections are in the left nav; the page only says which one it is
   const tabs = $derived.by(() => {
     const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["templates", "Templates", project?.templates.length ?? null]];
     if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canMembers) list.push(["members", "Members", null]);
+    if (project?.canUnlink) list.push(["advanced", "Advanced", null]);
     return list;
   });
 
@@ -174,7 +174,7 @@
   }
 
   function attach(agent: string) {
-    if (!openTerm(id, agent)) toast("Too many terminals are open. Close one first.", "error");
+    roomMade(openTerm(id, agent));
   }
 </script>
 
@@ -214,19 +214,12 @@
   <ErrorPage error={failure} />
 {:else if project}
   <div class="page">
-    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> /</nav>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(id)}>{project.name}</a> <span class="muted" data-testid="host">on {project.host}</span></nav>
     <div class="phead">
-      <h1 class="h-page">{project.name}</h1>
-      <span class="muted" data-testid="host">{project.host}</span>
-      {#if project.role === "overseer"}<span class="badge" title="You oversee it as an operator, with no role on it">operator</span>{:else}<span class="badge" title="your role">{project.role}</span>{/if}{#if project.ownerless} <span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
+      <h1 class="h-page">{tabs.find(([t]) => t === tab)?.[1] ?? project.name}</h1>
+      {#if project.ownerless}<span class="pill" data-s="warn" title="nobody who can sign in owns it">no owner</span>{/if}
       <span class="grow"></span>
-      {#if project.canSpawn}<button class="btn" data-variant="primary" aria-label="Spawn an agent" onclick={() => openSpawn()} disabled={!project.up}>Spawn agent</button>{/if}
-    </div>
-    <div class="metaline">
-      <span><span class="k">agents</span> {running} running{#if waiting}&nbsp;· {waiting} waiting{/if}&nbsp;· {agents.length - running} stopped</span>
-      <span class="k">services</span>
-      {#each project.services as s}<span><span class="dot" data-s={s.state === "running" ? "running" : "stopped"}></span> {s.name}</span>{/each}
-      {#if project.templates.length}<span><span class="k">templates</span> {project.templates.join(", ")}</span>{/if}
+      {#if project.canSpawn && (tab === "agents" || tab === "templates")}<button class="btn" data-variant="primary" aria-label="Spawn an agent" onclick={() => openSpawn()} disabled={!project.up}>Spawn agent</button>{/if}
     </div>
 
     {#if project.offlineSince}
@@ -234,9 +227,9 @@
         <div class="body">The project's link is not connected, so this is what the hub last heard. Nothing can be done on it from here until <code>egzo project up</code> runs on {project.host || "its machine"}.</div></div>
     {/if}
 
-    {#if (project.feed.state === "unavailable" || project.feed.state === "stale") && agents.some((a) => a.running)}
-      <div class="banner" data-tone="info" role="status" data-testid="feed-banner"><span class="tag">? Agent status unavailable</span>
-        <div class="body">What the agents are doing cannot be read, so they show as running. {project.feed.message}</div></div>
+    {#if tab === "agents" && (project.feed.state === "unavailable" || project.feed.state === "stale") && agents.some((a) => a.running)}
+      <div class="banner" data-tone="info" role="status" data-testid="feed-banner" title={project.feed.message}><span class="tag">? Agent status unavailable</span>
+        <div class="body">The hub can't see what the agents are doing right now, so the running ones just show as "running".</div></div>
     {/if}
 
     {#if !project.up && !project.offlineSince}
@@ -244,11 +237,6 @@
         <div class="body">The project's control or proxy sidecar is not running, so agents cannot be spawned. Run <code>egzo project up</code>.</div></div>
     {/if}
 
-    <div class="tabs" role="tablist" aria-label="Project sections">
-      {#each tabs as [section, label, count]}
-        <a class="tab" role="tab" href={href.project(id, section)} aria-selected={tab === section}>{label}{#if count !== null} <span class="count">{count}</span>{/if}</a>
-      {/each}
-    </div>
 
     {#if tab === "agents"}
       {#if agents.length}
@@ -320,17 +308,20 @@
       {#if spec === null}<p class="muted">Loading…</p>{:else}<SpecView text={spec} />{/if}
     {:else if tab === "audit"}
       {#if audit}<AuditTable entries={audit} />{:else}<p class="muted">Loading…</p>{/if}
-    {:else if tab === "members"}
-      {#if members}<MembersTable {project} data={members} invites={invites} reload={loadMembers} />{:else}<p class="muted">Loading…</p>{/if}
+    {:else if tab === "advanced"}
       {#if project.canUnlink}
         <section class="panel" aria-labelledby="unlink">
-          <header><h2 class="h-section" id="unlink">Unlink</h2></header>
+          <header><h2 class="h-section" id="unlink">Unlink this project</h2></header>
           <div class="pad" style="display:grid;gap:var(--space-3)">
-            <p class="muted" style="margin:0">The hub forgets the project: everyone loses their role, and its terminals end. The project keeps running on {project.host || "its machine"}, until somebody runs <code>egzo project down</code> there.</p>
+            <p class="muted" style="margin:0">Removes the project from this hub: nobody can reach it from here any more, and its open terminals close. The project itself keeps running on {project.host || "its machine"}; to stop it, run <code>egzo project down</code> there.</p>
             <div class="btn-group"><button class="btn" data-variant="danger" onclick={unlink}>Unlink {project.name}</button></div>
           </div>
         </section>
+      {:else}
+        <p class="muted">Nothing here is yours to change.</p>
       {/if}
+    {:else if tab === "members"}
+      {#if members}<MembersTable {project} data={members} invites={invites} reload={loadMembers} />{:else}<p class="muted">Loading…</p>{/if}
     {/if}
   </div>
 

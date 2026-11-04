@@ -7,7 +7,7 @@
   import { poll } from "../lib/live";
   import { href, navigate, type AgentTab } from "../lib/router.svelte";
   import type { AgentAnswer, Task } from "../lib/types";
-  import { openTerm, termId, workspace } from "../lib/workspace.svelte";
+  import { openTerm, roomMade, termId, workspace } from "../lib/workspace.svelte";
   import Icon from "../components/Icon.svelte";
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
@@ -15,6 +15,8 @@
   import ErrorPage from "./ErrorPage.svelte";
 
   let { project, agent, tab }: { project: string; agent: string; tab: AgentTab } = $props();
+  // the agent's first section is its activity: the address without a section shows it
+  const shown = $derived(tab === "overview" ? "activity" : tab);
 
   let data = $state<AgentAnswer | null>(null);
   let failure = $state<unknown>(null);
@@ -41,7 +43,7 @@
   // an operator with no role on the project sees the agent and its state, and no further
   const overseeing = $derived(data?.project.role === "overseer");
   $effect(() => {
-    if (tab !== "activity") return;
+    if (shown !== "activity") return;
     return poll(async () => {
       activity = await api.tasks(project, agent);
     }, 5000);
@@ -69,7 +71,7 @@
   }
 
   function attach() {
-    if (!openTerm(project, agent)) toast("Too many terminals are open. Close one first.", "error");
+    roomMade(openTerm(project, agent));
   }
 </script>
 
@@ -77,7 +79,7 @@
   <ErrorPage error={failure} />
 {:else if data && a}
   <div class="page">
-    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(project)}>{data.project.name}</a> /</nav>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(project)}>{data.project.name}</a> / <a href={href.project(project)}>Agents</a> /</nav>
     <div class="phead">
       <h1 class="h-page">{a.name}</h1>
       {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />{/if}
@@ -96,6 +98,13 @@
       </span>
     </div>
 
+    <div class="metaline" data-testid="details">
+      <span><span class="k">template</span> <a href={href.project(project, "templates")}>{a.template}</a></span>
+      <span><span class="k">spawned by</span> {a.creator}</span>
+      <span title={stamp(a.createdAt)}><span class="k">created</span> {ago(a.createdAt)}</span>
+      {#if a.holder}<span class="presence" data-live data-testid="presence"><span class="k">terminal held by</span> <span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{/if}
+    </div>
+
     {#if a.task && busy}
       <div class="statusline"><span data-testid="task-step">{a.task.step || "…"}</span> <span class="muted">· {a.task.creator}, started {ago(a.task.startedAt)}</span></div>
     {:else if a.task}
@@ -110,53 +119,20 @@
       <div class="banner" data-tone="info" role="status"><span class="tag">? Waiting for an answer</span><div class="body">The agent asked a question and nobody has answered it. Answer it in the terminal, or from a messaging client.</div></div>
     {/if}
 
-    <section class="termcard" aria-label="Terminal">
-      <div class="grow">
-        <b>Terminal</b><br />
-        {#if offline}
-          <span class="muted">The project is offline: its link is not connected. The agent's session goes on without the hub.</span>
-        {:else if !made}
-          <span class="muted">{busy ? "The agent is being made. Its terminal opens here when it is ready." : "The agent was not made."}</span>
-        {:else if a.canOperate && a.running}
-          <span class="muted">One person holds the terminal at a time; opening it while somebody else does offers to take it over. Detach with <span class="kbd">Ctrl</span> <span class="kbd">]</span> then <span class="kbd">d</span>.</span>
-        {:else if a.canOperate}
-          <span class="muted">The agent is {a.state}. Start it to open its terminal.</span>
-        {:else}
-          <span class="muted">Only the people who may operate this agent can open its terminal.</span>
-        {/if}
-      </div>
-      {#if a.holder}
-        <span class="presence" data-live data-testid="presence"><span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>
-      {/if}
-    </section>
+
+    {#if a.previews?.length}<Previews agent={a.name} previews={a.previews} />{/if}
 
     {#if overseeing}
       <p class="muted" data-testid="overseeing">Its activity, logs and network take a role on the project: give yourself one on its <a href={href.project(project, "members")}>Members</a> tab.</p>
     {:else}
     <div class="tabs" role="tablist">
-      <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={tab === "overview"}>Overview</a>
-      <a class="tab" role="tab" href={href.agent(project, agent, "activity")} aria-selected={tab === "activity"}>Activity</a>
+      <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={shown === "activity"}>Activity</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
     </div>
     {/if}
 
-    {#if tab === "overview" && !overseeing}
-      <div class="twocol">
-        <Previews agent={a.name} previews={a.previews} />
-        <section class="panel">
-          <header><h2 class="h-section">Details</h2></header>
-          <div class="pad">
-            <dl class="kv">
-              <dt>template</dt><dd>{a.template}</dd>
-              <dt>spawned by</dt><dd>{a.creator}</dd>
-              <dt>created</dt><dd title={stamp(a.createdAt)}>{ago(a.createdAt)}</dd>
-              <dt>state</dt><dd>{a.state || "—"}</dd>
-            </dl>
-          </div>
-        </section>
-      </div>
-    {:else if tab === "activity" && !overseeing}
+    {#if shown === "activity" && !overseeing}
       {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network" && !overseeing}
       <NetworkView {project} {agent} />
