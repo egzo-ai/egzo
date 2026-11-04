@@ -6,20 +6,18 @@
   import { activityKind, activityLabel, ago, initials, stamp, taskDoing, taskFailedLabel } from "../lib/format";
   import { poll } from "../lib/live";
   import { href, navigate, type AgentTab } from "../lib/router.svelte";
-  import type { AgentAnswer, Task, TimelineEvent } from "../lib/types";
+  import type { AgentAnswer, Task } from "../lib/types";
   import { openTerm, termId, workspace } from "../lib/workspace.svelte";
   import Icon from "../components/Icon.svelte";
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import TaskTable from "../components/TaskTable.svelte";
-  import Timeline from "../components/Timeline.svelte";
   import ErrorPage from "./ErrorPage.svelte";
 
   let { project, agent, tab }: { project: string; agent: string; tab: AgentTab } = $props();
 
   let data = $state<AgentAnswer | null>(null);
   let failure = $state<unknown>(null);
-  let events = $state<TimelineEvent[] | null>(null);
   let logs = $state<string | null>(null);
   let activity = $state<Task[] | null>(null);
 
@@ -30,8 +28,7 @@
   const offline = $derived(!!data?.project.offlineSince);
   const isOpen = $derived(workspace.terms.some((t) => t.id === termId(project, agent)));
 
-  // The agent itself comes from what the hub already holds, so it is read often. The timeline is read from the control sidecar, which
-  // runs a command in it, so it is read slowly and only when it is on the screen.
+  // The agent itself comes from what the hub already holds, so it is read often.
   $effect(() => poll(async () => {
     try {
       data = await api.agent(project, agent);
@@ -43,12 +40,6 @@
   }));
   // an operator with no role on the project sees the agent and its state, and no further
   const overseeing = $derived(data?.project.role === "overseer");
-  $effect(() => {
-    if (tab !== "overview" || offline || overseeing || !data) return;
-    return poll(async () => {
-      events = await api.events(project, agent, 40);
-    }, 15000);
-  });
   $effect(() => {
     if (tab !== "activity") return;
     return poll(async () => {
@@ -140,10 +131,10 @@
     </section>
 
     {#if overseeing}
-      <p class="muted" data-testid="overseeing">Its timeline, logs and network take a role on the project: give yourself one on its <a href={href.project(project, "members")}>Members</a> tab.</p>
+      <p class="muted" data-testid="overseeing">Its activity, logs and network take a role on the project: give yourself one on its <a href={href.project(project, "members")}>Members</a> tab.</p>
     {:else}
     <div class="tabs" role="tablist">
-      <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={tab === "overview"}>Timeline</a>
+      <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={tab === "overview"}>Overview</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "activity")} aria-selected={tab === "activity"}>Activity</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
@@ -152,7 +143,6 @@
 
     {#if tab === "overview" && !overseeing}
       <div class="twocol">
-        {#if offline && !events}<p class="muted" data-testid="timeline-offline">The timeline is read from the project, and it is offline.</p>{:else}<Timeline {events} />{/if}
         <Previews agent={a.name} previews={a.previews} />
         <section class="panel">
           <header><h2 class="h-section">Details</h2></header>

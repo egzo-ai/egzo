@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, TimelineEvent, UserRow,
+  AgentAnswer, AuditEntry, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, UserRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -85,8 +85,6 @@ export const api = {
   inviteSSO: (code: string) => request<{ url: string }>("POST", "/invites/sso", { code }),
 
   project: (id: string) => request<Project>("GET", project(id)),
-  events: (id: string, agentName = "", limit = 40) =>
-    request<{ events: TimelineEvent[] }>("GET", `${project(id)}/events?limit=${limit}${agentName ? "&agent=" + enc(agentName) : ""}`).then((r) => r.events),
   /** Answered at once: the hub runs the spawn as a task, and the agent is in the project from then on. */
   spawn: (id: string, template: string, agentName: string) =>
     request<{ task: Task }>("POST", `${project(id)}/spawn`, { template, name: agentName }).then((r) => r.task),

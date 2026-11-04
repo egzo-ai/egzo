@@ -173,14 +173,6 @@ export interface AgentAnswer {
   agent: Agent;
 }
 
-export interface TimelineEvent {
-  time: string;
-  type: string;
-  agent: string;
-  actor: string;
-  text: string;
-}
-
 export interface Member {
   user: User;
   role: Role;

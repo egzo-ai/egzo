@@ -164,7 +164,6 @@ func (w *world) seed(machine string) error {
 	e.SetAgent(links.Agent{Name: "coder-1", ID: newInstanceID(), Template: "coder", State: "running", Activity: "working", Actor: "operator",
 		Status: "refactoring the parser on " + machine, Created: now})
 	e.SetAgent(links.Agent{Name: "reviewer-1", Template: "reviewer", State: "exited", Activity: "stopped", Actor: "operator", Created: now})
-	e.AddEvent(links.Event{Seq: 1, Time: now, Type: "status", Agent: "coder-1", Actor: "agent:coder-1", Text: "refactoring the parser on " + machine})
 	other, template := "data", "analyst"
 	if machine != "local" {
 		other, template = "ml", "trainer"

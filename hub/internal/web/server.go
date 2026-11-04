@@ -128,7 +128,6 @@ func (s *Server) Handler() http.Handler {
 
 	const project = apiPrefix + "/p/{project}"
 	api("GET "+project, s.project)
-	api("GET "+project+"/events", s.events)
 	api("POST "+project+"/spawn", s.spawn)
 	api("GET "+project+"/tasks", s.tasks)
 	api("GET "+project+"/tasks/{id}", s.task)

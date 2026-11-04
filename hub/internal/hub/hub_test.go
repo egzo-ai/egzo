@@ -226,7 +226,6 @@ func TestAnOperatorGoesNoFurtherThanTheStateWithoutARole(t *testing.T) {
 	}
 	refused := map[string]func() error{
 		"logs":    func() error { _, err := r.hub.Logs(ctx, other, id, "coder-1", 10); return err },
-		"events":  func() error { _, err := r.hub.Events(ctx, other, id, "", 10); return err },
 		"spec":    func() error { _, err := r.hub.Spec(ctx, other, id); return err },
 		"tasks":   func() error { _, err := r.hub.Tasks(ctx, other, id, "", 10); return err },
 		"network": func() error { _, err := r.hub.Network(ctx, other, id, ""); return err },
@@ -833,20 +832,13 @@ func TestAdministratorsReadTheAuditLogAndUsersDoNot(t *testing.T) {
 	}
 }
 
-func TestEventsLogsAndSpecNeedARole(t *testing.T) {
+func TestLogsAndSpecNeedARole(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")
 	r.fakes["web"].SetAgent(agent("coder-1", "operator"))
-	r.fakes["web"].AddEvent(links.Event{Seq: 1, Type: "status", Agent: "coder-1", Text: "parsing"})
 	op := r.operator()
 	alice := r.login("alice")
-	if _, err := r.hub.Events(ctx, alice, r.id("web"), "", 10); !errors.Is(err, ErrNotFound) {
-		t.Errorf("events without a role: %v", err)
-	}
 	r.store.SetRole(ctx, r.id("web"), alice.ID, rbac.User)
-	if events, err := r.hub.Events(ctx, alice, r.id("web"), "", 10); err != nil || len(events) != 1 {
-		t.Errorf("events = %+v %v", events, err)
-	}
 	if _, err := r.hub.Spec(ctx, alice, r.id("web")); err != nil {
 		t.Errorf("spec: %v", err)
 	}

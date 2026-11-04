@@ -418,9 +418,6 @@ func TestAProjectOfflineIsShownOfflineSinceWithWhatWasLastKnownAndAsksNothing(t 
 	if _, err := r.hub.Attach(ctx, op, id, "coder-1", false); !errors.As(err, &offline) {
 		t.Errorf("attach offline: %v", err)
 	}
-	if _, err := r.hub.Events(ctx, op, id, "", 5); !errors.As(err, &offline) {
-		t.Errorf("events offline: %v", err)
-	}
 	if _, err := r.hub.Spec(ctx, op, id); !errors.As(err, &offline) {
 		t.Errorf("spec offline: %v", err)
 	}
