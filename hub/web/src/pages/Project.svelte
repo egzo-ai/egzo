@@ -81,7 +81,7 @@
     if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canMembers) list.push(["members", "Members", null]);
-    if (project?.canUnlink) list.push(["advanced", "Advanced", null]);
+    list.push(["advanced", "Advanced", null]);
     return list;
   });
 
@@ -309,6 +309,34 @@
     {:else if tab === "audit"}
       {#if audit}<AuditTable entries={audit} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "advanced"}
+      <section class="panel" aria-labelledby="health" data-testid="health">
+        <header><h2 class="h-section" id="health">Health</h2></header>
+        <div class="table-wrap" style="border:0;border-radius:0">
+          <table class="table">
+            <thead><tr><th>Part</th><th>State</th><th>Details</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Link to this hub</td>
+                <td>{#if project.offlineSince}<Pill kind="unreachable" label="offline" />{:else}<Pill kind="running" label="connected" />{/if}</td>
+                <td class="muted wrap">{#if project.offlineSince}Not connected since {ago(project.offlineSince)} ({stamp(project.offlineSince)}). What the hub shows of the project may be out of date.{:else}The project is connected to the hub.{/if}</td>
+              </tr>
+              <tr>
+                <td>Agent status</td>
+                <td>{#if project.feed.state === "live"}<Pill kind="running" label="up to date" />{:else if project.feed.state === "connecting"}<Pill kind="starting" label="connecting" />{:else}<Pill kind="warn" label="unavailable" />{/if}</td>
+                <td class="muted wrap">{#if project.feed.state === "live"}The hub knows what each agent is doing.{:else}{project.feed.message || "The hub can't see what the agents are doing right now."}{/if}</td>
+              </tr>
+              {#each project.services as svc (svc.name)}
+                <tr data-testid="service" data-service={svc.name}>
+                  <td>{svc.name} <span class="muted">{({ control: "· agent status and messages", proxy: "· what the agents may reach" } as Record<string, string>)[svc.name] ?? "· service"}</span></td>
+                  <td><Pill kind={svc.state === "running" ? "running" : "stopped"} label={svc.state} /></td>
+                  <td class="muted wrap">{svc.health ? `health check: ${svc.health}` : "–"}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        {#if !project.up && !project.offlineSince}<p class="muted" style="margin:var(--space-2) var(--space-3)">A part is down: run <code>egzo project up</code> on {project.host || "the project's machine"} to start it again.</p>{/if}
+      </section>
       {#if project.canUnlink}
         <section class="panel" aria-labelledby="unlink">
           <header><h2 class="h-section" id="unlink">Unlink this project</h2></header>
@@ -317,8 +345,6 @@
             <div class="btn-group"><button class="btn" data-variant="danger" onclick={unlink}>Unlink {project.name}</button></div>
           </div>
         </section>
-      {:else}
-        <p class="muted">Nothing here is yours to change.</p>
       {/if}
     {:else if tab === "members"}
       {#if members}<MembersTable {project} data={members} invites={invites} reload={loadMembers} />{:else}<p class="muted">Loading…</p>{/if}
