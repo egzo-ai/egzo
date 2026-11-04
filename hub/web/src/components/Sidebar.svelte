@@ -74,7 +74,7 @@
         ...(p.role === "overseer" ? [] : [["activity", "Activity", null], ["network", "Network", null], ["spec", "Spec", null]]),
         ...(admin ? [["audit", "Audit log", null]] : []),
         ...(p.role === "owner" || app.user?.isOperator ? [["members", "Members", null]] : []),
-        ...(p.role === "owner" || app.user?.isOperator ? [["advanced", "Advanced", null]] : []),
+        ["advanced", "Advanced", null],
       ] as [import("../lib/router.svelte").ProjectTab, string, number | null][],
     };
   });
