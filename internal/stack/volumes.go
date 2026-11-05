@@ -137,14 +137,17 @@ func DirectoryWorkspacesOf(project *config.Resolved, agent config.ResolvedAgent)
 	return names
 }
 
-// containersUsing lists the containers, running or not, that mount a volume.
-func containersUsing(ctx context.Context, c *engine.Client, name string) ([]string, error) {
+// containersUsing lists the containers, running or not, that mount a volume, but for the file helpers of project.
+func containersUsing(ctx context.Context, c *engine.Client, project, name string) ([]string, error) {
 	listed, err := c.API.ContainerList(ctx, container.ListOptions{All: true, Filters: filters.NewArgs(filters.Arg("volume", name))})
 	if err != nil {
 		return nil, fmt.Errorf("list the containers that use %s: %w", name, err)
 	}
 	var names []string
 	for _, item := range listed {
+		if isFileHelper(item.Labels, project) {
+			continue // the hub's file helpers only read, and go with the volume
+		}
 		if len(item.Names) > 0 {
 			names = append(names, strings.TrimPrefix(item.Names[0], "/"))
 		}

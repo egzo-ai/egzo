@@ -6,6 +6,7 @@ package stack
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -258,5 +259,44 @@ func TestAHelperMadeAndNeverStartedIsReplaced(t *testing.T) {
 	}
 	if len(fake.removed) != 1 {
 		t.Errorf("removed %v", fake.removed)
+	}
+}
+
+func workspaceVolumes(volumes ...Resource) Observed {
+	for i := range volumes {
+		volumes[i].Type, volumes[i].Kind, volumes[i].ID = "volume", kindWorkspace, volumes[i].Name
+	}
+	return Observed{Resources: volumes}
+}
+
+func helperLabels(project string) map[string]string {
+	return engine.Identity{Project: project, Service: kindFiles, Kind: kindFiles}.Labels()
+}
+
+func TestARefusedWorkspaceRmLeavesTheFileHelpersAlone(t *testing.T) {
+	c, fake := newHelperEngine(t)
+	base, worktree := BaseVolume("p", "repo"), WorktreeVolume("p", "repo", "x")
+	fake.addVolume("p", FilesTarget{Workspace: "repo", Instance: "x"})
+	fake.addContainer(fileHelperName(worktree), "running", time.Now(), helperLabels("p"), worktree)
+	observed := workspaceVolumes(Resource{Name: base, Workspace: "repo"}, Resource{Name: worktree, Workspace: "repo", Instance: "x"})
+	err := RemoveWorkspaces(context.Background(), c, observed, "p", []string{"repo"}, false, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--worktree x") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fake.removed) != 0 {
+		t.Errorf("removed %v though nothing was deleted", fake.removed)
+	}
+}
+
+func TestWorkspaceRmTakesTheFileHelpersWithTheVolume(t *testing.T) {
+	c, fake := newHelperEngine(t)
+	volume := fake.addVolume("p", FilesTarget{Workspace: "docs"})
+	fake.addContainer(fileHelperName(volume), "running", time.Now(), helperLabels("p"), volume)
+	err := RemoveWorkspaces(context.Background(), c, workspaceVolumes(Resource{Name: volume, Workspace: "docs"}), "p", []string{"docs"}, false, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, left := fake.volumes[volume]; left || len(fake.removed) != 1 {
+		t.Errorf("volume left %v, removed %v", left, fake.removed)
 	}
 }

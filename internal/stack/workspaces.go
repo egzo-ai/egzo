@@ -84,20 +84,10 @@ func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, 
 			return fmt.Errorf("workspace %q has no volume in this project (workspaces with volumes: %s)", name, strings.Join(order, ", "))
 		}
 	}
-	// the file helpers of the hub are no reason to refuse: they only read, and go first
-	var volumes []string
-	for _, name := range names {
-		for _, volume := range owned[name] {
-			volumes = append(volumes, volume.Name)
-		}
-	}
-	if err := RemoveFileHelpers(ctx, c, project, volumes); err != nil {
-		return err
-	}
 	// refuse first, so nothing is removed unless everything may be
 	for _, name := range names {
 		for _, volume := range owned[name] {
-			users, err := containersUsing(ctx, c, volume.Name)
+			users, err := containersUsing(ctx, c, project, volume.Name)
 			if err != nil {
 				return err
 			}
@@ -109,6 +99,16 @@ func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, 
 					"`egzo workspace rm %s --worktree %s` removes it", name, volume.Name, volume.Instance, name, volume.Instance)
 			}
 		}
+	}
+	// the file helpers of the hub are no reason to refuse: they only read, and go first
+	var volumes []string
+	for _, name := range names {
+		for _, volume := range owned[name] {
+			volumes = append(volumes, volume.Name)
+		}
+	}
+	if err := RemoveFileHelpers(ctx, c, project, volumes); err != nil {
+		return err
 	}
 	for _, name := range names {
 		for _, volume := range owned[name] {
