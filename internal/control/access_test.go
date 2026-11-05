@@ -29,6 +29,11 @@ func (r *rig) fromEgzo(agent string) []Message {
 	return r.srv.events.messagesOf("agent:"+agent, func(m Message) bool { return m.From == egzoSender })
 }
 
+// everFromEgzo is every notice egzo sent the agent, the closed ones too.
+func (r *rig) everFromEgzo(agent string) []Message {
+	return r.srv.events.selectMessages(func(m Message) bool { return m.To == "agent:"+agent && m.From == egzoSender })
+}
+
 func team(allow ...string) access.Access {
 	return access.Access{Profile: "team", Allow: allow, OtherHosts: access.OtherHosts, Services: []access.Service{}, SSH: []string{}}
 }
@@ -108,5 +113,32 @@ func TestTheAccessToolAnswersWhatTheAgentAPIDoes(t *testing.T) {
 	var got access.Access
 	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &got); err != nil || !access.Equal(got, team("example.com")) {
 		t.Errorf("access = %v (%v)", got, err)
+	}
+}
+
+func TestANewNoticeReplacesTheOneTheAgentHasNotResolved(t *testing.T) {
+	r := newRig(t)
+	r.putAccess(map[string]access.Access{"coder": team("example.com")})
+	r.putAccess(map[string]access.Access{"coder": team("example.com", "pypi.org")})
+	r.putAccess(map[string]access.Access{"coder": team("example.com", "pypi.org", "npmjs.org")})
+	told := r.everFromEgzo("coder")
+	if len(told) != 2 || told[0].State != stateResolved || told[0].Outcome != outcomeSuperseded {
+		t.Fatalf("the first notice is closed by the second: %+v", told)
+	}
+	if told[1].State == stateResolved || !strings.Contains(told[1].Text, "pypi.org") || !strings.Contains(told[1].Text, "npmjs.org") {
+		t.Errorf("the open notice says all that changed since the access the agent knew: %+v", told[1])
+	}
+
+	r.putAccess(map[string]access.Access{"coder": team("example.com")})
+	told = r.everFromEgzo("coder")
+	if len(told) != 2 || told[1].State != stateResolved {
+		t.Errorf("back to the access the agent knew: the open notice is closed and nothing is sent: %+v", told)
+	}
+
+	// once the agent is caught up, the next change is told against the access it has now
+	r.putAccess(map[string]access.Access{"coder": team("example.com", "go.dev")})
+	told = r.everFromEgzo("coder")
+	if len(told) != 3 || strings.Contains(told[2].Text, "pypi.org") || !strings.Contains(told[2].Text, "go.dev") {
+		t.Errorf("a new notice after the agent is caught up: %+v", told)
 	}
 }

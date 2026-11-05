@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -69,7 +70,7 @@ func setupSSH(home, token, publishedConfig string) error {
 const sshFollowInterval = 10 * time.Second
 
 // sshFollower keeps the agent's ssh config in step with the servers the proxy publishes again whenever `up` loads a policy.
-// A look is one stat of a file of the shared volume (the proxy replaces it whole, so a change moves its time or size):
+// A look is one stat of a file of the shared volume (the proxy replaces it whole, so a change gives it another inode, and moves its time or size):
 // file-change notifications do not cross containers under gVisor or a VM-backed engine. It looks every so often, and once
 // more right before a line is typed into the agent's terminal, so an agent told its access changed finds its new servers.
 type sshFollower struct {
@@ -88,7 +89,11 @@ func (f *sshFollower) Check() {
 	defer f.mu.Unlock()
 	seen := "gone"
 	if info, err := os.Stat(f.published); err == nil {
-		seen = fmt.Sprintf("%d %d", info.ModTime().UnixNano(), info.Size())
+		var inode uint64
+		if st, ok := info.Sys().(*syscall.Stat_t); ok {
+			inode = st.Ino // a file replaced within the volume's time resolution, by one of the same size, is still another file
+		}
+		seen = fmt.Sprintf("%d %d %d", inode, info.ModTime().UnixNano(), info.Size())
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return
 	}
