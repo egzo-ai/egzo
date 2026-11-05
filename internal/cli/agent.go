@@ -91,7 +91,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 	forward.Flags().BoolVar(&closeOnEOF, "close-on-eof", false, "end at the end of stdin")
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
-		newAttachCommand(opts), run, browserCommand, forward, newSSHSetupCommand())
+		newAttachCommand(opts), run, browserCommand, forward, newSSHSetupCommand(), newAgentAccessCommand())
 	return group(cmd)
 }
 
@@ -143,7 +143,8 @@ func runAgent(args []string) error {
 	}
 	// The proxy publishes the servers again whenever `up` loads a policy: follow it, so that a server added to the profile
 	// is reached without restarting the agent, and a removed one leaves its config.
-	go followSSH(home, os.Getenv("EGZO_TOKEN"), filepath.Join(proxy.AgentCADir, "ssh_config"), sshFollowInterval, nil)
+	ssh := &sshFollower{home: home, token: os.Getenv("EGZO_TOKEN"), published: filepath.Join(proxy.AgentCADir, "ssh_config")}
+	go ssh.Follow(sshFollowInterval, nil)
 
 	if hasIntegration {
 		options := harness.Options{
@@ -223,6 +224,7 @@ func runAgent(args []string) error {
 			InterruptKey: interrupt,
 			RequireRaw:   hasIntegration, // a known TUI: it is ready when it has taken the terminal over
 			ReadyMarkers: readyMarkers,
+			BeforeInject: ssh.Check,
 		})
 	}
 

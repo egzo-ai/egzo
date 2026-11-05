@@ -301,11 +301,13 @@ func conflict(format string, a ...any) *apiError {
 	return &apiError{http.StatusConflict, fmt.Sprintf(format, a...)}
 }
 
-// parseAddress accepts operator, user:<id> and agent:<name>.
+// parseAddress accepts operator, user:<id> and agent:<name>, and egzo (egzoSender), which only sends.
 func parseAddress(address string) (kind, name string, ok bool) {
 	switch {
 	case address == "operator":
 		return "operator", "", true
+	case address == egzoSender:
+		return egzoSender, "", true
 	case strings.HasPrefix(address, "user:") && names.Actor(address, "user"):
 		return "user", strings.TrimPrefix(address, "user:"), true
 	case strings.HasPrefix(address, "agent:") && names.Instance(strings.TrimPrefix(address, "agent:")):
@@ -316,7 +318,7 @@ func parseAddress(address string) (kind, name string, ok bool) {
 
 func isHuman(address string) bool {
 	kind, _, ok := parseAddress(address)
-	return ok && kind != "agent"
+	return ok && kind != "agent" && kind != egzoSender
 }
 
 func agentOf(address string) string {
@@ -383,7 +385,7 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 		return Message{}, Event{}, badRequest("text must not be empty or longer than 16 KB")
 	}
 	kind, name, ok := parseAddress(req.To)
-	if !ok {
+	if !ok || kind == egzoSender {
 		return Message{}, Event{}, badRequest("%q is not an address: use operator, user:<id> or agent:<name>", req.To)
 	}
 	if kind == "agent" {
@@ -414,8 +416,10 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 	if len(open) >= maxOpenPerRecipient {
 		return Message{}, Event{}, conflict("%s already has %d open requests: wait for it to resolve some", req.To, maxOpenPerRecipient)
 	}
-	if err := s.rateLimit(req.From, time.Now()); err != nil {
-		return Message{}, Event{}, err
+	if req.From != egzoSender { // egzo writes one message per `up` that changed the agent's access
+		if err := s.rateLimit(req.From, time.Now()); err != nil {
+			return Message{}, Event{}, err
+		}
 	}
 	return s.write(req, hops)
 }

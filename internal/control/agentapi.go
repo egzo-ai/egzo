@@ -41,6 +41,7 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages/{id}/update", a.authenticated(a.update))
 	mux.HandleFunc("POST /v1/messages/{id}/ask", a.authenticated(a.ask))
 	mux.HandleFunc("GET /v1/agents", a.authenticated(a.agents))
+	mux.HandleFunc("GET /v1/access", a.authenticated(a.access))
 	mux.HandleFunc("POST /v1/state", a.authenticatedLimit(maxStatePayload, a.state))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
@@ -225,6 +226,15 @@ func (a *agentAPI) ask(w http.ResponseWriter, r *http.Request, agent string) {
 
 func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) {
 	reply(w, http.StatusOK, a.server.othersOf(agent))
+}
+
+func (a *agentAPI) access(w http.ResponseWriter, r *http.Request, agent string) {
+	known, ok := a.server.readAccess(agent)
+	if !ok {
+		fail(w, errNoAccess)
+		return
+	}
+	reply(w, http.StatusOK, known)
 }
 
 func (a *agentAPI) boot(w http.ResponseWriter, r *http.Request, agent string) {

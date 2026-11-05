@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -67,17 +68,41 @@ func setupSSH(home, token, publishedConfig string) error {
 // sshFollowInterval is how often a running agent looks at the servers the proxy publishes. `up` takes longer than that.
 const sshFollowInterval = 10 * time.Second
 
-// followSSH rewrites the agent's ssh config each time the proxy publishes its servers again, for as long as the agent runs.
-// Each look is one stat of a file of the shared volume (the proxy replaces it whole, so a change moves its time or size):
-// file-change notifications do not cross containers under gVisor or a VM-backed engine. Errors are said once per change, as
-// setupSSH's at the start are: ssh that cannot follow is not worth stopping the agent for. It returns when done closes; nil
-// runs it for the life of the process.
-func followSSH(home, token, publishedConfig string, every time.Duration, done <-chan struct{}) {
-	if token == "" {
+// sshFollower keeps the agent's ssh config in step with the servers the proxy publishes again whenever `up` loads a policy.
+// A look is one stat of a file of the shared volume (the proxy replaces it whole, so a change moves its time or size):
+// file-change notifications do not cross containers under gVisor or a VM-backed engine. It looks every so often, and once
+// more right before a line is typed into the agent's terminal, so an agent told its access changed finds its new servers.
+type sshFollower struct {
+	home, token, published string
+	mu                     sync.Mutex
+	last                   string // what the last look saw; nothing yet, so the first look writes the config once more
+}
+
+// Check rewrites the config when the published servers changed since the last look. Errors are said once per change, as
+// setupSSH's at the start are: ssh that cannot follow is not worth stopping the agent for.
+func (f *sshFollower) Check() {
+	if f.token == "" {
 		return
 	}
-	// nothing seen yet: the first look writes the config once more, so a change made since the agent started is not missed
-	var last string
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seen := "gone"
+	if info, err := os.Stat(f.published); err == nil {
+		seen = fmt.Sprintf("%d %d", info.ModTime().UnixNano(), info.Size())
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if seen == f.last {
+		return
+	}
+	f.last = seen
+	if err := setupSSH(f.home, f.token, f.published); err != nil {
+		fmt.Fprintf(os.Stderr, "egzo: could not update ssh: %v\n", err)
+	}
+}
+
+// Follow looks every so often until done closes; nil follows for the life of the process.
+func (f *sshFollower) Follow(every time.Duration, done <-chan struct{}) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -85,19 +110,7 @@ func followSSH(home, token, publishedConfig string, every time.Duration, done <-
 		case <-done:
 			return
 		case <-ticker.C:
-		}
-		seen := "gone"
-		if info, err := os.Stat(publishedConfig); err == nil {
-			seen = fmt.Sprintf("%d %d", info.ModTime().UnixNano(), info.Size())
-		} else if !errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if seen == last {
-			continue
-		}
-		last = seen
-		if err := setupSSH(home, token, publishedConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "egzo: could not update ssh: %v\n", err)
+			f.Check()
 		}
 	}
 }

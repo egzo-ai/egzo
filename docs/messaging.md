@@ -37,8 +37,13 @@ Agents get an `egzo` MCP server with these tools:
 | `message` | send a new request to the operator, a person or another agent |
 | `status` | one line on what it is doing, shown by `egzo ps` |
 | `agents` | the other agents, with their activity |
+| `access` | what it may reach: its egress profile, the hosts it allows, each service and how to use its credential, the ssh servers (`egzo agent access` says the same) |
 | `expose` | open one of its declared ports for the hub or for the local machine, and get the address |
 | `unexpose` | close it |
+
+When `egzo project up` changes what a running agent may reach (a host allowed or taken away, a service, an ssh server), the
+agent gets a request from `egzo` that says what changed, and `access` answers the new state at once. An agent whose access did
+not change gets nothing; a new agent gets its access without a message. Nobody can send a message to `egzo`.
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: this is the only path between them.

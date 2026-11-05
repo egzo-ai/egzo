@@ -6,6 +6,7 @@ package control
 import (
 	"context"
 	"errors"
+	"github.com/egzo-ai/egzo/internal/access"
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -210,6 +211,23 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 			return nil, agentsResult{}, err
 		}
 		return nil, agentsResult{Agents: a.server.othersOf(agent)}, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "access",
+		Description: "What you may reach: your egress profile, the hosts it allows, each service with how to use its credential (the proxy " +
+			"holds the real ones: you never need a token), and the ssh servers. Every other host is refused. Call it again when egzo " +
+			"says your access changed.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, access.Access, error) {
+		agent, err := callerOf(req)
+		if err != nil {
+			return nil, access.Access{}, err
+		}
+		known, ok := a.server.readAccess(agent)
+		if !ok {
+			return nil, access.Access{}, errNoAccess
+		}
+		return nil, known, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

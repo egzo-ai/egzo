@@ -50,6 +50,9 @@ type Delivery struct {
 	// means it is not working. It defaults to three minutes. Only "working" is released: an agent that
 	// is blocked on a dialog stays blocked.
 	StuckAfter time.Duration
+	// BeforeInject runs right before a line is typed, so what the line may send the agent to look at is in place
+	// (the ssh servers of an access that changed). Nil does nothing.
+	BeforeInject func()
 }
 
 type claimed struct {
@@ -191,6 +194,9 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		}
 		if work.Line == "" {
 			continue
+		}
+		if cfg.BeforeInject != nil {
+			cfg.BeforeInject()
 		}
 		// The line is fixed words and ids from the control sidecar, never message text; Sanitize keeps it
 		// that way even if the sidecar were wrong.
