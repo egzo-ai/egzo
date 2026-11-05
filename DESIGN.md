@@ -373,8 +373,8 @@ said in the message. Anything else per instance belongs in another template.
   `ai.egzo.actor=<who>` (`operator` from the CLI; `user:<id>` or a service from another tool) and
   `ai.egzo.template-hash=<hash>` on the instance's container, network and home volume. `ai.egzo.instance-id=<ULID>` on its
   container and network only: spawn makes it and it is never reused, so history (the proxy's audit trail, the hub) tells two
-  instances of one name apart. A volume can be taken up by the next instance of the name and does not carry it
-  ([roadmap/instance-id.md](roadmap/instance-id.md)). `ps --json`, `agent ls --json` and `agent spawn --json` show it as `id`.
+  instances of one name apart. A volume can be taken up by the next instance of the name and does not carry it.
+  `ps --json`, `agent ls --json` and `agent spawn --json` show it as `id`.
 - **Workspaces belong to the project; worktrees to the instance.** A worktree is a volume named after the
   instance; the base clone and every directory workspace are volumes shared by every instance that lists them.
 
@@ -570,7 +570,7 @@ egress:
   (openai, google-ai, package registries). An object with a built-in's name replaces it.
   `egzo project check --resolved` prints each profile fully resolved.
 - **ssh servers** (`ssh:` in a profile, a map by name) are the ssh analogue of `inject`: the agent runs `ssh <name>`, the proxy
-  holds the key and re-originates the connection (see `roadmap/ssh-access.md`). A server has `host` (one exact name or address, no
+  holds the key and re-originates the connection. A server has `host` (one exact name or address, no
   wildcard, no port), `port` (default 22), `user` (fixed here: the agent never picks the remote account), `key` (a
   `<vault>/<secret>` holding an unencrypted private key) and `host_key` (required: a `SHA256:` fingerprint or a public key line,
   and there is no value that means trust on first use). The name is a lowercase label (the agent's `Host` alias; not `root`).
@@ -640,7 +640,7 @@ egress:
   pre-warmed connections log as `aborted`, not `denied`; `platform.claude.com` allowed w/o injection.
 - Pinned-cert hosts cannot be injected (out of scope).
 
-## Browser (decided, `roadmap/browser-access.md`)
+## Browser
 - The stock `claude-code` and `opencode` images carry Chromium (installed at build time in `/opt/ms-playwright`), the
   pinned `@playwright/mcp`, and `libnss3-tools`. No flavor, no recipe: a browser is a basic tool.
 - `egzo agent browser` (in-container role) builds the Playwright MCP configuration from the agent's environment (the
@@ -940,7 +940,7 @@ Decisions taken while building (reversible; each is covered by specs):
 - **Sidecar image** (`Dockerfile`) is the static binary on Alpine with CA roots and git >= 2.48.
 - **Label kinds** in use: `control`, `proxy`, `agent`, `prep` (short-lived containers and the network of `up`'s
   base clones, which never outlive the command) and `files` (the hub's read-only view of a workspace volume, made by the
-  link on demand and gone after five idle minutes: roadmap/hub-files.md).
+  link on demand and gone after five idle minutes; see docs/hub.md, "Files").
 - **Logging.** egzo makes no choice about logging: every container it creates (agents, control, proxy, the short-lived prep
   containers) gets **the engine's default log driver and options**, because that default is the sysadmin's decision
   (journald is common). egzo sets no `LogConfig`; `egzo.yaml` has no logging key (a Compose-style one may come later).
@@ -950,7 +950,7 @@ Decisions taken while building (reversible; each is covered by specs):
   `journald` on Docker, `k8s-file` and `journald` on Podman, and Docker's remote drivers through its local cache.
   `egzo system check` classifies the default by name and, when the egzo image is on the engine, tries it with a container
   that writes to both streams, reports `fail` for a driver that cannot be read back (`none`, Podman's `passthrough`), and
-  `warn` when it cannot tell (see `known-issues/container-logging-follows-the-engine-default.md`).
+  `warn` when it cannot tell (see docs/troubleshooting.md, "Container logs").
   **The control sidecar logs JSON, one object per line, on two streams.** Standard output carries only the agents'
   status: `{"type":"status","v":1,"time","project","reason","interval","agents":[{agent,status,activity,open,waiting,updated}]}`,
   written when something changes (`reason: "change"`, coalesced over 300 ms, and only when what a reader sees changed), when the sidecar

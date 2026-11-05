@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""What a hub reads of a project's files through the link (roadmap/hub-files.md): the `workspaces` verb lists the workspace volumes, and
+"""What a hub reads of a project's files through the link (docs/hub.md, "Files"): the `workspaces` verb lists the workspace volumes, and
 `files` is a stream to a file server that shows one of them, read only, from a helper container the link makes. The server speaks HTTP, GET
 only: a path that ends with a slash lists a directory as JSON, any other path sends a regular file's bytes.
 

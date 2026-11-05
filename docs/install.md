@@ -92,7 +92,7 @@ your choice (journald is common). Two things follow.
   status that a project's link follows. `json-file`, `local` and `journald` work on Docker, `k8s-file` and `journald` on Podman. The
   `none` driver, and Podman's `passthrough`, cannot be read, so `egzo system check` fails on them. Docker's remote drivers
   (`syslog`, `gelf`, `fluentd`, `awslogs`, ...) are read through Docker's local cache of them, which works unless it is
-  turned off. See `known-issues/container-logging-follows-the-engine-default.md`.
+  turned off. See [Troubleshooting](troubleshooting.md#container-logs).
 
 ## Building from source
 

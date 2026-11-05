@@ -1,6 +1,6 @@
 # Roadmap: agents without a terminal (LangGraph, SDK scripts)
 
-**Status.** Designed, not built. Needs [neutral-status-vocabulary.md](neutral-status-vocabulary.md) first, or at least its state
+**Status.** Designed, not built. Needs [neutral-status-vocabulary.md](../DESIGN.md) first, or at least its state
 endpoint.
 
 ## Why
@@ -81,7 +81,7 @@ Whether the shim lives in this repository (a `python/` directory, tested in CI) 
    (or through `egzo agent run`, which then only prepares the home and the CA and execs). `egzo agent attach` has nothing to
    attach to and says so; `egzo logs` is the way in. The hub's terminal for such an agent is read-only logs.
 3. `wait_for_message` in the MCP server and the agent API; the control's delivery loop skips the announcement for a `pull` agent.
-4. Status for a `pull` agent comes from the state endpoint of [neutral-status-vocabulary.md](neutral-status-vocabulary.md).
+4. Status for a `pull` agent comes from the state endpoint of [neutral-status-vocabulary.md](../DESIGN.md).
    Without reports, "blocked in `wait_for_message`" is idle and anything else is working.
 5. The platform instructions become a function of the mode: the line about "what you see typed" does not apply to a `pull` agent.
 

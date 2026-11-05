@@ -45,7 +45,7 @@ matrix, 6 hours per job) are far from what a matrix of five cells needs.
   pools have been fully subnetted` (every project and instance is a network and Docker's default pool holds about 30), and with
   the pool widened the timing-sensitive specs (a terminal's colours, the pty attach, the browser, the stand-in agents' timings)
   failed on three platforms. Serial passes on every Docker cell. Stable runs are preferred to fast ones, so xdist and the pool
-  setting are gone; [specs-overhaul.md](specs-overhaul.md) stands ("not for now").
+  setting are gone; [specs-overhaul.md](https://github.com/egzo-ai/egzo/issues/123) stands ("not for now").
 - **Podman cells.** Things the first runs found that are about the host, not egzo, and that `scripts/ci-engine.sh` sets up:
   the rootful socket is served by `podman system service` in a `/run/podman` the runner user can enter (systemd leaves it
   root-only); the test registry on `localhost:5000` is declared insecure (Podman does not trust localhost for plain HTTP as Docker

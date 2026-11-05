@@ -22,7 +22,7 @@ import (
 //     is doing, written when something changes and again every interval. A client (the hub) follows the container's
 //     log through the engine's own API and keeps the latest line, so it never has to run a command in the sidecar to
 //     ask. The engines tell the two streams apart, whatever log driver the sysadmin chose (see
-//     known-issues/container-logging-follows-the-engine-default.md).
+//     docs/troubleshooting.md, "Container logs").
 //   - standard error carries everything else control says: warnings and errors, as {"time","level","msg",...}.
 //
 // A status line is {"type":"status","v":1,"time","project","reason","interval","agents":[...]}. reason is `start` (the

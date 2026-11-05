@@ -6,7 +6,7 @@ question, reporting its life cycle through hooks, and never holding a real crede
 the stand-ins of the project's ChatGPT sign-in, which the proxy keeps (`proxy/test_proxy_oauth.py`).
 
 No model is called. The sign-in is made against the stub provider of `oauthkit`, under a service of the project's own: what the built-in
-`chatgpt` service does with auth.openai.com, which needs an account (known-issues/specs-depend-on-online-services.md)."""
+`chatgpt` service does with auth.openai.com, which needs an account (https://github.com/egzo-ai/egzo/issues/105)."""
 
 import json
 import re

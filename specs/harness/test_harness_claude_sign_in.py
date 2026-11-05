@@ -7,7 +7,7 @@ project's sign-in (`claude auth login` with CLAUDE_CODE_OAUTH_REFRESH_TOKEN, whi
 none gets an API key placeholder, which would win over the sign-in.
 
 No model is called. The stub provider of `oauthkit` answers as platform.claude.com and api.anthropic.com on the project's egress network
-(Claude Code's URLs are fixed), so no account is needed: the real sign-in needs one (known-issues/specs-depend-on-online-services.md)."""
+(Claude Code's URLs are fixed), so no account is needed: the real sign-in needs one (https://github.com/egzo-ai/egzo/issues/105)."""
 
 import json
 import re

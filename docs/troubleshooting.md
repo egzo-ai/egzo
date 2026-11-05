@@ -81,6 +81,29 @@ something changes and one every 30 seconds; anything control has to complain abo
 engine's default logging: if `egzo logs` prints nothing for a container that should have said something, run
 `egzo system check` and read its `logs` line.
 
+## Container logs
+
+egzo does not choose a log driver: every container it makes uses the engine's default ([Install](install.md)). egzo reads those
+logs back, for `egzo logs`, the git jobs, and the agents' status the hub follows, so the default must be readable.
+`egzo system check` fails on a driver it cannot read, warns when it cannot tell, and warns about a `json-file` with no size limit.
+When the hub cannot follow the status log, it shows the project's agents as **running** with a banner that says why; the terminal,
+start, stop and remove still work, only live activity and the "waiting" question are missing.
+
+Known to work: Docker `json-file`, `local`, `journald`, and its remote drivers through the dual-logging cache while their endpoint is
+healthy (tested with `syslog`); Podman `k8s-file` (which `json-file` is an alias for) and `journald`.
+
+Known not to work:
+
+- **Docker, `none`:** `docker logs` fails with `configured logging driver does not support reading`.
+- **Podman, `none`, `passthrough`, `passthrough-tty`:** `podman logs` fails with `cannot read logs: this container is not logging output`.
+- **Docker, a remote driver with the local cache turned off** (`cache-disabled: true`): `syslog`, `gelf`, `fluentd`, `awslogs`,
+  `splunk`, `gcplogs`, `etwlogs`. Docker reads them only through its dual-logging cache, on by default since Docker 20.10; an engine
+  older than 20.10 cannot read them at all.
+- **Docker, a remote driver whose endpoint is down or refuses:** the cache can stop receiving lines (seen with `gelf` pointed at a
+  closed UDP port).
+- **`journald` when the journal is not readable by the engine's user.** Reported for rootless Podman: `initial journal cursor`
+  errors, or `podman logs` printing nothing while `journalctl` shows the lines.
+
 ## Known problems
 
 - **Rootful Podman, intermittent loss of outbound connectivity.** The proxy's first outbound connection sometimes
