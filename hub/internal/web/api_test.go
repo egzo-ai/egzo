@@ -1,6 +1,8 @@
 package web_test
 
 import (
+	"github.com/egzo-ai/egzo/internal/version"
+
 	"context"
 	"encoding/json"
 	"net/http"
@@ -658,5 +660,14 @@ func TestAuditListsRefusals(t *testing.T) {
 	}
 	if refused == nil || refused["action"] != "agent.rm" || refused["actor"] != "alice" || refused["agent"] != "coder-1" {
 		t.Errorf("audit = %v", v)
+	}
+}
+
+func TestTheSessionSaysTheHubVersion(t *testing.T) {
+	r := newRig(t)
+	b := r.browser()
+	b.signIn("admin")
+	if status, session := b.get("/session"); status != 200 || session["version"] != version.Version {
+		t.Errorf("session = %d %v, want version %q", status, session, version.Version)
 	}
 }

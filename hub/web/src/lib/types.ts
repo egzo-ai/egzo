@@ -50,6 +50,8 @@ export interface Session {
   /** They may make a link code now: an operator, or somebody with room in their quota. */
   canLink: boolean;
   connectedProjects: number;
+  /** The hub's build version: the release tag, or "dev". Only signed-in people are told it. */
+  version: string;
 }
 
 /** One agent, as the project list and the sidebar know it (from what its link pushed). */
