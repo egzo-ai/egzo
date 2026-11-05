@@ -119,13 +119,7 @@ def test_the_files_of_the_workspaces_open_a_folder_at_a_time_and_a_file_download
     expect(files.locator("tr[data-entry='report.html']")).to_be_visible()
     files.get_by_role("link", name="notes/").click()
     expect(page).to_have_url(re.compile(r"/files\?w=docs&path=notes%2F$"))
-    with page.expect_download() as download:
-        page.get_by_test_id("files").get_by_role("link", name="Download plan.md").click()
-    assert download.value.suggested_filename == "plan.md"
-    with open(download.value.path()) as saved:
-        assert saved.read() == "# The plan\n"
-
-    # a file opens in the viewer as text, never as a page; its bytes decide, not its name
+    # a file opens in the viewer as text, never as a page, and downloads from there; its bytes decide, not its name
     page.on("dialog", lambda d: pytest.fail(f"a file ran: {d.message}"))
     page.get_by_test_id("files").get_by_role("link", name="plan.md", exact=True).click()
     expect(page).to_have_url(re.compile(r"/files\?w=docs&path=notes%2F&file=plan.md$"))
@@ -133,6 +127,8 @@ def test_the_files_of_the_workspaces_open_a_folder_at_a_time_and_a_file_download
     with page.expect_download() as download:
         page.get_by_role("link", name="Download").click()
     assert download.value.suggested_filename == "plan.md"
+    with open(download.value.path()) as saved:
+        assert saved.read() == "# The plan\n"
     page.get_by_label("Folder").get_by_role("link", name="notes").click()
     page.get_by_test_id("files").get_by_role("link", name="image.md", exact=True).click()
     expect(page.get_by_test_id("not-text")).to_contain_text("image/png")

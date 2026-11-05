@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, filesURL } from "../lib/api";
+  import { api } from "../lib/api";
   import { errorText } from "../lib/app.svelte";
   import { ago, stamp } from "../lib/format";
   import { filesPlace, filesHref, humanSize } from "../lib/files";
@@ -105,10 +105,7 @@
                 <td><a class="name" href={at(place.workspace, place.instance, place.dir + e.name + "/")}><Icon name="folder" size="sm" /> {e.name}/</a></td>
                 <td></td>
               {:else if e.type === "file"}
-                <td>
-                  <a class="name" href={at(place.workspace, place.instance, place.dir, e.name)}><Icon name="file" size="sm" /> {e.name}</a>
-                  <a class="muted download" href={filesURL(project, place.workspace, place.instance, place.dir + e.name)} download={e.name} data-external aria-label="Download {e.name}">download</a>
-                </td>
+                <td><a class="name" href={at(place.workspace, place.instance, place.dir, e.name)}><Icon name="file" size="sm" /> {e.name}</a></td>
                 <td style="text-align:right" title="{e.size ?? 0} bytes">{humanSize(e.size ?? 0)}</td>
               {:else}
                 <td><span class="muted" title="a symbolic link: not followed">{e.name} <small>link</small></span></td>

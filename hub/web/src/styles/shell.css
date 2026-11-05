@@ -321,4 +321,3 @@ html, body { height: 100%; }
 .viewer-name { font-size: var(--text-md); margin: 0; overflow-wrap: anywhere; }
 .viewer-note { font-size: var(--text-xs); margin: 0 0 var(--space-2); }
 .spec mark.bidi { background: var(--status-error-soft); color: var(--status-error); border-radius: 2px; padding: 0 2px; }
-td .download { font-size: var(--text-xs); margin-left: var(--space-2); }
