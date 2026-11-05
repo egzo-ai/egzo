@@ -370,6 +370,47 @@ func TestAVerbGivesItsStepsAndItsResultAndItsError(t *testing.T) {
 	}
 }
 
+func TestWorkspacesAndFilesAskForWhatTheyName(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub}
+	answering(t, link, func(q Request, lines *Lines, _ *yamux.Stream) {
+		if q.Verb != VerbWorkspaces {
+			t.Errorf("request %+v", q)
+		}
+		_ = lines.Write(Reply{Done: true, Result: []byte(`[{"Name":"shop","Kind":"git","Worktrees":[{"Instance":"coder-1","State":"removed"}]}]`)})
+	})
+	list, err := peer.Workspaces(context.Background())
+	if err != nil || len(list) != 1 || list[0].Worktrees[0].State != WorktreeRemoved {
+		t.Fatalf("workspaces %+v, err %v", list, err)
+	}
+
+	answering(t, link, func(q Request, lines *Lines, stream *yamux.Stream) {
+		if q.Verb != VerbFiles || q.Workspace != "shop" || q.Instance != "coder-1" {
+			t.Errorf("request %+v", q)
+		}
+		_ = lines.Write(Reply{Done: true})
+		asked, _ := io.ReadAll(io.LimitReader(lines.Rest(), 5))
+		_, _ = stream.Write(append([]byte("got "), asked...))
+		stream.Close()
+	})
+	conn, err := peer.DialFiles(context.Background(), "shop", "coder-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, _ = conn.Write([]byte("GET /"))
+	if answer, _ := io.ReadAll(conn); string(answer) != "got GET /" {
+		t.Errorf("answer %q", answer)
+	}
+
+	answering(t, link, func(_ Request, lines *Lines, _ *yamux.Stream) {
+		_ = lines.Write(Reply{Done: true, Error: "there is no volume p_ws.x"})
+	})
+	if _, err := peer.DialFiles(context.Background(), "x", ""); err == nil || !strings.Contains(err.Error(), "no volume") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestAVerbEndsWithItsContext(t *testing.T) {
 	link, hub := pair(t)
 	peer := &Peer{session: hub}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/hashicorp/yamux"
 
+	"github.com/egzo-ai/egzo/internal/files"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/portforward"
 	"github.com/egzo-ai/egzo/internal/seal"
@@ -632,7 +633,16 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 			err = fmt.Errorf("agent %q does not expose port %d", request.Agent, request.Port)
 			break
 		}
-		l.forward(ctx, stream, lines, request, protocol)
+		l.relay(lines, func(in io.Reader, out, said io.Writer) error {
+			return l.options.Engine.Forward(ctx, l.options.Project, request.Agent, request.Port, protocol == hublink.ProtocolHTTP, in, out, said)
+		}, stream, portforward.Connected)
+		return
+	case hublink.VerbWorkspaces:
+		result, err = engine.Workspaces(ctx, project)
+	case hublink.VerbFiles:
+		l.relay(lines, func(in io.Reader, out, said io.Writer) error {
+			return l.options.Engine.Files(ctx, l.options.Project, request.Workspace, request.Instance, in, out, said)
+		}, stream, files.Connected)
 		return
 	case hublink.VerbAttach:
 		if err = engine.Attachable(ctx, project, request.Agent); err == nil {
@@ -705,12 +715,14 @@ func (l *Link) exposure(agent string, port int) (string, bool) {
 // nothing listens is an answer: a server says nothing until it is spoken to, so a stream that ended could mean anything. The two ways out of the
 // command need not arrive in order, so a byte of the server's says the same. The protocol says what the end of the hub's side means: an HTTP
 // proxy never half closes, so it has left, and a tcp client may still be waiting for its answer.
-func (l *Link) forward(ctx context.Context, stream net.Conn, lines *hublink.Lines, request hublink.Request, protocol string) {
+// relay carries a stream verb, forward or files: run copies the stream's bytes through a command in a container, which says announce on
+// stderr once it reached its server. The Done goes out then, or with the first byte the server says, or with why it failed.
+func (l *Link) relay(lines *hublink.Lines, run func(in io.Reader, out, said io.Writer) error, stream net.Conn, announce string) {
 	var answered sync.Once
 	connected := func() { answered.Do(func() { _ = lines.Write(hublink.Reply{Done: true}) }) }
-	said := &forwardWords{connected: connected}
+	said := &forwardWords{connected: connected, announce: announce}
 	out := firstByte{Writer: stream, connected: connected}
-	err := l.options.Engine.Forward(ctx, l.options.Project, request.Agent, request.Port, protocol == hublink.ProtocolHTTP, lines.Rest(), out, said)
+	err := run(lines.Rest(), out, said)
 	answered.Do(func() {
 		reason := said.reason()
 		if reason == "" && err != nil {
@@ -737,11 +749,12 @@ func (w firstByte) Write(data []byte) (int, error) {
 // forwardWords reads what the command says on stderr: that it connected, or the start of why it failed.
 type forwardWords struct {
 	connected func()
+	announce  string
 	words     []byte
 }
 
 func (w *forwardWords) Write(data []byte) (int, error) {
-	if strings.HasPrefix(string(data), portforward.Connected) {
+	if strings.HasPrefix(string(data), w.announce) {
 		w.connected()
 		return len(data), nil
 	}

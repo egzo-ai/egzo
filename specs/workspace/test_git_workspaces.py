@@ -186,7 +186,7 @@ def test_the_fetch_goes_through_the_proxy_as_the_instance_and_no_credential_or_h
     shell(engine, p, "rm .git/hooks/post-checkout")
 
 
-def test_a_worktree_is_never_replaced_committed_work_outlives_the_instance_and_rm_deletes_without_a_check(sandbox, engine):
+def test_a_worktree_is_never_replaced_and_outlives_its_instance_until_rm_worktrees_deletes_it_without_a_check(sandbox, engine):
     p = sandbox
     volume = p.worktree_volume("repo", "issue-0")
     labels = ["--label", f"{LABEL_PREFIX}project={p.name}", "--label", f"{LABEL_PREFIX}kind=workspace"]
@@ -202,7 +202,17 @@ def test_a_worktree_is_never_replaced_committed_work_outlives_the_instance_and_r
     git(engine, p, "-c", "user.email=a@b.c", "-c", "user.name=a", "commit", "--allow-empty", "-qm", "keep me", instance="issue-1")
     assert shell(engine, p, "echo 'not committed, and nobody asks' > wip.txt", instance="issue-1").returncode == 0
     kept = p.spawn("coder")
-    p.ok("agent rm --force issue-1")
+    p.ok("agent rm --force issue-1")  # the instance goes, its worktree stays, with what was not committed
+    assert engine.instance(p.name, "issue-1") is None and engine.volume_exists(p.worktree_volume("repo", "issue-1"))
+    assert shell(engine, p, "cat wip.txt", instance="issue-1").stdout == "not committed, and nobody asks\n"
+    assert "issue-1" in git(engine, p, "worktree", "list"), "a worktree that is kept stays a worktree of its base"
+    refused = p.sh("agent spawn coder issue-1", timeout=400)
+    assert refused.returncode != 0 and p.worktree_volume("repo", "issue-1") in refused.stderr and "--reuse" in refused.stderr
+    p.ok("agent spawn coder issue-1 --reuse", timeout=400)
+    assert shell(engine, p, "cat wip.txt", instance="issue-1").stdout == "not committed, and nobody asks\n", "reuse continues in it"
+    assert git(engine, p, "status", "--porcelain", instance="issue-1") == "?? wip.txt"
+
+    p.ok("agent rm --force --worktrees issue-1")  # deletes the worktree too, with no check
     assert not engine.volume_exists(p.worktree_volume("repo", "issue-1"))
     assert engine.volume_exists(p.base_volume("repo")) and has_file(engine, p, "README", kept)
     assert "issue-1" not in git(engine, p, "worktree", "list") and kept in git(engine, p, "worktree", "list")
@@ -213,7 +223,7 @@ def test_a_worktree_is_never_replaced_committed_work_outlives_the_instance_and_r
     assert git(engine, p, "log", "-1", "--format=%s", instance="issue-1") == "keep me"
     assert git(engine, p, "branch", "--show-current", instance="issue-1") == "egzo/issue-1"
 
-    p.ok("agent rm --force", kept)
+    p.ok("agent rm --force --worktrees", kept)
     number = int(kept.rsplit("-", 1)[1])
     assert p.spawn("coder") == f"coder-{number + 1}", "an automatic name skips the one a branch was left under"
 
@@ -250,22 +260,25 @@ def test_the_base_survives_failed_clones_failed_fetches_down_and_up_and_goes_wit
     p.write(document("github.com"))
     p.ok("project up", timeout=400)
     first = p.spawn("coder")
-    p.ok("agent rm --force", first)
+    p.ok("agent rm --force --worktrees", first)
     assert engine.run("volume", "rm", p.base_volume("repo")).returncode == 0
     second = p.spawn("coder")
     assert engine.volume_exists(p.base_volume("repo")) and has_file(engine, p, "README", second), "spawn clones the base itself when it is missing"
-    p.ok("agent rm --force", second)
+    p.ok("agent rm --force --worktrees", second)
 
     p.write(document("example.com"))
     p.ok("project up", timeout=400)
     warned = p.sh("agent spawn coder", timeout=400)
     assert warned.returncode == 0, warned.stderr
     assert "github.com" in warned.stderr and "fetch" in warned.stderr.lower(), "a fetch that fails warns"
-    assert has_file(engine, p, "README", warned.stdout.strip()), "and the worktree is made from the base as it is"
+    warned = warned.stdout.strip()
+    assert has_file(engine, p, "README", warned), "and the worktree is made from the base as it is"
     assert shell(engine, p, "echo mine > .git/marker").returncode == 0
 
     down = p.ok("project down --force")
-    assert "repo" in down.stdout and [r.name for r in engine.resources(p.name)] == [p.base_volume("repo")], "down keeps the base and says so"
+    kept = sorted(r.name for r in engine.resources(p.name))
+    assert kept == sorted([p.base_volume("repo"), p.worktree_volume("repo", warned)]), "down keeps the base and the worktrees"
+    assert p.base_volume("repo") in down.stdout and p.worktree_volume("repo", warned) in down.stdout, "and says so"
     p.write(document("example.com"))  # github is unreachable: a clone would fail
     p.ok("project up", timeout=400)
     assert shell(engine, p, "cat .git/marker").stdout == "mine\n", "a new up reuses the base without cloning again"
@@ -273,6 +286,9 @@ def test_the_base_survives_failed_clones_failed_fetches_down_and_up_and_goes_wit
 
     refused = p.sh("workspace rm repo")
     assert refused.returncode != 0 and "again" in refused.stderr and engine.volume_exists(p.base_volume("repo"))
-    p.ok("agent rm --force again")
+    p.ok("agent rm --force --worktrees again")
+    left = p.sh("workspace rm repo")
+    assert left.returncode != 0 and f"--worktree {warned}" in left.stderr, "a worktree left by down is still somebody's work"
+    p.ok("workspace rm repo --worktree", warned)
     p.ok("workspace rm repo")
     assert not engine.volume_exists(p.base_volume("repo"))

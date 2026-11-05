@@ -199,8 +199,8 @@ agents:
 - A **directory** workspace is shared by every agent that lists it. `egzo project up` creates it, empty, and egzo never
   deletes it on its own. `:ro` makes it read-only for an agent.
 - A **git** workspace holds a base clone made by `egzo project up` and a worktree per instance, made by `egzo agent spawn`
-  on its own branch `egzo/<instance>`. It cannot be `:ro`. `egzo agent rm` deletes the instance's worktree; what it
-  committed stays on its branch in the base.
+  on its own branch `egzo/<instance>`. It cannot be `:ro`. `egzo agent rm` keeps the instance's worktree (`--worktrees`
+  deletes it); what it committed stays on its branch in the base either way.
 - Git sources are HTTPS only. The clone and the fetch go through the proxy, which injects the token (the `github`
   service), so agents hold no git credential and push their own work.
 - egzo keeps nothing in the project directory. `egzo project init` puts the secret key in `.env` and, in a git

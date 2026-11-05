@@ -142,6 +142,34 @@ type Event struct {
 	Text  string
 }
 
+// The kinds of a workspace.
+const (
+	WorkspaceDirectory = "directory"
+	WorkspaceGit       = "git"
+)
+
+// The states of a worktree's instance.
+const (
+	WorktreeRunning = "running"
+	WorktreeStopped = "stopped"
+	WorktreeRemoved = "removed" // the instance is gone, and its worktree was kept
+)
+
+// Workspace is a workspace volume of a project, as the verb workspaces lists it. A directory's files open; a git workspace's base clone has
+// none checked out, and its worktrees open.
+type Workspace struct {
+	Name      string
+	Kind      string // directory or git
+	Worktrees []Worktree
+}
+
+// Worktree is the worktree of one instance in a git workspace.
+type Worktree struct {
+	Instance string
+	State    string // running, stopped or removed
+	Actor    string // who spawned the instance, from the volume's labels
+}
+
 // Size is a terminal's size.
 type Size struct{ Cols, Rows uint }
 

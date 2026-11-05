@@ -188,7 +188,7 @@ func CheckOwnership(observed Observed, project, dir string) error {
 	for _, r := range observed.Resources {
 		if r.ProjectDir != "" && r.ProjectDir != dir {
 			hint := "run `egzo project down` from that directory"
-			if keptByDown(r, nil) {
+			if keptByDown(r) {
 				hint = "run `egzo project down` and `egzo workspace rm --all` from that directory, which removes the workspace volumes `down` keeps"
 			}
 			return fmt.Errorf("project %q already exists from another directory (%s); "+

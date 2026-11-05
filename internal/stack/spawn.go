@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -327,10 +328,11 @@ func freeName(ctx context.Context, c *engine.Client, env PrepEnv, observed Obser
 }
 
 // RemoveInstances removes instances: the container, its registration in control and in the proxy, its
-// network, and its volumes: the home and the worktrees. The branches the instances made stay in the base clones,
-// which forget the removed worktrees. Nothing is removed unless every name is an instance and, without force,
-// every instance is stopped. It returns the names it removed.
-func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv, project, dir string, names []string, force bool, out io.Writer) (removed []string, err error) {
+// network and its home volume. Its worktrees stay, with what the agent left uncommitted in them, unless worktrees
+// says to delete them too; the base clones forget only the worktrees that are deleted, so one that is kept is still
+// a worktree for `agent spawn --reuse`. The branches stay either way. Nothing is removed unless every name is an
+// instance and, without force, every instance is stopped. It returns the names it removed.
+func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv, project, dir string, names []string, force, worktrees bool, out io.Writer) (removed []string, err error) {
 	out = &lockedWriter{w: out}
 	for _, name := range names {
 		instance, ok := observed.Instance(name)
@@ -341,9 +343,10 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 			return nil, fmt.Errorf("instance %q is running: stop it first (egzo stop %s) or use --force", name, name)
 		}
 	}
-	// whatever happens, the base clones forget the worktrees of the instances that did go
+	// whatever happens, the base clones forget the worktrees that were deleted
+	var forget []string
 	defer func() {
-		if forgetErr := ForgetWorktrees(ctx, c, env, project, dir, observed, removed); forgetErr != nil && err == nil {
+		if forgetErr := ForgetWorktrees(ctx, c, env, project, dir, observed, forget); forgetErr != nil && err == nil {
 			err = forgetErr
 		}
 	}()
@@ -360,7 +363,7 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 				relay = r
 			case r.Type == "network" && r.Instance == name:
 				network = r
-			case r.Type == "volume" && r.Instance == name:
+			case r.Type == "volume" && r.Instance == name && (r.Kind != kindWorkspace || worktrees):
 				volumes = append(volumes, r)
 			}
 		}
@@ -399,10 +402,20 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 				return removed, fmt.Errorf("remove network %s: %w", network.Name, err)
 			}
 		}
+		var deleted []string
+		for _, volume := range volumes {
+			deleted = append(deleted, volume.Name)
+		}
+		if err := RemoveFileHelpers(ctx, c, project, deleted); err != nil {
+			return removed, err
+		}
 		for _, volume := range volumes {
 			fmt.Fprintf(out, "remove volume %s\n", volume.Name)
 			if err := c.API.VolumeRemove(ctx, volume.ID, true); err != nil {
 				return removed, fmt.Errorf("remove volume %s: %w", volume.Name, err)
+			}
+			if volume.Kind == kindWorkspace && !slices.Contains(forget, name) {
+				forget = append(forget, name)
 			}
 		}
 		removed = append(removed, name)

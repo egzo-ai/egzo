@@ -53,6 +53,7 @@ func New() *cobra.Command {
 		newRelayCommand(),
 		newLinkCommand(),
 		newPrepCommand(),
+		newFilesCommand(),
 		newStateCommand(),
 	)
 	return root

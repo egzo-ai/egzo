@@ -148,7 +148,7 @@ func TestWorkspaceRowsSayWhatTheEngineHolds(t *testing.T) {
 	}
 }
 
-func TestOnlyBaseVolumesAreBasesAndDownKeepsOnlyWhatIsNotAnInstancesOwn(t *testing.T) {
+func TestOnlyBaseVolumesAreBasesAndDownKeepsEveryWorkspaceVolume(t *testing.T) {
 	observed := Observed{Resources: []Resource{
 		{Type: "volume", Name: "proj_ws.repo.base", Kind: kindWorkspace, Workspace: "repo"},
 		{Type: "volume", Name: "proj_ws.data", Kind: kindWorkspace, Workspace: "data"},
@@ -163,12 +163,12 @@ func TestOnlyBaseVolumesAreBasesAndDownKeepsOnlyWhatIsNotAnInstancesOwn(t *testi
 	}
 	kept := []string{}
 	for _, r := range observed.Resources {
-		if keptByDown(r, orphanWorktrees(observed)) {
+		if keptByDown(r) {
 			kept = append(kept, r.Name)
 		}
 	}
-	if !slices.Equal(kept, []string{"proj_ws.repo.base", "proj_ws.data", "proj_ws.repo.wt.gone"}) {
-		t.Errorf("down keeps %v: the bases, the directories, and a worktree no instance owns", kept)
+	if !slices.Equal(kept, []string{"proj_ws.repo.base", "proj_ws.data", "proj_ws.repo.wt.a", "proj_ws.repo.wt.gone"}) {
+		t.Errorf("down keeps %v: the bases, the directories and every worktree, an instance's or not", kept)
 	}
 }
 

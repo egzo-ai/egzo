@@ -63,7 +63,7 @@ func WorkspaceRows(project *config.Resolved, observed Observed) []WorkspaceRow {
 // RemoveWorkspaces deletes the volumes of workspaces: the directory, or the base clone of a git workspace. It
 // refuses while a container mounts the volume, and a git workspace while a worktree of it is left. With all it
 // deletes every workspace volume the project has, left-over worktrees included, that nothing uses.
-func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, names []string, all bool, out io.Writer) error {
+func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, project string, names []string, all bool, out io.Writer) error {
 	owned := map[string][]Resource{} // workspace -> its base or directory volume, then its worktrees
 	var order []string
 	for _, r := range observed.Resources {
@@ -82,6 +82,16 @@ func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, 
 		if len(owned[name]) == 0 {
 			return fmt.Errorf("workspace %q has no volume in this project (workspaces with volumes: %s)", name, strings.Join(order, ", "))
 		}
+	}
+	// the file helpers of the hub are no reason to refuse: they only read, and go first
+	var volumes []string
+	for _, name := range names {
+		for _, volume := range owned[name] {
+			volumes = append(volumes, volume.Name)
+		}
+	}
+	if err := RemoveFileHelpers(ctx, c, project, volumes); err != nil {
+		return err
 	}
 	// refuse first, so nothing is removed unless everything may be
 	for _, name := range names {
@@ -115,12 +125,19 @@ func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, 
 func RemoveWorktreeVolumes(ctx context.Context, c *engine.Client, env PrepEnv, observed Observed, project, dir, workspace string, instances []string, out io.Writer) error {
 	for _, instance := range instances {
 		if _, ok := observed.Instance(instance); ok {
-			return fmt.Errorf("instance %q exists: remove it with `egzo agent rm %s`, which removes its worktree too", instance, instance)
+			return fmt.Errorf("instance %q exists: remove it with `egzo agent rm --worktrees %s`, which deletes its worktrees too", instance, instance)
 		}
 		name := WorktreeVolume(project, workspace, instance)
 		if observed.find("volume", name) == nil {
 			return fmt.Errorf("workspace %q has no worktree volume for %q (%s)", workspace, instance, name)
 		}
+	}
+	var volumes []string
+	for _, instance := range instances {
+		volumes = append(volumes, WorktreeVolume(project, workspace, instance))
+	}
+	if err := RemoveFileHelpers(ctx, c, project, volumes); err != nil {
+		return err
 	}
 	for _, instance := range instances {
 		name := WorktreeVolume(project, workspace, instance)

@@ -162,10 +162,10 @@ func newDownCommand(opts *options) *cobra.Command {
 		Use:   "down",
 		Short: "Remove the project's containers, networks and volumes",
 		Long: "Remove everything egzo made for the project: the sidecars, the networks, the volumes (the control state and the\n" +
-			"CA, and the home of every agent) and the worktrees of the agents it removes. It is refused while an agent\n" +
-			"runs, and removes nothing then; --force removes the agents too, as `egzo agent rm --force` does. The\n" +
-			"volumes of the directory workspaces and of the base clones are kept: they are your work, and a later\n" +
-			"`egzo project up` finds them again. `egzo workspace rm` deletes them.",
+			"CA, and the home of every agent). It is refused while an agent runs, and removes nothing then; --force removes\n" +
+			"the agents too, as `egzo agent rm --force` does. The volumes of the workspaces are kept, the directories, the\n" +
+			"base clones and the agents' worktrees: they are your work, and a later `egzo project up` finds them again.\n" +
+			"`egzo workspace rm` deletes them.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := commandContext(cmd)

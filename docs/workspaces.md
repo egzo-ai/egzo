@@ -76,9 +76,11 @@ workspace) and the base at `/workspace/shop/.base`, never another agent's worktr
   directory workspace with `egzo workspace put`.
 - **Looking at an agent's files.** `egzo workspace get shop/coder-1 src ./coder-src` copies a path of that instance's
   worktree out. What an agent should keep, it commits and pushes.
-- **Removing** an instance (`egzo agent rm`, `egzo project down`) deletes its worktree volume, with no check. What the
-  agent committed stays on its branch in the base clone, `egzo/<instance>`. Tell agents to commit and push when they are
-  done.
+- **Removing** an instance (`egzo agent rm`, `egzo project down`) keeps its worktree volume, with what the agent left
+  uncommitted in it: [the hub](hub.md#files) shows it, `egzo workspace get` copies it out, and `egzo agent spawn --reuse`
+  continues in it. `egzo agent rm --worktrees` deletes the worktrees with the instance, with no check, and `egzo workspace rm
+  NAME --worktree INSTANCE` deletes one later. What the agent committed stays on its branch in the base clone,
+  `egzo/<instance>`, either way. Tell agents to commit and push when they are done.
 - **Spawning a name again** fails while its worktree volume or its branch is still there. `egzo agent spawn --reuse`
   continues with them (the branch is checked out again in a fresh worktree). A name egzo picks itself
   (`coder-2`) skips the names that left a worktree volume or a branch behind.
@@ -88,8 +90,9 @@ workspace) and the base at `/workspace/shop/.base`, never another agent's worktr
 
 | | directory volume | base clone | worktree volume |
 |---|---|---|---|
-| `egzo agent rm` | kept | kept | removed |
-| `egzo project down` | kept | kept | removed |
+| `egzo agent rm` | kept | kept | kept |
+| `egzo agent rm --worktrees` | kept | kept | removed |
+| `egzo project down` | kept | kept | kept |
 | `egzo workspace rm NAME` | removed | removed | refused while one is left |
 | `egzo workspace rm NAME --worktree INSTANCE` | | | removed |
 | `egzo workspace rm --all` | removed | removed | removed (if no instance uses it) |
