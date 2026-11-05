@@ -10,7 +10,7 @@
 > The core CLI tool and web UI are stable enough for testing and non-production work.
 > See [the 1.0 roadmap](roadmap/initial-release.md) for details.
 
-![The egzo hub: the agents of a project, then a live Claude Code session in the browser](assets/hub.gif)
+![The egzo hub: a project with OpenCode and Codex running, Claude Code spawned next to them, then the files and the network](assets/hub.gif)
 
 Egzo is a CLI tool to sandbox coding agents and organize your projects, with an optional [web UI](docs/hub.md),
 to watch and drive them from a browser.
