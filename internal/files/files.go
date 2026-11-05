@@ -5,8 +5,9 @@
 // the workspace's volume read only at /w, and the project's link carries each connection to it with `egzo files connect`.
 //
 // It speaks two answers to one method. GET of a path that ends with a slash lists a directory as JSON; GET of any other path sends a
-// regular file's bytes. There is no way to write, and every path is opened through an os.Root, so nothing outside the root is reached, by
-// `..` or by a symbolic link: the files are written by an agent, and are not trusted.
+// regular file's bytes. There is no way to write, and every path is opened one part at a time from the root without following a link, so
+// nothing outside the root is reached, by `..` or by a symbolic link, even while the files change: they are written by an agent, and are
+// not trusted.
 package files
 
 import (
@@ -20,6 +21,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -48,11 +50,24 @@ type Listing struct {
 	Truncated bool `json:"truncated"`
 }
 
-// Handler serves the files under root.
+// Handler serves the files under Root, a directory held open.
 type Handler struct {
-	Root *os.Root
+	Root *os.File
 	// Max is the most entries a listing holds; 0 is MaxEntries.
 	Max int
+}
+
+// errLink is a symbolic link met on the way: it is never followed.
+var errLink = errors.New("a symbolic link is not followed")
+
+// errOutside is a path that would leave the root.
+var errOutside = errors.New("outside the workspace")
+
+// stat is what an entry is, read without following a link.
+type stat struct {
+	mode     fs.FileMode // only the type
+	size     int64
+	modified time.Time
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -71,24 +86,19 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "."
 	}
-	// os.Root keeps a link inside the root, and still follows one; a link is never followed here, in any part of the path
-	for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
-		info, err := h.Root.Lstat(parent)
-		if err != nil {
-			missing(w, err)
-			return
-		}
-		if !info.IsDir() {
-			fail(w, http.StatusForbidden, "a symbolic link is not followed")
-			return
-		}
-	}
-	info, err := h.Root.Lstat(name)
+	// the directory that holds name is held open, reached without following a link: what is read next is read in it
+	dir, base, err := walk(h.Root, name)
 	if err != nil {
 		missing(w, err)
 		return
 	}
-	switch mode := info.Mode(); {
+	defer dir.Close()
+	info, err := statAt(dir, base)
+	if err != nil {
+		missing(w, err)
+		return
+	}
+	switch mode := info.mode; {
 	case mode.IsDir():
 		if !wantDir {
 			// relative, so it holds wherever the files are served from
@@ -96,20 +106,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusMovedPermanently)
 			return
 		}
-		h.list(w, r, name)
+		h.list(w, r, dir, base)
+	case mode&fs.ModeSymlink != 0:
+		fail(w, http.StatusForbidden, errLink.Error())
 	case wantDir:
 		fail(w, http.StatusNotFound, "not a directory")
-	case mode&fs.ModeSymlink != 0:
-		fail(w, http.StatusForbidden, "a symbolic link is not followed")
 	case mode.IsRegular():
-		h.send(w, r, name)
+		h.send(w, r, dir, base)
 	default:
 		fail(w, http.StatusForbidden, "not a regular file")
 	}
 }
 
-func (h Handler) list(w http.ResponseWriter, r *http.Request, name string) {
-	dir, err := h.Root.Open(name)
+func (h Handler) list(w http.ResponseWriter, r *http.Request, parent *os.File, name string) {
+	dir, err := openAt(parent, name, true)
 	if err != nil {
 		missing(w, err)
 		return
@@ -119,7 +129,7 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request, name string) {
 	if max <= 0 {
 		max = MaxEntries
 	}
-	// ReadDir reads the entries' types without opening them, and Info lstats: a pipe in the directory blocks nothing
+	// ReadDir reads the names without opening them, and each is looked at in this directory without following it: a pipe blocks nothing
 	found, err := dir.ReadDir(max + 1)
 	if err != nil && len(found) == 0 && !errors.Is(err, io.EOF) {
 		fail(w, http.StatusInternalServerError, "the directory cannot be read")
@@ -130,18 +140,18 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request, name string) {
 		found = found[:max]
 	}
 	for _, entry := range found {
-		info, err := entry.Info()
+		info, err := statAt(dir, entry.Name())
 		if err != nil {
 			continue // gone since
 		}
-		e := Entry{Name: entry.Name(), Modified: info.ModTime().UTC()}
-		switch mode := info.Mode(); {
+		e := Entry{Name: entry.Name(), Modified: info.modified.UTC()}
+		switch mode := info.mode; {
 		case mode.IsDir():
 			e.Type = TypeDir
 		case mode&fs.ModeSymlink != 0:
 			e.Type = TypeSymlink
 		case mode.IsRegular():
-			e.Type, e.Size = TypeFile, info.Size()
+			e.Type, e.Size = TypeFile, info.size
 		default:
 			continue
 		}
@@ -156,9 +166,8 @@ func (h Handler) list(w http.ResponseWriter, r *http.Request, name string) {
 	_ = json.NewEncoder(w).Encode(listing)
 }
 
-func (h Handler) send(w http.ResponseWriter, r *http.Request, name string) {
-	// O_NONBLOCK: what was a file when it was looked at may be a pipe by now, and opening a pipe waits for a writer
-	f, err := h.Root.OpenFile(name, openFlags, 0)
+func (h Handler) send(w http.ResponseWriter, r *http.Request, dir *os.File, name string) {
+	f, err := openAt(dir, name, false)
 	if err != nil {
 		missing(w, err)
 		return
@@ -176,12 +185,13 @@ func (h Handler) send(w http.ResponseWriter, r *http.Request, name string) {
 
 func missing(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, errLink):
+		fail(w, http.StatusForbidden, errLink.Error())
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		fail(w, http.StatusNotFound, "no such file or directory")
 	case errors.Is(err, fs.ErrPermission):
 		fail(w, http.StatusForbidden, "permission denied")
 	default:
-		// os.Root says a path that leaves the root, by .. or a link, is an error of its own
 		fail(w, http.StatusForbidden, "outside the workspace, or not readable")
 	}
 }

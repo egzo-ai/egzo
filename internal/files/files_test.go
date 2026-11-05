@@ -20,7 +20,7 @@ import (
 )
 
 // tree is a workspace as an agent might leave it, next to a secret it must not reach.
-func tree(t *testing.T) (*os.Root, string) {
+func tree(t *testing.T) (*os.File, string) {
 	t.Helper()
 	top := t.TempDir()
 	dir := filepath.Join(top, "w")
@@ -38,7 +38,7 @@ func tree(t *testing.T) (*os.Root, string) {
 	must(os.Symlink("notes/a.txt", filepath.Join(dir, "in")))
 	must(os.Symlink("..", filepath.Join(dir, "notes", "up")))
 	must(syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o644))
-	root, err := os.OpenRoot(dir)
+	root, err := os.Open(dir)
 	must(err)
 	t.Cleanup(func() { root.Close() })
 	return root, dir
@@ -169,7 +169,7 @@ func TestABigDirectoryIsCutAndSaysSo(t *testing.T) {
 	for i := range 5 {
 		os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d", i)), nil, 0o644)
 	}
-	root, _ := os.OpenRoot(dir)
+	root, _ := os.Open(dir)
 	defer root.Close()
 	l := listing(t, get(t, Handler{Root: root, Max: 3}, "GET", "/"))
 	if !l.Truncated || len(l.Entries) != 3 {
@@ -227,6 +227,74 @@ func TestConnectSaysWhenNothingServes(t *testing.T) {
 	defer func() { connectWait = 10 * time.Second }()
 	err := Connect(filepath.Join(t.TempDir(), "none.sock"), strings.NewReader(""), io.Discard, nil)
 	if err == nil || !strings.Contains(err.Error(), "does not answer") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestALinkOnTheWayIsNotFollowedEvenInsideTheRoot(t *testing.T) {
+	root, dir := tree(t)
+	if err := os.Symlink("notes", filepath.Join(dir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler{Root: root}
+	for _, target := range []string{"/linked/a.txt", "/linked/", "/in"} {
+		if w := get(t, h, "GET", target); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "symbolic link") {
+			t.Errorf("%s: %d %q", target, w.Code, w.Body)
+		}
+	}
+	if w := get(t, h, "GET", "/page.html/x"); w.Code != http.StatusNotFound {
+		t.Errorf("a file as a directory: %d %q", w.Code, w.Body)
+	}
+}
+
+func TestADirectorySwappedForALinkAfterTheWalkIsNotFollowed(t *testing.T) {
+	root, dir := tree(t)
+	parent, base, err := walk(root, "notes/a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	// the agent moves the directory away and puts a link to the secret's directory in its place
+	if err := os.Rename(filepath.Join(dir, "notes"), filepath.Join(dir, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..", filepath.Join(dir, "notes")); err != nil {
+		t.Fatal(err)
+	}
+	f, err := openAt(parent, base, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if data, _ := io.ReadAll(f); string(data) != "alpha\n" {
+		t.Errorf("read %q: the name was looked up somewhere else than the directory the walk opened", data)
+	}
+	if _, _, err := walk(root, "notes/secret"); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("a walk through the link: %v", err)
+	}
+}
+
+func TestAFileSwappedForALinkAfterItWasLookedAtFailsToOpen(t *testing.T) {
+	root, dir := tree(t)
+	parent, base, err := walk(root, "page.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	if info, err := statAt(parent, base); err != nil || !info.mode.IsRegular() {
+		t.Fatalf("%+v %v", info, err)
+	}
+	if err := os.Remove(filepath.Join(dir, "page.html")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../secret", filepath.Join(dir, "page.html")); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := openAt(parent, base, false); err == nil {
+		data, _ := io.ReadAll(f)
+		f.Close()
+		t.Fatalf("opened the link: %q", data)
+	} else if !strings.Contains(err.Error(), "symbolic link") {
 		t.Errorf("err = %v", err)
 	}
 }
