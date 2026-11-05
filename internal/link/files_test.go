@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egzo-ai/egzo/internal/config"
+	"github.com/egzo-ai/egzo/internal/stack"
 )
 
 func TestAFilesAttemptThatNeverReachedTheServerReadsNothingOfTheHub(t *testing.T) {
@@ -53,5 +56,37 @@ func TestAByteOfTheServerSaysTheAttemptCrossed(t *testing.T) {
 	a.end()
 	if !a.crossed() || out.String() != "HTTP/1.1 200 OK\r\n" {
 		t.Errorf("crossed %v, out %q", a.crossed(), out.String())
+	}
+}
+
+func TestTheRemotesShownAreHTTPSURLsWithNothingThatCouldBeASecret(t *testing.T) {
+	git := func(u, branch string) config.ResolvedWorkspace {
+		return config.ResolvedWorkspace{Git: &config.Git{URL: u, Branch: branch}}
+	}
+	published := stack.Published{Templates: map[string]stack.Template{
+		"coder": {Workspaces: map[string]config.ResolvedWorkspace{
+			"repo":   git("https://github.com/egzo-ai/egzo.git", "main"),
+			"docs":   {},
+			"secret": git("https://user:token@example.com/r.git?access_token=x#frag", ""),
+		}},
+		"other": {Workspaces: map[string]config.ResolvedWorkspace{
+			"repo":  git("https://github.com/egzo-ai/egzo.git", "main"),
+			"ssh":   git("ssh://git@example.com/r.git", ""),
+			"plain": git("http://example.com/r.git", ""),
+			"bad":   git("https://%zz", ""),
+		}},
+	}}
+	got := remotesOf(published)
+	want := map[string]config.Git{
+		"repo":   {URL: "https://github.com/egzo-ai/egzo.git", Branch: "main"},
+		"secret": {URL: "https://example.com/r.git"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for name, g := range want {
+		if got[name] != g {
+			t.Errorf("%s = %+v, want %+v", name, got[name], g)
+		}
 	}
 }

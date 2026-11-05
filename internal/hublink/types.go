@@ -161,6 +161,10 @@ type Workspace struct {
 	Name      string
 	Kind      string // directory or git
 	Worktrees []Worktree
+	// Remote and Branch are where a git workspace clones from, as the project was last brought up: an https URL with no credential, query
+	// or fragment, and the branch, "" for the remote's default. Both are "" when the link cannot tell.
+	Remote string `json:",omitempty"`
+	Branch string `json:",omitempty"`
 }
 
 // Worktree is the worktree of one instance in a git workspace.

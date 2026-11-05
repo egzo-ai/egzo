@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/volume"
 
+	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/files"
 	"github.com/egzo-ai/egzo/internal/hublink"
@@ -575,13 +576,47 @@ func (d *Engine) Workspaces(ctx context.Context, project string) ([]hublink.Work
 			ws.Kind = hublink.WorkspaceGit
 		}
 	}
+	remotes := d.remotes(ctx, project)
 	list := make([]hublink.Workspace, 0, len(byName))
 	for _, ws := range byName {
 		sort.Slice(ws.Worktrees, func(i, j int) bool { return ws.Worktrees[i].Instance < ws.Worktrees[j].Instance })
+		if git, ok := remotes[ws.Name]; ok && ws.Kind == hublink.WorkspaceGit {
+			ws.Remote, ws.Branch = git.URL, git.Branch
+		}
 		list = append(list, *ws)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 	return list, nil
+}
+
+// remotes are where the git workspaces clone from, read from the templates `up` last published, in one question to control: a base
+// clone is made only for a workspace an agent lists. A project whose control does not answer has none: the list does not wait on them.
+func (d *Engine) remotes(ctx context.Context, project string) map[string]config.Git {
+	published, err := stack.ReadPublished(ctx, d.client, project)
+	if err != nil {
+		return nil
+	}
+	return remotesOf(published)
+}
+
+// remotesOf reads the git sources of the published templates. A URL is kept only as an https URL with a host, and without what could
+// carry a secret: credentials, a query, a fragment. The project's config refuses credentials already; this does not count on it.
+func remotesOf(published stack.Published) map[string]config.Git {
+	remotes := map[string]config.Git{}
+	for _, template := range published.Templates {
+		for name, ws := range template.Workspaces {
+			if ws.Git == nil {
+				continue
+			}
+			u, err := url.Parse(ws.Git.URL)
+			if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
+				continue
+			}
+			u.User, u.RawQuery, u.ForceQuery, u.Fragment, u.RawFragment = nil, "", false, "", ""
+			remotes[name] = config.Git{URL: u.String(), Branch: ws.Git.Branch}
+		}
+	}
+	return remotes
 }
 
 // Files carries one connection to the file server of a workspace volume: a directory's, or the worktree of instance. It makes the volume's
