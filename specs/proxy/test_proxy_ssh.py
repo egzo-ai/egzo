@@ -37,15 +37,16 @@ def profiles(server):
 def sandbox(shared_project, engine, egzo, ssh_server):
     shared_project.env["PROD_SSH_KEY"] = ssh_server.private_key
     shared_project.env["OTHER_SSH_KEY"] = ssh_server.keygen()[0]  # a key the server does not know
-    image = engine.ssh_agent_image(egzo.binary)
-    egress = profiles(ssh_server)
-    shared_project.up(
-        spec(
-            egress=egress,
-            agents={name: agent(harness="custom", image=image, egress=name, env={"FAKE_TUI": "cat", "HOME": HOME}) for name in egress},
-        )
-    )
+    shared_project.up(sandbox_document(engine.ssh_agent_image(egzo.binary), profiles(ssh_server)))
     return shared_project
+
+
+def sandbox_document(image, egress):
+    """One template per profile, named after it."""
+    return spec(
+        egress=egress,
+        agents={name: agent(harness="custom", image=image, egress=name, env={"FAKE_TUI": "cat", "HOME": HOME}) for name in egress},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -253,3 +254,29 @@ def test_up_refuses_a_key_it_cannot_use_and_never_prints_it(live_project, engine
     assert result.returncode != 0
     assert "env/PROD_SSH_KEY" in result.stderr and "not usable as an ssh key" in result.stderr
     assert "not-really-a-key-material" not in result.stdout + result.stderr
+
+
+def test_a_server_added_to_the_profile_is_reached_by_a_running_agent_without_a_restart_and_a_removed_one_leaves_its_config(sandbox, engine, egzo, ssh_server, ssh_of):
+    a = ssh_of()
+    before = json.loads(engine.run("inspect", a.container).stdout)[0]["Id"]
+    assert a.inside(f"grep -c '^Host staging' {HOME}/.ssh/config").stdout.strip() == "0"
+
+    image = engine.ssh_agent_image(egzo.binary)
+    wider = profiles(ssh_server)
+    wider["ops"]["ssh"]["staging"] = dict(wider["ops"]["ssh"]["prod"])
+    sandbox.write(sandbox_document(image, wider))
+    try:
+        sandbox.ok("project up", timeout=300)
+        assert json.loads(engine.run("inspect", a.container).stdout)[0]["Id"] == before and sandbox.ps()[a.name]["STALE"] == ""
+        # `egzo agent run` follows what the proxy publishes and rewrites its block of ~/.ssh/config
+        seen = a.inside(f"for i in $(seq 300); do grep -q '^Host staging' {HOME}/.ssh/config && exit 0; sleep 0.1; done; exit 1")
+        assert seen.returncode == 0, "the new server is in the running agent's ssh config"
+        ran = a.ssh("staging", "echo", "reached")
+        assert ran.returncode == 0 and ran.stdout.strip() == "reached", ran.stderr
+    finally:
+        sandbox.write(sandbox_document(image, profiles(ssh_server)))
+        sandbox.ok("project up", timeout=300)
+    gone = a.inside(f"for i in $(seq 300); do grep -q '^Host staging' {HOME}/.ssh/config || exit 0; sleep 0.1; done; exit 1")
+    assert gone.returncode == 0, "a removed server leaves the config"
+    assert a.inside(f"grep -c '^Host prod' {HOME}/.ssh/config").stdout.strip() == "1", "the others stay"
+

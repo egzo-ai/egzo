@@ -29,18 +29,10 @@ func signInEnv(ctx context.Context, c *engine.Client, project string, view *conf
 		return nil
 	}
 	signsIn, ok := integration.(harness.SignsIn)
-	profile := view.Egress[agent.Egress]
-	if !ok || profile == nil {
+	if !ok {
 		return nil
 	}
-	var services []string
-	for name, service := range profile.Services {
-		if host := signsIn.SignInHost(); service.OAuth() && (host == "" || slices.Contains(service.Hosts, host)) {
-			services = append(services, name)
-		}
-	}
-	sort.Strings(services)
-	for _, service := range services {
+	for _, service := range signInServices(view.Egress[agent.Egress], agent.Harness) {
 		result, err := c.Exec(ctx, project+"-proxy-1", []string{"/egzo", "proxy", "request", "GET", "/oauth/" + service + "/stand-ins"}, nil)
 		if err != nil || result.ExitCode != 0 {
 			continue
@@ -53,4 +45,25 @@ func signInEnv(ctx context.Context, c *engine.Client, project string, view *conf
 			Refreshed: standIns.Refreshed})
 	}
 	return nil
+}
+
+// signInServices lists, sorted, the OAuth services of a profile whose sign-in a harness's client keeps itself (harness.SignsIn):
+// the ones that cover its sign-in host, or any when it names none. A new instance is given the stand-ins of the first one signed in.
+func signInServices(profile *config.ResolvedProfile, harnessName string) []string {
+	integration, ok := harness.For(harnessName)
+	if !ok || profile == nil {
+		return nil
+	}
+	signsIn, ok := integration.(harness.SignsIn)
+	if !ok {
+		return nil
+	}
+	var services []string
+	for name, service := range profile.Services {
+		if host := signsIn.SignInHost(); service.OAuth() && (host == "" || slices.Contains(service.Hosts, host)) {
+			services = append(services, name)
+		}
+	}
+	sort.Strings(services)
+	return services
 }

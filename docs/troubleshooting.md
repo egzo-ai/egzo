@@ -7,7 +7,7 @@ Start with `egzo system check` ([installing](install.md)), then `egzo ps`, then 
 | message or symptom | what to do |
 |---|---|
 | a secret is missing | `egzo project check`; with `pass`, check that `pass show NAME` works in your shell; with `env`, export the variable. Secrets are read before anything is created, so nothing is half-made. |
-| "stale" instances block `project up` | their template changed. `egzo agent rm --stale` (or `egzo agent rm NAME`), `egzo project up`, spawn again. `egzo project up --dry-run` shows the change. |
+| "stale" instances block `project up` | their template changed (an egress change does only when it changes what the container holds, such as a placeholder variable). `egzo agent rm --stale` (or `egzo agent rm NAME`), `egzo project up`, spawn again. `egzo project up --dry-run` shows the change. |
 | the name is taken (exit 17) | `egzo agent rm NAME`, or pick another. A leftover network or home volume counts as an instance; `agent rm` clears it. |
 | a project of that name exists from another directory | rename with `-p`, `EGZO_PROJECT_NAME` or `name:`, or `egzo project down` the other. |
 | image cannot be pulled | the error names the image and the `image:` override. `make images`, or set `EGZO_HARNESS_PREFIX` ([installing](install.md), [images](images.md)). |

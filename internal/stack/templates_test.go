@@ -88,7 +88,6 @@ func TestATemplatesHashFollowsWhatMakesTheInstanceAndNothingElse(t *testing.T) {
 			p.Agents["coder"] = a
 		},
 		"model":   func(p *config.Resolved) { a := p.Agents["coder"]; a.Model = "m"; p.Agents["coder"] = a },
-		"profile": func(p *config.Resolved) { p.Egress["default"].Allow = append(p.Egress["default"].Allow, "x.example") },
 		"workspace": func(p *config.Resolved) {
 			p.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}}
 		},
@@ -111,6 +110,65 @@ func TestATemplatesHashFollowsWhatMakesTheInstanceAndNothingElse(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "p.md"), []byte("be verbose"), 0o644)
 	if publish(t, project, dir).Templates["coder"].Hash == base {
 		t.Error("editing the prompt file did not change the hash")
+	}
+}
+
+func TestOfTheEgressProfileOnlyWhatTheAgentContainerGetsMovesTheHash(t *testing.T) {
+	secret := func(ref string) *config.Credential { return &config.Credential{Method: config.MethodSecret, Secret: ref} }
+	project, dir := templateProject(t)
+	base := publish(t, project, dir).Templates["coder"].Hash
+	hashAfter := func(change func(*config.ResolvedProfile)) string {
+		other, otherDir := templateProject(t)
+		change(other.Egress["default"])
+		return publish(t, other, otherDir).Templates["coder"].Hash
+	}
+	service := func(p *config.ResolvedProfile, name string, s *config.ResolvedService) {
+		if p.Services == nil {
+			p.Services = map[string]*config.ResolvedService{}
+		}
+		p.Services[name] = s
+	}
+	// the proxy's policy: up reloads it, the instances keep running
+	for name, change := range map[string]func(*config.ResolvedProfile){
+		"an allowed host": func(p *config.ResolvedProfile) { p.Allow = append(p.Allow, "x.example") },
+		"an inspected service": func(p *config.ResolvedProfile) {
+			service(p, "docs", &config.ResolvedService{Hosts: []string{"docs.example"}, Inspect: true})
+		},
+		"an injecting service": func(p *config.ResolvedProfile) {
+			service(p, "github", &config.ResolvedService{Hosts: []string{"github.com"}, Inject: &config.Inject{Header: "Authorization"}, Credential: secret("env/GH")})
+		},
+		"an ssh server": func(p *config.ResolvedProfile) {
+			p.SSH = map[string]*config.ResolvedSSH{"prod": {Host: "prod.example", Port: 22, User: "ops", Key: "env/KEY"}}
+		},
+	} {
+		if hashAfter(change) != base {
+			t.Errorf("%s made the instances stale: it is the proxy's", name)
+		}
+	}
+	// what goes into the agent container: only a new one has it
+	for name, change := range map[string]func(*config.ResolvedProfile){
+		"a placeholder variable": func(p *config.ResolvedProfile) {
+			service(p, "site", &config.ResolvedService{Hosts: []string{"site.example"}, Placeholder: "SITE_PASSWORD", Credential: secret("env/SITE")})
+		},
+		"an Anthropic subscription token instead of nothing": func(p *config.ResolvedProfile) {
+			service(p, "anthropic-oauth", &config.ResolvedService{Hosts: []string{"api.anthropic.com"}, Inject: &config.Inject{Header: "Authorization", Value: "Bearer {secret}"}, Credential: secret("env/TOKEN")})
+		},
+		"a Claude sign-in": func(p *config.ResolvedProfile) {
+			service(p, "claude", &config.ResolvedService{Hosts: []string{"api.anthropic.com"}, Credential: &config.Credential{Method: config.MethodOAuth}})
+		},
+	} {
+		if hashAfter(change) == base {
+			t.Errorf("%s did not make the instances stale", name)
+		}
+	}
+	// a placeholder's text belongs to its secret: another secret behind the variable is another container
+	withSite := func(ref string) func(*config.ResolvedProfile) {
+		return func(p *config.ResolvedProfile) {
+			service(p, "site", &config.ResolvedService{Hosts: []string{"site.example"}, Placeholder: "SITE_PASSWORD", Credential: secret(ref)})
+		}
+	}
+	if hashAfter(withSite("env/SITE")) == hashAfter(withSite("env/OTHER")) {
+		t.Error("the secret behind a placeholder variable does not count")
 	}
 }
 

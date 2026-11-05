@@ -126,3 +126,25 @@ def test_the_bindings_of_instances_to_their_profile_follow_spawn_rm_and_the_rest
     p.ok("project up --recreate")
     assert probe.container("proxy").name == name and ca() == before
     assert probe.status(second, "example.com").stdout == "200"
+
+
+def test_a_changed_profile_reaches_a_running_instance_at_the_next_up_without_recreating_it(sandbox, probe, engine):
+    allow = sandbox.spawn("allow")
+    before = probe.container(allow).raw["Id"]
+    refused = probe.status(allow, "example.org")
+    assert refused.returncode != 0 and "403" in refused.stderr
+
+    wider = document(engine.agent_image(), "allow", "open", "none", "inspect", "wild", "wildsub")
+    wider["egress"]["allow"] = {"allow": ["example.com", "example.org"]}
+    sandbox.write(wider)
+    try:
+        sandbox.ok("project up", timeout=300)
+        assert probe.container(allow).raw["Id"] == before, "the instance keeps running: the policy is the proxy's"
+        assert sandbox.ps()[allow]["STALE"] == ""
+        assert probe.status(allow, "example.org").stdout == "200", "the newly allowed host is reached at once"
+    finally:
+        sandbox.write(document(engine.agent_image(), "allow", "open", "none", "inspect", "wild", "wildsub"))
+        sandbox.ok("project up", timeout=300)
+    narrowed = probe.status(allow, "example.org")
+    assert narrowed.returncode != 0 and "403" in narrowed.stderr, "and taking it back closes it again"
+

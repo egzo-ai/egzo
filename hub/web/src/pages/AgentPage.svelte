@@ -85,7 +85,7 @@
       {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />{/if}
       {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
       {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting">waiting for an answer</span>{/if}
-      {#if a.stale}<span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}
+      {#if a.stale}<span class="pill" data-s="warn" title="its template changed in a way the running container cannot follow (an egress change only reloads the proxy): remove it and spawn again">stale</span>{/if}
       {#if a.denied}<a class="pill" data-s="error" href={href.agent(project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}
       <span class="grow"></span>
       <span class="btn-group">
