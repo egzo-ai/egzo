@@ -71,20 +71,26 @@ func FileHelper(ctx context.Context, c *engine.Client, env func(context.Context)
 		return "", fmt.Errorf("the volume %s is not a workspace of project %s", volume, project)
 	}
 	name := fileHelperName(volume)
-	for attempt := 0; ; attempt++ {
-		id, err := runningHelper(ctx, c, name)
+	deadline := time.Now().Add(filesStarting)
+	for {
+		id, starting, err := runningHelper(ctx, c, name)
 		if err != nil || id != "" {
 			return id, err
 		}
-		prep, err := env(ctx)
-		if err != nil {
-			return "", err
+		if !starting {
+			prep, err := env(ctx)
+			if err != nil {
+				return "", err
+			}
+			id, err = startFileHelper(ctx, c, prep, project, target, volume, name)
+			if err == nil || !cerrdefs.IsConflict(err) && !cerrdefs.IsNotFound(err) {
+				return id, err
+			}
+			// another connection made it at the same moment, or the last one is still removing itself
 		}
-		id, err = startFileHelper(ctx, c, prep, project, target, volume, name)
-		if err == nil || attempt == 4 || !cerrdefs.IsConflict(err) && !cerrdefs.IsNotFound(err) {
-			return id, err
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("the file helper of %s did not start", volume)
 		}
-		// another connection made it at the same moment, or the last one is still removing itself
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -93,21 +99,32 @@ func FileHelper(ctx context.Context, c *engine.Client, env func(context.Context)
 	}
 }
 
-// runningHelper returns the id of the helper if it runs. One that does not (it exited and is being removed, or was stopped) is removed.
-func runningHelper(ctx context.Context, c *engine.Client, name string) (string, error) {
+// filesStarting is how long a helper that another connection made may take to start before it is taken for one that never will.
+const filesStarting = 15 * time.Second
+
+// runningHelper returns the id of the helper if it runs. One that another connection made and is starting is waited for: starting says
+// so. One that does not run otherwise (it exited and is being removed, it was stopped, or it was made and never started) is removed.
+func runningHelper(ctx context.Context, c *engine.Client, name string) (id string, starting bool, err error) {
 	inspected, err := c.API.ContainerInspect(ctx, name)
 	switch {
 	case cerrdefs.IsNotFound(err):
-		return "", nil
+		return "", false, nil
 	case err != nil:
-		return "", err
-	case inspected.State != nil && inspected.State.Running:
-		return inspected.ID, nil
+		return "", false, err
+	case inspected.State == nil:
+	case inspected.State.Running:
+		return inspected.ID, false, nil
+	case inspected.State.Status == container.StateRemoving:
+		return "", true, nil
+	case inspected.State.Status == container.StateCreated:
+		if made, err := time.Parse(time.RFC3339Nano, inspected.Created); err == nil && time.Since(made) < filesStarting {
+			return "", true, nil
+		}
 	}
 	if err := c.API.ContainerRemove(ctx, inspected.ID, container.RemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
-		return "", err
+		return "", false, err
 	}
-	return "", nil
+	return "", false, nil
 }
 
 func startFileHelper(ctx context.Context, c *engine.Client, env PrepEnv, project string, target FilesTarget, volume, name string) (string, error) {
