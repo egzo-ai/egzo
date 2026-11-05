@@ -20,20 +20,16 @@ func resolve(t *testing.T, dir, yaml string) (*Resolved, []string, error) {
 		t.Fatalf("Parse: %v", err)
 	}
 	if file.SecretKey == "" {
-		if file.Vaults == nil {
-			file.Vaults = map[string]Vault{}
-		}
-		file.Vaults["testkey"] = Vault{Backend: "env"}
-		file.SecretKey = "testkey/KEY"
+		file.SecretKey = "env/KEY"
 	}
 	return Resolve(file, "proj", dir)
 }
 
 func TestTheSecretKeyIsRequiredAndTheErrorSaysHowToMakeOneInTheFilesVault(t *testing.T) {
 	cases := map[string]string{
-		"vaults:\n  a: { backend: env }\n  b: { backend: pass }\n": "openssl rand -hex 32 | pass insert --multiline egzo/proj-key\n  secret_key: b/egzo/proj-key",
-		"vaults:\n  a: { backend: env }\n":                         "export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)\n  secret_key: a/EGZO_PROJECT_SECRET_KEY",
-		"{}\n":                                                     "main: { backend: pass }",
+		"vaults:\n  b: { backend: pass }\negress: { default: { services: { anthropic: env/K } } }\n": "openssl rand -hex 32 | pass insert --multiline egzo/proj-key\n  secret_key: b/egzo/proj-key",
+		"egress: { default: { services: { anthropic: env/K } } }\n":                                  "export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)\n  secret_key: env/EGZO_PROJECT_SECRET_KEY",
+		"{}\n": "main: { backend: pass }",
 	}
 	for yaml, want := range cases {
 		file, err := Parse([]byte(yaml))
@@ -205,21 +201,20 @@ func TestResolveVaults(t *testing.T) {
 	t.Run("a reference declares its secret; the vault lists them sorted", func(t *testing.T) {
 		resolved, _ := mustResolve(t, t.TempDir(), `
 vaults:
-  main: { backend: env }
   spare: { backend: pass }
 egress:
   default:
     services:
-      b: { hosts: [b.example.com], inject: { header: X-Key }, credential: main/B }
-      a: { hosts: [a.example.com], inject: { header: X-Key }, credential: main/A }
+      b: { hosts: [b.example.com], inject: { header: X-Key }, credential: env/B }
+      a: { hosts: [a.example.com], inject: { header: X-Key }, credential: env/A }
   other:
     services:
-      again: { hosts: [c.example.com], inject: { header: X-Key }, credential: main/A }
+      again: { hosts: [c.example.com], inject: { header: X-Key }, credential: env/A }
 `)
-		if want := (ResolvedVault{Backend: "env", Secrets: []string{"A", "B"}}); !reflect.DeepEqual(resolved.Vaults["main"], want) {
-			t.Errorf("vault = %v, want %v", resolved.Vaults["main"], want)
+		if want := (ResolvedVault{Backend: "env", Secrets: []string{"A", "B", "KEY"}}); !reflect.DeepEqual(resolved.Vaults["env"], want) {
+			t.Errorf("vault = %v, want %v", resolved.Vaults["env"], want)
 		}
-		if want := (SecretRef{Vault: "main", Name: "A", Backend: "env"}); resolved.Secrets["main/A"] != want || len(resolved.Secrets) != 3 {
+		if want := (SecretRef{Vault: "env", Name: "A", Backend: "env"}); resolved.Secrets["env/A"] != want || len(resolved.Secrets) != 3 {
 			t.Errorf("secrets = %v", resolved.Secrets)
 		}
 		if want := []string{`warning: vault "spare": nothing refers to a secret in it`}; !reflect.DeepEqual(resolved.UnusedVaults(), want) {
@@ -232,8 +227,10 @@ egress:
 	}{
 		{"slash in vault name", "vaults:\n  a/b: { backend: pass }\n", "names cannot contain '/'"},
 		{"no backend", "vaults:\n  v: {}\n", "backend is required"},
-		{"unknown backend", "vaults:\n  v: { backend: vault }\n", `unknown backend "vault" (backends: env, pass)`},
-		{"file is not a backend", "vaults:\n  v: { backend: file }\n", `unknown backend "file" (backends: env, pass)`},
+		{"unknown backend", "vaults:\n  v: { backend: vault }\n", `unknown backend "vault" (backends: pass)`},
+		{"file is not a backend", "vaults:\n  v: { backend: file }\n", `unknown backend "file" (backends: pass)`},
+		{"env is a reserved vault name", "vaults:\n  env: { backend: pass }\n", `vault "env": the name is reserved`},
+		{"no declared vault has the env backend", "vaults:\n  v: { backend: env }\n", `vault "v": there is no env backend to declare`},
 	}
 	for _, c := range vaultCases {
 		t.Run(c.name, func(t *testing.T) { wantProblems(t, t.TempDir(), c.yaml, c.want) })
@@ -257,14 +254,18 @@ egress:
 	}
 	for _, c := range nameCases {
 		t.Run(c.name, func(t *testing.T) {
-			yaml := "vaults:\n  v: { backend: " + c.backend + " }\negress:\n  default:\n    services:\n      s: { hosts: [s.example.com], inject: { header: X-Key }, credential: \"v/" + c.secret + "\" }\n"
+			vaults, vault := "vaults:\n  v: { backend: "+c.backend+" }\n", "v"
+			if c.backend == EnvBackend {
+				vaults, vault = "", EnvVault
+			}
+			yaml := vaults + "egress:\n  default:\n    services:\n      s: { hosts: [s.example.com], inject: { header: X-Key }, credential: \"" + vault + "/" + c.secret + "\" }\n"
 			wantProblems(t, t.TempDir(), yaml, c.want)
 		})
 	}
 
 	t.Run("a reference to an unknown vault names the vaults that exist", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), "vaults:\n  a: { backend: env }\n  b: { backend: env }\negress:\n  default:\n    services:\n      anthropic: ghost/K\n",
-			`names unknown vault "ghost" (vaults: a, b, testkey)`)
+		wantProblems(t, t.TempDir(), "vaults:\n  a: { backend: pass }\n  b: { backend: pass }\negress:\n  default:\n    services:\n      anthropic: ghost/K\n",
+			`names unknown vault "ghost" (vaults: env (the environment), a, b)`)
 	})
 }
 

@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"reflect"
 	"slices"
@@ -375,10 +376,13 @@ func declareSecret(file *File, secrets map[string]SecretRef, ref string) (proble
 		return fmt.Sprintf("invalid secret reference %q (want <vault>/<secret>)", ref), false
 	}
 	vault, known := file.Vaults[vaultName]
+	if vaultName == EnvVault {
+		vault, known = Vault{Backend: EnvBackend}, true
+	}
 	if !known {
 		return fmt.Sprintf("secret reference %q names unknown vault %q (%s)", ref, vaultName, vaultList(file.Vaults)), false
 	}
-	if !slices.Contains(vaultBackends, vault.Backend) {
+	if vaultName != EnvVault && !slices.Contains(vaultBackends, vault.Backend) {
 		return "", false
 	}
 	if reason := secretNameProblem(vault.Backend, secret); reason != "" {
@@ -388,16 +392,14 @@ func declareSecret(file *File, secrets map[string]SecretRef, ref string) (proble
 	return "", true
 }
 
-// vaultList names the declared vaults, for an error about a reference to another one.
+// vaultList names the vaults, for an error about a reference to another one: the built-in env first, then the declared ones.
 func vaultList(vaults map[string]Vault) string {
-	if len(vaults) == 0 {
-		return "no vault is declared under vaults:"
+	names := []string{EnvVault + " (the environment)"}
+	for _, name := range slices.Sorted(maps.Keys(vaults)) {
+		if name != EnvVault {
+			names = append(names, name)
+		}
 	}
-	names := make([]string, 0, len(vaults))
-	for name := range vaults {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 	return "vaults: " + strings.Join(names, ", ")
 }
 

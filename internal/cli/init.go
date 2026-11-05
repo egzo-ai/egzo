@@ -77,7 +77,7 @@ func keepSecretKey(dir string, cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 	keep := "keep it: another key cannot open what egzo sealed with it"
 	manual := func(why string) error {
-		fmt.Fprintf(out, "%s: make the project's secret key, and %s\n  %s\n", why, keep, config.SecretKeyCommand("env", scaffoldSecretKey))
+		fmt.Fprintf(out, "%s: make the project's secret key, and %s\n  %s\n", why, keep, config.SecretKeyCommand(config.EnvBackend, scaffoldSecretKey))
 		return nil
 	}
 	if _, ok := os.LookupEnv(scaffoldSecretKey); ok {
@@ -158,7 +158,7 @@ var scaffoldEgress = map[string]string{
 `,
 	"opencode": `    allow: [models.opencode.ai]
     services:
-      anthropic: main/ANTHROPIC_API_KEY
+      anthropic: env/ANTHROPIC_API_KEY
 `,
 }
 
@@ -167,11 +167,7 @@ const scaffoldSecretKey = "EGZO_PROJECT_SECRET_KEY"
 
 func scaffold(harness, repoURL string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `secret_key: main/%s     # seals what egzo keeps at rest
-
-vaults:
-  main:
-    backend: env
+	fmt.Fprintf(&b, `secret_key: env/%s     # seals what egzo keeps at rest; env/ is the environment or .env
 
 `, scaffoldSecretKey)
 	if profile, known := scaffoldEgress[harness]; known {

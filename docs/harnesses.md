@@ -43,8 +43,8 @@ egress:
   default:
     services:
       claude: { credential: { method: oauth } }   # a Claude subscription: sign in with /login
-      # anthropic-oauth: main/CLAUDE_TOKEN          # or a `claude setup-token` token
-      # anthropic: main/ANTHROPIC_API_KEY           # or an API key
+      # anthropic-oauth: env/CLAUDE_TOKEN           # or a `claude setup-token` token
+      # anthropic: env/ANTHROPIC_API_KEY            # or an API key
 
 agents:
   coder:
@@ -78,7 +78,7 @@ egress:
   default:
     allow: [models.opencode.ai]
     services:
-      anthropic: main/ANTHROPIC_API_KEY     # or whichever provider you configure
+      anthropic: env/ANTHROPIC_API_KEY      # or whichever provider you configure
 
 agents:
   reviewer:

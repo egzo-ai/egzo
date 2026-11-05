@@ -339,7 +339,9 @@ func Resolve(file *File, name, dir string) (*Resolved, []string, error) {
 		resolved.Vaults[vault] = ResolvedVault{Backend: definition.Backend, Secrets: []string{}}
 	}
 	for _, secret := range secrets {
+		// The built-in env vault is listed only when something refers to it.
 		vault := resolved.Vaults[secret.Vault]
+		vault.Backend = secret.Backend
 		vault.Secrets = append(vault.Secrets, secret.Name)
 		resolved.Vaults[secret.Vault] = vault
 	}
@@ -538,7 +540,7 @@ func secretKeyHelp(vaults map[string]ResolvedVault, project string) string {
 	}
 	for _, name := range names {
 		if vaults[name].Backend == "env" {
-			return fmt.Sprintf("Make one, keep it (another key cannot open what the first sealed) and name it:\n  export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)\n  secret_key: %s/EGZO_PROJECT_SECRET_KEY", name)
+			return "Make one, keep it (another key cannot open what the first sealed) and name it:\n  export EGZO_PROJECT_SECRET_KEY=$(openssl rand -hex 32)\n  secret_key: env/EGZO_PROJECT_SECRET_KEY"
 		}
 	}
 	return fmt.Sprintf("Declare a vault and name a key in it:\n  vaults:\n    main: { backend: pass }\n  secret_key: main/egzo/%s-key\nthen make the key:\n  openssl rand -hex 32 | pass insert --multiline egzo/%s-key", project, project)
@@ -546,7 +548,7 @@ func secretKeyHelp(vaults map[string]ResolvedVault, project string) string {
 
 // SecretKeyCommand is the command that makes the secret key ref names, for `project init` to print.
 func SecretKeyCommand(backend, name string) string {
-	if backend == "env" {
+	if backend == EnvBackend {
 		return fmt.Sprintf("export %s=$(openssl rand -hex 32)", name)
 	}
 	return fmt.Sprintf("openssl rand -hex 32 | pass insert --multiline %s", name)
@@ -639,8 +641,15 @@ func ReadUpstreamCA(path string) ([]byte, error) {
 	return data, nil
 }
 
-// vaultBackends are the backends that exist.
-var vaultBackends = []string{"env", "pass"}
+// EnvVault is the built-in vault every project has and no file declares: env/NAME is the environment variable NAME, or
+// the one of the project's .env. Its backend, EnvBackend, is that vault's alone: no declared vault can use it.
+const (
+	EnvVault   = "env"
+	EnvBackend = "env"
+)
+
+// vaultBackends are the backends a declared vault can have.
+var vaultBackends = []string{"pass"}
 
 func checkVaults(vaults map[string]Vault, p *problems) {
 	names := make([]string, 0, len(vaults))
@@ -654,6 +663,12 @@ func checkVaults(vaults map[string]Vault, p *problems) {
 			p.addf("vault %q: names cannot contain '/'", name)
 		}
 		switch {
+		case name == EnvVault:
+			p.addf("vault %q: the name is reserved: env is the built-in vault of the environment, refer to a variable as env/NAME without declaring it", name)
+			continue
+		case vault.Backend == EnvBackend:
+			p.addf("vault %q: there is no env backend to declare: the environment is the built-in vault env, refer to a variable as env/NAME", name)
+			continue
 		case vault.Backend == "":
 			p.addf("vault %q: backend is required (backends: %s)", name, strings.Join(vaultBackends, ", "))
 			continue
@@ -666,7 +681,7 @@ func checkVaults(vaults map[string]Vault, p *problems) {
 
 // secretNameProblem says why name is not a secret name for the backend, or returns "".
 func secretNameProblem(backend, name string) string {
-	if backend == "env" {
+	if backend == EnvBackend {
 		if !envName.MatchString(name) {
 			return "is not an environment variable name (letters, digits and '_', not starting with a digit)"
 		}

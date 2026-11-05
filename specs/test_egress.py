@@ -87,7 +87,7 @@ def test_an_allowed_host_is_a_host_name_or_address(project, host):
 
 def test_the_anthropic_oauth_service_is_built_in(project):
     """A Claude subscription token (`claude setup-token`) is not an API key: api.anthropic.com takes it as a bearer token."""
-    profile_ = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}
+    profile_ = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "env/ANTHROPIC_API_KEY"}}
     service = profile(project.resolved(spec(egress={"default": profile_})), "default")["services"]["anthropic-oauth"]
     assert service["hosts"] == ["api.anthropic.com"]
     assert service["inject"] == {"header": "Authorization", "value": "Bearer {secret}"}
@@ -96,19 +96,19 @@ def test_the_anthropic_oauth_service_is_built_in(project):
 def test_the_opencode_service_is_built_in(project):
     """The key of an OpenCode Go or Console workspace (a service account's) is a bearer token for opencode.ai, which is also the
     website: it goes only to the paths OpenCode sends it to, the model calls and the workspace's config and web search."""
-    profile_ = {"allow": ["models.opencode.ai"], "services": {"opencode": "main/ANTHROPIC_API_KEY"}}
+    profile_ = {"allow": ["models.opencode.ai"], "services": {"opencode": "env/ANTHROPIC_API_KEY"}}
     service = profile(project.resolved(spec(egress={"default": profile_})), "default")["services"]["opencode"]
     assert service["hosts"] == ["opencode.ai"]
     assert service["paths"] == ["/inference/", "/zen/", "/console/api/v2/config", "/console/api/websearch"]
     assert service["inject"] == {"header": "Authorization", "value": "Bearer {secret}"}
-    assert service["credential"]["secret"] == "main/ANTHROPIC_API_KEY"
+    assert service["credential"]["secret"] == "env/ANTHROPIC_API_KEY"
 
 
 def test_the_anthropic_service_is_built_in(project):
     service = profile(project.resolved(spec(egress={"default": anthropic_profile()})), "default")["services"]["anthropic"]
     assert service["hosts"] == ["api.anthropic.com"]
     assert service["inject"]["header"] == "x-api-key"
-    assert service["credential"]["secret"] == "main/ANTHROPIC_API_KEY"
+    assert service["credential"]["secret"] == "env/ANTHROPIC_API_KEY"
 
 
 def test_the_claude_service_is_built_in_as_a_sign_in(project):
@@ -123,13 +123,13 @@ def test_the_claude_service_is_built_in_as_a_sign_in(project):
 
 def test_the_openai_service_is_built_in(project):
     """An OpenAI API key is a bearer token for api.openai.com: what Codex and OpenCode use with an API key."""
-    resolved = project.resolved(spec(egress={"default": {"services": {"openai": "main/DEPLOY_TOKEN"}}}))
+    resolved = project.resolved(spec(egress={"default": {"services": {"openai": "env/DEPLOY_TOKEN"}}}))
     service = profile(resolved, "default")["services"]["openai"]
     assert service["hosts"] == ["api.openai.com"]
     assert service["inject"] == {"header": "Authorization", "value": "Bearer {secret}"}
 
 
-@pytest.mark.parametrize("services, warns", [({}, True), ({"openai": "main/DEPLOY_TOKEN"}, False), ({"chatgpt": {"credential": {"method": "oauth"}}}, False)])
+@pytest.mark.parametrize("services, warns", [({}, True), ({"openai": "env/DEPLOY_TOKEN"}, False), ({"chatgpt": {"credential": {"method": "oauth"}}}, False)])
 def test_codex_needs_chatgpt_or_the_openai_api(project, services, warns):
     result = project.config(spec(egress={"default": {"services": services}}, agents={"coder": agent(harness="codex")}))
     assert result.returncode == 0, result.stderr
@@ -137,15 +137,15 @@ def test_codex_needs_chatgpt_or_the_openai_api(project, services, warns):
 
 
 def test_the_github_service_is_built_in(project):
-    resolved = project.resolved(spec(egress={"default": {"services": {"github": "main/GITHUB_TOKEN"}}}))
+    resolved = project.resolved(spec(egress={"default": {"services": {"github": "env/GITHUB_TOKEN"}}}))
     service = profile(resolved, "default")["services"]["github"]
     assert set(service["hosts"]) == {"github.com", "api.github.com"}
-    assert service["credential"]["secret"] == "main/GITHUB_TOKEN"
+    assert service["credential"]["secret"] == "env/GITHUB_TOKEN"
 
 
 def test_the_github_service_sends_the_token_as_basic_authentication(project):
     """git over HTTPS refuses `Authorization: Bearer`; GitHub takes the token as the password of a Basic credential."""
-    resolved = project.resolved(spec(egress={"default": {"services": {"github": "main/GITHUB_TOKEN"}}}))
+    resolved = project.resolved(spec(egress={"default": {"services": {"github": "env/GITHUB_TOKEN"}}}))
     service = profile(resolved, "default")["services"]["github"]
     assert service["inject"] == {"header": "Authorization", "basic_user": "x-access-token"}
 
@@ -154,14 +154,14 @@ def test_a_custom_service_can_send_its_secret_as_basic_authentication(project):
     """The built-in github service is nothing but this: a custom service can say the same."""
     basic = {"header": "Authorization", "basic_user": "x-access-token"}
     resolved = project.resolved(
-        spec(egress={"default": {"services": {"git-host": deploy_api(inject=basic, credential="main/DEPLOY_TOKEN")}}})
+        spec(egress={"default": {"services": {"git-host": deploy_api(inject=basic, credential="env/DEPLOY_TOKEN")}}})
     )
     assert profile(resolved, "default")["services"]["git-host"]["inject"] == basic
 
 
 def test_basic_authentication_and_a_value_template_are_exclusive(project):
     inject = {"header": "Authorization", "value": "Bearer {secret}", "basic_user": "x-access-token"}
-    result = project.config(spec(egress={"default": {"services": {"git-host": deploy_api(inject=inject, credential="main/DEPLOY_TOKEN")}}}))
+    result = project.config(spec(egress={"default": {"services": {"git-host": deploy_api(inject=inject, credential="env/DEPLOY_TOKEN")}}}))
     assert result.returncode != 0
     assert "basic_user" in result.stderr and "value" in result.stderr
 
@@ -172,33 +172,33 @@ def test_basic_authentication_and_a_value_template_are_exclusive(project):
 def test_a_service_can_be_limited_to_path_prefixes(project):
     """A host that is also a website or a console gets the secret only on the paths of its API."""
     resolved = project.resolved(
-        spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN", paths=["/api/v1/", "/upload"])}}})
+        spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN", paths=["/api/v1/", "/upload"])}}})
     )
     assert profile(resolved, "default")["services"]["deploy-api"]["paths"] == ["/api/v1/", "/upload"]
 
 
 def test_a_service_without_paths_injects_on_every_path(project):
-    resolved = project.resolved(spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN")}}}))
+    resolved = project.resolved(spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN")}}}))
     assert "paths" not in profile(resolved, "default")["services"]["deploy-api"]
 
 
 @pytest.mark.parametrize("prefix", ["api/v1/", "", "/api/../admin/", "/api/./v1", "/api?x=1", "/api#top", "/api/%2e%2e/", "/api\\v1", "/api v1", "https://example.com/api/"])
 def test_a_path_prefix_is_a_plain_absolute_path(project, prefix):
-    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN", paths=[prefix])}}}))
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN", paths=[prefix])}}}))
     assert result.returncode != 0
     assert "deploy-api" in result.stderr and "path" in result.stderr
 
 
 def test_paths_cannot_be_empty(project):
     """No paths at all would inject nowhere: leave the key out to inject on every path."""
-    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN", paths=[])}}}))
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN", paths=[])}}}))
     assert result.returncode != 0
     assert "paths" in result.stderr
 
 
 @pytest.mark.parametrize("service", [
     {"hosts": ["app.example.com"], "paths": ["/api/"]},
-    {"hosts": ["app.example.com"], "credential": "main/DEPLOY_TOKEN", "placeholder": "APP_PASSWORD", "paths": ["/login"]},
+    {"hosts": ["app.example.com"], "credential": "env/DEPLOY_TOKEN", "placeholder": "APP_PASSWORD", "paths": ["/login"]},
 ], ids=["no-secret", "placeholder"])
 def test_paths_limit_an_injected_header_and_nothing_else(project, service):
     """A placeholder goes where the agent types it, and a service with nothing to inject has nothing to limit."""
@@ -210,8 +210,8 @@ def test_paths_limit_an_injected_header_and_nothing_else(project, service):
 @pytest.mark.parametrize("paths", [["/admin/"], None], ids=["other-paths", "every-path"])
 def test_two_services_cannot_put_one_credential_on_one_host_with_different_paths(project, paths):
     """Only one service decides where a host's credential goes: its prefixes belong in that one service."""
-    other = deploy_api(secret="main/DEPLOY_TOKEN", **({"paths": paths} if paths else {}))
-    services = {"deploy-api": deploy_api(secret="main/DEPLOY_TOKEN", paths=["/api/v1/"]), "deploy-admin": other}
+    other = deploy_api(secret="env/DEPLOY_TOKEN", **({"paths": paths} if paths else {}))
+    services = {"deploy-api": deploy_api(secret="env/DEPLOY_TOKEN", paths=["/api/v1/"]), "deploy-admin": other}
     result = project.config(spec(egress={"default": {"services": services}}))
     assert result.returncode != 0
     assert "deploy-api" in result.stderr and "deploy-admin" in result.stderr and "paths" in result.stderr
@@ -219,11 +219,11 @@ def test_two_services_cannot_put_one_credential_on_one_host_with_different_paths
 
 def test_an_object_defines_a_custom_service(project):
     resolved = project.resolved(
-        spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN")}}})
+        spec(egress={"default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN")}}})
     )
     service = profile(resolved, "default")["services"]["deploy-api"]
     assert service["hosts"] == DEPLOY_HOSTS
-    assert service["credential"]["secret"] == "main/DEPLOY_TOKEN"
+    assert service["credential"]["secret"] == "env/DEPLOY_TOKEN"
 
 
 def test_a_service_object_needs_hosts(project):
@@ -270,7 +270,7 @@ def test_a_service_without_a_secret_may_cover_hosts_with_wildcards(project):
 @pytest.mark.parametrize("secret", [{"inject": DEPLOY_INJECT}, {"placeholder": "SITE_PASSWORD"}])
 def test_a_secret_binds_to_exact_hosts_never_to_a_wildcard(project, hosts, secret):
     """`*.example.com` would hand the secret to every subdomain, including ones somebody else controls."""
-    service = {"hosts": hosts, "credential": "main/DEPLOY_TOKEN", **secret}
+    service = {"hosts": hosts, "credential": "env/DEPLOY_TOKEN", **secret}
     result = project.config(spec(egress={"default": {"services": {"deploy-api": service}}}))
     assert result.returncode != 0
     wildcard = next(host for host in hosts if "*" in host)
@@ -280,7 +280,7 @@ def test_a_secret_binds_to_exact_hosts_never_to_a_wildcard(project, hosts, secre
 def test_a_secret_cannot_be_bound_to_an_inherited_wildcard_service(project):
     browse = {"browse": {"hosts": ["*"], "inspect": True}}
     project.resolved(spec(egress={"default": {"services": browse}, "other": {"extend": "default"}}))
-    document = spec(egress={"default": {"services": browse}, "other": {"extend": "default", "services": {"browse": "main/DEPLOY_TOKEN"}}})
+    document = spec(egress={"default": {"services": browse}, "other": {"extend": "default", "services": {"browse": "env/DEPLOY_TOKEN"}}})
     result = project.config(document)
     assert result.returncode != 0
     assert "browse" in result.stderr and "inject" in result.stderr
@@ -296,13 +296,13 @@ def test_a_service_has_no_setting_that_weakens_tls(project, key):
 
 
 def test_a_string_for_an_unknown_service_is_an_error(project):
-    result = project.config(spec(egress={"default": {"services": {"nonesuch": "main/ANTHROPIC_API_KEY"}}}))
+    result = project.config(spec(egress={"default": {"services": {"nonesuch": "env/ANTHROPIC_API_KEY"}}}))
     assert result.returncode != 0
     assert "nonesuch" in result.stderr
 
 
 def test_a_misspelled_service_suggests_the_close_name(project):
-    result = project.config(spec(egress={"default": {"services": {"antropic": "main/ANTHROPIC_API_KEY"}}}))
+    result = project.config(spec(egress={"default": {"services": {"antropic": "env/ANTHROPIC_API_KEY"}}}))
     assert result.returncode != 0
     assert "anthropic" in result.stderr
 
@@ -312,7 +312,7 @@ def test_a_null_service_value_is_rejected(project):
     assert result.returncode != 0
 
 
-@pytest.mark.parametrize("reference", ["main/NOT-A-NAME", "nope/ANTHROPIC_API_KEY", "not-a-reference"])
+@pytest.mark.parametrize("reference", ["env/NOT-A-NAME", "nope/ANTHROPIC_API_KEY", "not-a-reference"])
 def test_a_secret_reference_names_a_vault_and_a_name_its_backend_can_read(project, reference):
     result = project.config(spec(egress={"default": {"services": {"anthropic": reference}}}))
     assert result.returncode != 0
@@ -322,7 +322,7 @@ def test_a_secret_reference_names_a_vault_and_a_name_its_backend_can_read(projec
 def test_two_services_sharing_a_host_with_different_injection_are_ambiguous(project):
     shared = {
         "hosts": DEPLOY_HOSTS,
-        "credential": "main/DEPLOY_TOKEN",
+        "credential": "env/DEPLOY_TOKEN",
     }
     result = project.config(
         spec(
@@ -347,8 +347,8 @@ def test_extend_unions_allow_and_merges_services(project):
     resolved = project.resolved(
         spec(
             egress={
-                "default": {"allow": ["a.example.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}},
-                "coder": {"extend": "default", "allow": ["b.example.com"], "services": {"github": "main/GITHUB_TOKEN"}},
+                "default": {"allow": ["a.example.com"], "services": {"anthropic": "env/ANTHROPIC_API_KEY"}},
+                "coder": {"extend": "default", "allow": ["b.example.com"], "services": {"github": "env/GITHUB_TOKEN"}},
             }
         )
     )
@@ -362,13 +362,13 @@ def test_a_child_string_overrides_only_the_secret(project):
     resolved = project.resolved(
         spec(
             egress={
-                "default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN")}},
-                "staging": {"extend": "default", "services": {"deploy-api": "main/GITHUB_TOKEN"}},
+                "default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN")}},
+                "staging": {"extend": "default", "services": {"deploy-api": "env/GITHUB_TOKEN"}},
             }
         )
     )
     service = profile(resolved, "staging")["services"]["deploy-api"]
-    assert service["credential"]["secret"] == "main/GITHUB_TOKEN"
+    assert service["credential"]["secret"] == "env/GITHUB_TOKEN"
     assert service["hosts"] == DEPLOY_HOSTS
     assert service["inject"]["header"] == "Authorization"
 
@@ -377,14 +377,14 @@ def test_a_child_object_replaces_the_inherited_definition(project):
     resolved = project.resolved(
         spec(
             egress={
-                "default": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN")}},
+                "default": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN")}},
                 "staging": {
                     "extend": "default",
                     "services": {
                         "deploy-api": {
                             "hosts": ["staging.deploy.example.com"],
                             "inject": {"header": "X-Key"},
-                            "credential": "main/DEPLOY_TOKEN",
+                            "credential": "env/DEPLOY_TOKEN",
                         }
                     },
                 },
@@ -400,12 +400,12 @@ def test_a_string_can_bind_a_secret_to_an_inherited_custom_service(project):
     resolved = project.resolved(
         spec(
             egress={
-                "base": {"services": {"deploy-api": deploy_api(credential="main/DEPLOY_TOKEN")}},
-                "operator": {"extend": "base", "services": {"deploy-api": "main/GITHUB_TOKEN"}},
+                "base": {"services": {"deploy-api": deploy_api(credential="env/DEPLOY_TOKEN")}},
+                "operator": {"extend": "base", "services": {"deploy-api": "env/GITHUB_TOKEN"}},
             }
         )
     )
-    assert profile(resolved, "operator")["services"]["deploy-api"]["credential"]["secret"] == "main/GITHUB_TOKEN"
+    assert profile(resolved, "operator")["services"]["deploy-api"]["credential"]["secret"] == "env/GITHUB_TOKEN"
 
 
 def test_a_child_cannot_remove_what_it_inherits(project):
@@ -455,7 +455,7 @@ def test_a_profile_that_reaches_the_provider_does_not_warn(project):
 
 def test_a_wildcard_service_is_an_allow_and_counts_for_reaching_the_provider(project):
     """A service that covers every host reaches the model API too, so there is nothing to warn about."""
-    result = project.config(spec(vaults={}, egress={"default": {"services": {"web": {"hosts": ["*"]}}}}, agents={"coder": agent()}))
+    result = project.config(spec(egress={"default": {"services": {"web": {"hosts": ["*"]}}}}, agents={"coder": agent()}))
     assert result.returncode == 0, result.stderr
     assert "warning" not in result.stderr.lower()
 
@@ -466,7 +466,7 @@ def test_a_wildcard_service_is_an_allow_and_counts_for_reaching_the_provider(pro
 def test_host_names_are_case_insensitive_and_a_trailing_dot_is_ignored(project):
     """The proxy lowercases; the file must not warn about a host that the proxy would allow."""
     document = spec(
-        egress={"default": {"allow": ["Platform.Claude.COM.", "API.Anthropic.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}},
+        egress={"default": {"allow": ["Platform.Claude.COM.", "API.Anthropic.com"], "services": {"anthropic": "env/ANTHROPIC_API_KEY"}}},
         agents={"coder": agent()},
     )
     result = project.config(document)
@@ -484,7 +484,7 @@ def test_a_secret_bound_to_a_service_that_injects_nothing_is_an_error(project):
                     "plain": {"hosts": ["example.com"]},
                 }
             },
-            "other": {"extend": "default", "services": {"plain": "main/DEPLOY_TOKEN"}},
+            "other": {"extend": "default", "services": {"plain": "env/DEPLOY_TOKEN"}},
         },
     )
     result = project.config(document)
@@ -495,7 +495,7 @@ def test_a_secret_bound_to_a_service_that_injects_nothing_is_an_error(project):
 def test_opencode_with_a_subscription_token_is_warned_about(project):
     """OpenCode sends its Anthropic credential as x-api-key; a bearer token injected for it cannot work."""
     document = spec(
-        egress={"default": {"allow": ["models.opencode.ai"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}},
+        egress={"default": {"allow": ["models.opencode.ai"], "services": {"anthropic-oauth": "env/ANTHROPIC_API_KEY"}}},
         agents={"coder": agent(harness="opencode")},
     )
     result = project.config(document)
@@ -508,13 +508,13 @@ def test_opencode_with_a_subscription_token_is_warned_about(project):
 
 def login(**fields):
     """The smallest service with a placeholder: the agent gets $SITE_PASSWORD, the proxy swaps it on app.example.com."""
-    return {"hosts": ["app.example.com"], "credential": "main/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD", **fields}
+    return {"hosts": ["app.example.com"], "credential": "env/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD", **fields}
 
 
 def test_a_service_can_give_agents_a_placeholder_for_its_secret(project):
     resolved = project.resolved(spec(egress={"default": {"services": {"login": login()}}}))
     service = profile(resolved, "default")["services"]["login"]
-    assert service["credential"]["secret"] == "main/DEPLOY_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
+    assert service["credential"]["secret"] == "env/DEPLOY_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
     assert "inject" not in service
 
 
@@ -539,7 +539,7 @@ def test_a_placeholder_is_a_usable_environment_variable_name_that_egzo_does_not_
 
 
 def test_two_services_of_a_profile_cannot_share_a_placeholder_variable(project):
-    other = login(hosts=["other.example.com"], credential="main/GITHUB_TOKEN")
+    other = login(hosts=["other.example.com"], credential="env/GITHUB_TOKEN")
     result = project.config(spec(egress={"default": {"services": {"login": login(), "other": other}}}))
     assert result.returncode != 0
     assert "SITE_PASSWORD" in result.stderr
@@ -560,12 +560,12 @@ def test_a_string_can_bind_another_secret_to_an_inherited_placeholder_service(pr
         spec(
             egress={
                 "base": {"services": {"login": login()}},
-                "operator": {"extend": "base", "services": {"login": "main/GITHUB_TOKEN"}},
+                "operator": {"extend": "base", "services": {"login": "env/GITHUB_TOKEN"}},
             }
         )
     )
     service = profile(resolved, "operator")["services"]["login"]
-    assert service["credential"]["secret"] == "main/GITHUB_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
+    assert service["credential"]["secret"] == "env/GITHUB_TOKEN" and service["placeholder"] == "SITE_PASSWORD"
 
 
 # --- no rule by method ------------------------------------------------------------------------------------------

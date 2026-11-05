@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""Vaults and secrets: the two backends (`env` and `pass`), what is refused, and what `egzo project check` says about a secret it cannot read.
+"""Vaults and secrets: the built-in vault `env`, the `pass` backend, what is refused, and what `egzo project check` says about a
+secret it cannot read.
 
 A vault is a name and a backend. A secret is declared where it is used, by its reference `<vault>/<name>`: nothing lists it
-a second time, and nothing says where it is: the backend knows."""
+a second time, and nothing says where it is: the backend knows. The environment is the vault `env`, which every project has
+and no file declares: `env/NAME` is the variable NAME."""
 
 import re
 
@@ -20,7 +22,7 @@ def vault(backend, **extra):
 
 
 def rows(result):
-    """The secret lines of `egzo project check` (`ok   secret main/X is set`) as {reference: the rest of its line}."""
+    """The secret lines of `egzo project check` (`ok   secret env/X is set`) as {reference: the rest of its line}."""
     found = {}
     for line in result.stdout.splitlines():
         match = re.match(r"(?:ok|warn|fail)\s+secret (\S+) (.*)", line)
@@ -38,20 +40,20 @@ def fake_pass(tmp_path):
 
 
 def test_a_reference_declares_the_secret_and_the_resolved_file_lists_it_under_its_vault(project):
-    resolved = project.resolved(spec(**uses("main/TOKEN", "main/OTHER")))
-    assert resolved["egress"]["default"]["services"]["svc0"]["credential"]["secret"] == "main/TOKEN"
-    assert resolved["vaults"]["main"] == {"backend": "env", "secrets": ["OTHER", "TOKEN"]}
+    resolved = project.resolved(spec(**uses("main/token", "main/other", backend="pass")))
+    assert resolved["egress"]["default"]["services"]["svc0"]["credential"]["secret"] == "main/token"
+    assert resolved["vaults"]["main"] == {"backend": "pass", "secrets": ["other", "token"]}
 
 
 def test_a_secret_referred_to_twice_is_listed_once(project):
-    document = spec(**uses("main/TOKEN"))
-    document["egress"]["other"] = {"services": {"deploy": {"hosts": ["deploy.example.com"], "inject": {"header": "X-Key"}, "credential": "main/TOKEN"}}}
-    assert project.resolved(document)["vaults"]["main"]["secrets"] == ["TOKEN"]
+    document = spec(**uses("env/TOKEN"))
+    document["egress"]["other"] = {"services": {"deploy": {"hosts": ["deploy.example.com"], "inject": {"header": "X-Key"}, "credential": "env/TOKEN"}}}
+    assert project.resolved(document)["vaults"]["env"]["secrets"].count("TOKEN") == 1
 
 
 def test_a_vault_cannot_list_its_secrets(project):
     """No backward compatibility: the list was a second copy of the references."""
-    result = project.config(spec(vaults=vault("env", secrets=["TOKEN"]), egress=uses("main/TOKEN")["egress"]))
+    result = project.config(spec(vaults=vault("pass", secrets=["token"]), egress=uses("main/token")["egress"]))
     assert result.returncode != 0
     assert "secrets" in result.stderr
 
@@ -66,7 +68,7 @@ def test_an_unknown_backend_is_refused_and_names_the_ones_that_exist(project):
     result = project.config(spec(vaults=vault("not-a-backend")))
     assert result.returncode != 0
     assert 'unknown backend "not-a-backend"' in result.stderr
-    assert "env" in result.stderr and "pass" in result.stderr
+    assert "pass" in result.stderr
 
 
 def test_there_is_no_file_backend(project):
@@ -79,23 +81,62 @@ def test_there_is_no_file_backend(project):
 
 
 def test_a_reference_to_an_unknown_vault_is_refused_and_names_the_vaults_that_exist(project):
-    document = spec(**uses("ghost/TOKEN"))
-    document["vaults"]["other"] = {"backend": "env"}
+    document = spec(**uses("ghost/TOKEN"), vaults={"other": {"backend": "pass"}})
     result = project.config(document)
     assert result.returncode != 0
     assert '"ghost"' in result.stderr
-    assert "main" in result.stderr and "other" in result.stderr
+    assert "env" in result.stderr and "other" in result.stderr
 
 
-def test_a_vault_nothing_refers_to_is_a_warning(project):
-    document = spec(**uses("main/TOKEN"))
+def test_a_vault_nothing_refers_to_is_a_warning(project, fake_pass):
+    fake_pass.put("token", "a-secret\n")
+    document = spec(**uses("main/token", backend="pass"))
     document["vaults"]["spare"] = {"backend": "pass"}
     project.write(document)
-    result = project.sh("project check", env={"TOKEN": "a-secret"})
+    result = project.sh("project check", env=fake_pass.env)
     assert result.returncode == 0, result.stdout + result.stderr
     warnings = [line for line in result.stdout.splitlines() if line.startswith("warn")]
     assert any('"spare"' in line for line in warnings), result.stdout
     assert not any('"main"' in line for line in warnings), result.stdout
+
+
+# --- the environment is the built-in vault `env` ----------------------------------------------------------------------
+
+
+def test_the_env_vault_needs_no_declaration(project):
+    document = spec(**uses("env/TOKEN"))
+    assert "vaults" not in document
+    resolved = project.resolved(document)
+    assert resolved["vaults"]["env"]["backend"] == "env"
+    assert "TOKEN" in resolved["vaults"]["env"]["secrets"]
+
+
+def test_the_env_vault_is_listed_only_when_something_refers_to_it(project):
+    resolved = project.resolved(spec(**uses("main/token", backend="pass"), secret_key="main/egzo/key"))
+    assert "env" not in resolved["vaults"]
+
+
+def test_the_env_vault_is_never_a_vault_nothing_refers_to(project, fake_pass):
+    fake_pass.put("egzo/key", "k" * 32 + "\n")
+    fake_pass.put("token", "a-secret\n")
+    project.write(spec(**uses("main/token", backend="pass"), secret_key="main/egzo/key"))
+    result = project.sh("project check", env=fake_pass.env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"env"' not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("backend", ["pass", "env"])
+def test_env_is_a_reserved_vault_name(project, backend):
+    result = project.config(spec(vaults={"env": {"backend": backend}}))
+    assert result.returncode != 0
+    assert 'vault "env"' in result.stderr and "reserved" in result.stderr
+
+
+def test_there_is_no_env_backend_to_declare(project):
+    """No backward compatibility, and one way to say it: the environment is the vault `env`, and the error says how to write it."""
+    result = project.config(spec(vaults={"main": {"backend": "env"}}))
+    assert result.returncode != 0
+    assert 'vault "main"' in result.stderr and "env/" in result.stderr
 
 
 def test_secret_names_in_a_pass_vault_can_be_hierarchical(project):
@@ -113,7 +154,7 @@ def test_a_pass_secret_name_stays_inside_the_store(project, name):
 
 @pytest.mark.parametrize("name", ["company/token", "1TOKEN", "MY-TOKEN", "MY TOKEN"])
 def test_an_env_secret_name_is_an_environment_variable_name(project, name):
-    result = project.config(spec(**uses(f"main/{name}")))
+    result = project.config(spec(**uses(f"env/{name}")))
     assert result.returncode != 0
     assert name in result.stderr
 
@@ -129,7 +170,7 @@ def test_a_vault_name_cannot_contain_a_slash(project):
 
 
 def test_the_env_backend_warns_that_it_is_not_recommended(project):
-    result = project.config(spec(**uses("main/TOKEN")))
+    result = project.config(spec(**uses("env/TOKEN")))
     assert result.returncode == 0, result.stderr
     assert result.stderr.count(ENV_WARNING) == 1
 
@@ -141,11 +182,11 @@ def test_a_project_without_an_env_vault_gets_no_such_warning(project, fake_pass)
 
 
 def test_the_env_backend_reads_the_variable_of_the_same_name(project):
-    project.write(spec(**uses("main/SET_ONE", "main/UNSET_ONE")))
+    project.write(spec(**uses("env/SET_ONE", "env/UNSET_ONE")))
     result = project.sh("project check", env={"SET_ONE": "env-secret-value", "UNSET_ONE": ""})
     assert result.returncode == 1, result.stderr  # a secret that cannot be read is an error
     found = rows(result)
-    assert "set" in found["main/SET_ONE"] and "missing" in found["main/UNSET_ONE"]
+    assert "set" in found["env/SET_ONE"] and "missing" in found["env/UNSET_ONE"]
     assert "env-secret-value" not in result.stdout + result.stderr
 
 
@@ -159,25 +200,25 @@ KEY_31 = "k" * 31
 
 
 def keyed(**sections):
-    """A file whose secret key is `main/KEY`, in the env vault `main`."""
-    return spec(**{"vaults": {"main": {"backend": "env"}}, **sections}, secret_key="main/KEY")
+    """A file whose secret key is `env/KEY`, the variable KEY."""
+    return spec(**sections, secret_key="env/KEY")
 
 
 def test_an_env_secret_missing_from_the_environment_is_read_from_dotenv_in_the_project_directory(project):
-    project.write(spec(**uses("main/FROM_FILE")))
+    project.write(spec(**uses("env/FROM_FILE")))
     project.write("FROM_FILE=dotenv-secret-value\n", filename=".env")
     result = project.sh("project check")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "is set" in rows(result)["main/FROM_FILE"]
+    assert "is set" in rows(result)["env/FROM_FILE"]
     assert "dotenv-secret-value" not in result.stdout + result.stderr
 
 
 def test_project_check_says_a_secret_came_from_dotenv(project):
-    project.write(spec(**uses("main/FROM_FILE", "main/FROM_SHELL")))
+    project.write(spec(**uses("env/FROM_FILE", "env/FROM_SHELL")))
     project.write("FROM_FILE=a-value\n", filename=".env")
     found = rows(project.sh("project check", env={"FROM_SHELL": "b-value"}))
-    assert ".env" in found["main/FROM_FILE"]
-    assert ".env" not in found["main/FROM_SHELL"]
+    assert ".env" in found["env/FROM_FILE"]
+    assert ".env" not in found["env/FROM_SHELL"]
 
 
 def test_the_environment_wins_over_dotenv(project):
@@ -185,16 +226,16 @@ def test_the_environment_wins_over_dotenv(project):
     project.write(keyed())
     project.write(f"KEY={KEY_32}\n", filename=".env")
     result = project.sh("project check", env={"KEY": KEY_31})
-    assert "31 bytes" in rows(result)["main/KEY"]
+    assert "31 bytes" in rows(result)["env/KEY"]
 
 
 def test_a_variable_set_to_nothing_in_the_environment_still_hides_dotenv(project):
     """Compose's order again: set counts, empty or not. The line says why the file was not read."""
-    project.write(spec(**uses("main/TOKEN")))
+    project.write(spec(**uses("env/TOKEN")))
     project.write("TOKEN=a-value\n", filename=".env")
     result = project.sh("project check", env={"TOKEN": ""})
     assert result.returncode == 1
-    line = rows(result)["main/TOKEN"]
+    line = rows(result)["env/TOKEN"]
     assert "is set" not in line and ".env" in line
 
 
@@ -213,13 +254,13 @@ def test_a_variable_set_to_nothing_in_the_environment_still_hides_dotenv(project
 def test_dotenv_is_read_with_the_syntax_of_compose(project, text):
     project.write(keyed())
     project.write(text, filename=".env")
-    assert "31 bytes" in rows(project.sh("project check"))["main/KEY"]
+    assert "31 bytes" in rows(project.sh("project check"))["env/KEY"]
 
 
 def test_a_value_in_dotenv_may_refer_to_the_environment(project):
     project.write(keyed())
     project.write(f"KEY=${{FROM_SHELL}}{KEY_31[:11]}\n", filename=".env")
-    assert "31 bytes" in rows(project.sh("project check", env={"FROM_SHELL": KEY_31[:20]}))["main/KEY"]
+    assert "31 bytes" in rows(project.sh("project check", env={"FROM_SHELL": KEY_31[:20]}))["env/KEY"]
 
 
 def test_the_project_secret_key_can_be_kept_in_dotenv(project):
@@ -235,38 +276,38 @@ def test_dotenv_is_the_one_next_to_the_project_file_not_in_the_current_directory
     below = project.mkdir("src/deeper")
     (below / ".env").write_text(f"KEY={KEY_32}\n")
     result = project.egzo.run("project", "check", cwd=below, env=project.env)
-    assert "31 bytes" in rows(result)["main/KEY"]
+    assert "31 bytes" in rows(result)["env/KEY"]
 
 
 def test_a_dotenv_that_is_a_directory_is_ignored(project):
-    project.write(spec(**uses("main/TOKEN")))
+    project.write(spec(**uses("env/TOKEN")))
     project.mkdir(".env")
     result = project.sh("project check", env={"TOKEN": "a-value"})
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_a_broken_dotenv_names_the_file_and_line_and_never_a_value(project):
-    project.write(spec(**uses("main/TOKEN")))
+    project.write(spec(**uses("env/TOKEN")))
     project.write("FIRST=fine\nBAD@NAME=a-secret-value\n", filename=".env")
     result = project.sh("project check")
     assert result.returncode == 1
-    line = rows(result)["main/TOKEN"]
+    line = rows(result)["env/TOKEN"]
     assert ".env" in line and "line 2" in line, line
     assert "a-secret-value" not in result.stdout + result.stderr
 
 
 def test_an_unterminated_quote_in_dotenv_never_shows_the_value(project):
     """Compose's parser quotes the value in its own message; egzo does not pass it on."""
-    project.write(spec(**uses("main/TOKEN")))
+    project.write(spec(**uses("env/TOKEN")))
     project.write('FIRST=fine\nTOKEN="unterminated-secret-value\n', filename=".env")
     result = project.sh("project check")
     assert result.returncode == 1
-    assert ".env" in rows(result)["main/TOKEN"]
+    assert ".env" in rows(result)["env/TOKEN"]
     assert "unterminated-secret-value" not in result.stdout + result.stderr
 
 
 def test_a_broken_dotenv_is_not_read_when_the_environment_has_every_secret(project):
-    project.write(spec(**uses("main/TOKEN")))
+    project.write(spec(**uses("env/TOKEN")))
     project.write('TOKEN="unterminated\n', filename=".env")
     result = project.sh("project check", env={"TOKEN": "a-value"})
     assert result.returncode == 0, result.stdout + result.stderr

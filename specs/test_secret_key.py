@@ -13,7 +13,7 @@ from support import SECRET_KEY, SECRET_KEY_VARIABLE, FakePass, spec, uses
 
 def key_line(result):
     """The `project check` line about the secret key's secret."""
-    return next(line for line in result.stdout.splitlines() if re.match(rf"(?:ok|warn|fail)\s+secret key/{SECRET_KEY_VARIABLE} ", line))
+    return next(line for line in result.stdout.splitlines() if re.match(rf"(?:ok|warn|fail)\s+secret env/{SECRET_KEY_VARIABLE} ", line))
 
 
 def test_a_project_without_a_secret_key_is_refused_with_the_command_that_makes_one_in_its_own_vault(project):
@@ -24,27 +24,28 @@ def test_a_project_without_a_secret_key_is_refused_with_the_command_that_makes_o
     assert f"secret_key: main/egzo/{project.name}-key" in result.stderr
 
 
-def test_without_any_vault_the_command_says_to_declare_one(project):
-    result = project.config(spec(secret_key=None, vaults={}))
+def test_a_file_that_reads_no_secret_is_told_to_declare_a_pass_vault(project):
+    result = project.config(spec(secret_key=None))
     assert result.returncode != 0
     assert "secret_key" in result.stderr and "backend: pass" in result.stderr and "openssl rand -hex 32" in result.stderr
 
 
-def test_with_an_env_vault_only_the_command_sets_a_variable(project):
-    result = project.config(spec(secret_key=None))
+def test_a_file_that_reads_the_environment_is_told_to_set_a_variable(project):
+    result = project.config(spec(secret_key=None, **uses("env/TOKEN")))
     assert result.returncode != 0
-    assert "secret_key: main/" in result.stderr and "$(openssl rand -hex 32)" in result.stderr
+    assert "secret_key: env/EGZO_PROJECT_SECRET_KEY" in result.stderr and "$(openssl rand -hex 32)" in result.stderr
+    assert "vaults:" not in result.stderr
 
 
 def test_the_secret_key_is_a_secret_reference_listed_with_the_others(project):
-    resolved = project.resolved(spec(**uses("main/TOKEN")))
+    resolved = project.resolved(spec(**uses("env/TOKEN")))
     assert resolved["secret_key"] == SECRET_KEY["secret_key"]
-    assert resolved["vaults"]["key"]["secrets"] == [SECRET_KEY_VARIABLE]
+    assert resolved["vaults"]["env"]["secrets"] == sorted([SECRET_KEY_VARIABLE, "TOKEN"])
 
 
-@pytest.mark.parametrize("reference, word", [("ghost/KEY", "ghost"), ("key/NOT-A-NAME", "NOT-A-NAME"), ("no-slash", "no-slash")])
+@pytest.mark.parametrize("reference, word", [("ghost/KEY", "ghost"), ("env/NOT-A-NAME", "NOT-A-NAME"), ("no-slash", "no-slash")])
 def test_the_secret_key_follows_the_rules_of_any_secret_reference(project, reference, word):
-    result = project.config(spec(secret_key=reference, vaults={"key": {"backend": "env"}}))
+    result = project.config(spec(secret_key=reference))
     assert result.returncode != 0
     assert "secret_key" in result.stderr and word in result.stderr
 

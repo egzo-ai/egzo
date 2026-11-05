@@ -29,7 +29,7 @@ def test_up_stores_the_resolved_project_on_the_control_volume_without_secrets_an
         return p.ok("project up", env=env, timeout=300)
 
     document = spec(
-        egress={"default": {"services": {"anthropic": "main/ANTHROPIC_API_KEY"}, "allow": ["platform.claude.com"]}},
+        egress={"default": {"services": {"anthropic": "env/ANTHROPIC_API_KEY"}, "allow": ["platform.claude.com"]}},
         agents={"coder": custom(agent_image)},
     )
     up(document, ANTHROPIC_API_KEY=SECRET)
@@ -40,7 +40,7 @@ def test_up_stores_the_resolved_project_on_the_control_volume_without_secrets_an
     assert stored["spec-version"] == "1" and stored["created-by"].startswith("egzo/")
     for resource in engine.containers(p.name):
         assert stored["config-hashes"][resource.name] == resource.labels[f"{LABEL_PREFIX}config-hash"]
-    assert SECRET not in text and "main/ANTHROPIC_API_KEY" in text, "the reference is kept, never the value"
+    assert SECRET not in text and "env/ANTHROPIC_API_KEY" in text, "the reference is kept, never the value"
 
     assert "nothing to do" in up(document, ANTHROPIC_API_KEY=SECRET).stdout
     assert snapshots() == [name], "a second up with the same configuration stores nothing new"

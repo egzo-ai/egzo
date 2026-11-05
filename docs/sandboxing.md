@@ -21,8 +21,8 @@ egress:
   default:                                  # what an agent gets if it names no profile
     allow: [platform.claude.com, "*.pypi.org", files.pythonhosted.org]
     services:
-      anthropic: main/ANTHROPIC_API_KEY     # built-in service + its secret
-      github: main/GITHUB_TOKEN
+      anthropic: env/ANTHROPIC_API_KEY      # built-in service + its secret
+      github: env/GITHUB_TOKEN
 ```
 
 - `allow`: host names or `*.domain` globs the agent may reach with **no** credential.
@@ -61,11 +61,11 @@ egress:
       deploy-api:
         hosts: [api.deploy.example.com]
         inject: { header: Authorization, value: "Bearer {secret}" }   # without value, the raw secret is the header
-        credential: main/DEPLOY_TOKEN
+        credential: env/DEPLOY_TOKEN
 ```
 
-A credential has a `method`. `secret` reads a secret from a vault at `egzo project up`: `credential: main/DEPLOY_TOKEN`
-is short for `credential: { method: secret, secret: main/DEPLOY_TOKEN }`. `oauth` is the tokens of a sign-in, which the
+A credential has a `method`. `secret` reads a secret from a vault at `egzo project up`: `credential: env/DEPLOY_TOKEN`
+is short for `credential: { method: secret, secret: env/DEPLOY_TOKEN }`. `oauth` is the tokens of a sign-in, which the
 proxy captures and renews (see [OAuth services](#oauth-services)).
 
 `inject` has three forms: the raw secret (no `value`), a `value` template around `{secret}`, or HTTP Basic authentication
@@ -76,7 +76,7 @@ such as git over HTTPS. `basic_user` and `value` cannot be combined. The built-i
       git-host:
         hosts: [git.example.com]
         inject: { header: Authorization, basic_user: x-access-token }
-        credential: main/GIT_TOKEN
+        credential: env/GIT_TOKEN
 ```
 
 A service with neither `inject` nor a `placeholder` (see below) is a plain allowlist entry and cannot have a secret.
@@ -90,7 +90,7 @@ them:
         hosts: [deploy.example.com]               # also the vendor's website
         paths: [/api/v1/]                         # the API: the token goes nowhere else
         inject: { header: Authorization, value: "Bearer {secret}" }
-        credential: main/DEPLOY_TOKEN
+        credential: env/DEPLOY_TOKEN
 ```
 
 - A prefix matches whole segments: `/api` covers `/api` and `/api/x`, not `/apix`; `/api/` covers `/api/x`. Other paths
@@ -226,12 +226,12 @@ egress:
   default:
     allow: [platform.claude.com]
     services:
-      anthropic: main/ANTHROPIC_API_KEY
+      anthropic: env/ANTHROPIC_API_KEY
   operator:
     extend: default                 # one parent; allow lists are unioned
     services:
-      github: main/GITHUB_TOKEN     # a string only sets the secret of an inherited or built-in service
-      deploy-api: { hosts: [api.deploy.example.com], credential: main/DEPLOY_TOKEN,
+      github: env/GITHUB_TOKEN      # a string only sets the secret of an inherited or built-in service
+      deploy-api: { hosts: [api.deploy.example.com], credential: env/DEPLOY_TOKEN,
                     inject: { header: X-Api-Key } }
 
 agents:

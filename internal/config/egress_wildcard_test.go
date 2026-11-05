@@ -18,41 +18,41 @@ func TestEgressWildcardServices(t *testing.T) {
 	})
 
 	t.Run("a wildcard service next to an exact injecting one is accepted", func(t *testing.T) {
-		mustResolve(t, t.TempDir(), vaultFixture+`
+		mustResolve(t, t.TempDir(), `
 egress:
   default:
     services:
       browse: { hosts: ['*'], inspect: true }
-      anthropic: main/KEY
+      anthropic: env/KEY
 `)
 	})
 
 	t.Run("a wildcard service defined by a child is refused when it holds a secret", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), vaultFixture+`
+		wantProblems(t, t.TempDir(), `
 egress:
   default: {}
   child:
     extend: default
     services:
-      deploy-api: { hosts: ['*.example.com'], inject: { header: H }, credential: main/KEY }
+      deploy-api: { hosts: ['*.example.com'], inject: { header: H }, credential: env/KEY }
 `, `service "deploy-api"`, "exact", `"*.example.com"`)
 	})
 
 	t.Run("a child replacing a service with a wildcard secret one is refused", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), vaultFixture+`
+		wantProblems(t, t.TempDir(), `
 egress:
   default:
     services:
-      svc: { hosts: [a.com], inject: { header: H }, credential: main/KEY }
+      svc: { hosts: [a.com], inject: { header: H }, credential: env/KEY }
   child:
     extend: default
     services:
-      svc: { hosts: ['*'], inject: { header: H }, credential: main/KEY }
+      svc: { hosts: ['*'], inject: { header: H }, credential: env/KEY }
 `, `service "svc"`, "exact")
 	})
 
 	t.Run("a secret cannot be bound to an inherited wildcard service", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), vaultFixture+`
+		wantProblems(t, t.TempDir(), `
 egress:
   default:
     services:
@@ -60,17 +60,17 @@ egress:
   child:
     extend: default
     services:
-      browse: main/KEY
+      browse: env/KEY
 `, `service "browse"`, "inject", "placeholder")
 	})
 
 	t.Run("two services still cannot share an exact host with different injection", func(t *testing.T) {
-		wantProblems(t, t.TempDir(), vaultFixture+`
+		wantProblems(t, t.TempDir(), `
 egress:
   default:
     services:
-      a: { hosts: [x.com], inject: { header: A }, credential: main/KEY }
-      b: { hosts: [x.com], inject: { header: B }, credential: main/KEY }
+      a: { hosts: [x.com], inject: { header: A }, credential: env/KEY }
+      b: { hosts: [x.com], inject: { header: B }, credential: env/KEY }
 `, "both cover host")
 	})
 }

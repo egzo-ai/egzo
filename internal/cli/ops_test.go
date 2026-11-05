@@ -34,10 +34,10 @@ func inProject(t *testing.T, yaml string, stdin string, args ...string) (string,
 }
 
 func vaultYAML() string {
-	return "secret_key: main/EGZO_TEST_SECRET_KEY\nvaults:\n  main:\n    backend: env\n" +
+	return "secret_key: env/EGZO_TEST_SECRET_KEY\n" +
 		"egress:\n  default:\n    services:\n" +
-		"      set: { hosts: [set.example.com], inject: { header: X-Key }, credential: main/EGZO_TEST_SET_VARIABLE }\n" +
-		"      unset: { hosts: [unset.example.com], inject: { header: X-Key }, credential: main/EGZO_TEST_UNSET_VARIABLE }\n"
+		"      set: { hosts: [set.example.com], inject: { header: X-Key }, credential: env/EGZO_TEST_SET_VARIABLE }\n" +
+		"      unset: { hosts: [unset.example.com], inject: { header: X-Key }, credential: env/EGZO_TEST_UNSET_VARIABLE }\n"
 }
 
 func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testing.T) {
@@ -54,7 +54,7 @@ func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testi
 			rows[strings.Fields(line)[2]] = line
 		}
 	}
-	if !strings.HasPrefix(rows["main/EGZO_TEST_SET_VARIABLE"], "ok") || !strings.HasPrefix(rows["main/EGZO_TEST_UNSET_VARIABLE"], "fail") {
+	if !strings.HasPrefix(rows["env/EGZO_TEST_SET_VARIABLE"], "ok") || !strings.HasPrefix(rows["env/EGZO_TEST_UNSET_VARIABLE"], "fail") {
 		t.Errorf("rows = %v", rows)
 	}
 	if strings.Contains(out, "value") {
@@ -64,13 +64,12 @@ func TestProjectCheckShowsSetAndMissingSecretsAndExitsOneForAMissingOne(t *testi
 
 func TestProxyRulesListWhatEachAgentMayReachWithoutSecrets(t *testing.T) {
 	yaml := `
-secret_key: main/KEY
-vaults: {main: {backend: env}}
+secret_key: env/KEY
 egress:
   default: {allow: [docs.example.org]}
   wide:
     extend: default
-    services: {svc: {hosts: [api.test], inject: {header: x-key}, credential: main/S}}
+    services: {svc: {hosts: [api.test], inject: {header: x-key}, credential: env/S}}
 agents:
   coder: {harness: custom, image: x}
   reviewer: {harness: custom, image: x, egress: wide}
@@ -79,7 +78,7 @@ agents:
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"docs.example.org", "api.test", "x-key", "main/S"} {
+	for _, want := range []string{"docs.example.org", "api.test", "x-key", "env/S"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rules lack %q:\n%s", want, out)
 		}

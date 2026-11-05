@@ -71,18 +71,13 @@ A GitHub repo and two agents.
 
 ```yaml
 # egzo.yaml
-secret_key: main/EGZO_PROJECT_SECRET_KEY   # seals what egzo keeps at rest: `openssl rand -hex 32`
-
-vaults:
-  main:
-    backend: env
-
+secret_key: env/EGZO_PROJECT_SECRET_KEY    # seals what egzo keeps at rest: `openssl rand -hex 32`
 egress:
   default:                           # one profile for everyone; anything not allowed is denied
     allow: [platform.claude.com]
     services:
-      anthropic: main/ANTHROPIC_API_KEY
-      github: main/GITHUB_TOKEN
+      anthropic: env/ANTHROPIC_API_KEY
+      github: env/GITHUB_TOKEN
 
 workspaces:
   repo:

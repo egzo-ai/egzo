@@ -1,6 +1,6 @@
 # Roadmap: more vault implementations (idea, not decided, not built)
 
-Today there are two backends, `env` and `pass`. This item adds more, and one small change to the design so they
+Today a declared vault has one backend, `pass`, and the environment is the built-in vault `env`. This item adds more, and one small change to the design so they
 can be configured.
 
 ## Design change: an `options` bag on vaults
@@ -14,7 +14,7 @@ vaults:
 ```
 
 - `options` is a map of scalar strings. Each backend declares the keys it accepts; an unknown key is a
-  validation error naming the keys that exist. A backend with no option to offer (`env`) accepts none.
+  validation error naming the keys that exist. A backend with no option to offer accepts none.
 - Relaxes `DESIGN.md`, "Secrets and vaults": "the project file cannot configure pass" came from pass already having
   `PASSWORD_STORE_DIR` and `GNUPGHOME`, not from a rule against configuring a store. Backends that already have a
   standard environment configuration keep using it; options are for stores where the project is the natural place
