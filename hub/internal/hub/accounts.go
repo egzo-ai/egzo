@@ -11,7 +11,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
-// The ways people sign in (see roadmap/hub-login.md): the starter account's password, and identities at the one configured
+// The ways people sign in (see docs/reference/hub-accounts.md): the starter account's password, and identities at the one configured
 // OpenID Connect issuer. A person is a user; a password and identities are ways to prove it. Nothing is matched by email.
 
 var (

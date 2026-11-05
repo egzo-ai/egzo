@@ -40,7 +40,7 @@ specs: build
 clean:
 	rm -rf bin
 
-# --- the hub (hub/ is its own Go module; see roadmap/hub.md) ---------------------------------------------------------------------
+# --- the hub (hub/ is its own Go module; see DESIGN.md, "The hub") ---------------------------------------------------------------------
 
 # The web app (Svelte, TypeScript, Vite; hub/web) built into hub/internal/web/dist, which the hub embeds. Needs node, or docker.
 hub-web:

@@ -3,11 +3,11 @@
 ## Supported platforms
 
 **Linux** with Docker or rootless Podman is the supported host today. Rootful Podman is not supported for now (see the table below). The specs run on a set of reference platforms in CI; only Docker is a required check so far, and the others are
-reported but cannot fail the run yet (`known-issues/reference-platform-ci-matrix.md`).
+reported but cannot fail the run yet ([#136](https://github.com/egzo-ai/egzo/issues/136)).
 
 **Planned:** Windows through WSL2 (the Linux binary inside a WSL2 distro, with Docker Desktop) and macOS (with Docker
 Desktop, Colima or OrbStack). Neither is supported yet; see
-[`roadmap/windows-and-macos.md`](../roadmap/windows-and-macos.md). There is no plan for a native Windows binary.
+[#147](https://github.com/egzo-ai/egzo/issues/147). There is no plan for a native Windows binary.
 
 ## Get egzo
 
@@ -29,7 +29,7 @@ That is all the CLI needs. It talks to your container engine, and pulls the imag
 own version, so the CLI and the sidecars cannot drift. To pull from another registry (a mirror), set
 `EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `egzo agent spawn` says which image and how to override it.
 
-> There is no install script yet, and the releases are early (0.x): see [`roadmap/initial-release.md`](../roadmap/initial-release.md).
+> There is no install script yet ([#128](https://github.com/egzo-ai/egzo/issues/128)), and the releases are early (0.x): see the [1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1).
 
 ## Pick an engine
 
@@ -41,25 +41,17 @@ configured are used without complaint. A few configurations are tested and offic
 |---|---|
 | Docker (rootful) | the engine the specs run against; use this first |
 | Docker with gVisor | supported, with a tradeoff; see [Using gVisor](#using-gvisor) |
-| Rootless Podman | supported; see [Using rootless Podman](#using-rootless-podman) |
-| Rootful Podman | not supported for now; to be decided for 1.0.0 |
+| Rootless Podman | supported; see [Using Podman](podman.md) |
+| Rootful Podman | not supported for now; to be decided for 1.0.0 ([Using Podman](podman.md)) |
 
 Agents run as your uid and gid, and egzo never mounts the engine socket into an agent. Anything that can reach the engine
 socket is root-equivalent on a rootful engine, so a rootless engine is the safer host.
 
-For why rootful Podman is not supported yet, see
-[`known-issues/rootful-podman-intermittent-egress.md`](../known-issues/rootful-podman-intermittent-egress.md).
+For why rootful Podman is not supported yet, see [Using Podman](podman.md#rootful-podman-outbound-connections-fail-at-random).
 
 ### Using rootless Podman
 
-Start Podman's user socket and point `DOCKER_HOST` at it:
-
-```console
-$ systemctl --user enable --now podman.socket
-$ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
-```
-
-gVisor on rootless Podman is untested.
+Start Podman's user socket and point `DOCKER_HOST` at it: see [Using Podman](podman.md#rootless-podman).
 
 ### Using gVisor
 

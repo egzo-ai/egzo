@@ -80,7 +80,7 @@ type Agent struct {
 func (a Agent) Running() bool { return a.State == "running" }
 
 // AuditEvent is one event of a proxy's audit trail: a step of one connection and what the proxy decided (see
-// roadmap/proxy-audit.md).
+// docs/sandboxing.md, "See what happened").
 type AuditEvent = proxy.Event
 
 // AuditBacklog is how many lines of a proxy's log FollowAudit reads first when it has no time to start from.

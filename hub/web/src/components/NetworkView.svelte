@@ -9,7 +9,7 @@
   import type { Denial, Network } from "../lib/types";
 
   // What the project's proxy recorded, or what it recorded for one agent: the hosts it denied, grouped, with why and how to fix
-  // it, then the latest connections. The hub keeps the groups; the events are the latest it heard (roadmap/proxy-audit.md).
+  // it, then the latest connections. The hub keeps the groups; the events are the latest it heard (docs/hub.md, "Network").
   let { project, agent = "" }: { project: string; agent?: string } = $props();
 
   let data = $state<Network | null>(null);

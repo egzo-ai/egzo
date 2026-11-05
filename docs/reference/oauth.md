@@ -1,16 +1,10 @@
-# Roadmap: OAuth services, captured at sign-in and renewed by the proxy
+# Reference: OAuth sign-ins, what was checked
 
-**Status.** Built: `credential: { method: oauth }`, the built-in `chatgpt` service, `egzo proxy logout`
-([docs/sandboxing.md](../docs/sandboxing.md#oauth-services), `specs/proxy/test_proxy_oauth.py`), and the `codex` harness
-([docs/harnesses.md](../docs/harnesses.md#codex), `specs/harness/test_harness_codex.py`). Not built yet: the hub's status
-feed for a sign-in that ended, the online spec with a real account, and a real session to confirm it end to end (see Open
-questions). Claude Code signs in with a Claude subscription through the built-in `claude` service, the default for Claude
-Code ([below](#claude-codes-sign-in), [docs/harnesses.md](../docs/harnesses.md#claude-code)). Decided since: the
-configuration is a service's `credential` with a `method`; a stub provider for the specs sits behind `proxy.upstream`;
-sign-ins live in the proxy's private volume and end at `project down`, like the CA; Codex gets its settings as `-c`
-overrides and runs egzo's hooks with `--dangerously-bypass-hook-trust`.
+How the clients egzo serves through an [OAuth service](../sandboxing.md#oauth-services) sign in, refresh and log out, as read from
+their source or tried, and why the proxy holds the tokens. The mechanism itself is in [Sandboxing](../sandboxing.md#oauth-services)
+and DESIGN.md. Moved from the design page `roadmap/oauth-services.md` when the roadmap moved to GitHub issues.
 
-## The problem
+## Why the proxy holds the tokens
 
 A service today injects a static secret that the CLI reads from a vault at `up`. That covers API keys and long-lived tokens such
 as Claude's `claude setup-token`. It does not cover a sign-in whose tokens rotate:
@@ -34,74 +28,6 @@ How others do it, with the sign-in inside the agent:
   file. Its PR #2126 fixed a fallback that copied the file instead of linking it.
 
 Both leave a credential that can mint new tokens inside the agent. egzo's rule is that the agent never holds a real credential.
-
-## The design
-
-The proxy terminates TLS for the token endpoint, keeps the real tokens and gives the client stand-ins. The user signs in where the
-client already asks, and nothing is configured beyond the service.
-
-```yaml
-services:
-  chatgpt: { credential: { method: oauth } }   # built in: chatgpt.com under /backend-api/, token URL on auth.openai.com
-```
-
-1. **Sign-in, in the agent.** The first Codex agent of the project starts without a sign-in and shows Codex's own first-run
-   screen. The user attaches (CLI or the hub's terminal) and picks *Sign in from another device with a one-time code*. `agent
-   spawn` says so when the project's `oauth` service has no sign-in. The browser option cannot work in a container: its callback is
-   `http://127.0.0.1:<port>/auth/callback` in the container, which the user's browser cannot reach.
-2. **Capture.** The device-code flow ends with an ordinary `authorization_code` exchange at the token URL (redirect
-   `https://auth.openai.com/deviceauth/callback`). The proxy forwards it, saves the real `access_token`, `refresh_token`,
-   `id_token` and `expires_in` from the response, and rewrites the response with stand-ins before the client reads it. Any
-   response from the token URL is rewritten, whatever the grant: the agent cannot get a real token through the proxy.
-3. **Inject.** On the service's hosts and paths, a request whose `Authorization: Bearer` is a stand-in gets the current real
-   access token. A request with any other token is not touched.
-4. **The client's refreshes.** A refresh request to the token URL with a stand-in refresh token is answered by the proxy: it
-   refreshes the real tokens if they need it and returns new stand-ins. A stand-in is never forwarded upstream. The client keeps
-   its normal behaviour.
-5. **Renewal.** The proxy refreshes the real tokens ahead of `exp` (or `expires_in`), and at least every 8 days for Codex, so the
-   chain stays alive while no agent runs. One proxy per project means one refresher: no race between agents. The rotated refresh
-   token is saved before the new access token is used.
-
-### Stand-ins look real
-
-A client may read its tokens. Codex decodes the JWT claims (plan, account id, email, `exp`) without checking the signature
-(`codex-rs/login/src/token_data.rs`, `decode_jwt_payload`). A JWT stand-in therefore carries the real token's claims with a
-meaningless signature; an opaque token gets a random value of the same shape. A stand-in is useless anywhere but through this
-proxy.
-
-### Where the tokens are kept
-
-The tokens are internal to the proxy and never leave it. egzo does not write to the user's vault.
-
-- **Sealed at rest** with the [project secret key](../docs/project-file.md#the-secret-key) (its `egzo/v1/oauth` key), in an engine volume only
-  the proxy mounts. A copy or backup of the volume is useless without the vault secret.
-- **Restart.** A restarted proxy opens nothing until the next `up` delivers the key, as for every secret today.
-- **Another key.** The sign-ins cannot be opened: the proxy discards them and the user signs in again.
-- `project down` ends the sign-ins, with the rest of the private volume. Removing one otherwise is `egzo proxy logout
-  <service>`.
-- One sign-in per service per project, shared by every agent of the project. On a hub with several users that means one account
-  for the project: the docs say so.
-- Two projects that share a sign-in log each other out; egzo does not prevent it, the docs say so.
-
-### Agents after the first
-
-Without help each new Codex agent shows the sign-in screen again, and a second sign-in starts a new chain that replaces the
-first. Once the project has a sign-in, egzo writes a stand-in `auth.json` (`auth_mode: chatgpt`, the stand-in tokens,
-`last_refresh`) into each new Codex agent. This is the only harness-specific part: where the client keeps its tokens and in what
-format.
-
-### A sign-in that stops working
-
-The refresh token is revoked (sign-out everywhere, a password change), expires after a long idle period, or the volume is gone.
-The proxy reports it where the user looks: `project check`, the hub's status feed, and the agent's own error (a 401 with a body
-that says to sign in again).
-
-## The Codex harness
-
-A `codex` harness built on this: an image with a pinned Codex version, the `egzo` MCP server and `use_agent_identity = false` in
-`config.toml`, the status hooks, and the stand-in `auth.json` above. The model hosts are `chatgpt.com` (through the service) for a ChatGPT account, or
-`api.openai.com` with the `openai` service of [model-providers.md](model-providers.md) for an API key. `auth.openai.com` is
-reached only through the `oauth` service.
 
 ## What was checked (2026-10-27, `openai/codex` at `c587d6e`, from the source)
 
@@ -174,52 +100,13 @@ stand-ins. It is a second user of the mechanism, next to `claude setup-token`, w
   with the sign-in; a renewal that leaves the scope out keeps the old one.
 - The proxy renews in the client's encoding (JSON here).
 
-### Not seen yet
+### Not seen yet ([#153](https://github.com/egzo-ai/egzo/issues/153))
 
 - **The proxy's own renewal** against Anthropic: it runs five minutes before the real access token expires, eight hours
   after a sign-in.
 - **A refused refresh.** Anthropic's errors read `{"error": {"type", "message"}}`. The proxy ends a sign-in only on OAuth's
   `invalid_grant`; if a refusal is shaped like the other errors, the proxy keeps retrying instead of asking for a sign-in.
 - **Logout.** Whether `/logout` revokes the token, and at which URL (the test service had no `revoke_url`).
-
-### Built
-
-- The built-in `claude` service: `api.anthropic.com` and the token URL above, no `revoke_url`. Also
-  `mcp-proxy.anthropic.com`: Claude Code lists the claude.ai account's connectors from `api.anthropic.com/v1/mcp_servers`,
-  then reaches each at `mcp-proxy.anthropic.com/v1/mcp/{server_id}` with the same bearer token; without it there the
-  connectors fail with `CLAUDEAI_BEARER_REJECTED` (the stand-in reaches Anthropic).
-- The `claude-code` harness sets no `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` placeholder with it: either would win
-  over the sign-in.
-- **Agents after the first.** Spawn gives a new agent the sign-in's stand-in refresh token and scope
-  (`CLAUDE_CODE_OAUTH_REFRESH_TOKEN`, `CLAUDE_CODE_OAUTH_SCOPES`), and `egzo agent run` runs `claude auth login` with them
-  when Claude Code has no sign-in, before the TUI: only that command reads them. The proxy answers its refresh with the
-  current stand-ins, so one stand-in serves every agent.
-- `egzo project init --harness claude-code` scaffolds it. `anthropic-oauth` (`claude setup-token`) stays, for agents that
-  start with nobody there to sign in, and `anthropic` for an API key.
-- Specs: `specs/harness/test_harness_claude_sign_in.py`, with the stub answering as `platform.claude.com` and
-  `api.anthropic.com`.
-
-## Open questions
-
-- **A real Codex session** to confirm the above end to end.
-- **Clients this cannot serve:** a client that pins its certificate, or tokens bound to a key the client holds (DPoP, mTLS).
-- **Terms of use**, to be read before it ships.
-
-## Specs
-
-- Engine specs with a stub token endpoint and a stub model backend, no account needed:
-  - a sign-in through the proxy: the agent's `auth.json` holds stand-ins, the stub saw the real exchange;
-  - a model request reaches the stub with the real token; a request with any other token is untouched;
-  - a websocket upgrade gets the real token like any request;
-  - `/oauth/revoke` with a stand-in signs the project out; a dead chain answers `invalid_grant`;
-  - the client's refresh is answered by the proxy and never reaches the stub with a stand-in;
-  - the proxy renews ahead of `exp`, saves the rotated refresh token, and keeps working after a proxy restart and `up`;
-  - the volume holds no token in clear; with another secret key the proxy discards the sign-in and asks for a new one;
-  - two agents of the project, one sign-in;
-  - a revoked refresh token is reported by `project check` and in the agent's error;
-  - a stand-in sent to a host outside the service stays a stand-in.
-- One online spec with a real account, listed in
-  [specs-depend-on-online-services.md](https://github.com/egzo-ai/egzo/issues/105).
 
 ## Alternatives considered
 

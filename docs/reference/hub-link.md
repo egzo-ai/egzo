@@ -1,7 +1,8 @@
-# Roadmap: a project links itself to a hub
+# Reference: how a project links to a hub
 
-**Status.** Built: the link, the hub on top of it, roles and invites, and previews ([agent-ports.md](../docs/hub.md#previews)). The hub no longer connects to engines.
-What is left is [Open questions](#open-questions).
+How a project and a hub talk: the model, registering, the link sidecar, the connection, versions, and the roles and invites the
+hub keeps. For running a hub, see [The hub](../hub.md) and [Hub access](../hub-access.md); for the API the web app uses,
+[the hub API](../hub-api.md). Moved from the design page `roadmap/hub-link.md` when the roadmap moved to GitHub issues.
 
 ## Why
 
@@ -11,7 +12,7 @@ The hub used to connect to engines (a unix socket, tcp+TLS, ssh) and pull everyt
   every host behind it.
 - **The hub must reach every engine.** A laptop, a box behind NAT or a company network cannot be added.
 - **The hub sees everything on an engine**: every project with egzo labels, whether its owner wants it shown or not.
-- **The hub pushes its settings into projects**: the preview domain of [agent-ports.md](../docs/hub.md#previews) had to be written into
+- **The hub pushes its settings into projects**: the preview domain of [agent-ports.md](../hub.md#previews) had to be written into
   the control sidecar by `engine exec`, and two hubs on one engine fight over it.
 - **Every feed is a long pull across the distance**: the engine's events, the status log, the audit log, the exec streams.
 
@@ -64,7 +65,7 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
   random bits, starts `egzo-link-` so that secret scanners find one that was committed, is good once, for 15 minutes, can be cancelled, and is kept as a
   SHA-256 only.
 - The link makes an Ed25519 key pair. The private key stays on the link's volume, sealed with the
-  [project secret key](../docs/project-file.md#the-secret-key); the hub keeps the public key with the registration.
+  [project secret key](../project-file.md#the-secret-key); the hub keeps the public key with the registration.
 - `egzo project register` asks for the code without echo, or reads it from stdin, and hands it to the link through `engine exec` stdin, like the secret
   key. There is no flag for it, and it is never in the project file: a file can be committed, and flags reach a shell's history and `ps`.
 - The link puts the code in its proof, covered by the signature, after the protocol check: it cannot be moved to another key. The hub spends the code
@@ -113,7 +114,7 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 
 ## The connection
 
-- **A WebSocket carrying yamux** ([chosen in the spike](#spike-results)): it passes reverse proxies and company proxies that an
+- **A WebSocket carrying yamux** ([chosen in the spike](#what-was-tested)): it passes reverse proxies and company proxies that an
   HTTP/2 stream to a backend does not. One stream per verb, per terminal and per preview connection; the feeds have one each.
 - **A versioned protocol.** Link and hub are separate releases on separate machines: see [Versions](#versions).
 - **The protocol lives in core** (`internal/hublink`: the messages and the hub's side, with no engine in it; `internal/link`: the link's
@@ -145,41 +146,11 @@ no compatibility shims.
 The hub no longer talks to a control sidecar. The link does, and `up` makes both from one image, so they are one release. That removes the need for a
 control API version the hub can compare, and for a typed result from every control call: what the hub sees is the protocol above.
 
-**Needed for 1.0.0.**
+**Still to decide for 1.0**: the rule for changing the protocol, and the rest of telling an old release from a broken one: [#130](https://github.com/egzo-ai/egzo/issues/130).
 
-- **The change rule.** Adding a verb, a feed or a field is free. A change or a removal bumps `hublink.Version`. After 1.0 a hub supports the current version and one
-  older, written down and checked by a test. Open: how wide the window is, and whether the status format keeps its own number.
-- **A verb a link does not know.** A newer hub asking an older link for something new should turn off one feature and not the project. That needs the link to say what it
-  supports at the handshake.
-- **The CLI and an older control.** Until `up` runs, a newer CLI talks to a control sidecar of the release before. `egzo ps` and `egzo system check` should say so and
-  name the fix.
-- **`up` and a rebuilt image.** Check that `up` recreates a sidecar whose image tag is the same and whose build is older.
-- **An agent's image.** `Stale` covers a template that changed, not an image built by an older egzo. A version label on the harness image could say so, as a hint.
+## Roles and invites
 
-## What changed in the hub
-
-Removed, with their code, settings and docs:
-
-- **Engines**: Settings, Engines, `EGZO_LOCAL_ENGINE`, the engine credentials and their encryption, the ssh host key pinning,
-  `hub/internal/engines/docker.go` and `ssh.go`, the engine badge and filter, `(engine, project)` as the key of everything.
-- **Discovery by labels and the scan interval** (`EGZO_SCAN_INTERVAL`): the hub knows the projects that linked.
-- **Following logs and events through the engine API**: the link pushes.
-- **The Docker socket in `hub/compose.yaml`** and its warning.
-
-Changed:
-
-- **A project is a registration**: an id from the hub, the project's name, the host it says it runs on. URLs carry the id
-  (`/p/<id>/a/coder-1`). Two projects named `web` on two machines are two projects.
-- **The `Engine` seam stays** and gets one implementation: the link. Tasks, terminals with take-over, the Network tab, Activity and
-  the audit log keep their logic; what they call goes over the connection.
-- **Roles and invites** replace today's roles and the operators' implicit ownership (below).
-- **The quick start**: the hub without the socket, and a project on the same machine linking to it.
-- `EGZO_SECRET_KEY` went: nothing is left for it to protect. `EGZO_PUBLIC_URL` or `EGZO_LINK_URL` is required instead, and a link's proof is
-  checked against that address, never one taken from a request.
-
-## Roles and invites (decided)
-
-Built, as [hub-access.md](../docs/hub-access.md) describes. What the text below left open:
+Built, as [hub-access.md](../hub-access.md) describes. What the text below left open:
 
 - An invite lives 7 days. A link code that finds its maker's quota used up is refused and stays good, like one of a key already registered.
 - An owner's unlink forgets the project outright, so its key is unknown and the link hears it is not registered. Revoke, which keeps the record and refuses
@@ -196,7 +167,7 @@ the company. So a person needs a sign-in **and** a valid invite, and an account 
 - An invite is a link with a one-time code: single use, expiring, revocable. It carries what it grants: a role on a project (sent
   by the project's owner), or the flags below (sent by an operator).
 - It is redeemed by whoever signs in with it, by password or single sign-on. Nothing is matched by email
-  ([hub-access.md](../docs/hub-access.md)).
+  ([hub-access.md](../hub-access.md)).
 - A person from outside (the viewer of a preview) needs an account: the invite is also how they get one, as a local account made from it.
 
 Roles are assigned on projects:
@@ -207,7 +178,7 @@ Roles are assigned on projects:
 - **admin**: access all agents (operate, attach, logs, network, the audit log), the CLI's included.
 - **user**: can spawn their own agents, operate and attach to them, and view their logs and network.
 - **viewer**: the web proxy only: a preview of any agent of the project, opened with its link. The link is not guessable but
-  shareable ([agent-ports.md](../docs/hub.md#previews)): the agent or a member hands it over. A viewer sees nothing else of the project,
+  shareable ([agent-ports.md](../hub.md#previews)): the agent or a member hands it over. A viewer sees nothing else of the project,
   not even a list of its previews.
 
 Flags on users:
@@ -222,28 +193,7 @@ Flags on users:
 A person disabled by an operator loses everything at once. Their projects stay linked, so a project can be left with
 no valid owner: the operators see it, and grant a new owner or revoke it.
 
-## Specs and tests
-
-- Core, specs first: `hub:` in the project file and `check --resolved`; registration (unregistered, approved, revoked) and
-  each verb against a small fake hub in `specs/fixtures`; the link reconnecting; nothing listening on the host; the link not
-  reachable from an agent; `down` unlinking. On gVisor, what does not work is a
-  strict xfail of that platform, as for any unsupported feature.
-- The hub: Go unit tests with the seam faked, as now; the link endpoint tested with core's link against `httptest`;
-  `make hub-stack` with a real project linking to the hub in the compose stack.
-
-## Order of work
-
-1. **Spikes**: the link as a sidecar with the engine's socket, and a WebSocket with a multiplexer through a company HTTP proxy
-   and through Caddy and nginx in front of the hub. Done on Docker ([results](#spike-results)); rootless Podman and gVisor are
-   later spikes.
-2. **Core**: `hub:`, the `link` role, registration, the protocol with the verbs and streams, the pushed feeds, with specs.
-3. **The hub**: the link endpoint, the seam over the link, registration pages, projects by id; then remove the engines and
-   everything listed above.
-4. **Previews** ([agent-ports.md](../docs/hub.md#previews)) over the link. Only `http` ports exposed with `where: hub` are previews
-   ([declared-local-ports.md](../docs/project-file.md#local-ports)).
-5. **Roles and invites**: invites, the viewer role, the project quota, operators.
-
-## Spike results
+## What was tested
 
 Run on 2026-10-31 on Docker 29.1.3 with runc. The clients and proxies ran in containers on one machine.
 
@@ -304,12 +254,6 @@ Partial notes, not conclusions:
   test machine under `journald`, from the host too, and worked with the file backends.
 - **gVisor**: a container under default `runsc` could not connect to the mounted socket. With `--host-uds=open` it did, with the
   socket's group as the primary gid (`--group-add` was not enough). Outbound from a user-defined network failed: open.
-
-## Open questions
-
-- Narrowing what the hub may do from the project file (`hub: { url: ..., allow: [attach, previews] }`): a later idea.
-- What the hub shows of a project that is offline, after the hub restarted: its name and host, as what it pushed is in memory. Before that, its
-  last known state, marked as such. Keeping that state in the database is open.
 
 ## Alternatives considered
 

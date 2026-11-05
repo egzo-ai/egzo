@@ -20,7 +20,7 @@ import (
 //     is the log pipeline of the engine's sysadmin;
 //   - marks a group fixed when the same instance gets through to the host afterwards.
 //
-// A link that connects says from when it is wanted: the time of the last event handled. See roadmap/proxy-audit.md.
+// A link that connects says from when it is wanted: the time of the last event handled. See docs/hub.md, "Network".
 
 const (
 	// recentEvents is how many events of a project the hub keeps in memory.

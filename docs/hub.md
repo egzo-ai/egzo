@@ -18,7 +18,7 @@ asked and how it went. Whoever asked gets a toast when the agent is not on their
 
 It does not create or change projects: the project file and the `egzo` CLI stay the only way to do that (`egzo project up`,
 secrets, recreate). This page is how to run it; [access](hub-access.md) is who may do what, and [the hub
-API](hub-api.md) is what the web app talks to. The design and its reasons are in [roadmap/hub.md](../roadmap/hub.md).
+API](hub-api.md) is what the web app talks to. The design and its reasons are in [DESIGN.md](../DESIGN.md), "The hub", and the [reference](README.md#reference).
 
 ## Quick start
 
@@ -357,7 +357,7 @@ in `e2e/`, and the integration and stack runs above. Core's specs-first rule doe
 ### The web app
 
 `web/` is a Svelte 5 + TypeScript single-page app built by Vite. The hub serves it for every address that is not the API, so the
-app's own routes (`/p/p1a2b3c4d5e6/a/coder-1`) survive a reload. The design it implements is in `roadmap/egzo-design/` (tokens,
+app's own routes (`/p/p1a2b3c4d5e6/a/coder-1`) survive a reload. The design it implements is in `hub/web/design/` (tokens,
 components and the clickable prototype). The API it talks to is described in [the hub API](hub-api.md).
 
 ```sh

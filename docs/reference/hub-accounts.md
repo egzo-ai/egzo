@@ -1,31 +1,8 @@
-# Roadmap: hub login, without Dex and with a starter account
+# Reference: hub accounts and sign-in
 
-**Status.** Built (`hub/`; operator docs in [docs/hub-access.md](../docs/hub-access.md)). Where the build settled
-a detail the proposal left open, this page now says what was built: the generated password is 26 characters (`crypto/rand.Text`),
-a hub with local login off and no operator refuses to start, and Link and Unlink are on the user's Account page (Settings,
-Account, reached from their name in the sidebar).
-
-Today the hub can only log people in through OpenID Connect, and the compose file bundles Dex to make that possible. The cost
-is a second public port and hostname (the browser has to reach Dex itself), an `/etc/hosts` trick for a first try, an `issuer`
-and `redirectURIs` in `dex.yaml` to keep in step with the hub's address, and no way in at all until an identity provider
-runs. Comparable tools (Portainer, Arcane, Dockge) ship one container, one port and a built-in login; none bundles an identity
-provider.
-
-## The change
-
-1. **Drop Dex from the hub's compose file.** The hub does not run an identity provider and does not document how to run one.
-   Whoever wants SSO brings their own. Dex stays only where the tests need a real provider (`make hub-stack`), as a test fixture
-   under `hub/` and not as part of the deployment the docs describe.
-2. **Keep OIDC, made generic.** The `EGZO_OIDC_*` variables stay. OIDC becomes optional: with no issuer set, only the starter
-   account exists. The code follows what every mainstream provider (Keycloak, Authentik, Authelia, Zitadel, Okta, Entra ID,
-   Google, GitLab, Auth0, Dex) supports, and no more. See "OIDC".
-3. **A starter account with a built-in login page.** One username-and-password account, for starting out and demos. Any setup
-   with more than one person connects an identity provider.
-4. **A model where a person and the ways they sign in are separate.** Users, passwords and provider identities are separate
-   tables, and nothing is ever matched or merged by email. See "The model".
-
-One container, one port, one volume. The compose file loses the `dex` service, its volume and its port, and `.env` loses
-`EGZO_OIDC_CLIENT_SECRET` as a required value.
+How the hub models people and the ways they sign in: users, passwords, provider identities, sessions, usernames, the starter
+account, SSO, and what the hub asks of an OpenID Connect provider. For setting it up, see [Hub access](../hub-access.md). Moved
+from the design page `roadmap/hub-login.md` when the roadmap moved to GitHub issues.
 
 ## The model
 
@@ -100,7 +77,7 @@ The starter account's username is `admin`, set directly and not generated.
   can sign in as an operator. The hub starts and says so in the log, naming the issuer and the fix (the break-glass below).
 - **Break-glass** is the same two variables: set `EGZO_LOCAL_LOGIN=true` and `EGZO_ADMIN_PASSWORD` and restart. It works when the
   password is lost or the provider is gone, with no subcommand and no editing of the database. This closes the gap in
-  [hub-settings.md](../docs/hub.md#settings). The password has to be set: with it unset and an old one in place, nothing is printed.
+  [Settings](../hub.md#settings). The password has to be set: with it unset and an old one in place, nothing is printed.
 - **Hashing.** argon2id with the library's recommended parameters, encoded with them so they can be raised later.
 - **The login page** is a page of the SPA over `POST /auth/login` (username, password), with the SSO button below it when OIDC is
   configured (`EGZO_OIDC_NAME`, default "SSO"). Same session cookie as the OIDC path, same lifetime. A failure says "wrong
@@ -180,8 +157,8 @@ The hub trusts the one issuer it is configured with. What to expect when it chan
 
 ## Disabling users
 
-`Store.DeleteUser` exists and nothing calls it (see [hub-settings.md](../docs/hub.md#settings)). It goes: the hub has no hard delete of a
-person, for the reason in "The model". Settings, Users gets **Disable** and **Enable** for an operator, with a confirmation:
+The hub has no hard delete of a
+person (whether to add one: [#112](https://github.com/egzo-ai/egzo/issues/112)), for the reason in "The model". Settings, Users gets **Disable** and **Enable** for an operator, with a confirmation:
 
 - **Disabled** means `disabled_at` is set (the time says when; the audit entry says by whom, and its detail names the user). The
   user's sessions end and their open terminals are closed. Sign-in is refused by password and by SSO alike, in the plain wording
@@ -219,54 +196,8 @@ the provider's keys, identity is issuer plus `sub`. To be generic enough without
 - **Not in scope.** Groups or roles from claims (roles stay in the hub), RP-initiated logout (signing out ends the hub session
   only), back-channel logout, more than one issuer at a time (the schema allows it), SAML.
 
-## Documentation
+## Printing the starter password
 
-`docs/hub-access.md` is written around this:
-
-- **Quick start**: set `EGZO_PUBLIC_URL`, `docker compose up`, read the `admin` password in `docker compose logs hub`.
-- **Reaching it**: meant for a private network (a LAN, Tailscale, a tunnel), not the open internet. `EGZO_PUBLIC_URL`
-  and `EGZO_TRUSTED_PROXIES` when a proxy is in front. A few lines; how to self-host is not the hub's docs' job.
-- **Single sign-on**: the client to register (confidential or public with PKCE, authorization code, the redirect address, the
-  scopes), the variables, linking from the starter account, and a table of the failures (redirect mismatch, issuer mismatch,
-  unreachable issuer, unknown CA) with the fix for each. One worked example each for Keycloak, Authentik and Google; others
-  follow the same shape.
-- **Giving a teammate access**: they sign in once, then an owner grants a role in the Members tab.
-- **Changing the identity provider**: the section above.
-- **The avatar**: fetched by the browser; the hub's CSP allows https images; avatar hosts see viewers.
-- The `/etc/hosts` line, the Dex section and the `dex.yaml` comments go.
-
-## Steps
-
-Each is a commit with Go unit tests (the hub is not specs-first), and each leaves the hub working.
-
-1. **The schema and the store**: `users`, `user_passwords`, `user_identities`, `sessions` (with the cascade from an identity to
-   its sessions), setting and clearing `disabled_at`; username generation and its tests. The hub records a schema version and,
-   on an older database, refuses to start and says to remove `hub.db` (pre-1.0 has no migrations).
-2. **The starter account and the login page**: `EGZO_ADMIN_PASSWORD`, `EGZO_LOCAL_LOGIN`, argon2id, `/auth/login`, throttling,
-   the SPA page, the start-up checks, password sessions ended at start, and the lockout warning. The first-sign-in-is-operator
-   rule (and its audit entry) is removed here, not in step 1, so no commit leaves a fresh hub without a way to an operator.
-   Store and web tests; a Playwright test of the form.
-3. **SSO sign-in on the new model**: identity lookup, new users, the imported fields and the userinfo fallback. Tests include: an
-   identity of another issuer never matches; **a disabled user who signs in with SSO is refused and no new user row is made**
-   (count the rows before and after), with nothing refreshed and no session; the same for a password sign-in.
-4. **Link and unlink**: the OIDC state, the refusals (identity of another user, a second identity at the same issuer), an
-   operator's Remove identity on a disabled user, the audit entries, sessions (and their terminals) ended on unlink, and ended at
-   start for identities of another issuer.
-5. **Disable and enable a user**: `PUT /users/{id}` `{disabled}`, the buttons and their confirmation, the filter, the audit entry,
-   sessions and terminals ended. `Store.DeleteUser` is removed.
-6. **OIDC generic**: PKCE, client authentication, optional secret, scopes, exact issuer (no trimmed `/`), clear errors. Tests against `oidctest` with providers
-   that behave differently (claims missing from the id_token, no `email_verified`, public client).
-7. **People in the UI**: username, avatar, sign-in method and last sign-in in the picker, the Members tab and Settings, Users;
-   the CSP change. Vitest and a Playwright test.
-8. **Compose and docs**: drop Dex from `compose.yaml`, `.env.example` and the docs; keep a Dex fixture for `hub-stack`, which then
-   exercises the OIDC path and the link flow with the starter account present.
-
-No compatibility is kept: the first-user rule, the old `users` columns and the bundled Dex are removed outright.
-
-## Open questions
-
-- **Renaming a user.** Generated usernames can be unlovely (`alex-2`). An operator rename is a small action to add later; the
-  starter account's `admin` is looked up by name, so it would need to stay fixed.
-- **Printing a secret to the log** is the convention (Jenkins, Pi-hole) and the quick start relies on it, but logs get shipped.
-  The mitigation is printing only when there is no password yet. Whoever wants no secret in the log sets `EGZO_ADMIN_PASSWORD`, or
-  connects an identity provider and sets `EGZO_LOCAL_LOGIN=false`.
+Printing a secret to the log is the convention (Jenkins, Pi-hole) and the quick start relies on it, but logs get shipped. The
+mitigation is printing only when there is no password yet. Whoever wants no secret in the log sets `EGZO_ADMIN_PASSWORD`, or
+connects an identity provider and sets `EGZO_LOCAL_LOGIN=false`.

@@ -474,7 +474,7 @@ service of the agent's profile, and only those.
   requests to the service's hosts.
 
 Neither stops the agent from *using* the secret while it runs (see `docs/security.md`), and both have limits
-(`known-issues/secret-injection-limits.md`).
+([docs/sandboxing.md](docs/sandboxing.md#limits-of-secret-injection)).
 
 ### Placeholders
 
@@ -507,7 +507,7 @@ egress:
   denied (code `placeholder`) with the same reason. The rule depends only on the request, so a given request always succeeds or always
   fails, and the failure says why. The reason is a fixed sentence: nothing taken from the request is ever put
   in it, since the agent controls the request (it could otherwise put its own placeholder there). Hosts of a placeholder service are meant for logins and API calls, not
-  uploads; see `known-issues/secret-injection-limits.md`.
+  uploads; see [docs/sandboxing.md](docs/sandboxing.md#limits-of-secret-injection).
 - Hosts of a placeholder service are TLS-intercepted, like those of `inject`, and are audited the same way.
 
 ## Egress policy (decided)
@@ -800,7 +800,7 @@ Claude Code `SessionStart` arrives before its first-run dialogs are answered.
 The suite is the status report: `specs/README.md` explains the done / broken / unsupported model.
 A run tests egzo on one reference platform (docker, docker-gvisor, podman, podman-rootless: what the host is like, not
 what egzo is asked; docker-gvisor is Docker with `runsc` as its default runtime), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
-per platform (known-issues/reference-platform-ci-matrix.md). It builds its own sidecar and agent images, and needs the internet for the specs that
+per platform (specs/README.md, "In CI"). It builds its own sidecar and agent images, and needs the internet for the specs that
 talk to real hosts (they fail when offline) and a registry for the image-name spec (`EGZO_SPEC_REGISTRY`).
 
     specs/
@@ -893,7 +893,7 @@ Decisions taken while building (reversible; each is covered by specs):
   or profile. Plain HTTP is refused (405); agents get `HTTP_PROXY`
   too so `http://` fails loudly. Audit lines (JSON, no bodies or query strings) go to the proxy's
   stdout (`egzo proxy log [--agent]`): one event per step of a connection, with the connection's id, its protocol, the
-  decision and a reason code from a fixed list ([docs/sandboxing.md](docs/sandboxing.md), [roadmap/proxy-audit.md](roadmap/proxy-audit.md)).
+  decision and a reason code from a fixed list ([docs/sandboxing.md](docs/sandboxing.md), [the reason codes](docs/sandboxing.md#reason-codes)).
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
   init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. There is no runtime setting: containers run under the engine's default runtime, which is the host administrator's choice (gVisor included).
@@ -977,7 +977,7 @@ Open, in the order they matter:
 1. **pi** is accepted as a harness name but has no image or integration. `custom` covers it for now.
 2. The engine matrix beyond Docker (rootless and rootful Podman, gVisor) is not part of the current spec run;
    the specs were written for it and need a pass on those hosts. Rootful Podman loses outbound connectivity
-   intermittently (`known-issues/rootful-podman-intermittent-egress.md`).
+   intermittently ([docs/podman.md](docs/podman.md)).
 3. `request_secret_access`, the optional mount of the user's own `~/.claude` settings.
 4. A real model call is never made by the specs; the end-to-end behaviour of a harness with a model (that a
    reply comes back, that the Stop text reaches `say`) is unverified.
@@ -985,7 +985,7 @@ Open, in the order they matter:
 ## Not in core: hub, web UI, chat clients
 
 Egzo core does not implement a hub, a web UI or chat integrations (Discord and the like); they are a separate `egzo-hub` deliverable (see
-`roadmap/hub.md` and `roadmap/hub-link.md`). What that means for core:
+"The hub" below and [docs/reference/hub-link.md](docs/reference/hub-link.md)). What that means for core:
 - The project YAML and the CLI are the only way to create or change a project. Nothing else writes config.
 - Secrets are CLI-only. No user identities live in YAML, ever; who may talk to agents is not declared there.
 - A project connects itself to a hub: `hub:` in its file starts a **link** sidecar, which dials out, proves its key and, once a person has
@@ -994,6 +994,105 @@ Egzo core does not implement a hub, a web UI or chat integrations (Discord and t
 - Core exposes what the link needs: the `ai.egzo.*` label schema, the control sidecar's operator API (reached by `engine exec` only) and its
   status log, attach as `engine exec`, the message and event contract, and importable Go packages (list, inspect, read-spec, start/stop, attach,
   send) rather than logic inside CLI commands.
+
+## The hub (`egzo-hub`)
+
+The hub and its web UI are in `hub/`; how to run and use them is in [docs/hub.md](docs/hub.md).
+
+### Model
+
+- The hub + web UI is a **separate deliverable** (`egzo-hub`, own binary and image), shipped as a docker-compose
+  stack and allowed its own database. It lives in the same git repository as core, in `hub/` (its own Go module),
+  and imports core packages, never the reverse (see "Code layout and rules"); it is not part of the `egzo` CLI.
+- Projects **link themselves** to the hub ([reference](docs/reference/hub-link.md)). The key of everything is the id of a registration.
+- Multi-project and multi-user. **Users are global to the hub** and live only in the hub database.
+- **Observe and operate only.** The project YAML + CLI is the one and only way to create or change a project
+  (`project up`, `project down`, recreate, edit). The hub never writes YAML and never applies config.
+- **Secrets are CLI-only.** The hub never reads or writes secret values; it may list which secrets exist and which
+  agents use them. A hub compromise must not leak credentials.
+- **No users or roles in YAML, ever.** Identities, roles and grants live in the hub database. The roles are fixed by
+  the hub (below); the project file knows nothing about them.
+- Trust: the hub is the policy enforcement point for its users and passes the acting user as an asserted `actor` on what it does. No token signing in projects. The CLI stays
+  "OS user = operator".
+
+### Deployment
+
+- A docker-compose project. No TLS termination: users put a TLS reverse proxy in front (out of scope); the hub
+  exposes one port for people and links, and one for previews.
+- The public host is derived safely from `X-Forwarded-Host` and the related headers, following best practice (trust
+  them only from a configured proxy).
+- All configuration comes from environment variables, set in the compose file.
+
+### Users and login
+
+- **Local accounts and OIDC**, as [the reference](docs/reference/hub-accounts.md) describes. The hub only speaks OIDC, to any provider. Dex is a test fixture of
+  `make hub-stack` and is not part of the compose stack. No provider code in the hub.
+- An account takes an invite; signing in is not enough ([docs/hub-access.md](docs/hub-access.md)).
+- **Operators** oversee every project and grant themselves a role to go further; operators make and remove other operators, and the last one stays.
+
+### Permissions (RBAC)
+
+- Resources: **projects and agents** only. Roles are granted per project. An agent has a creator field (the `actor` label that spawn already writes). Agents spawned
+  from the CLI are the admins'.
+- Roles:
+  - **viewer**: the web proxy only.
+  - **user**: spawn, start, stop, attach and delete their own agents.
+  - **admin**: the same on every agent of the project.
+  - **owner**: admin, plus granting and removing roles, and unlinking. Destroying a project (`project down`) is not a hub action, by design: the CLI does it.
+- An owner cannot remove themselves or drop their own permissions. An owner can remove other owners. A project keeps a valid owner.
+- Chat needs no permission of its own: a person talks to an agent from a channel it was added to, with `user` or above. **A viewer can never talk to an agent.** See
+  "Who decides what" in the messaging epic ([#145](https://github.com/egzo-ai/egzo/issues/145)), which also covers a `user` talking to another person's agent: allowed, sensitive, and to evaluate carefully before building.
+
+### Web UI
+
+What it shows is in [docs/hub.md](docs/hub.md). The decisions behind it:
+
+- A project list first; inside a project, a left nav of that project's sections and its open terminals. The hub's own settings
+  and the account are in the top bar.
+- One terminal per agent at a time, with presence and take-over: no read-only observers (one pty has one size). The CLI is not
+  managed, a documented known issue.
+- What is rarely needed (health, the spec) is under **Advanced**.
+- **Messaging** comes to the hub for 1.0 as an audit view of messages and the questions agents wait on
+  ([#145](https://github.com/egzo-ai/egzo/issues/145)). Until then an agent's "waiting" state shows on its row and its page.
+
+### Code layout and rules
+
+**hub -> core, never core -> hub.** Any file is identifiable as hub or core by its path alone.
+
+    cmd/egzo/, internal/, specs/   core (unchanged)
+    hub/go.mod                     the hub module: github.com/egzo-ai/egzo/hub
+    hub/cmd/egzo-hub/              the hub binary
+    hub/internal/...               hub and adapter code (all of it: nothing importable outside hub/)
+    hub/web/                       the web UI source (frontend toolchain stays inside hub/)
+    hub/Dockerfile*, hub/compose.yaml   images, the compose stack
+
+- **A separate Go module** (`hub/go.mod`). Core's `go.mod`, `staticcheck` and `govulncheck` never see NATS, OIDC,
+  the frontend or Discord libraries. The hub requires core with `replace github.com/egzo-ai/egzo => ../`. Go's
+  `internal` rule is path-based, so the hub can import core's `internal/...` packages (confirmed by the build).
+- **The compiler enforces the direction.** Code under `hub/internal/` can be imported only from `hub/`, and
+  `hub/cmd/` packages are `main`. So nothing hub-side is importable by core. Never put hub code in a non-`internal`
+  package under `hub/`.
+- **A lint check** (`make lint`) also fails if any core package depends on a path containing `/hub/`, as a guard
+  against a future move.
+- **The web UI lives in `hub/web/`**, built in the image build and embedded in the hub binary (`go:embed`); build
+  output is not committed.
+- **Tests**: hub and adapters do **not** use the `specs/` first model. They use plain Go unit tests and other best
+  practices (the engine seam faked, an embedded NATS, `httptest`), and a separate CI job. `specs/` stays core only.
+- `make lint`, `make test` and the images get hub targets that run inside `hub/`; core's targets do not touch it.
+- Hub documentation is part of the main docs (`docs/hub.md`, `docs/hub-access.md`, `docs/hub-api.md`, `docs/reference/`). Planning is in GitHub issues.
+
+### Core ↔ hub contract
+
+The protocol of `internal/hublink`, versioned at the handshake ([reference](docs/reference/hub-link.md)): a link's verbs and feeds. The link runs the shared
+Go packages (list, inspect, read-spec, start/stop, attach, send, spawn, rm, workspace put/get), which take an engine client and a `PrepEnv` and
+read no file of the host. Actors: spawn writes the `actor` label (the hub passes `user:<id>`), and messages and answers carry one. Start, stop, rm
+and attach leave no trace in core: the hub writes its own audit log for them, with the signed-in user.
+
+### Hub design notes
+
+- **An `Engine` seam owned by the hub** (`hub/internal/links`): the verbs of one project, implemented by `hublink.Peer` and faked in the hub's
+  tests. That covers what is the hub's own logic: registrations, the operators' access, RBAC, a project going offline.
+- Risk tracked in [#143](https://github.com/egzo-ai/egzo/issues/143): `project up` recreating containers while users are attached.
 
 ## Hardening decisions (code review of the first implementation)
 

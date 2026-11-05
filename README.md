@@ -8,7 +8,7 @@
 > [!NOTE]
 > **Project status:** egzo is in active development. Expect some breaking changes as we work toward a 1.0 release.
 > The core CLI tool and web UI are stable enough for testing and non-production work.
-> See [the 1.0 roadmap](roadmap/initial-release.md) for details.
+> See [the 1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1) for details.
 
 ![The egzo hub: a project with OpenCode and Codex running, Claude Code spawned next to them, then the files and the network](assets/hub.gif)
 
@@ -126,8 +126,8 @@ The following platforms are tested for each new release and using nightly GitHub
 
 Work in progress:
 
-- Rootful Podman has a minor issue: [`known-issues/rootful-podman-intermittent-egress.md`](known-issues/rootful-podman-intermittent-egress.md).
-- macOS and Windows (through WSL2) are untested: [`roadmap/windows-and-macos.md`](roadmap/windows-and-macos.md).
+- Rootful Podman has a minor issue: [Using Podman](docs/podman.md).
+- macOS and Windows (through WSL2) are untested: [#147](https://github.com/egzo-ai/egzo/issues/147).
 
 See [Installation](docs/install.md) for more details.
 

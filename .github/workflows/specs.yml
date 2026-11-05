@@ -8,7 +8,7 @@ name: specs
 #   dispatch       every platform, by hand.
 # release.yml does not run them again: it requires that the push to main of the tagged commit passed here.
 # Only the cells that are not `experimental` can fail the run. A platform becomes required (in the branch rules, by the name
-# `specs (<platform>)`) and loses its `experimental` mark after a clean history; see roadmap/ci-test-matrix.md.
+# `specs (<platform>)`) and loses its `experimental` mark after a clean history; see specs/README.md, "In CI".
 on:
   pull_request:
   merge_group:
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -o pipefail
           ../specs/.venv/bin/pytest --engine ${{ matrix.engine }} --junitxml=../specs-${{ matrix.name }}.xml 2>&1 | tee ../specs-${{ matrix.name }}.log
-      # What known-issues/rootful-podman-intermittent-egress.md says confirms its netavark bug: the stale sysctl files and the
+      # What docs/podman.md says confirms its netavark bug: the stale sysctl files and the
       # bridges that have forwarding off. It is what is left at the end of the run, so it is a hint, not a proof.
       - name: Network state of the Podman engine
         if: failure() && startsWith(matrix.engine, 'podman')

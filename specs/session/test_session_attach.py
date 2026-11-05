@@ -132,7 +132,7 @@ def test_the_window_size_reaches_the_program_and_a_reattach_repaints_at_the_new_
 
 
 def test_end_of_input_typed_at_the_start_of_a_line_reaches_the_program(sandbox, engine, request):
-    if engine.gvisor:  # known-issues/gvisor-terminal-quirks.md
+    if engine.gvisor:  # docs/gvisor.md, "Known differences"
         request.applymarker(pytest.mark.xfail(strict=True, reason="gVisor does not give a program end of input from Ctrl-D on a pty a Go program made"))
     p = sandbox
     eof = p.pty("agent attach", p.spawn("lines"))

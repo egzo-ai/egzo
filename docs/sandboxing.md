@@ -109,8 +109,7 @@ them:
 
 The built-in `opencode` service injects only on the paths OpenCode sends its key to ([harnesses.md](harnesses.md#opencode)).
 `github` injects on every path of its hosts: `github.com` is also GitHub's website, and git over HTTPS sends
-its requests under `/<owner>/<repo>.git/`, so a prefix there would be a list of repositories: see [the known
-issue](../known-issues/a-secret-is-injected-in-every-request-to-its-hosts.md).
+its requests under `/<owner>/<repo>.git/`, so a prefix there would be a list of repositories: see [below](#a-secret-goes-to-every-path-of-its-hosts-unless-the-service-has-paths).
 
 Service `hosts` take the patterns `allow` takes (`host`, `*.domain`, `*`), **but only for a service without a secret**: a
 secret binds to exact hosts, because a wildcard would hand it to every subdomain, including ones somebody else controls.
@@ -216,7 +215,7 @@ or larger than 1 MiB is refused with a message saying so (`413` or `415`, the `4
 RFC 9110 has it), always, not sometimes. Use `inject` for a
 host that takes uploads, or send the upload to a host that has no placeholder.
 
-Some clients cannot be served this way: see [known issues](../known-issues/secret-injection-limits.md). HTTP Basic
+Some clients cannot be served this way: see [Limits of secret injection](#limits-of-secret-injection). HTTP Basic
 authentication, for example, is built by the client from the placeholder, which hides it; use `inject` for that.
 
 ## Several profiles
@@ -313,6 +312,135 @@ egress:
 Still through the proxy, so still audited, still limited to port 443 and public addresses, and credentials are
 injected only for the hosts of declared services. Use it for a trusted template, not by default.
 
+## Limits of secret injection
+
+egzo keeps secrets out of agents by rewriting HTTPS requests in the proxy: `inject` sets a header, a `placeholder`
+is swapped for the secret (`DESIGN.md`, "Secrets and vaults"). That covers an API key in a header and a password in
+a form. It does not cover everything a client can do with a secret, and in each case below the agent is not given
+the secret to work around it: the feature does not work, and says nothing is injected.
+
+### Signed requests (HMAC, AWS SigV4, signed URLs, JWTs the client mints)
+
+A client that signs a request uses the secret to compute the signature, and the signature covers the method, the
+path, the headers or the body. The agent only has a placeholder, so it signs with that, and the server rejects the
+request. The proxy replaces text; it does not know the signing scheme, so it cannot sign again. Anything that needs
+the *real key in the client* is out of reach: AWS SDKs and CLI, Stripe-style webhook signing, OAuth 1.0, and the like.
+
+Works instead: services where the credential is the header (bearer tokens, API keys, session cookies). For a signed
+API, give the agent a credential that does not sign (a short-lived token minted outside the sandbox), or run the
+signing step outside it.
+
+### Credentials the client transforms before sending
+
+The proxy matches the placeholder text, so it must reach the wire unchanged. A client that encodes or hashes it first
+hides it:
+
+- **HTTP Basic authentication** is `base64(user:password)`. A client that builds it from the placeholder sends the
+  base64 of the placeholder. Use `inject` with `basic_user` for the whole header instead.
+- A login page whose JavaScript hashes or encrypts the password in the browser (a client-side `sha256`, SRP,
+  password-manager style derivation) sends the hash of the placeholder.
+- Any format that transforms the text: URL-safe base64, gzip of the body (`Content-Encoding` is not scanned),
+  encryption inside the payload.
+
+### Clients that do not behave like a proxy-aware HTTPS client
+
+The proxy only sees what is sent to it as a `CONNECT` tunnel to port 443, and can only rewrite what it terminates
+with the project CA. These do not get injection, or do not work at all:
+
+- Clients that ignore `HTTPS_PROXY` (some language runtimes and SDKs, and software that opens sockets itself). The
+  agent's network has no other route, so they fail to connect rather than leak.
+- Clients that do not read the CA bundle egzo provides. Chromium uses its own NSS database, not `SSL_CERT_FILE`: the
+  harness images import the project CA there (`egzo agent run`, needs `certutil`), and a browser in an image of your
+  own needs the same. Java uses its own keystore; some Python HTTP libraries bundle their own CA list. They reject the
+  proxy's certificate for any host that is injected into, inspected, or that the client reaches with Encrypted Client
+  Hello (see [Browsing](browser.md)).
+- Clients that pin certificates, for the same reason.
+- Anything that is not HTTPS on port 443: SSH, raw TCP, plain HTTP (refused), UDP, a database protocol. A git remote
+  over SSH cannot use a secret from egzo; git over HTTPS can.
+- WebSocket messages after the upgrade are not rewritten.
+
+### Request bodies to a placeholder host
+
+The proxy reads a request body to find the placeholder, so it holds it in memory: up to 1 MiB, uncompressed. A request
+to a placeholder host that does not fit those limits is **refused**, not forwarded: `413` for a body over 1 MiB and
+`415` for a compressed one (`Content-Encoding`), with a message naming the reason, and a `deny` in the audit log.
+
+This is deliberate. Forwarding the request with the placeholder still in it would make some requests work and others
+fail with nothing to tell them apart, which is worse than a clear refusal. The rule depends only on the request, so
+the same request always has the same outcome. The cost is that a host with a placeholder cannot take big uploads: use
+`inject` for such a host, or a service for the upload that has no placeholder. Raising the limit, or scanning the
+stream instead of buffering it (a fixed-length placeholder can be found in a stream, but then the request has to be
+sent chunked, which some servers refuse), is possible if a real use-case needs it.
+
+### What the agent sees when it fails
+
+Nothing is retried with the real secret, and nothing falls back to sending it. The server gets the placeholder (or no
+header), and the request fails the way a wrong password fails. A body the proxy cannot scan is refused with a message
+instead (see above). `egzo proxy log` shows the request on an intercepted
+host; it never shows a body.
+
+### If a use needs one of these
+
+If a real use-case needs one of these, the likely fixes are on the proxy side (re-signing for a named scheme, a
+`placeholder` form for Basic authentication), added for that scheme only, with specs. Per-client problems with the CA
+are image problems and belong in the image ([images](images.md)).
+
+### A secret goes to every path of its hosts, unless the service has `paths`
+
+A service binds a secret to hosts, and without `paths` the proxy applies it to every request an agent sends to one of
+them. That is harmless when the host only serves an API. It is not when the host is also the vendor's website or console,
+because the agent can then send the secret to pages and endpoints that have nothing to do with the API it was given for.
+
+#### Where it applies today
+
+- **`github`** (`github.com` and `api.github.com`). git over HTTPS needs `github.com`, which is also the website: the token
+  goes with every request to it, a pull request page as well as `git push`.
+- **Your own services**, whenever the host serves more than its API, until you give them `paths`.
+
+Limited to their API's path already: **`chatgpt`** (`chatgpt.com`, the built-in OAuth service), under `/backend-api/`,
+where Codex's calls go.
+
+Planned: **`openrouter`** (`openrouter.ai`, [#148](https://github.com/egzo-ai/egzo/issues/148)), whose API is under `/api/v1/`, on the same host as the website.
+
+Limited to their API's paths already: **`opencode`** (`opencode.ai`, also the OpenCode website, its documentation and the
+Console), under `/inference/` and `/zen/` (the model calls, Zen and Go), `/console/api/v2/config` and
+`/console/api/websearch` (below).
+
+`anthropic` and `anthropic-oauth` (`api.anthropic.com`) are not affected: the host serves the API and nothing else.
+
+#### What it costs
+
+The secret only ever goes to the host it was bound to, which belongs to the party that issued it. It does not reach a third
+party. What follows:
+
+- **The website's own logs and analytics may see it.** They sit behind the same name as the API.
+- **The agent can use it on any endpoint of the host,** not only the one it was meant for. A prompt-injected agent can call
+  the GitHub web endpoints with the token, and whatever the credential allows is
+  what it can do. The credential's own permissions are the only limit.
+
+#### What to do about it now
+
+Give the credential the least privilege it can work with. egzo cannot narrow it, the issuer can:
+
+- **GitHub.** A fine-grained token limited to the repositories the agents work on, with only the permissions they need
+  (contents, pull requests), not a classic token with the `repo` scope.
+
+#### What `paths` leaves
+
+- **`opencode`.** The paths are the ones OpenCode 2 sends its key to (anomalyco/opencode,
+  `packages/core/src/plugin/provider/opencode.ts`): the model calls under `/inference/` (and `/zen/`, where they went before
+  and where the Go usage meter is), and two Console calls. OpenCode fetches the workspace's config from
+  `/console/api/v2/config` at start and every minute: it carries the header that routes the model calls to the workspace,
+  the models the workspace turned off and its policies. Without the key there the Console answers 401, OpenCode reports
+  the connection as signed out and runs without them. `/console/api/websearch` is the hosted web search, which OpenCode
+  offers when that config enables it. The device sign-in (`/console/auth/`) is not covered: egzo binds a key. A Console
+  config can carry voice and MCP servers that take the key too, under a base URL it gives; one not under these paths
+  gets the placeholder.
+- **`github`.** git over HTTPS to `github.com` sends its requests under `/<owner>/<repo>.git/`, so the prefix would have to
+  name the repositories, and the list would then be the access policy. It stays unlimited, with a least-privilege token.
+- A path rule is not an authorization rule: an endpoint under the prefix can still do more than the agent needs. It narrows
+  the exposure, it does not replace a least-privilege credential.
+
 ## What the sandbox does not allow
 
 - **Raw TCP, UDP, ping, DNS to other servers; ssh anywhere else.** Only HTTPS through the proxy, and ssh to the servers a profile names
@@ -348,8 +476,7 @@ Each event is one step of one connection:
 - `decision` is `allow`, `deny`, `error`, or `challenge`: a connection that arrived without proxy credentials. A client
   may start that way and send them once asked, so a challenge is not a refusal, and it names no agent; its `client` says
   where it came from.
-- `reason.code` is from a fixed list, for tools (the full list is in [the roadmap](../roadmap/proxy-audit.md)); `reason.text`
-  is for people.
+- `reason.code` is from a fixed list, for tools ([below](#reason-codes)); `reason.text` is for people, and may change.
 - `service` is the service of the profile that covers the host, on an allowed `connect`.
 - On a `request`, `injected` names the service whose credential the proxy set, and `substituted` the services whose
   placeholder it swapped for the secret. A request to an injecting service's host outside its `paths` has neither, and the
@@ -370,3 +497,38 @@ Each event is one step of one connection:
 Changing a profile and running `egzo project up` reloads the proxy with the new policy; running instances keep their
 binding by profile name. After a proxy restart, `egzo restart proxy` (or `egzo project up`) loads the policy again; until
 then the proxy answers 503. `egzo project rotate-ca` issues a new project CA and restarts the agents.
+
+### Reason codes
+
+| code | decision | meaning |
+|---|---|---|
+| `no-policy` | deny | the proxy was restarted and has no policy: `egzo restart proxy` or `egzo project up` |
+| `no-credentials` | challenge | no proxy credentials yet |
+| `credentials` | deny | wrong proxy credentials: the name is in `claimed_agent`, never in `agent` |
+| `host` | deny | the CONNECT target is not a host name or address; it is said in the text, and the event has no `host` |
+| `port` | deny | only port 443 is allowed |
+| `not-in-profile` | deny | the host is not in the agent's profile |
+| `private-address` | deny | the host is a private address |
+| `limit` | deny | too many connections, the agent's or the proxy's |
+| `client-hello` | deny | the client's TLS hello could not be read |
+| `sni-mismatch` | deny | the TLS server name differs from the CONNECT host |
+| `host-header` | deny | a request's `Host` header is malformed |
+| `host-mismatch` | deny | a request names another host than its connection |
+| `placeholder` | deny | a placeholder could not be swapped (a compressed or too large body, a secret that cannot go in a header) |
+| `path` | deny | a request under a service's `paths` whose path the server could read as another one: a dot segment, a backslash, a needless or double escape, an escaped control character or byte outside ASCII |
+| `outside-paths` | allow | why a request to an injecting service's host went without its credential: outside the service's `paths` (the text says when the agent sent the header itself) |
+| `aborted` | error | the client left before the handshake (clients open connections ahead of time); for ssh, before it tried to sign in |
+| `dial` | error | the upstream did not answer (for ssh too, a cloud metadata address included) |
+| `tls-handshake` | error | the client's TLS handshake with the proxy failed: it does not trust the project CA |
+| `upstream` | error | a request to the upstream failed |
+| `ech` | allow | why the mode is `intercept`: the client sent Encrypted Client Hello |
+| `identity` | deny | ssh: no valid identity for a server of a profile, or the agent's binding or profile changed while it signed in |
+| `channel` | deny | ssh: a channel that is not a session (port forwarding, X11) |
+| `forwarding` | deny | ssh: a global request (remote forwarding) |
+| `request` | deny | ssh: a session request that is not relayed (agent forwarding, a subsystem other than sftp) |
+| `host-key` | error | ssh: the server presented another key than the pinned one, or the pin is not usable |
+| `key` | error | ssh: the profile's key is not usable |
+| `auth` | error | ssh: the server refused the key |
+| `session` | error | ssh: the server did not open a session |
+| `config` | error | ssh: the listener has no host key |
+| `idle` | (close) | ssh: closed after being idle |
