@@ -5,6 +5,7 @@
   import { filesPlace, filesHref, humanSize } from "../lib/files";
   import { nav } from "../lib/router.svelte";
   import type { Listing, WorkspaceRow } from "../lib/types";
+  import FileViewer from "./FileViewer.svelte";
   import Icon from "./Icon.svelte";
   import Pill from "./Pill.svelte";
 
@@ -12,7 +13,7 @@
   let { project }: { project: string } = $props();
 
   const place = $derived(filesPlace(nav.path));
-  const at = (workspace = "", instance = "", dir = "") => filesHref(project, workspace, instance, dir);
+  const at = (workspace = "", instance = "", dir = "", file = "") => filesHref(project, workspace, instance, dir, file);
 
   let workspaces = $state<WorkspaceRow[] | null>(null);
   let listing = $state<Listing | null>(null);
@@ -20,9 +21,10 @@
   let asked = 0; // an answer to an older question is dropped
 
   $effect(() => {
-    const { workspace, instance, dir } = place;
+    const { workspace, instance, dir, file } = place;
     const n = ++asked;
     failure = "";
+    if (file) return; // the viewer reads it
     if (!workspace) {
       api.workspaces(project).then((w) => { if (n === asked) workspaces = w; }).catch((e) => { if (n === asked) failure = errorText(e); });
       return;
@@ -83,8 +85,11 @@
     <a href={at()}>Workspaces</a> /
     <a href={at(place.workspace, place.instance)}>{place.workspace}{#if place.instance} · {place.instance}{/if}</a>
     {#each crumbs as c (c.href)} / <a href={c.href}>{c.name}</a>{/each}
+    {#if place.file} / <span>{place.file}</span>{/if}
   </nav>
-  {#if failure}
+  {#if place.file}
+    <FileViewer {project} workspace={place.workspace} instance={place.instance} path={place.dir + place.file} />
+  {:else if failure}
     <p class="field-error" role="alert">{failure}</p>
   {:else if listing === null}
     <p class="muted">Loading…</p>
@@ -100,7 +105,10 @@
                 <td><a class="name" href={at(place.workspace, place.instance, place.dir + e.name + "/")}><Icon name="folder" size="sm" /> {e.name}/</a></td>
                 <td></td>
               {:else if e.type === "file"}
-                <td><a class="name" href={filesURL(project, place.workspace, place.instance, place.dir + e.name)} download={e.name} data-external><Icon name="file" size="sm" /> {e.name}</a></td>
+                <td>
+                  <a class="name" href={at(place.workspace, place.instance, place.dir, e.name)}><Icon name="file" size="sm" /> {e.name}</a>
+                  <a class="muted download" href={filesURL(project, place.workspace, place.instance, place.dir + e.name)} download={e.name} data-external aria-label="Download {e.name}">download</a>
+                </td>
                 <td style="text-align:right" title="{e.size ?? 0} bytes">{humanSize(e.size ?? 0)}</td>
               {:else}
                 <td><span class="muted" title="a symbolic link: not followed">{e.name} <small>link</small></span></td>

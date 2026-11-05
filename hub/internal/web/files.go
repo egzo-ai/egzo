@@ -25,6 +25,7 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/store"
+	"github.com/egzo-ai/egzo/hub/internal/textview"
 	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/termsafe"
 )
@@ -109,6 +110,10 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request, user store.User) 
 	}
 	if err := s.hub.CanReadFiles(r.Context(), user, target.project); err != nil {
 		s.problem(w, r, err)
+		return
+	}
+	if r.URL.Query().Has("view") {
+		s.viewFile(w, r, filesCall{target: target, user: user, path: "/" + r.PathValue("path")})
 		return
 	}
 	// the hub's own policy is for its pages; what comes back here gets one that runs nothing (filesAnswered)
@@ -204,13 +209,9 @@ func (s *Server) filesAnswered(response *http.Response) error {
 			kept.Set("Location", location)
 		}
 	case response.StatusCode >= 400:
-		text, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		message := serverSaid(response)
 		response.Body.Close()
-		message := termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(text))), 200)
-		if message == "" {
-			message = http.StatusText(response.StatusCode)
-		}
-		body, _ := json.Marshal(apiError{Code: "files", Message: capitalize(message) + "."})
+		body, _ := json.Marshal(apiError{Code: "files", Message: message})
 		response.Body = io.NopCloser(bytes.NewReader(body))
 		response.ContentLength = int64(len(body))
 		kept.Set("Content-Type", "application/json")
@@ -227,6 +228,89 @@ func (s *Server) filesAnswered(response *http.Response) error {
 	}
 	response.Header = kept
 	return nil
+}
+
+// serverSaid is the file server's refusal, as one line of the hub's.
+func serverSaid(response *http.Response) string {
+	text, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+	message := termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(text))), 200)
+	if message == "" {
+		message = http.StatusText(response.StatusCode)
+	}
+	return capitalize(message) + "."
+}
+
+// viewJSON is a file shown in the hub: its start as text, or why it is not text. The text is shown as text, never as a page.
+type viewJSON struct {
+	Size      int64  `json:"size"`
+	Kind      string `json:"kind"`             // text or binary
+	Text      string `json:"text"`             // the first textview.Limit bytes, lines cut at textview.MaxLine
+	Binary    string `json:"binary,omitempty"` // why it is not text: the format its bytes say, or what they are not
+	Truncated bool   `json:"truncated"`        // the file goes on past the text
+	CutLines  int    `json:"cutLines"`
+	Bidi      int    `json:"bidi"` // characters that change the direction of text, which the viewer shows
+}
+
+// viewFile reads the start of a file through the file server, at most textview.Limit bytes, and says it as text if its bytes are text.
+func (s *Server) viewFile(w http.ResponseWriter, r *http.Request, call filesCall) {
+	if strings.HasSuffix(call.path, "/") {
+		s.apiFail(w, http.StatusBadRequest, "not_a_file", "A folder is listed, not viewed.")
+		return
+	}
+	s.filesProxy() // its transport
+	ctx := context.WithValue(r.Context(), filesRequest{}, call)
+	asked := &url.URL{Scheme: "http", Host: call.target.poolKey(), Path: call.path}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, asked.String(), nil)
+	if err != nil {
+		s.apiFail(w, http.StatusBadRequest, "not_a_file", "Not a path.")
+		return
+	}
+	request.Host = "files"
+	request.Header.Set("Range", "bytes=0-"+strconv.Itoa(textview.Limit-1))
+	response, err := s.filesState.proxy.Transport.RoundTrip(request)
+	if err != nil {
+		s.filesFailed(w, r, err)
+		return
+	}
+	defer response.Body.Close()
+	var size int64
+	switch response.StatusCode {
+	case http.StatusPartialContent:
+		// bytes 0-N/SIZE
+		_, total, _ := strings.Cut(response.Header.Get("Content-Range"), "/")
+		if size, err = strconv.ParseInt(total, 10, 64); err != nil {
+			s.apiFail(w, http.StatusBadGateway, "files", "The file server answered what the hub does not read.")
+			return
+		}
+	case http.StatusOK:
+		size = response.ContentLength
+	case http.StatusRequestedRangeNotSatisfiable: // no byte to range over: an empty file
+	case http.StatusMovedPermanently:
+		s.apiFail(w, http.StatusBadRequest, "not_a_file", "It is a folder.")
+		return
+	default:
+		status := http.StatusBadGateway
+		if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusForbidden {
+			status = response.StatusCode
+		}
+		s.apiFail(w, status, "files", serverSaid(response))
+		return
+	}
+	var data []byte
+	if response.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+		if data, err = io.ReadAll(io.LimitReader(response.Body, textview.Limit)); err != nil {
+			s.filesFailed(w, r, err)
+			return
+		}
+	}
+	truncated := size > int64(len(data))
+	seen := textview.Inspect(data, truncated)
+	s.hub.FileViewed(r.Context(), call.user, call.target.project, call.target.workspace, call.target.instance, call.path)
+	out := viewJSON{Size: max(size, int64(len(data))), Kind: "text", Text: seen.Text, Truncated: truncated, CutLines: seen.CutLines, Bidi: seen.Bidi}
+	if seen.Binary != "" {
+		out = viewJSON{Size: out.Size, Kind: "binary", Binary: seen.Binary}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // filesFailed says why the file server could not be reached. What a link said is not shown as it is.

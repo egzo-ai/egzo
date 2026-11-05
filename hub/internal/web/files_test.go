@@ -11,6 +11,7 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
+	"github.com/egzo-ai/egzo/hub/internal/textview"
 	"github.com/egzo-ai/egzo/internal/files"
 )
 
@@ -23,6 +24,10 @@ func filesRig(t *testing.T) (*rig, *browser, *headersSeen) {
 	docs, worktree := t.TempDir(), t.TempDir()
 	os.MkdirAll(filepath.Join(docs, "notes"), 0o755)
 	os.WriteFile(filepath.Join(docs, "notes", "a.txt"), []byte("alpha\n"), 0o644)
+	os.WriteFile(filepath.Join(docs, "notes", "image.md"), []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), 0o644)
+	os.WriteFile(filepath.Join(docs, "notes", "empty.txt"), nil, 0o644)
+	os.WriteFile(filepath.Join(docs, "notes", "big.log"), []byte(strings.Repeat("line\n", 60_000)), 0o644)
+	os.WriteFile(filepath.Join(docs, "notes", "bidi.go"), []byte("ok := \u202e} admin {\n"), 0o644)
 	os.WriteFile(filepath.Join(docs, "page.html"), []byte("<script>alert(1)</script>"), 0o644)
 	os.WriteFile(filepath.Join(worktree, "wip.txt"), []byte("not committed\n"), 0o644)
 	seen := &headersSeen{}
@@ -182,5 +187,62 @@ func TestReadingFilesTakesARoleAboveViewerAndADownloadIsAudited(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no download in the audit log: %v", v)
+	}
+}
+
+func TestAFileIsViewedAsTextWhenItsBytesAreTextAndTheViewIsAudited(t *testing.T) {
+	r, b, _ := filesRig(t)
+	base := "/p/" + r.id("web") + "/files/docs/"
+	code, v := b.get(base + "page.html?view")
+	if code != 200 || v["kind"] != "text" || v["text"] != "<script>alert(1)</script>" || v["size"] != float64(25) || v["truncated"] != false {
+		t.Fatalf("page.html: %d %v", code, v)
+	}
+	resp, _ := b.raw("GET", base+"page.html?view")
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") || resp.Header.Get("Content-Disposition") != "" {
+		t.Errorf("a view is the hub's JSON, never the file: %q", ct)
+	}
+	if _, v := b.get(base + "notes/image.md?view"); v["kind"] != "binary" || v["binary"] != "image/png" || v["text"] != "" {
+		t.Errorf("a PNG named .md: %v", v)
+	}
+	if code, v := b.get(base + "notes/empty.txt?view"); code != 200 || v["kind"] != "text" || v["text"] != "" || v["size"] != float64(0) {
+		t.Errorf("empty: %d %v", code, v)
+	}
+	code, v = b.get(base + "notes/big.log?view")
+	if text, _ := v["text"].(string); code != 200 || v["truncated"] != true || len(text) != textview.Limit || v["size"] != float64(300_000) {
+		t.Errorf("big: %d, %d bytes, %v %v", code, len(text), v["truncated"], v["size"])
+	}
+	if _, v := b.get(base + "notes/bidi.go?view"); v["bidi"] != float64(1) {
+		t.Errorf("bidi: %v", v)
+	}
+	if code, v := b.get("/p/" + r.id("web") + "/worktrees/repo/gone/wip.txt?view"); code != 200 || v["text"] != "not committed\n" {
+		t.Errorf("a worktree: %d %v", code, v)
+	}
+	for path, want := range map[string]int{"notes/?view": 400, "notes?view": 400, "nothing?view": 404} {
+		if code, _ := b.get(base + path); code != want {
+			t.Errorf("%s: %d, want %d", path, code, want)
+		}
+	}
+	_, v = b.get("/p/" + r.id("web") + "/audit")
+	views, downloads := 0, 0
+	for _, e := range list(v, "entries") {
+		switch e["action"] {
+		case "files.view":
+			views++
+		case "files.download":
+			downloads++
+		}
+	}
+	if views != 7 || downloads != 0 { // page.html twice, then five more
+		t.Errorf("%d views and %d downloads in the audit log", views, downloads)
+	}
+}
+
+func TestViewingAFileTakesTheRoleReadingDoes(t *testing.T) {
+	r, _, _ := filesRig(t)
+	alice := r.browser()
+	alice.signIn("alice")
+	r.store.SetRole(ctx, r.id("web"), r.userID("alice"), rbac.Viewer)
+	if code, _ := alice.get("/p/" + r.id("web") + "/files/docs/page.html?view"); code != 404 {
+		t.Errorf("a viewer: %d", code)
 	}
 }
