@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -146,7 +147,11 @@ func RemoveWorktreeVolumes(ctx context.Context, c *engine.Client, env PrepEnv, o
 			return fmt.Errorf("remove volume %s: %w", name, err)
 		}
 	}
-	return ForgetWorktrees(ctx, c, env, project, dir, observed, instances)
+	// only this workspace's base forgets: the instance may keep a worktree in another
+	if !slices.Contains(baseWorkspaces(observed), workspace) {
+		return nil
+	}
+	return ForgetWorktrees(ctx, c, env, project, dir, []string{workspace}, instances)
 }
 
 // volumeHelper creates, and never starts, a container that mounts a volume, for the archive API to copy through:

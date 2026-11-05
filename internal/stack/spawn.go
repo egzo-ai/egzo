@@ -343,10 +343,16 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 			return nil, fmt.Errorf("instance %q is running: stop it first (egzo stop %s) or use --force", name, name)
 		}
 	}
-	// whatever happens, the base clones forget the worktrees that were deleted
-	var forget []string
+	// whatever happens, the base clones forget the worktrees that were deleted, and only those bases
+	var forget, forgetIn []string
 	defer func() {
-		if forgetErr := ForgetWorktrees(ctx, c, env, project, dir, observed, forget); forgetErr != nil && err == nil {
+		var bases []string
+		for _, base := range baseWorkspaces(observed) {
+			if slices.Contains(forgetIn, base) {
+				bases = append(bases, base)
+			}
+		}
+		if forgetErr := ForgetWorktrees(ctx, c, env, project, dir, bases, forget); forgetErr != nil && err == nil {
 			err = forgetErr
 		}
 	}()
@@ -414,8 +420,13 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 			if err := c.API.VolumeRemove(ctx, volume.ID, true); err != nil {
 				return removed, fmt.Errorf("remove volume %s: %w", volume.Name, err)
 			}
-			if volume.Kind == kindWorkspace && !slices.Contains(forget, name) {
-				forget = append(forget, name)
+			if volume.Kind == kindWorkspace {
+				if !slices.Contains(forget, name) {
+					forget = append(forget, name)
+				}
+				if !slices.Contains(forgetIn, volume.Workspace) {
+					forgetIn = append(forgetIn, volume.Workspace)
+				}
 			}
 		}
 		removed = append(removed, name)

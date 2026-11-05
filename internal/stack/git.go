@@ -479,17 +479,16 @@ func baseWorkspaces(observed Observed) []string {
 	return names
 }
 
-// ForgetWorktrees makes the base clones forget the worktrees of instances whose volumes are gone, so that a name
-// can be used again. The branches stay: what was committed outlives the instance. It is best effort: a base that
-// cannot be reached has nothing the next spawn of the name cannot cope with (`--reuse` forces).
-func ForgetWorktrees(ctx context.Context, c *engine.Client, env PrepEnv, project, dir string, observed Observed, instances []string) error {
-	if len(instances) == 0 {
+// ForgetWorktrees makes the base clones of workspaces forget the worktrees of instances whose volumes are gone, so
+// that a name can be used again. Only the bases whose worktree was deleted are named: another workspace may keep a
+// worktree of the same instance, and its base must still know it. The branches stay: what was committed outlives the
+// instance. It is best effort: a base that cannot be reached has nothing the next spawn of the name cannot cope with
+// (`--reuse` forces).
+func ForgetWorktrees(ctx context.Context, c *engine.Client, env PrepEnv, project, dir string, workspaces, instances []string) error {
+	if len(instances) == 0 || len(workspaces) == 0 {
 		return nil
 	}
-	bases := baseWorkspaces(observed)
-	if len(bases) == 0 {
-		return nil
-	}
+	bases := workspaces
 	if err := ensureImage(ctx, c, env.Image); err != nil {
 		return err
 	}
