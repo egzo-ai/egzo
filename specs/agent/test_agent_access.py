@@ -78,7 +78,7 @@ def test_an_agent_sees_its_profile_its_services_and_how_to_use_them_and_never_a_
     assert "refused" in access["other_hosts"], "it says that every other host is refused"
     services = {s["name"]: s for s in access["services"]}
     assert set(services) == {"github", "site", "docs"}
-    assert services["github"]["credential"] == "injected" and "github.com" in services["github"]["hosts"]
+    assert services["github"]["credential"] == "injected" and sorted(services["github"]["hosts"]) == ["api.github.com", "github.com"]
     assert "GH_TOKEN" in services["github"]["how"], "a hint for the well-known client: any token, the proxy sets the real one"
     assert services["site"]["credential"] == "placeholder" and services["site"]["variable"] == "SITE_PASSWORD"
     assert services["docs"]["credential"] == "none" and services["docs"]["inspect"] is True
@@ -98,8 +98,20 @@ def test_egzo_agent_access_says_the_same_in_words(sandbox, engine):
     session = Agent(engine, sandbox, sandbox.spawn("session"))
     printed = session.exec("egzo agent access")
     assert printed.returncode == 0, printed.stderr
-    assert "team" in printed.stdout and "example.com" in printed.stdout and "SITE_PASSWORD" in printed.stdout
+    lines = printed.stdout.splitlines()
+    assert "egress profile: team" in lines and "allowed hosts: example.com" in lines
+    assert any(line.startswith("service site: httpbin.org: ") and "$SITE_PASSWORD" in line for line in lines), printed.stdout
     assert GH_TOKEN not in printed.stdout and SITE_SECRET not in printed.stdout
+    as_json = session.exec("egzo agent access --json")
+    assert as_json.returncode == 0, as_json.stderr
+    answered = json.loads(as_json.stdout)
+    assert answered["profile"] == "team" and answered["allow"] == ["example.com"], "--json is what the tool answers"
+
+
+def test_egzo_agent_access_outside_an_agent_says_it_runs_inside_one(sandbox):
+    for line in ("agent access", "agent access --json"):
+        outside = sandbox.sh(line)
+        assert outside.returncode != 0 and "agent container" in outside.stderr, outside.stderr
 
 
 def test_when_up_changes_what_an_agent_can_reach_the_agent_is_told_what_changed_and_the_others_are_not(sandbox, engine, egzo):
@@ -110,9 +122,9 @@ def test_when_up_changes_what_an_agent_can_reach_the_agent_is_told_what_changed_
     sandbox.write(document(engine.agent_image(), engine.session_image(egzo.binary), team_allow=("example.com", "pypi.org")))
     try:
         sandbox.ok("project up", timeout=300)
-        assert "pypi.org" in access_of(team)["allow"], "the running agent sees it at once"
+        assert access_of(team)["allow"] == ["example.com", "pypi.org"], "the running agent sees it at once"
         (told,) = from_egzo(team)
-        assert told["kind"] == "request" and "pypi.org" in told["text"] and "access" in told["text"]
+        assert told["kind"] == "request" and "hosts now allowed: pypi.org." in told["text"] and "access" in told["text"]
         assert from_egzo(plain) == [], "an agent whose access did not change is not told"
 
         sandbox.ok("project up", timeout=300)
@@ -120,8 +132,8 @@ def test_when_up_changes_what_an_agent_can_reach_the_agent_is_told_what_changed_
     finally:
         sandbox.write(document(engine.agent_image(), engine.session_image(egzo.binary)))
         sandbox.ok("project up", timeout=300)
-    assert "pypi.org" not in access_of(team)["allow"]
-    assert len(from_egzo(team)) == 2 and "pypi.org" in from_egzo(team)[-1]["text"], "taking it back is a change too"
+    assert access_of(team)["allow"] == ["example.com"]
+    assert len(from_egzo(team)) == 2 and "hosts no longer allowed: pypi.org." in from_egzo(team)[-1]["text"], "taking it back is a change too"
 
 
 def test_an_agent_cannot_message_egzo(sandbox, engine):

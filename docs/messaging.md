@@ -43,7 +43,8 @@ Agents get an `egzo` MCP server with these tools:
 
 When `egzo project up` changes what a running agent may reach (a host allowed or taken away, a service, an ssh server), the
 agent gets a request from `egzo` that says what changed, and `access` answers the new state at once. An agent whose access did
-not change gets nothing; a new agent gets its access without a message. Nobody can send a message to `egzo`.
+not change gets nothing; a new agent gets its access without a message. An agent has at most one such request open: a later
+change closes the one it has not resolved and says everything that changed since. Nobody can send a message to `egzo`.
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: this is the only path between them.
