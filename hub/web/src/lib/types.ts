@@ -386,3 +386,16 @@ export interface Listing {
   entries: { name: string; type: "dir" | "file" | "symlink"; size?: number; modified: string }[];
   truncated: boolean;
 }
+
+/** A file shown in the hub: its start as text, or why it is not text. The text is shown as text, never as a page. */
+export interface FileView {
+  size: number;
+  kind: "text" | "binary";
+  text: string;
+  /** Why it is not text: the format its bytes say (image/png), or what they are not. */
+  binary?: string;
+  /** The file goes on past the text the hub shows. */
+  truncated: boolean;
+  cutLines: number;
+  bidi: number;
+}

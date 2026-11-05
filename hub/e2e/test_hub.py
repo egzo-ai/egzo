@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from playwright.sync_api import expect
 
 from conftest import ADMIN_PASSWORD, sign_in
@@ -118,10 +120,28 @@ def test_the_files_of_the_workspaces_open_a_folder_at_a_time_and_a_file_download
     files.get_by_role("link", name="notes/").click()
     expect(page).to_have_url(re.compile(r"/files\?w=docs&path=notes%2F$"))
     with page.expect_download() as download:
-        page.get_by_test_id("files").get_by_role("link", name="plan.md").click()
+        page.get_by_test_id("files").get_by_role("link", name="Download plan.md").click()
     assert download.value.suggested_filename == "plan.md"
     with open(download.value.path()) as saved:
         assert saved.read() == "# The plan\n"
+
+    # a file opens in the viewer as text, never as a page; its bytes decide, not its name
+    page.on("dialog", lambda d: pytest.fail(f"a file ran: {d.message}"))
+    page.get_by_test_id("files").get_by_role("link", name="plan.md", exact=True).click()
+    expect(page).to_have_url(re.compile(r"/files\?w=docs&path=notes%2F&file=plan.md$"))
+    expect(page.get_by_test_id("viewer")).to_have_text("# The plan")
+    with page.expect_download() as download:
+        page.get_by_role("link", name="Download").click()
+    assert download.value.suggested_filename == "plan.md"
+    page.get_by_label("Folder").get_by_role("link", name="notes").click()
+    page.get_by_test_id("files").get_by_role("link", name="image.md", exact=True).click()
+    expect(page.get_by_test_id("not-text")).to_contain_text("image/png")
+    expect(page.get_by_test_id("viewer")).to_have_count(0)
+    page.get_by_label("Folder").get_by_role("link", name="docs").click()
+    page.get_by_test_id("files").get_by_role("link", name="report.html", exact=True).click()
+    viewer = page.get_by_test_id("viewer")
+    expect(viewer).to_have_text("<script>alert(1)</script>")
+    assert viewer.locator("script").count() == 0, "the text is text nodes"
 
     page.get_by_label("Folder").get_by_role("link", name="Workspaces").click()
     page.get_by_test_id("workspaces").get_by_role("link", name="coder-0").click()

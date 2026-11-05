@@ -1,5 +1,5 @@
 import type {
-  AgentAnswer, AuditEntry, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Listing, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, Template, UserRow, WorkspaceRow,
+  AgentAnswer, AuditEntry, FileView, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Listing, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, Template, UserRow, WorkspaceRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -118,6 +118,8 @@ export const api = {
   workspaces: (id: string) => request<{ workspaces: WorkspaceRow[] }>("GET", `${project(id)}/workspaces`).then((r) => r.workspaces),
   /** A directory of a workspace, or of an instance's worktree: dir is "" for the root, else ends with a slash. */
   listing: (id: string, workspace: string, instance: string, dir: string) => request<Listing>("GET", filesPath(id, workspace, instance, dir)),
+  /** The start of a file as text, if its bytes are text. */
+  view: (id: string, workspace: string, instance: string, path: string) => request<FileView>("GET", filesPath(id, workspace, instance, path) + "?view"),
 };
 
 /** The address of a path in a workspace: a directory's listing when it ends with a slash, a file's download otherwise. */

@@ -317,3 +317,8 @@ html, body { height: 100%; }
 .counts { display: inline-flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
 .counts > span { display: inline-flex; align-items: center; gap: 6px; }
 .tg-inst { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; padding-top: var(--space-2); border-top: 1px solid var(--border); font-size: var(--text-xs); }
+.viewer-head { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) 0 var(--space-2); }
+.viewer-name { font-size: var(--text-md); margin: 0; overflow-wrap: anywhere; }
+.viewer-note { font-size: var(--text-xs); margin: 0 0 var(--space-2); }
+.spec mark.bidi { background: var(--status-error-soft); color: var(--status-error); border-radius: 2px; padding: 0 2px; }
+td .download { font-size: var(--text-xs); margin-left: var(--space-2); }

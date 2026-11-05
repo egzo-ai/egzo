@@ -396,6 +396,7 @@ func seedFiles(e *fake.Engine) error {
 	for path, text := range map[string]string{
 		filepath.Join(docs, "notes", "plan.md"): "# The plan\n", filepath.Join(docs, "report.html"): "<script>alert(1)</script>",
 		filepath.Join(worktree, "wip.txt"): "not committed\n",
+		filepath.Join(docs, "notes", "image.md"): "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", // a PNG named .md
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err

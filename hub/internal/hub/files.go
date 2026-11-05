@@ -55,6 +55,15 @@ func (h *Hub) DialFiles(ctx context.Context, id, workspace, instance string) (ne
 	return ended, nil
 }
 
+// FileViewed writes to the project's audit log that a file was shown in the hub: what was read, and by whom.
+func (h *Hub) FileViewed(ctx context.Context, user store.User, id, workspace, instance, path string) {
+	where := workspace
+	if instance != "" {
+		where += " (worktree of " + instance + ")"
+	}
+	h.record(ctx, store.AuditEntry{Actor: rbac.Actor(user.ID), Action: "files.view", Project: id, Agent: instance, Detail: where + ": " + path, Allowed: true})
+}
+
 // FileDownloaded writes a download to the project's audit log: what was read, and by whom.
 func (h *Hub) FileDownloaded(ctx context.Context, user store.User, id, workspace, instance, path string) {
 	where := workspace

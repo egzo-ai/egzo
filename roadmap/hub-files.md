@@ -12,7 +12,13 @@ the least code that does it.
 ## What it is
 
 A **Files** section in a project's left nav. It lists the project's workspaces; a workspace opens on a plain table of its files
-(name, size, modified), a folder opens, a file downloads. Nothing else: no viewer, no editor, no upload, no search, no git.
+(name, size, modified), a folder opens, a file opens in a viewer that shows the start of a text file as text, and downloads. Nothing
+else: no editor, no upload, no search, no git.
+
+The viewer: the hub reads the first 256 KiB (`hub/internal/textview`) and decides from the bytes whether it is text: the standard
+library's sniffer for the format (a PNG named `.md` is a PNG), strict UTF-8, no binary control byte anywhere, a character cut at the
+limit dropped. The browser gets JSON and puts the text in text nodes, never HTML; lines past 10,000 bytes are cut, direction controls
+(`unicode.Bidi_Control`) are marked. Each view is audited as `files.view`. Rendering (Markdown, highlighting) is out of scope.
 
 | Kind | What is shown | Opens |
 |---|---|---|
@@ -76,7 +82,7 @@ the worktree of another person's agent (the worktree volume carries the `actor` 
 
 ## Out of scope
 
-Upload, delete, rename, edit, a file viewer, search, git (diffs, branches, commits), mounting from a desktop client. WebDAV was
+Upload, delete, rename, edit, rendering a file (Markdown, HTML, highlighting), search, git (diffs, branches, commits), mounting from a desktop client. WebDAV was
 considered and dropped: `golang.org/x/net/webdav` says it is not hardened against malicious clients, has no read-only mode, cannot turn
 locks off, follows symlinks out of its tree and opens every file it lists; the two calls above are all the page needs.
 

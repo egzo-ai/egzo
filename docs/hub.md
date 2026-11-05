@@ -232,8 +232,8 @@ engine keeps it. The schema of the audit trail is in [sandboxing agents](sandbox
 
 The **Files** section of a project lists its [workspaces](workspaces.md). A directory workspace opens; a git workspace lists the worktree
 of each of its agents, running, stopped or removed ([`agent rm` keeps it](workspaces.md#git-workspaces)), and a worktree opens. A git
-workspace shows the remote and branch it clones from, as text. The base clone has no files checked out and does not open. A folder opens a folder at a time; a file downloads. That is all: no viewer, no upload,
-no editing, no git.
+workspace shows the remote and branch it clones from, as text. The base clone has no files checked out and does not open. A folder opens
+a folder at a time. A file opens in a viewer as plain text, with a download; that is all: no upload, no editing, no git.
 
 - **Read only.** Nothing the hub sends can change a file: the project's link serves each workspace from a helper container that mounts
   its volume read only, with no network and no capability, and the server in it answers `GET` only. The helper goes once it has been
@@ -242,8 +242,12 @@ no editing, no git.
   more than 10,000 entries is cut, and says so.
 - **A file is a download, never a page.** What an agent wrote does not run on the hub's address: every file comes as
   `application/octet-stream`, `Content-Disposition: attachment`, under a policy that allows nothing.
+- **The viewer shows text as text.** The hub reads the first 256 KB of the file and decides from its bytes, never its name, whether it is
+  text: UTF-8 with no binary control character, and not a format such as PNG, zip or PDF. A `.md` that is an image is not shown, and says
+  what it is. Text is shown as it is, never rendered: Markdown is its source, HTML its tags. A line past 10,000 characters is cut, and
+  the characters that change the direction of text (which can make code read otherwise than it is) are marked where they stand.
 - **Who.** A user, an admin or an owner of the project reads every workspace; a viewer and an operator with no role do not. Each
-  download is in the project's audit log, with who and what.
+  view and each download is in the project's audit log, with who and what.
 
 ## How the hub keeps up
 
