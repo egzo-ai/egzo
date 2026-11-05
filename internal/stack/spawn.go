@@ -264,6 +264,10 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 		return err
 	}
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
+	// What the agent may reach, for its `access`: a new agent is told nothing more, it asks.
+	if err := ControlPushAccess(ctx, c, p.project, p.name, p.template); err != nil {
+		return err
+	}
 	// The relay comes before the agent: it holds the host ports, and an agent whose ports could not be published is not worth starting. It
 	// only needs the agent's network and a name to dial, and the agent is not up yet when the first connection comes.
 	if hasRelay(p.view, p.name) {

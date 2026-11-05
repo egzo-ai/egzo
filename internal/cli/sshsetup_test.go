@@ -101,7 +101,7 @@ func TestARunningAgentFollowsTheServersTheProxyPublishes(t *testing.T) {
 	}
 	done := make(chan struct{})
 	defer close(done)
-	go followSSH(home, "a-token", published, 10*time.Millisecond, done)
+	go (&sshFollower{home: home, token: "a-token", published: published}).Follow(10*time.Millisecond, done)
 
 	os.WriteFile(published, []byte("Host prod\n    HostName proxy\nHost staging\n    HostName proxy\n"), 0o644)
 	waitFor("a server the proxy published since is in the config", func(c string) bool { return strings.Contains(c, "Host staging") })
@@ -111,5 +111,18 @@ func TestARunningAgentFollowsTheServersTheProxyPublishes(t *testing.T) {
 	})
 	if strings.Count(read(), managedBegin) != 1 {
 		t.Fatalf("one managed block, rewritten in place:\n%s", read())
+	}
+}
+
+func TestOneCheckBeforeALineIsTypedFindsWhatTheProxyPublishedSince(t *testing.T) {
+	home, shared := t.TempDir(), t.TempDir()
+	published := filepath.Join(shared, "ssh_config")
+	os.WriteFile(published, []byte("Host prod\n    HostName proxy\n"), 0o644)
+	follower := &sshFollower{home: home, token: "a-token", published: published}
+	follower.Check()
+	os.WriteFile(published, []byte("Host prod\n    HostName proxy\nHost staging\n    HostName proxy\n"), 0o644)
+	follower.Check() // what the delivery loop runs right before it types "your network access changed"
+	if data, _ := os.ReadFile(filepath.Join(home, ".ssh", "config")); !strings.Contains(string(data), "Host staging") {
+		t.Fatalf("the server published since is not in the config:\n%s", data)
 	}
 }

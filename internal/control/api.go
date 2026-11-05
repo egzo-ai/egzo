@@ -39,6 +39,8 @@ type server struct {
 	buckets    map[string]*bucket
 	// sendMu makes the checks of a send and its write one step.
 	sendMu sync.Mutex
+	// access keeps what each agent may reach (access.go).
+	access accessStore
 	key    []byte // the project key, read once
 	// placeholderMu makes reading and making placeholders one step.
 	placeholderMu sync.Mutex
@@ -88,6 +90,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("PUT /agents/{name}", s.registerAgent)
 	mux.HandleFunc("DELETE /agents/{name}", s.unregisterAgent)
 	mux.HandleFunc("PUT /agents/{name}/ports", s.putPorts)
+	mux.HandleFunc("PUT /access", s.putAccess)
 	mux.HandleFunc("PUT /templates", s.putTemplates)
 	mux.HandleFunc("GET /templates", s.getTemplates)
 	mux.HandleFunc("PUT /preview-template", s.putPreviewTemplate)
@@ -479,6 +482,10 @@ func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.forgetExposures(name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.forgetAccess(name); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -183,7 +183,7 @@ for building them. `pi` waits on MCP support: see [below](#a-harness-needs-mcp).
 ## A harness needs MCP
 
 egzo's agent-facing verbs (`list_messages`, `get_message`, `resolve`, `update`, `ask`, `message`, `status`, `expose`, `unexpose`,
-`agents`) reach the agent as **MCP tools** served by the control
+`agents`, `access`) reach the agent as **MCP tools** served by the control
 sidecar at `http://control:7777/mcp`. So a harness has to be able to talk MCP over streamable HTTP, with a
 fixed header for the agent's credentials, to be integrated.
 

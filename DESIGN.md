@@ -683,7 +683,8 @@ sender out of anything typed (nothing a message contains can forge an origin or 
 the typed line a user's authority, and makes a retry safe because the announcement carries no content.
 
 ### The model
-- **Addresses:** `operator` (the CLI), `user:<id>` (a person, via the hub), `agent:<name>`.
+- **Addresses:** `operator` (the CLI), `user:<id>` (a person, via the hub), `agent:<name>`, and `egzo`, which only sends: the
+  request that tells a running agent its access changed (`access`, below). Its announcement has words of its own; it is not rate-limited.
 - **A message** has an id (`m` + 32 random hex characters, unguessable: it is a capability), `from`, `to`, a
   `kind`, `text` (at most 16 KB), `re` (the id it answers or belongs to), `hops`, and for a question
   `choices` (a list of strings, for quick answers; unused for now).
@@ -712,6 +713,7 @@ the typed line a user's authority, and makes a retry safe because the announceme
 | `message(to, text, [re])` | A new request to `operator`, `user:<id>` or `agent:<name>`. It does not resolve anything. This replaces `handoff`: an agent that needs something done sends a message, waits for the resolution, then resolves its own request. |
 | `status(text)` | One line on what the agent is doing, shown by `egzo ps`. |
 | `agents` | The other agents with their activity and open counts. |
+| `access` | What the agent may reach (`internal/access`): its egress profile, allowed hosts, each service with its kind of credential (injected, placeholder and its variable, sign-in, none) and how to use it, the ssh servers. Never a secret or a vault reference. Core gives it to the control sidecar at spawn and at every `up` (`PUT /v1/access`, all instances at once, after the policy is loaded); when it changes for an agent that had one, control sends that agent a request from `egzo` saying what changed. The session holder checks the published ssh servers once more before it types a line, so the agent finds them. `GET /v1/access` and `egzo agent access` answer the same. |
 
 Retired: `say` (use `message` to `operator` or `update`), `ask_user` (`ask`), `get_answer` (the answer is a
 message), `check_inbox` (`list_messages`), `handoff` (`message`).

@@ -169,6 +169,13 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 			return err
 		}
 	}
+	if !opts.DryRun && desired.Control != "" {
+		// After the policy: the proxy has published its ssh servers again by now, so an agent told its access changed
+		// finds them. A running agent whose access changed is told what changed.
+		if err := pushAccess(ctx, c, project.Name, observed.Instances(), published); err != nil {
+			return err
+		}
+	}
 	if len(plan) == 0 && !built && !pushed && !stored && !published2 {
 		fmt.Fprintln(out, "nothing to do")
 	}

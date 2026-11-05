@@ -87,7 +87,7 @@ func TestATemplatesHashFollowsWhatMakesTheInstanceAndNothingElse(t *testing.T) {
 			a.Env = map[string]string{"X": "1"}
 			p.Agents["coder"] = a
 		},
-		"model":   func(p *config.Resolved) { a := p.Agents["coder"]; a.Model = "m"; p.Agents["coder"] = a },
+		"model": func(p *config.Resolved) { a := p.Agents["coder"]; a.Model = "m"; p.Agents["coder"] = a },
 		"workspace": func(p *config.Resolved) {
 			p.Workspaces["repo"] = config.ResolvedWorkspace{Git: &config.Git{URL: "https://x/y"}}
 		},
@@ -114,7 +114,9 @@ func TestATemplatesHashFollowsWhatMakesTheInstanceAndNothingElse(t *testing.T) {
 }
 
 func TestOfTheEgressProfileOnlyWhatTheAgentContainerGetsMovesTheHash(t *testing.T) {
-	secret := func(ref string) *config.Credential { return &config.Credential{Method: config.MethodSecret, Secret: ref} }
+	secret := func(ref string) *config.Credential {
+		return &config.Credential{Method: config.MethodSecret, Secret: ref}
+	}
 	project, dir := templateProject(t)
 	base := publish(t, project, dir).Templates["coder"].Hash
 	hashAfter := func(change func(*config.ResolvedProfile)) string {
