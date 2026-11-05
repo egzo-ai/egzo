@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker/api/types/volume"
 
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/files"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/portforward"
@@ -597,22 +598,97 @@ func (d *Engine) Files(ctx context.Context, project, workspace, instance string,
 		return stack.PrepEnv{Image: published.Image, User: published.User}, nil
 	}
 	target := stack.FilesTarget{Workspace: workspace, Instance: instance}
-	var err error
-	for attempt := 0; attempt < 2; attempt++ {
-		var id string
-		id, err = stack.FileHelper(ctx, d.client, env, project, target)
+	for attempt := 0; ; attempt++ {
+		id, err := stack.FileHelper(ctx, d.client, env, project, target)
 		if err != nil {
 			return err
 		}
-		var code int
-		code, err = d.client.ExecStream(ctx, id, stack.FilesConnectCommand, engine.Stream{In: in, Out: out, Err: said}, nil)
+		attempted := newFilesAttempt(in, out, said)
+		code, err := d.client.ExecStream(ctx, id, stack.FilesConnectCommand, engine.Stream{In: attempted.in, Out: attempted.out, Err: attempted.said}, nil)
+		attempted.end()
 		if err == nil && code != 0 {
-			return fmt.Errorf("the file connection ended with code %d", code)
+			err = fmt.Errorf("the file connection ended with code %d", code)
 		}
-		if err == nil || ctx.Err() != nil {
+		if err == nil || attempted.crossed() || ctx.Err() != nil || attempt == 1 {
 			return err
 		}
-		// the helper may have idled out between finding it and the exec: make another, once
+		// nothing crossed: the helper may have idled out between finding it and the exec. Make another, once
 	}
-	return err
+}
+
+// filesAttempt is one try at carrying a connection to a file server. The hub sends nothing before the link says the server was reached,
+// so until then the attempt reads nothing of the hub's side: one that fails before it may be followed by another, which reads it all.
+type filesAttempt struct {
+	in        io.Reader
+	out, said io.Writer
+	reached   chan struct{}
+	once      sync.Once
+	ended     chan struct{}
+}
+
+func newFilesAttempt(in io.Reader, out, said io.Writer) *filesAttempt {
+	a := &filesAttempt{reached: make(chan struct{}), ended: make(chan struct{})}
+	a.in = gatedReader{in: in, open: a.reached, closed: a.ended}
+	a.out = reachedWriter{Writer: out, reach: a.reach}
+	a.said = announceWriter{Writer: said, reach: a.reach}
+	return a
+}
+
+func (a *filesAttempt) reach() { a.once.Do(func() { close(a.reached) }) }
+
+// end lets go of the hub's side, if the attempt never reached the server.
+func (a *filesAttempt) end() { close(a.ended) }
+
+// crossed says the server was reached: what the hub sent may have gone to it, and what it answered to the hub.
+func (a *filesAttempt) crossed() bool {
+	select {
+	case <-a.reached:
+		return true
+	default:
+		return false
+	}
+}
+
+// gatedReader reads in only once open is closed. If closed is closed first, it ends without reading.
+type gatedReader struct {
+	in           io.Reader
+	open, closed <-chan struct{}
+}
+
+func (g gatedReader) Read(p []byte) (int, error) {
+	select {
+	case <-g.open:
+		return g.in.Read(p)
+	default:
+	}
+	select {
+	case <-g.open:
+		return g.in.Read(p)
+	case <-g.closed:
+		return 0, io.EOF
+	}
+}
+
+// reachedWriter is the server's answer: its first byte says it was reached.
+type reachedWriter struct {
+	io.Writer
+	reach func()
+}
+
+func (w reachedWriter) Write(p []byte) (int, error) {
+	w.reach()
+	return w.Writer.Write(p)
+}
+
+// announceWriter is what `egzo files connect` says on stderr: the announce says it reached the server.
+type announceWriter struct {
+	io.Writer
+	reach func()
+}
+
+func (w announceWriter) Write(p []byte) (int, error) {
+	if strings.HasPrefix(string(p), files.Connected) {
+		w.reach()
+	}
+	return w.Writer.Write(p)
 }
