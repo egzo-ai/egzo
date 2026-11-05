@@ -3,7 +3,7 @@
 
 // Package preview serves what agents expose to people's browsers: a host name of its own per preview, a reverse proxy over the project's link,
 // with limits, because the server on the other side is untrusted. It depends on two things only: a Gate that says who may pass, and a
-// Backend that finds and reaches a preview. See roadmap/agent-ports.md.
+// Backend that finds and reaches a preview. See docs/hub.md, "Previews".
 package preview
 
 import (

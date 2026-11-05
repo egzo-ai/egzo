@@ -166,5 +166,5 @@ it covers and how the project it runs on is shared.
 A model is never called: the harness specs stop at what egzo configures, what the TUI shows and what the
 harness reports as states (prompt submitted, session idle), which needs no credential. The specs that need
 the outside world (github.com, httpbin.org, example.com, the registry) fail when it is unreachable (a known weakness:
-`known-issues/specs-depend-on-online-services.md`).
+[#105](https://github.com/egzo-ai/egzo/issues/105)).
 The harness specs build the real images from `harness/` (a few minutes the first time, cached by content).

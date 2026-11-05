@@ -219,7 +219,7 @@ stand-ins. It is a second user of the mechanism, next to `claude setup-token`, w
   - a revoked refresh token is reported by `project check` and in the agent's error;
   - a stand-in sent to a host outside the service stays a stand-in.
 - One online spec with a real account, listed in
-  [specs-depend-on-online-services.md](../known-issues/specs-depend-on-online-services.md).
+  [specs-depend-on-online-services.md](https://github.com/egzo-ai/egzo/issues/105).
 
 ## Alternatives considered
 

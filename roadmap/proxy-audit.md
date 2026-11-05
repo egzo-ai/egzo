@@ -1,7 +1,7 @@
 # Roadmap: monitoring agents' internet access
 
 **Status.** Built: the audit event schema (code, specs, unit tests) and the hub's Network view (unit, browser and
-real-engine tests). Needs [instance-id.md](instance-id.md), which is built. Decided on the way: the hub keeps the latest events
+real-engine tests). Needs [instance-id.md](../DESIGN.md), which is built. Decided on the way: the hub keeps the latest events
 in memory, from its follower, rather than reading the engine's log when the tab opens, so the Log needs no read of its own. Split out of [hub.md](hub.md), where the proxy audit log was listed on the
 project page and never built. No backward compatibility: the old `action` field is gone.
 
@@ -22,7 +22,7 @@ The audit trail itself was hard to build on:
 - **No connection id.** `allow`, `request` and `close` could not be tied together; two tunnels to one host were ambiguous.
   Terminated hosts (`inject`, `inspect`) had no `close` at all.
 - **No profile.** A denial did not say which profile refused, so a fix ("add the host to profile `default`") had to be looked up.
-- **The name only.** A name can come back; see [instance-id.md](instance-id.md).
+- **The name only.** A name can come back; see [instance-id.md](../DESIGN.md).
 
 ## The audit event
 
@@ -71,7 +71,7 @@ The steps:
 - **`challenge`.** A connection that arrives without proxy credentials gets a 407 and `decision: challenge`: browsers start that
   way and send the credentials once asked. It is not a denial and has no agent; its `client` says where it came from. A tool
   that never sends credentials shows up as nothing but challenges. egzo's browser sends none: its forwarder adds the credentials
-  to everything Chromium sends ([proxy-client-identity.md](proxy-client-identity.md)).
+  to everything Chromium sends ([proxy-client-identity.md](../docs/browser.md)).
 
 The reason codes:
 
@@ -123,7 +123,7 @@ two parts.
 **History.** The hub keeps the groups only, not the events. It follows each project's proxy log, as it already follows the control
 sidecar's, and writes the groups to its database: one row per distinct denial, at most 500 per project and dropped 30 days after
 it was last seen. After the hub was down it reads again from the time of the last event it saw. Further back than the hub's latest
-events, the raw log is the engine's (`egzo proxy log`), and how far back it goes is the sysadmin's log configuration (see `known-issues/container-logging-follows-the-engine-default.md`);
+events, the raw log is the engine's (`egzo proxy log`), and how far back it goes is the sysadmin's log configuration (see [container-logging-follows-the-engine-default](../docs/troubleshooting.md#container-logs));
 it ends with the proxy's container. Keeping every event would make the hub a log store, a second copy of hosts and paths with a
 retention of its own to answer for; long-term audit belongs to the sysadmin's log pipeline.
 
@@ -142,5 +142,5 @@ error. The next refusal opens it again.
   instead of guessing, and one to ask for access, which the hub shows to the people who can change the profile.
 - A temporary grant from the hub (one agent, one host, an hour). It is a change of policy outside the project file and needs its
   own design.
-- Sampling repeated denials in the proxy itself (see "Audit sampling" in [review-leftovers.md](review-leftovers.md)).
+- Sampling repeated denials in the proxy itself (see "Audit sampling" in [review-leftovers.md](https://github.com/egzo-ai/egzo/issues/117)).
 - Direct connections a tool attempts because it ignores `HTTPS_PROXY`: the proxy never sees them.

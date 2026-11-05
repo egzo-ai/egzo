@@ -3,7 +3,7 @@
 # govulncheck itself cannot ignore an advisory, and its -format json mode always exits 0.
 set -eu
 
-# Accepted advisories, each explained in known-issues/moby-daemon-advisories.md.
+# Accepted advisories, each explained in https://github.com/egzo-ai/egzo/issues/106.
 ACCEPTED='["GO-2026-4887","GO-2026-4883"]'
 
 out=$(govulncheck -format json ./...)

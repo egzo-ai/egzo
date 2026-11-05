@@ -123,19 +123,19 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   running agent whose status cannot be read is **running**, never "starting". See `docs/hub.md`, "How the hub keeps up".
 - Monitoring agents' internet access ([proxy-audit.md](proxy-audit.md)): the link pushes each proxy's audit trail, and the hub groups what was
   denied by instance, host and reason in its database, says why and how to fix it, and marks a group fixed when the agent gets through.
-- Settings for operators ([hub-settings.md](hub-settings.md)): Links, Invites, and Users, where an operator makes or removes other
+- Settings for operators ([hub-settings.md](../docs/hub.md#settings)): Links, Invites, and Users, where an operator makes or removes other
   operators; the last one cannot be removed.
-- The web UI, a Svelte app on a JSON API ([web-ui-spa.md](web-ui-spa.md)): projects, project page (agents, spawn, start / stop / remove, services, timeline, network, spec, audit log, members), agent page
+- The web UI, a Svelte app on a JSON API ([web-ui-spa.md](../docs/hub.md#the-web-app)): projects, project page (agents, spawn, start / stop / remove, services, timeline, network, spec, audit log, members), agent page
   (status, timeline, network, logs), and terminals: several at once, in a sidebar, held by one person each with presence and take-over. No
   messaging. A question an agent is waiting on is shown as a status.
-- Tasks ([hub-tasks.md](hub-tasks.md)): a spawn, start, stop or removal is answered at once and runs in the background, shown on
+- Tasks ([hub-tasks.md](../docs/hub.md)): a spawn, start, stop or removal is answered at once and runs in the background, shown on
   its agent with its step for everyone, one at a time per agent; a spawn is one agent from the start; failures stay until dismissed;
   the project's Activity tab lists them.
 - Public address from `X-Forwarded-*`, believed only from configured proxies; same-origin checks on every state change and on
   the terminal websocket.
-- Previews ([agent-ports.md](agent-ports.md)): an agent's `http` port served to people's browsers on an origin of its own, signed in by redirects with one-time
-  tickets, with the role checked on every request. Local ports ([declared-local-ports.md](declared-local-ports.md)) are listed next to them as addresses to copy.
-- Files ([hub-files.md](hub-files.md)): the project's workspaces and the worktrees agents left, read only, a folder at a time; a file is a download. The
+- Previews ([agent-ports.md](../docs/hub.md#previews)): an agent's `http` port served to people's browsers on an origin of its own, signed in by redirects with one-time
+  tickets, with the role checked on every request. Local ports ([declared-local-ports.md](../docs/project-file.md#local-ports)) are listed next to them as addresses to copy.
+- Files ([hub-files.md](../docs/hub.md#files)): the project's workspaces and the worktrees agents left, read only, a folder at a time; a file is a download. The
   link's `workspaces` and `files` verbs, and a file helper per volume.
 - Tests: Go unit tests with the seam faked, and core's real link against the endpoint; Playwright tests of the pages; `make hub-stack` (the
   compose stack: hub image, Dex, Caddy in front, a real project that links itself, a real terminal and a real preview).
@@ -149,6 +149,6 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   templates are still read by running a command in the control sidecar: the timelines every 15 seconds while one is on the screen,
   the templates once per five minutes. Following the event stream the way the status is followed (a second line type on the
   sidecar's standard output, or a stream of its own) would remove the last periodic command.
-- **Hub settings, later parts** (removing users, a richer users list): see [hub-settings.md](hub-settings.md).
+- **Hub settings, later parts** (removing users, a richer users list): see [hub-settings.md](../docs/hub.md#settings).
 - **Versions, for 1.0**: the rule for changing the link's protocol, and what is left of telling an old release from a broken one: see [hub-link.md](hub-link.md#versions).
 - Resource usage, and a way for an owner to remove a user from the hub altogether.

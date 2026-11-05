@@ -30,7 +30,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
-// The files of a project's workspaces (roadmap/hub-files.md): the hub lists the workspace volumes, and carries GET requests to the read-only
+// The files of a project's workspaces (docs/hub.md, "Files"): the hub lists the workspace volumes, and carries GET requests to the read-only
 // file server of one of them over the project's link. What comes back was written by an agent: a file is always a download, never a page of
 // the hub's origin.
 

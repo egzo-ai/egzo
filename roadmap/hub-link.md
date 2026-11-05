@@ -1,6 +1,6 @@
 # Roadmap: a project links itself to a hub
 
-**Status.** Built: the link, the hub on top of it, roles and invites, and previews ([agent-ports.md](agent-ports.md)). The hub no longer connects to engines.
+**Status.** Built: the link, the hub on top of it, roles and invites, and previews ([agent-ports.md](../docs/hub.md#previews)). The hub no longer connects to engines.
 What is left is [Open questions](#open-questions).
 
 ## Why
@@ -11,7 +11,7 @@ The hub used to connect to engines (a unix socket, tcp+TLS, ssh) and pull everyt
   every host behind it.
 - **The hub must reach every engine.** A laptop, a box behind NAT or a company network cannot be added.
 - **The hub sees everything on an engine**: every project with egzo labels, whether its owner wants it shown or not.
-- **The hub pushes its settings into projects**: the preview domain of [agent-ports.md](agent-ports.md) had to be written into
+- **The hub pushes its settings into projects**: the preview domain of [agent-ports.md](../docs/hub.md#previews) had to be written into
   the control sidecar by `engine exec`, and two hubs on one engine fight over it.
 - **Every feed is a long pull across the distance**: the engine's events, the status log, the audit log, the exec streams.
 
@@ -207,7 +207,7 @@ Roles are assigned on projects:
 - **admin**: access all agents (operate, attach, logs, network, the audit log), the CLI's included.
 - **user**: can spawn their own agents, operate and attach to them, and view their logs and network.
 - **viewer**: the web proxy only: a preview of any agent of the project, opened with its link. The link is not guessable but
-  shareable ([agent-ports.md](agent-ports.md)): the agent or a member hands it over. A viewer sees nothing else of the project,
+  shareable ([agent-ports.md](../docs/hub.md#previews)): the agent or a member hands it over. A viewer sees nothing else of the project,
   not even a list of its previews.
 
 Flags on users:
@@ -239,8 +239,8 @@ no valid owner: the operators see it, and grant a new owner or revoke it.
 2. **Core**: `hub:`, the `link` role, registration, the protocol with the verbs and streams, the pushed feeds, with specs.
 3. **The hub**: the link endpoint, the seam over the link, registration pages, projects by id; then remove the engines and
    everything listed above.
-4. **Previews** ([agent-ports.md](agent-ports.md)) over the link. Only `http` ports exposed with `where: hub` are previews
-   ([declared-local-ports.md](declared-local-ports.md)).
+4. **Previews** ([agent-ports.md](../docs/hub.md#previews)) over the link. Only `http` ports exposed with `where: hub` are previews
+   ([declared-local-ports.md](../docs/project-file.md#local-ports)).
 5. **Roles and invites**: invites, the viewer role, the project quota, operators.
 
 ## Spike results

@@ -20,7 +20,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/files"
 )
 
-// kindFiles labels a file helper: a container that shows the hub one workspace volume, read only (see roadmap/hub-files.md).
+// kindFiles labels a file helper: a container that shows the hub one workspace volume, read only (see docs/hub.md, "Files").
 const kindFiles = "files"
 
 // The bounds of a file helper. It serves listings and downloads to a few people at a time.

@@ -18,7 +18,7 @@ import (
 // Chromium sends proxy credentials only in answer to a 407, and only its pages answer one: Playwright supplies the credentials
 // per page, so Chromium's own services (push messaging, update checks) stop at the challenge. The forwarder is the proxy
 // Chromium is given instead: it listens on loopback, adds the agent's credentials to each CONNECT and passes the bytes through,
-// so everything Chromium sends reaches the egzo proxy as the agent. See roadmap/proxy-client-identity.md.
+// so everything Chromium sends reaches the egzo proxy as the agent.
 
 // upstream is the egzo proxy of HTTPS_PROXY: where to connect, and the Proxy-Authorization to send, empty without credentials.
 type upstream struct {

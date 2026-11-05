@@ -270,7 +270,7 @@ This needs a log the link can stream back from its engine, which is the engine's
 `journald` on Docker, `k8s-file` or `journald` on Podman. Run `egzo system check` on the machine. If the status cannot be read the
 project page says why, and its agents show as **running**: the hub never says "starting" for a state it does not know. An old
 control sidecar (made by an egzo before the status log) writes no status; run `egzo project up` again. See
-[the known issue](../known-issues/container-logging-follows-the-engine-default.md).
+[Troubleshooting](troubleshooting.md#container-logs).
 
 ## Settings
 

@@ -44,11 +44,7 @@ The specs must pass in CI on every supported platform before 1.0.0 ([ci-test-mat
       forwarding off on a reused bridge name; fix proposed in #1498). Before 1.0.0: see whether the fix is released, run the `podman`
       cell on a Podman and netavark that have it, and either support rootful Podman with a stated minimum version of both
       (`known-issues/rootful-podman-intermittent-egress.md`) or keep it unsupported and say so in the README and `docs/install.md`.
-- [ ] Retire [`review-leftovers.md`](review-leftovers.md): file its concrete items as GitHub issues (the `errcheck` sweep, a fake
-      `client.APIClient` for `Up`/`Apply`/`Down`/`RunPrep` unit tests, audit-log sampling of repeated denials, and a link to
-      `known-issues/moby-daemon-advisories.md` for the `govulncheck` finding), fold the Podman uid mapping and per-request cost
-      notes into `DESIGN.md` or drop them, then delete the file and this link. Its R-nn and T-nn ids refer to the deleted
-      `TODO.md` and mean nothing to outsiders.
+- [x] `review-leftovers.md` retired into issues #106 and #117–#122.
 - [ ] **Fix any CodeQL issue before 1.0.**
 
 ## Documentation review against the published artifacts
@@ -74,5 +70,4 @@ What a pass on a **clean machine, from the published binary and images**, still 
 
 ## Later
 
-The other roadmap items are separate: [hub](hub.md) and [messaging adapters](messaging-adapters.md), [ssh access for
-agents](ssh-access.md), [proxy protocol structure](proxy-protocols.md), [`build:` on an agent](build-images.md), [review leftovers](review-leftovers.md), [CI test matrix](ci-test-matrix.md), [macOS and Windows (WSL2) hosts](windows-and-macos.md).
+The other roadmap items are separate: [hub](hub.md) and [messaging adapters](messaging-adapters.md), [CI test matrix](ci-test-matrix.md), [macOS and Windows (WSL2) hosts](windows-and-macos.md).

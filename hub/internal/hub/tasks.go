@@ -22,7 +22,7 @@ import (
 // background apart from the request that asked for it. While it runs it is part of its agent, for everyone who sees the project; one
 // that failed stays on its agent until somebody dismisses it. Tasks are kept in the database: the project's activity lists them, and
 // those that ran when the hub stopped are marked interrupted when it starts again (RecoverTasks), like those whose link dropped while
-// they ran: nothing follows them any more. See roadmap/hub-tasks.md.
+// they ran: nothing follows them any more. See docs/hub.md.
 
 const (
 	// taskDeadline is how long one task may take, waiting for the ones before it included.

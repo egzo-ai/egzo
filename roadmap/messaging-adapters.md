@@ -76,8 +76,8 @@ Nothing else goes through the API.
   with the hub on reconnect. A stale adapter can still relay output to a place after a user is disabled; the second check on `.in` stops the other direction. Accepted.
 - **Capabilities**: an adapter handles what its platform supports (threads, buttons for question choices, rich text, per-agent identity, message length). Hub messages are
   one neutral model: text, choices, attachments.
-- **Addresses in a channel.** An agent hands out an address by saying it, so one can land in a channel. A [preview](agent-ports.md) still asks whoever opens it to sign in. A
-  [local port](declared-local-ports.md) has no sign-in, so its address reaches everyone in that channel: it is as open as `local_ports.bind` makes it.
+- **Addresses in a channel.** An agent hands out an address by saying it, so one can land in a channel. A [preview](../docs/hub.md#previews) still asks whoever opens it to sign in. A
+  [local port](../docs/project-file.md#local-ports) has no sign-in, so its address reaches everyone in that channel: it is as open as `local_ports.bind` makes it.
 
 ## Who decides what
 

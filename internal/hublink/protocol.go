@@ -95,7 +95,7 @@ func (s Status) text() string {
 
 // The verbs a hub may ask. There is no other: a hub cannot run a container, mount a path or exec a command of its choosing. forward reaches
 // a port an agent exposed, and no other: the link refuses the rest. files reaches the files of one of the project's workspace volumes, read
-// only, through a helper the link makes (roadmap/hub-files.md).
+// only, through a helper the link makes (docs/hub.md, "Files").
 const (
 	VerbProject   = "project"
 	VerbPublished = "published"

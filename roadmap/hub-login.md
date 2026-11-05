@@ -100,7 +100,7 @@ The starter account's username is `admin`, set directly and not generated.
   can sign in as an operator. The hub starts and says so in the log, naming the issuer and the fix (the break-glass below).
 - **Break-glass** is the same two variables: set `EGZO_LOCAL_LOGIN=true` and `EGZO_ADMIN_PASSWORD` and restart. It works when the
   password is lost or the provider is gone, with no subcommand and no editing of the database. This closes the gap in
-  [hub-settings.md](hub-settings.md). The password has to be set: with it unset and an old one in place, nothing is printed.
+  [hub-settings.md](../docs/hub.md#settings). The password has to be set: with it unset and an old one in place, nothing is printed.
 - **Hashing.** argon2id with the library's recommended parameters, encoded with them so they can be raised later.
 - **The login page** is a page of the SPA over `POST /auth/login` (username, password), with the SSO button below it when OIDC is
   configured (`EGZO_OIDC_NAME`, default "SSO"). Same session cookie as the OIDC path, same lifetime. A failure says "wrong
@@ -180,7 +180,7 @@ The hub trusts the one issuer it is configured with. What to expect when it chan
 
 ## Disabling users
 
-`Store.DeleteUser` exists and nothing calls it (see [hub-settings.md](hub-settings.md)). It goes: the hub has no hard delete of a
+`Store.DeleteUser` exists and nothing calls it (see [hub-settings.md](../docs/hub.md#settings)). It goes: the hub has no hard delete of a
 person, for the reason in "The model". Settings, Users gets **Disable** and **Enable** for an operator, with a confirmation:
 
 - **Disabled** means `disabled_at` is set (the time says when; the audit entry says by whom, and its detail names the user). The

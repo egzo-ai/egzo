@@ -150,7 +150,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		limit := spec.PidsLimit
 		host.Resources.PidsLimit = &limit
 	}
-	// No LogConfig: the engine's default logging is the sysadmin's choice (known-issues/container-logging-follows-the-engine-default.md).
+	// No LogConfig: the engine's default logging is the sysadmin's choice (docs/troubleshooting.md, "Container logs").
 	host.Tmpfs = spec.Tmpfs
 	host.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(spec.Restart)}
 	for _, m := range spec.Mounts {
