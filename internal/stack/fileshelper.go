@@ -195,6 +195,24 @@ func RemoveFileHelpers(ctx context.Context, c *engine.Client, project string, vo
 	return errors.Join(failed...)
 }
 
+// removeVolume deletes a volume whose file helpers were removed (RemoveFileHelpers). A request of the hub in between makes a helper
+// again, and the volume is in use: the helper is removed and the volume tried again, a few times. A container that is not a file helper
+// is a reason to fail.
+func removeVolume(ctx context.Context, c *engine.Client, project, volume string) error {
+	for attempt := 0; ; attempt++ {
+		err := c.API.VolumeRemove(ctx, volume, true)
+		if err == nil || !cerrdefs.IsConflict(err) || attempt == 4 {
+			return err
+		}
+		if users, listErr := containersUsing(ctx, c, project, volume); listErr != nil || len(users) > 0 {
+			return err
+		}
+		if err := RemoveFileHelpers(ctx, c, project, []string{volume}); err != nil {
+			return err
+		}
+	}
+}
+
 // isFileHelper says whether a container's labels are those of a file helper of project.
 func isFileHelper(labels map[string]string, project string) bool {
 	return labels[engine.LabelProject] == project && labels[engine.LabelKind] == kindFiles

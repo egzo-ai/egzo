@@ -300,3 +300,37 @@ func TestWorkspaceRmTakesTheFileHelpersWithTheVolume(t *testing.T) {
 		t.Errorf("volume left %v, removed %v", left, fake.removed)
 	}
 }
+
+func TestAHelperMadeAgainJustBeforeTheVolumeGoesIsRemovedToo(t *testing.T) {
+	c, fake := newHelperEngine(t)
+	volume := fake.addVolume("p", FilesTarget{Workspace: "docs"})
+	again := 0
+	fake.onVolumeRemove = func(string) {
+		if again < 2 { // the hub's Files page asks again, twice, between the helpers' removal and the volume's
+			again++
+			fake.addContainer(fileHelperName(volume), "running", time.Now(), helperLabels("p"), volume)
+		}
+	}
+	if err := RemoveWorkspaces(context.Background(), c, workspaceVolumes(Resource{Name: volume, Workspace: "docs"}), "p", []string{"docs"}, false, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, left := fake.volumes[volume]; left {
+		t.Error("the volume is left")
+	}
+}
+
+func TestAVolumeAnInstanceTookMeanwhileIsNotTakenFromIt(t *testing.T) {
+	c, fake := newHelperEngine(t)
+	volume := fake.addVolume("p", FilesTarget{Workspace: "docs"})
+	var once sync.Once
+	fake.onVolumeRemove = func(string) {
+		once.Do(func() { fake.addContainer("p-coder-1", "running", time.Now(), nil, volume) })
+	}
+	err := RemoveWorkspaces(context.Background(), c, workspaceVolumes(Resource{Name: volume, Workspace: "docs"}), "p", []string{"docs"}, false, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fake.removed) != 0 {
+		t.Errorf("removed %v", fake.removed)
+	}
+}
