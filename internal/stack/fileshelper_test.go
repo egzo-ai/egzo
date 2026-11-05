@@ -334,3 +334,21 @@ func TestAVolumeAnInstanceTookMeanwhileIsNotTakenFromIt(t *testing.T) {
 		t.Errorf("removed %v", fake.removed)
 	}
 }
+
+func TestTheFileHelpersOfManyVolumesGoAfterOneList(t *testing.T) {
+	c, fake := newHelperEngine(t)
+	a, b, kept := WorktreeVolume("p", "repo", "a"), WorktreeVolume("p", "repo", "b"), WorkspaceVolume("p", "docs")
+	fake.addContainer(fileHelperName(a), "running", time.Now(), helperLabels("p"), a)
+	fake.addContainer(fileHelperName(b), "exited", time.Now(), helperLabels("p"), b)
+	fake.addContainer(fileHelperName(kept), "running", time.Now(), helperLabels("p"), kept)
+	fake.addContainer("q_ws.repo.wt.a-files", "running", time.Now(), helperLabels("q"), "q_ws.repo.wt.a")
+	if err := RemoveFileHelpers(context.Background(), c, "p", []string{a, b, WorktreeVolume("p", "repo", "none")}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(fake.removed, " ") != fileHelperName(a)+" "+fileHelperName(b) && strings.Join(fake.removed, " ") != fileHelperName(b)+" "+fileHelperName(a) {
+		t.Errorf("removed %v", fake.removed)
+	}
+	if fake.lists != 2 { // one to find them, one to see they are gone
+		t.Errorf("%d lists", fake.lists)
+	}
+}

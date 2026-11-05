@@ -408,9 +408,11 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 				return removed, fmt.Errorf("remove network %s: %w", network.Name, err)
 			}
 		}
-		var deleted []string
+		var deleted []string // the worktrees: a file helper shows no home volume
 		for _, volume := range volumes {
-			deleted = append(deleted, volume.Name)
+			if volume.Kind == kindWorkspace {
+				deleted = append(deleted, volume.Name)
+			}
 		}
 		if err := RemoveFileHelpers(ctx, c, project, deleted); err != nil {
 			return removed, err
