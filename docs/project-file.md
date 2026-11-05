@@ -1,8 +1,8 @@
 # The project file
 
 A project is one `egzo.yaml`. Everything is denied unless the file declares it, so the file reads as a list of what
-agents may use. It has six parts: **secret_key** (what egzo seals its own secrets with), **vaults** (where secrets come
-from), **egress** (what agents may reach), **workspaces** (what they work on), **agents** (the templates) and,
+agents may use. It has six parts: **secret_key** (what egzo seals its own secrets with), **vaults** (the secret stores
+besides the environment), **egress** (what agents may reach), **workspaces** (what they work on), **agents** (the templates) and,
 optionally, **proxy**/**name**/**hub**.
 
 `egzo project check --resolved` prints the file validated and fully resolved: the quickest way to see what a short
@@ -13,17 +13,13 @@ digit, like every name in the file.
 ## The smallest useful file
 
 ```yaml
-secret_key: main/EGZO_PROJECT_SECRET_KEY
-
-vaults:
-  main:
-    backend: env
+secret_key: env/EGZO_PROJECT_SECRET_KEY   # env/ is the environment or .env: nothing to declare
 
 egress:
   default:
     allow: [platform.claude.com]
     services:
-      anthropic: main/ANTHROPIC_API_KEY
+      anthropic: env/ANTHROPIC_API_KEY
 
 workspaces:
   repo:
@@ -114,7 +110,8 @@ $ openssl rand -hex 32 | pass insert --multiline egzo/shop-key
 A vault is one secret store: a name and a `backend`. A secret is declared where it is used, by its reference
 `<vault>/<name>` (a service's secret, an ssh server's key): nothing lists it a second time. The CLI reads the
 secrets on your machine at `egzo project up` time. `egzo project check --resolved` lists, under each vault, every
-secret the file refers to; a vault nothing refers to is a warning. There are two backends.
+secret the file refers to; a vault nothing refers to is a warning. Every project has the vault `env`, the environment,
+without declaring it; `vaults:` declares the others, which use the `pass` backend.
 
 ### pass
 
@@ -141,20 +138,16 @@ your store).
 
 ### env
 
-**`env`** reads the environment variable of the same name from your shell or, as Docker Compose does, from the
-`.env` file next to `egzo.yaml`. It works, and egzo warns each time (`Using ENV var based secret backend is not
+**`env`** is the built-in vault: `env/NAME` reads the environment variable `NAME` from your shell or, as Docker Compose
+does, from the `.env` file next to `egzo.yaml`. It is not declared, and `env` cannot be the name of a declared vault. It works, and egzo warns each time (`Using ENV var based secret backend is not
 recommended.`): any process of yours can read an environment variable or a file in clear, and they tend to end up in
 shell history, dotfiles and backups. It is fine for a quick try.
 
 ```yaml
-vaults:
-  main:
-    backend: env
-
 egress:
   default:
     services:
-      anthropic: main/ANTHROPIC_API_KEY   # the variable ANTHROPIC_API_KEY
+      anthropic: env/ANTHROPIC_API_KEY    # the variable ANTHROPIC_API_KEY
 ```
 
 `.env` follows Compose's rules:

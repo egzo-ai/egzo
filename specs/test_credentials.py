@@ -21,34 +21,34 @@ def service_of(project, services, name):
 
 
 def test_a_string_is_short_for_a_secret_credential(project):
-    short = service_of(project, {"deploy-api": {**DEPLOY, "credential": "main/DEPLOY_TOKEN"}}, "deploy-api")
-    long = service_of(project, {"deploy-api": {**DEPLOY, "credential": {"method": "secret", "secret": "main/DEPLOY_TOKEN"}}}, "deploy-api")
-    assert short["credential"] == long["credential"] == {"method": "secret", "secret": "main/DEPLOY_TOKEN"}
+    short = service_of(project, {"deploy-api": {**DEPLOY, "credential": "env/DEPLOY_TOKEN"}}, "deploy-api")
+    long = service_of(project, {"deploy-api": {**DEPLOY, "credential": {"method": "secret", "secret": "env/DEPLOY_TOKEN"}}}, "deploy-api")
+    assert short["credential"] == long["credential"] == {"method": "secret", "secret": "env/DEPLOY_TOKEN"}
 
 
 def test_a_service_has_no_secret_key_of_its_own_any_more(project):
     """No backward compatibility: the secret is the service's credential."""
-    result = project.config(spec(egress={"default": {"services": {"deploy-api": {**DEPLOY, "secret": "main/DEPLOY_TOKEN"}}}}))
+    result = project.config(spec(egress={"default": {"services": {"deploy-api": {**DEPLOY, "secret": "env/DEPLOY_TOKEN"}}}}))
     assert result.returncode != 0
     assert "secret" in result.stderr and "credential" in result.stderr
 
 
 def test_an_object_without_hosts_binds_a_built_in_service_like_a_string(project):
-    bound = service_of(project, {"anthropic": {"credential": "main/ANTHROPIC_API_KEY"}}, "anthropic")
-    short = service_of(project, {"anthropic": "main/ANTHROPIC_API_KEY"}, "anthropic")
+    bound = service_of(project, {"anthropic": {"credential": "env/ANTHROPIC_API_KEY"}}, "anthropic")
+    short = service_of(project, {"anthropic": "env/ANTHROPIC_API_KEY"}, "anthropic")
     assert bound == short
     assert bound["hosts"] == ["api.anthropic.com"]
 
 
 def test_an_object_without_hosts_for_a_service_that_does_not_exist_is_refused(project):
-    result = project.config(spec(egress={"default": {"services": {"ghost": {"credential": "main/DEPLOY_TOKEN"}}}}))
+    result = project.config(spec(egress={"default": {"services": {"ghost": {"credential": "env/DEPLOY_TOKEN"}}}}))
     assert result.returncode != 0
     assert "ghost" in result.stderr
 
 
 def test_a_binding_can_only_name_the_credential(project):
     """Without hosts the object binds; changing what the service is takes a full definition."""
-    result = project.config(spec(egress={"default": {"services": {"anthropic": {"credential": "main/ANTHROPIC_API_KEY", "paths": ["/v1/"]}}}}))
+    result = project.config(spec(egress={"default": {"services": {"anthropic": {"credential": "env/ANTHROPIC_API_KEY", "paths": ["/v1/"]}}}}))
     assert result.returncode != 0
     assert "anthropic" in result.stderr and "hosts" in result.stderr
 
@@ -96,7 +96,7 @@ def test_the_token_url_is_an_https_url_on_port_443_of_an_exact_host(project, tok
 
 def test_an_oauth_credential_reads_no_vault(project):
     """The tokens are captured at sign-in and kept by the proxy: nothing is read from a vault, nothing is written to one."""
-    result = project.config(spec(egress={"default": {"services": {"idp": {"hosts": ["api.example.com"], "credential": {**OAUTH, "secret": "main/X"}}}}}))
+    result = project.config(spec(egress={"default": {"services": {"idp": {"hosts": ["api.example.com"], "credential": {**OAUTH, "secret": "env/X"}}}}}))
     assert result.returncode != 0
     assert "secret" in result.stderr
 
@@ -111,7 +111,7 @@ def test_chatgpt_is_a_built_in_oauth_service_limited_to_the_api_paths(project):
 
 
 def test_chatgpt_cannot_be_bound_to_a_secret(project):
-    result = project.config(spec(egress={"default": {"services": {"chatgpt": "main/DEPLOY_TOKEN"}}}))
+    result = project.config(spec(egress={"default": {"services": {"chatgpt": "env/DEPLOY_TOKEN"}}}))
     assert result.returncode != 0
     assert "chatgpt" in result.stderr and "oauth" in result.stderr
 

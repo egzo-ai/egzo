@@ -108,7 +108,7 @@ def test_init_makes_the_secret_key_and_keeps_it_in_dotenv(project):
     assert result.returncode == 0, result.stderr
     document = yaml.safe_load((project.root / "egzo.yaml").read_text())
     vault, _, name = document["secret_key"].partition("/")
-    assert document["vaults"][vault] == {"backend": "env"}
+    assert vault == "env" and "vaults" not in document, "the env backend is the built-in vault: nothing to declare"
     dotenv = project.root / ".env"
     lines = [line for line in dotenv.read_text().splitlines() if line and not line.startswith("#")]
     assert len(lines) == 1 and lines[0].startswith(f"{name}=")

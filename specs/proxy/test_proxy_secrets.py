@@ -175,14 +175,14 @@ def test_up_refuses_a_missing_secret_and_a_token_bound_to_the_wrong_service_befo
     echo = document(agent_image, "echo")
     p.write(echo)
     missing = p.sh("project up", env={"DEPLOY_TOKEN": "", "SITE_SECRET": "x"})
-    assert missing.returncode != 0 and "main/DEPLOY_TOKEN" in missing.stderr and engine.resources(p.name) == []
+    assert missing.returncode != 0 and "env/DEPLOY_TOKEN" in missing.stderr and engine.resources(p.name) == []
 
     # api.anthropic.com answers 401 to a subscription token sent as x-api-key: say so before starting anything
     p.write(spec(egress={"default": anthropic_profile()}, agents={"coder": custom(agent_image)}))
     oauth = p.sh("project up", env={"ANTHROPIC_API_KEY": "sk-ant-oat01-" + "x" * 60}, timeout=300)
     assert oauth.returncode != 0 and "OAuth" in oauth.stderr and "anthropic-oauth" in oauth.stderr
     assert "oat01" not in oauth.stderr and not engine.containers(p.name)
-    wrong = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/ANTHROPIC_API_KEY"}}
+    wrong = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "env/ANTHROPIC_API_KEY"}}
     p.write(spec(egress={"default": wrong}, agents={"coder": custom(agent_image)}))
     api = p.sh("project up", env={"ANTHROPIC_API_KEY": "sk-ant-api03-" + "x" * 60}, timeout=300)
     assert api.returncode != 0 and "API key" in api.stderr and "anthropic" in api.stderr

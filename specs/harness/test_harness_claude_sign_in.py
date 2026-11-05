@@ -32,7 +32,6 @@ def sandbox(shared_project, engine, egzo):
     start = start_stub(engine, p, engine.agent_image(), ANTHROPIC)
     p.up(
         spec(
-            vaults={"main": {"backend": "env"}},
             proxy=UPSTREAM_ANTHROPIC,
             egress={"subscription": {"services": {"claude": {"credential": {"method": "oauth"}}}}},
             workspaces={"scratch": {}},

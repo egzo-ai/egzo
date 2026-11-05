@@ -10,7 +10,7 @@ egress:
   default:
     allow: [platform.claude.com, example.com]       # besides the model API, the browser may open example.com and nothing else
     services:
-      anthropic: main/ANTHROPIC_API_KEY
+      anthropic: env/ANTHROPIC_API_KEY
 ```
 
 A page served by the agent's own dev server (`http://localhost:3000`) needs nothing: `localhost` never goes through the
@@ -28,7 +28,7 @@ egress:
   browsing:
     allow: ["*"]
     services:
-      anthropic: main/ANTHROPIC_API_KEY
+      anthropic: env/ANTHROPIC_API_KEY
       pages: { hosts: ["*"], inspect: true }       # every request: method, path, status (never the query or a body)
 ```
 

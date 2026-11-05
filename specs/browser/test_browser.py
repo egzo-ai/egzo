@@ -31,7 +31,7 @@ USERS_OWN = {
     "claude-code": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest", "--headless"], "env": {"A": "1"}},
     "opencode": {"type": "local", "command": ["npx", "@playwright/mcp"], "disabled": True},
 }
-MODEL_API = {"allow": ["platform.claude.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}
+MODEL_API = {"allow": ["platform.claude.com"], "services": {"anthropic": "env/ANTHROPIC_API_KEY"}}
 
 
 def without_browser(engine, base):
@@ -57,11 +57,10 @@ def sandbox(shared_project, engine, egzo):
     agents["login"] = agent(harness="claude-code", image=images["claude-code"], egress="login")
     p.up(
         spec(
-            vaults={"main": {"backend": "env"}},
             egress={
                 "example": {**MODEL_API, "allow": [*MODEL_API["allow"], "example.com"]},
                 "wild": {**MODEL_API, "services": {**MODEL_API["services"], "browse": {"hosts": ["*"], "inspect": True}}},
-                "login": {**MODEL_API, "services": {**MODEL_API["services"], "login": {"hosts": ["httpbin.org"], "credential": "main/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD"}}},
+                "login": {**MODEL_API, "services": {**MODEL_API["services"], "login": {"hosts": ["httpbin.org"], "credential": "env/DEPLOY_TOKEN", "placeholder": "SITE_PASSWORD"}}},
             },
             agents=agents,
         ),

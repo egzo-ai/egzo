@@ -12,15 +12,12 @@ FINGERPRINT = "SHA256:giDwc8qRcN2ytSupvU/QCL4YGA5l7fUGresaokyLYt4"
 PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMGFJIY0eOCEYAre+qhPAFyN2YPymAD03FxBn1v6yyZz"
 
 
-VAULTS = {"main": {"backend": "env"}}
-
-
 def ssh_spec(**sections):
-    return spec(vaults=VAULTS, **sections)
+    return spec(**sections)
 
 
 def server(**fields):
-    return {"host": "prod.example.com", "user": "deploy", "key": "main/PROD_SSH_KEY", "host_key": FINGERPRINT, **fields}
+    return {"host": "prod.example.com", "user": "deploy", "key": "env/PROD_SSH_KEY", "host_key": FINGERPRINT, **fields}
 
 
 def ssh_of(resolved, profile="default"):
@@ -34,7 +31,7 @@ def test_a_profile_without_ssh_servers_resolves_to_none(project):
 def test_a_profile_declares_ssh_servers_by_name(project):
     resolved = project.resolved(ssh_spec(egress={"default": {"ssh": {"prod": server()}}}))
     assert ssh_of(resolved)["prod"] == {
-        "host": "prod.example.com", "port": 22, "user": "deploy", "key": "main/PROD_SSH_KEY", "host_key": FINGERPRINT,
+        "host": "prod.example.com", "port": 22, "user": "deploy", "key": "env/PROD_SSH_KEY", "host_key": FINGERPRINT,
     }
 
 
@@ -88,7 +85,7 @@ def test_the_name_of_a_server_is_what_an_agent_types(project, name):
     assert "ssh" in result.stderr
 
 
-@pytest.mark.parametrize("key", ["main/NOT-A-NAME", "nope/PROD_SSH_KEY", "not-a-reference"])
+@pytest.mark.parametrize("key", ["env/NOT-A-NAME", "nope/PROD_SSH_KEY", "not-a-reference"])
 def test_the_key_is_a_secret_reference_to_a_declared_vault(project, key):
     result = project.config(ssh_spec(egress={"default": {"ssh": {"prod": server(key=key)}}}))
     assert result.returncode != 0
@@ -131,7 +128,7 @@ def test_extend_merges_ssh_servers_by_name_with_the_child_winning(project):
 
 
 def test_the_resolved_output_never_holds_the_key_itself(project):
-    """It names the secret (`main/PROD_SSH_KEY`); the value is read by `up` and goes to the proxy alone."""
+    """It names the secret (`env/PROD_SSH_KEY`); the value is read by `up` and goes to the proxy alone."""
     result = project.config(ssh_spec(egress={"default": {"ssh": {"prod": server()}}}))
     assert result.returncode == 0
     assert "PRIVATE KEY" not in result.stdout

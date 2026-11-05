@@ -19,7 +19,7 @@ TOKEN_FREE = "ssh-agent"
 
 def profiles(server):
     def entry(**fields):
-        return {"host": server.host, "port": server.port, "user": server.user, "key": "main/PROD_SSH_KEY", "host_key": server.fingerprint, **fields}
+        return {"host": server.host, "port": server.port, "user": server.user, "key": "env/PROD_SSH_KEY", "host_key": server.fingerprint, **fields}
 
     other, _, other_fingerprint = server.keygen()
     return {
@@ -27,7 +27,7 @@ def profiles(server):
         "pubkey": {"ssh": {"prod": entry(host_key=server.host_key)}},
         "wrongkey": {"ssh": {"prod": entry(host_key=other_fingerprint)}},
         "metadata": {"ssh": {"prod": entry(host="169.254.169.254", port=22)}},
-        "refused": {"ssh": {"prod": entry(key="main/OTHER_SSH_KEY")}},
+        "refused": {"ssh": {"prod": entry(key="env/OTHER_SSH_KEY")}},
         "dead": {"ssh": {"prod": entry(port=1)}},
         "none": {},
     }
@@ -41,7 +41,6 @@ def sandbox(shared_project, engine, egzo, ssh_server):
     egress = profiles(ssh_server)
     shared_project.up(
         spec(
-            vaults={"main": {"backend": "env"}},
             egress=egress,
             agents={name: agent(harness="custom", image=image, egress=name, env={"FAKE_TUI": "cat", "HOME": HOME}) for name in egress},
         )
@@ -244,13 +243,13 @@ def test_ssh_setup_can_be_run_again_by_hand_in_an_image_that_does_not_start_egzo
 
 def test_up_refuses_a_key_it_cannot_use_and_never_prints_it(live_project, engine, egzo, ssh_server):
     live_project.env["PROD_SSH_KEY"] = "-----BEGIN OPENSSH PRIVATE KEY-----\nnot-really-a-key-material\n"
-    egress = {"ops": {"ssh": {"prod": {"host": ssh_server.host, "port": ssh_server.port, "user": "ops", "key": "main/PROD_SSH_KEY", "host_key": ssh_server.fingerprint}}}}
+    egress = {"ops": {"ssh": {"prod": {"host": ssh_server.host, "port": ssh_server.port, "user": "ops", "key": "env/PROD_SSH_KEY", "host_key": ssh_server.fingerprint}}}}
     document = spec(
-        vaults={"main": {"backend": "env"}}, egress=egress,
+        egress=egress,
         agents={"ops": agent(harness="custom", image=engine.agent_image(), egress="ops")},
     )
     live_project.write(document)
     result = live_project.run("project", "up", timeout=300)
     assert result.returncode != 0
-    assert "main/PROD_SSH_KEY" in result.stderr and "not usable as an ssh key" in result.stderr
+    assert "env/PROD_SSH_KEY" in result.stderr and "not usable as an ssh key" in result.stderr
     assert "not-really-a-key-material" not in result.stdout + result.stderr

@@ -31,10 +31,9 @@ def sandbox(shared_project, engine, egzo):
     make_certificates(p.root, HOSTS)
     images = {name: engine.harness_image(name, egzo.binary) for name in HARNESSES}
     quick = {"inject": {"human_quiet": "1s"}}
-    anthropic, openai = {"anthropic": "main/ANTHROPIC_API_KEY"}, {"openai": "main/OPENAI_API_KEY"}
+    anthropic, openai = {"anthropic": "env/ANTHROPIC_API_KEY"}, {"openai": "env/OPENAI_API_KEY"}
     p.up(
         spec(
-            vaults={"main": {"backend": "env"}},
             proxy={"upstream": {"ca": "./stub-ca.pem", "private_hosts": list(HOSTS)}},
             egress={"anthropic": {"allow": BROWSE, "services": anthropic}, "openai": {"allow": BROWSE, "services": openai}},
             workspaces={"scratch": {}},

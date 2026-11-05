@@ -32,10 +32,9 @@ def sandbox(shared_project, engine, egzo):
     quick = {"inject": {"human_quiet": "1s"}}
     p.up(
         spec(
-            vaults={"main": {"backend": "env"}},
             proxy=UPSTREAM,
             egress={
-                "key": {"services": {"openai": "main/OPENAI_API_KEY"}},
+                "key": {"services": {"openai": "env/OPENAI_API_KEY"}},
                 "chatgpt": {"services": {"chatgpt": {"credential": {"method": "oauth"}}}},
                 "stub": {"services": {"idp": SERVICE}},
             },

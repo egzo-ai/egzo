@@ -34,8 +34,8 @@ STUB_LOG = "/tmp/model-stub.log"
 SCRIPTED = {"claude-code": "cc-scripted", "opencode": "oc-scripted"}
 # the tool through which each harness reaches the MCP tools it keeps off the model's tool list (Claude Code's tool search, OpenCode's Code Mode)
 DEFERRING = {"claude-code": "ToolSearch", "opencode": "execute"}
-ANTHROPIC = {"allow": ["platform.claude.com"], "services": {"anthropic": "main/ANTHROPIC_API_KEY"}}
-OAUTH = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "main/CLAUDE_CODE_OAUTH_TOKEN"}}
+ANTHROPIC = {"allow": ["platform.claude.com"], "services": {"anthropic": "env/ANTHROPIC_API_KEY"}}
+OAUTH = {"allow": ["platform.claude.com"], "services": {"anthropic-oauth": "env/CLAUDE_CODE_OAUTH_TOKEN"}}
 OAUTH_TOKEN = "sk-ant-oat01-egzo-spec-not-a-real-token-" + "0" * 40
 API_KEY = "sk-ant-egzo-spec-not-a-real-key-0000000000"
 # what each harness prints when its prompt is ready, and what must never appear before that
@@ -57,7 +57,6 @@ def sandbox(shared_project, engine, egzo):
     quick = {"inject": {"human_quiet": "1s"}}
     p.up(
         spec(
-            vaults={"main": {"backend": "env"}},
             egress={"default": ANTHROPIC, "oauth": OAUTH},
             workspaces={"scratch": {}, "one": {}, "two": {}},
             local_ports={"bind": "127.0.0.1"},

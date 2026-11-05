@@ -60,15 +60,12 @@ Rules:
 Level 1 example:
 
 ```yaml
-secret_key: main/EGZO_PROJECT_SECRET_KEY
-vaults:
-  main:
-    backend: env
+secret_key: env/EGZO_PROJECT_SECRET_KEY
 egress:
   default:                    # the profile agents get when they name none
     allow: [platform.claude.com]
     services:
-      anthropic: main/ANTHROPIC_API_KEY   # built-in service + its secret
+      anthropic: env/ANTHROPIC_API_KEY    # built-in service + its secret
 workspaces:
   repo:
     git: { url: https://github.com/me/repo.git }
@@ -146,7 +143,7 @@ secret_key: main/egzo/myproj-key   # required: seals what egzo keeps at rest (se
 
 vaults:
   main:
-    backend: pass              # env | pass (see Secrets and vaults); a reference main/<name> declares a secret
+    backend: pass              # pass (see Secrets and vaults); a reference main/<name> declares a secret; env/<NAME> is built in
 
 proxy:                         # infrastructure of the egress sidecar
   image: ghcr.io/egzo-ai/egzo  # optional override; default is the all-in-one egzo image (`egzo proxy`)
@@ -424,17 +421,22 @@ templates are declared and published by `up`.
   opened); `rotate-ca` makes a new CA sealed with the file's key. A volume from before the key (a CA key in clear) stops
   the proxy: before 1.0 there is no migration, `down` and `up` make the project again. Rejected: a key per service, a key on a vault, a naming convention, a key pair (the proxy
   must read its own data back), a random key in the volume, envelope encryption (only helps rotation).
-- **Two backends exist: `env` and `pass`.** Any other name, whatever it is, is the same validation error
-  (`unknown backend "x"`, naming the two that exist). The schema, the errors, the docs and the specs mention
-  nothing that does not exist: no removed or planned backends, no reserved names. A backend is added when it
-  works, together with its specs.
+- **The environment is the built-in vault `env`.** Every project has it and no file declares it: `env/NAME` is the
+  variable `NAME`. `env` is the one reserved vault name (declaring it is an error), and its backend is its own: a
+  declared vault cannot have `backend: env`, and the error says to write `env/NAME`. It is listed by `--resolved` only
+  when something refers to it, and is never a vault nothing refers to. The env backend was a vault that took no
+  options, so declaring it was boilerplate in every project.
+- **One backend can be declared: `pass`.** Any other name, whatever it is, is the same validation error
+  (`unknown backend "x"`, naming the backends that exist). The schema, the errors, the docs and the specs mention
+  nothing that does not exist: no removed or planned backends. A backend is added when it works, together with its
+  specs.
 - **`env`** reads the environment variable of the same name from the shell that runs the CLI or, when the
   environment does not have it, from `.env` in the project directory (the directory of `egzo.yaml`), as Docker Compose
   does: the environment wins, even a variable set to nothing; Compose's own parser (`compose-go/v2/dotenv`), so the
   syntax and `${VAR}` are Compose's; no file, or a directory, is no variable. The file is read only for a variable the
   environment lacks. Its errors keep a line number and egzo's own words, never the parser's message (it can quote a
   value). `project check` says which secrets came from `.env`. A secret name must be a valid variable name. It is accepted but discouraged (every process of the user can read it, and
-  it ends up in shell history and dotfiles): every command that loads a project with an `env` vault, except the ones that relay a process's own output (`exec`, `attach`, `logs`), prints
+  it ends up in shell history and dotfiles): every command that loads a project that refers to an `env/` secret (the secret key included), except the ones that relay a process's own output (`exec`, `attach`, `logs`), prints
   `Using ENV var based secret backend is not recommended.` on stderr, once, and goes on.
 - **`pass`** runs the `pass` program (https://www.passwordstore.org/) directly, `pass show <name>`, with the
   secret name as the entry name, slashes included (a name never starts with `-`, and egzo passes it after `--`,

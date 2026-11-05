@@ -61,7 +61,7 @@ func ReadSecretKey(ref config.SecretRef, dir string) (string, error) {
 
 func readSecret(ref config.SecretRef, dir string, whole bool) (string, error) {
 	switch ref.Backend {
-	case "env":
+	case config.EnvBackend:
 		return readEnv(ref.Name, dir)
 	case "pass":
 		return readPass(ref.Name, whole)
@@ -101,7 +101,7 @@ func readEnv(name, dir string) (string, error) {
 
 // FromDotenv tells whether the env backend reads ref from the project's .env rather than the environment.
 func FromDotenv(ref config.SecretRef, dir string) bool {
-	if ref.Backend != "env" {
+	if ref.Backend != config.EnvBackend {
 		return false
 	}
 	if _, ok := os.LookupEnv(ref.Name); ok {

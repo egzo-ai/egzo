@@ -3,37 +3,35 @@
 
 """Small builders so specs read as the YAML they describe."""
 
-import copy
 import os
 import stat
 
-VAULT = {"main": {"backend": "env"}}
-
-# Every project names a secret key. A spec's file reads it from the environment variable below, through a vault of its own (`key`),
-# so a spec that replaces `vaults` keeps it; every project of the specs has the variable set (conftest.Project).
+# Every project names a secret key. A spec's file reads it from the environment variable below, through the built-in
+# vault `env`, which no file declares; every project of the specs has the variable set (conftest.Project).
 SECRET_KEY_VARIABLE = "EGZO_SPEC_SECRET_KEY"
 SECRET_KEY_VALUE = "spec-secret-key-" + "0123456789abcdef" * 3
-SECRET_KEY = {"secret_key": f"key/{SECRET_KEY_VARIABLE}", "vault": {"key": {"backend": "env"}}}
+SECRET_KEY = {"secret_key": f"env/{SECRET_KEY_VARIABLE}"}
 
 GIT_WORKSPACE = {"repo": {"git": {"url": "https://github.com/acme/shop.git"}}}
 
 
 def spec(**sections):
-    """An egzo.yaml as a dict, with the shared vault unless overridden, and the spec secret key unless `secret_key` is given
-    (None leaves it out)."""
-    document = {"secret_key": SECRET_KEY["secret_key"], "vaults": copy.deepcopy(VAULT)}
+    """An egzo.yaml as a dict, with the spec secret key unless `secret_key` is given (None leaves it out)."""
+    document = {"secret_key": SECRET_KEY["secret_key"]}
     document.update(sections)
     if document["secret_key"] is None:
         del document["secret_key"]
-    elif document["secret_key"] == SECRET_KEY["secret_key"]:
-        document["vaults"] = {**(document.get("vaults") or {}), **copy.deepcopy(SECRET_KEY["vault"])}
     return document
 
 
 def uses(*refs, backend="env"):
-    """The vault and egress sections of a file that refers to the secrets `refs` (`main/NAME`): a service per secret, which declares it."""
+    """The vault and egress sections of a file that refers to the secrets `refs`: a service per secret, which declares it.
+    The env backend is the built-in vault `env` (`env/NAME`, nothing declared); any other is the vault `main` (`main/NAME`)."""
     services = {f"svc{i}": {"hosts": [f"svc{i}.example.com"], "inject": {"header": "X-Key"}, "credential": ref} for i, ref in enumerate(refs)}
-    return {"vaults": {"main": {"backend": backend}}, "egress": {"default": {"services": services}}}
+    sections = {"egress": {"default": {"services": services}}}
+    if backend != "env":
+        sections["vaults"] = {"main": {"backend": backend}}
+    return sections
 
 
 def agent(**fields):
@@ -52,7 +50,7 @@ def anthropic_profile(**extra):
     """The profile that lets an agent reach its model API."""
     profile = {
         "allow": ["platform.claude.com"],
-        "services": {"anthropic": "main/ANTHROPIC_API_KEY"},
+        "services": {"anthropic": "env/ANTHROPIC_API_KEY"},
     }
     profile.update(extra)
     return profile

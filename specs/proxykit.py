@@ -19,13 +19,13 @@ PROFILES = {
     "allow": {"allow": ["example.com"]},
     "open": {"allow": ["*"]},
     "none": {},
-    "echo": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "credential": "main/DEPLOY_TOKEN"}}},
-    "paths": {"services": {"echo": {"hosts": ["httpbin.org"], "paths": ["/anything/api/"], "inject": {"header": "X-Egzo-Secret"}, "credential": "main/DEPLOY_TOKEN"}}},
-    "basic": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "Authorization", "basic_user": "x-access-token"}, "credential": "main/DEPLOY_TOKEN"}}},
-    "login": {"allow": ["httpbingo.org"], "services": {"login": {"hosts": ["httpbin.org"], "credential": "main/SITE_SECRET", "placeholder": "SITE_PASSWORD"}}},
+    "echo": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "credential": "env/DEPLOY_TOKEN"}}},
+    "paths": {"services": {"echo": {"hosts": ["httpbin.org"], "paths": ["/anything/api/"], "inject": {"header": "X-Egzo-Secret"}, "credential": "env/DEPLOY_TOKEN"}}},
+    "basic": {"services": {"echo": {"hosts": ["httpbin.org"], "inject": {"header": "Authorization", "basic_user": "x-access-token"}, "credential": "env/DEPLOY_TOKEN"}}},
+    "login": {"allow": ["httpbingo.org"], "services": {"login": {"hosts": ["httpbin.org"], "credential": "env/SITE_SECRET", "placeholder": "SITE_PASSWORD"}}},
     "plain": {"allow": ["httpbin.org"]},
     "inspect": {"services": {"docs": {"hosts": ["example.com"], "inspect": True}}},
-    "wild": {"services": {"browse": {"hosts": ["*"], "inspect": True}, "echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "credential": "main/DEPLOY_TOKEN"}}},
+    "wild": {"services": {"browse": {"hosts": ["*"], "inspect": True}, "echo": {"hosts": ["httpbin.org"], "inject": {"header": "X-Egzo-Secret"}, "credential": "env/DEPLOY_TOKEN"}}},
     "wildsub": {"services": {"docs": {"hosts": ["*.example.com"], "inspect": True}}},
     "ech": {"allow": [ECH_HOST]},
 }
@@ -35,7 +35,6 @@ def document(image, *profiles):
     """A project with one template per named profile (`echo` uses the profile `echo`), and the two secrets from the environment."""
     chosen = profiles or tuple(PROFILES)
     return spec(
-        vaults={"main": {"backend": "env"}},
         egress={name: PROFILES[name] for name in chosen},
         agents={name: custom(image, egress=name) for name in chosen},
     )

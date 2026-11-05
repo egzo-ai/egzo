@@ -5,10 +5,8 @@ project: any number of agents may list it. There are two kinds. The short versio
 [the project file](project-file.md); for the egress side of cloning see [sandboxing](sandboxing.md).
 
 ```yaml
-vaults:
-  main: { backend: env }
 egress:
-  default: { services: { github: main/GITHUB_TOKEN } }
+  default: { services: { github: env/GITHUB_TOKEN } }
 workspaces:
   shop:                                  # a git repository
     git: { url: https://github.com/acme/shop.git, branch: main }
