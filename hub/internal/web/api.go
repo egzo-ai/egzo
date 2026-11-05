@@ -16,6 +16,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
+	"github.com/egzo-ai/egzo/internal/version"
 )
 
 // The JSON API under /api/v1. Every answer is JSON; every error is {"code", "message"} with a real status code. Times are RFC 3339.
@@ -341,7 +342,7 @@ func (s *Server) whoami(w http.ResponseWriter, r *http.Request, user store.User)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": userOf(user), "identities": s.identitiesOf(identities),
 		"hasPassword": user.HasPassword && signIn.LocalLogin, "sso": sso, "issuer": signIn.Issuer, "hub": s.opts.LinkURL,
-		"canLink": user.IsOperator || connected < user.ProjectQuota, "connectedProjects": connected})
+		"canLink": user.IsOperator || connected < user.ProjectQuota, "connectedProjects": connected, "version": version.Version})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

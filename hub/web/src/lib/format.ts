@@ -89,3 +89,10 @@ export function duration(fromIso: string, toIso?: string, now = Date.now()): str
   if (s < 3600) return `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
   return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
 }
+
+const repo = "https://github.com/egzo-ai/egzo";
+
+/** Where the source of this build is: the release's tag (tags have no "v": 0.1.0, 0.1.0-rc1), or the repo for a dev build. */
+export function sourceURL(version: string): string {
+  return /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version) ? `${repo}/tree/${version}` : repo;
+}

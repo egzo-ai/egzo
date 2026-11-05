@@ -3,6 +3,7 @@
   import { taskDoing } from "../lib/format";
   import { href, nav } from "../lib/router.svelte";
   import { closeTerm, scopedTerms, showPage, showTerm, workspace, type Term } from "../lib/workspace.svelte";
+  import AboutLine from "./AboutLine.svelte";
   import Avatar from "./Avatar.svelte";
   import Icon from "./Icon.svelte";
   import Logo from "./Logo.svelte";
@@ -170,5 +171,6 @@
       <button class="btn hide-rail" data-variant="quiet" data-size="sm" data-icon-only aria-label="Switch theme" onclick={toggleTheme}><Icon name="sun" /></button>
       <button class="btn hide-rail" data-variant="quiet" data-size="sm" data-icon-only aria-label="Sign out" title="Sign out" onclick={onsignout}><Icon name="signout" /></button>
     </div>
+    <AboutLine class="hide-rail" />
   </div>
 </nav>

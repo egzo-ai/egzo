@@ -5,6 +5,7 @@
   import { inviteFailedText } from "../lib/signin";
   import { workspace } from "../lib/workspace.svelte";
   import Icon from "../components/Icon.svelte";
+  import AboutLine from "../components/AboutLine.svelte";
 
   let text = $state("");
   let view = $state<"tiles" | "list">((() => { try { return localStorage.getItem("egzo.projectView") === "list" ? "list" : "tiles"; } catch { return "tiles"; } })());
@@ -101,4 +102,5 @@
       </table>
     </div>
   {/if}
+  <AboutLine class="home-about" />
 </div>
