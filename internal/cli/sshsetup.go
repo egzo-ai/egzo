@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -65,19 +64,20 @@ func setupSSH(home, token, publishedConfig string) error {
 	return writeFileAtomic(path, withManagedBlock(string(existing), string(published)), 0o600)
 }
 
-// sshFollowInterval is how often a running agent looks at the servers the proxy publishes.
-const sshFollowInterval = 2 * time.Second
+// sshFollowInterval is how often a running agent looks at the servers the proxy publishes. `up` takes longer than that.
+const sshFollowInterval = 10 * time.Second
 
-// followSSH rewrites the agent's ssh config each time the servers the proxy published change, for as long as the agent
-// runs. It reads one small file of the shared volume each time: nothing is written until it changes. Errors are said once
-// per change, as setupSSH's at the start are: ssh that cannot follow is not worth stopping the agent for.
-// It returns when done closes; nil runs it for the life of the process.
+// followSSH rewrites the agent's ssh config each time the proxy publishes its servers again, for as long as the agent runs.
+// Each look is one stat of a file of the shared volume (the proxy replaces it whole, so a change moves its time or size):
+// file-change notifications do not cross containers under gVisor or a VM-backed engine. Errors are said once per change, as
+// setupSSH's at the start are: ssh that cannot follow is not worth stopping the agent for. It returns when done closes; nil
+// runs it for the life of the process.
 func followSSH(home, token, publishedConfig string, every time.Duration, done <-chan struct{}) {
 	if token == "" {
 		return
 	}
-	// nothing applied yet: the first look writes the config once more, so a change made since the agent started is not missed
-	var last []byte
+	// nothing seen yet: the first look writes the config once more, so a change made since the agent started is not missed
+	var last string
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -86,11 +86,16 @@ func followSSH(home, token, publishedConfig string, every time.Duration, done <-
 			return
 		case <-ticker.C:
 		}
-		now, err := os.ReadFile(publishedConfig)
-		if err != nil && !errors.Is(err, os.ErrNotExist) || bytes.Equal(now, last) {
+		seen := "gone"
+		if info, err := os.Stat(publishedConfig); err == nil {
+			seen = fmt.Sprintf("%d %d", info.ModTime().UnixNano(), info.Size())
+		} else if !errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		last = now
+		if seen == last {
+			continue
+		}
+		last = seen
 		if err := setupSSH(home, token, publishedConfig); err != nil {
 			fmt.Fprintf(os.Stderr, "egzo: could not update ssh: %v\n", err)
 		}
