@@ -34,7 +34,7 @@ the worktree of a removed agent.
 ## How a file travels
 
 ```
-browser --GET--> hub --link stream "files"--> link --exec--> files helper container --unix socket--> egzo files serve (os.Root at /w)
+browser --GET--> hub --link stream "files"--> link --exec--> files helper container --unix socket--> egzo files serve (/w)
 ```
 
 - **The hub** checks the person's role, takes `GET` and `HEAD` only, forwards `Range`, `If-Range`, `If-None-Match` and
@@ -61,7 +61,8 @@ GET /notes/spec.pdf  a file: its bytes, Range supported, as application/octet-st
 - A directory without the slash redirects to it; a file with one is `404`.
 - Entries are sorted by name, at most 10,000 (the first the directory gives, not the first by name); past that `truncated` is true.
 - A symlink is listed and never followed or served. Pipes, sockets and devices are not listed, and refused.
-- Every path is opened through `os.Root`: nothing outside `/w` is reached, by `..` or by a link.
+- Every path is opened one part at a time from `/w`, each directory with `O_NOFOLLOW` and held open while the next part is looked up in
+  it: nothing outside `/w` is reached, by `..` or by a link, and a link swapped in while a request runs is refused, not followed.
 - A file is opened `O_RDONLY|O_NONBLOCK|O_NOFOLLOW` and checked to be regular after it is open.
 - Any other method is `405`. Errors are a status and one line of text.
 - The server has no write path: read-only is the absence of code, and the read-only mount under it.

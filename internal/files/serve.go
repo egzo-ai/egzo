@@ -32,11 +32,14 @@ type ServeOptions struct {
 
 // Serve serves the files under dir on a unix socket until it has had no connection for options.Idle, or ctx ends.
 func Serve(ctx context.Context, dir, socket string, options ServeOptions) error {
-	root, err := os.OpenRoot(dir)
+	root, err := os.Open(dir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
+	if info, err := root.Stat(); err != nil || !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
 	_ = os.Remove(socket) // a socket left by a server that was killed
 	listener, err := net.Listen("unix", socket)
 	if err != nil {

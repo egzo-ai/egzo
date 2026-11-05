@@ -405,7 +405,7 @@ func seedFiles(e *fake.Engine) error {
 		}
 	}
 	for _, served := range []struct{ workspace, instance, dir string }{{"docs", "", docs}, {"repo", "coder-0", worktree}} {
-		root, err := os.OpenRoot(served.dir)
+		root, err := os.Open(served.dir)
 		if err != nil {
 			return err
 		}
