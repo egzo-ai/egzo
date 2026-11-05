@@ -711,12 +711,10 @@ func (l *Link) exposure(agent string, port int) (string, bool) {
 	return protocol, ok
 }
 
-// forward is one connection to a port on the verb's stream. The reply waits for the command to say it reached the server, so that a port where
-// nothing listens is an answer: a server says nothing until it is spoken to, so a stream that ended could mean anything. The two ways out of the
-// command need not arrive in order, so a byte of the server's says the same. The protocol says what the end of the hub's side means: an HTTP
-// proxy never half closes, so it has left, and a tcp client may still be waiting for its answer.
 // relay carries a stream verb, forward or files: run copies the stream's bytes through a command in a container, which says announce on
-// stderr once it reached its server. The Done goes out then, or with the first byte the server says, or with why it failed.
+// stderr once it reached its server. The Done goes out then, or with the first byte the server says, or with why it failed. The reply waits
+// for the server to be reached so that a server that cannot be is an answer: a server says nothing until it is spoken to, so a stream that
+// ended could mean anything. The two ways out of the command need not arrive in order, which is why a byte of the server's says the same.
 func (l *Link) relay(lines *hublink.Lines, run func(in io.Reader, out, said io.Writer) error, stream net.Conn, announce string) {
 	var answered sync.Once
 	connected := func() { answered.Do(func() { _ = lines.Write(hublink.Reply{Done: true}) }) }
