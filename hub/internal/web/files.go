@@ -80,9 +80,8 @@ type filesRequest struct{}
 
 // filesState is what the server keeps for the file proxy.
 type filesState struct {
-	once    sync.Once
-	proxy   *httputil.ReverseProxy
-	targets sync.Map // pool key -> filesTarget
+	once  sync.Once
+	proxy *httputil.ReverseProxy
 }
 
 // files serves a file or a directory listing of a workspace volume: a directory workspace's, or with {instance} a worktree's.
@@ -140,7 +139,6 @@ func (t filesTarget) poolKey() string {
 func (s *Server) rewriteFiles(pr *httputil.ProxyRequest) {
 	call := pr.In.Context().Value(filesRequest{}).(filesCall)
 	key := call.target.poolKey()
-	s.filesState.targets.Store(key, call.target)
 	header := http.Header{}
 	for _, name := range filesRequestHeaders {
 		if value := pr.In.Header.Get(name); value != "" {
@@ -153,16 +151,18 @@ func (s *Server) rewriteFiles(pr *httputil.ProxyRequest) {
 	pr.Out.URL.Path, pr.Out.URL.RawPath, pr.Out.URL.RawQuery = call.path, "", ""
 }
 
+// dialFiles connects to the file server of the request's volume. The transport dials with the values of the context of the request that
+// asked for the connection, which say the volume; the address, its pool key, must be that volume's.
 func (s *Server) dialFiles(ctx context.Context, _, address string) (net.Conn, error) {
 	key, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
 	}
-	found, ok := s.filesState.targets.Load(key)
-	if !ok {
+	call, ok := ctx.Value(filesRequest{}).(filesCall)
+	if !ok || call.target.poolKey() != key {
 		return nil, errors.New("no such volume")
 	}
-	t := found.(filesTarget)
+	t := call.target
 	dialing, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	return s.hub.DialFiles(dialing, t.project, t.workspace, t.instance)
