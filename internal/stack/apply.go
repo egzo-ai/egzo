@@ -391,7 +391,6 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 		}
 	}
 	unlink(ctx, c, observed, out)
-	orphans := orphanWorktrees(observed)
 	// Containers first, then the networks they were on, then the volumes. Within a kind nothing
 	// depends on anything, and stopping containers is where the time goes, so do it together.
 	for _, kind := range []string{"container", "network", "volume"} {
@@ -400,8 +399,12 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 			if r.Type != kind {
 				continue
 			}
-			if keptByDown(r, orphans) {
-				fmt.Fprintf(out, "keep volume %s (workspace %s): `egzo workspace rm %s` deletes it\n", r.Name, r.Workspace, r.Workspace)
+			if keptByDown(r) {
+				if r.Instance != "" {
+					fmt.Fprintf(out, "keep volume %s (worktree of %s in workspace %s): `egzo workspace rm %s --worktree %s` deletes it\n", r.Name, r.Instance, r.Workspace, r.Workspace, r.Instance)
+				} else {
+					fmt.Fprintf(out, "keep volume %s (workspace %s): `egzo workspace rm %s` deletes it\n", r.Name, r.Workspace, r.Workspace)
+				}
 				continue
 			}
 			actions = append(actions, Action{Verb: "remove", Type: kind, Name: r.Name, ID: r.ID})
@@ -418,33 +421,15 @@ func Down(ctx context.Context, c *engine.Client, observed Observed, env PrepEnv,
 			return err
 		}
 	}
-	if _, err := removeBuilds(ctx, c, project, nil, out); err != nil {
-		return err
-	}
-	return ForgetWorktrees(ctx, c, env, project, dir, observed, observed.InstanceNames())
+	_, err := removeBuilds(ctx, c, project, nil, out)
+	return err
 }
 
-// keptByDown says whether `down` leaves a resource: the volumes that hold a workspace's data, the directory and the
-// base clone. They are the user's work, not egzo's infrastructure; `egzo workspace rm` deletes them. An instance's
-// worktree volume goes with the instance.
-func keptByDown(r Resource, orphans map[string]bool) bool {
-	return r.Type == "volume" && r.Kind == kindWorkspace && (r.Instance == "" || orphans[r.Name])
-}
-
-// orphanWorktrees are the worktree volumes no instance owns: left by a spawn or a removal that did not finish. They
-// may hold work, so `down` keeps them like the bases; `egzo workspace rm NAME --worktree INSTANCE` deletes one.
-func orphanWorktrees(observed Observed) map[string]bool {
-	live := map[string]bool{}
-	for _, name := range observed.InstanceNames() {
-		live[name] = true
-	}
-	orphans := map[string]bool{}
-	for _, r := range observed.Resources {
-		if r.Type == "volume" && r.Kind == kindWorkspace && r.Instance != "" && !live[r.Instance] {
-			orphans[r.Name] = true
-		}
-	}
-	return orphans
+// keptByDown says whether `down` leaves a resource: the volumes that hold a workspace's data, the directory, the
+// base clone and the worktrees, with what agents left uncommitted in them. They are the user's work, not egzo's
+// infrastructure; `egzo workspace rm` deletes them. A worktree that is kept stays a worktree of its base.
+func keptByDown(r Resource) bool {
+	return r.Type == "volume" && r.Kind == kindWorkspace
 }
 
 // Report is what an agent last said about itself and what it is doing, as the control sidecar knows it.

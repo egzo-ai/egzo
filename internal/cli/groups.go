@@ -423,7 +423,7 @@ func newWorkspaceRemoveCommand(opts *options) *cobra.Command {
 			if len(worktrees) > 0 {
 				return stack.RemoveWorktreeVolumes(ctx, s.engine, s.prepEnv(ctx), observed, s.Resolved.Name, s.Dir, args[0], worktrees, cmd.OutOrStdout())
 			}
-			return stack.RemoveWorkspaces(ctx, s.engine, observed, args, all, cmd.OutOrStdout())
+			return stack.RemoveWorkspaces(ctx, s.engine, observed, s.Resolved.Name, args, all, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "delete every workspace volume of the project")

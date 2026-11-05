@@ -142,10 +142,10 @@ class Project:
         return sorted(item["name"] for item in json.loads(self.ok("agent ls --json").stdout))
 
     def retire(self):
-        """Remove every instance, in one command, so the next spec of a shared project finds it as it was left by `up`."""
+        """Remove every instance and its worktrees, in one command, so the next spec of a shared project finds it as it was left by `up`."""
         names = self.instance_names()
         if names:
-            self.ok("agent rm --force", *names)
+            self.ok("agent rm --force --worktrees", *names)
 
     def config(self, document, *args, **kwargs):
         """Write the file and run `egzo config`."""

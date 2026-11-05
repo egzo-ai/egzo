@@ -19,6 +19,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/volume"
 
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/hublink"
@@ -291,7 +292,7 @@ func (d *Engine) Remove(ctx context.Context, project, agent string, progress fun
 		return err
 	}
 	env := stack.PrepEnv{Image: published.Image, User: published.User}
-	_, err = stack.RemoveInstances(ctx, d.client, observed, env, project, published.Dir, []string{agent}, true, &steps{progress: progress})
+	_, err = stack.RemoveInstances(ctx, d.client, observed, env, project, published.Dir, []string{agent}, true, false, &steps{progress: progress})
 	return err
 }
 
@@ -527,4 +528,91 @@ func (d *Engine) currentHash(ctx context.Context, project string, hashes []strin
 		}
 	}
 	return hashes[len(hashes)-1]
+}
+
+// Workspaces lists the project's workspace volumes, from their labels: a directory's volume, a git workspace's base clone and the
+// worktrees of its instances, each with the state of its instance. It reads no file.
+func (d *Engine) Workspaces(ctx context.Context, project string) ([]hublink.Workspace, error) {
+	volumes, err := d.client.API.VolumeList(ctx, volume.ListOptions{Filters: filters.NewArgs(
+		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"=workspace"))})
+	if err != nil {
+		return nil, err
+	}
+	agents, err := d.client.API.ContainerList(ctx, container.ListOptions{All: true, Filters: filters.NewArgs(
+		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindAgent))})
+	if err != nil {
+		return nil, err
+	}
+	states := map[string]string{}
+	for _, a := range agents {
+		state := hublink.WorktreeStopped
+		if a.State == "running" {
+			state = hublink.WorktreeRunning
+		}
+		states[a.Labels[engine.LabelInstance]] = state
+	}
+	byName := map[string]*hublink.Workspace{}
+	for _, v := range volumes.Volumes {
+		id, err := engine.IdentityOf(v.Labels)
+		if err != nil || id.Project != project || id.Workspace == "" {
+			continue
+		}
+		ws := byName[id.Workspace]
+		if ws == nil {
+			ws = &hublink.Workspace{Name: id.Workspace, Kind: hublink.WorkspaceDirectory, Worktrees: []hublink.Worktree{}}
+			byName[id.Workspace] = ws
+		}
+		switch {
+		case id.Instance != "":
+			ws.Kind = hublink.WorkspaceGit
+			state, ok := states[id.Instance]
+			if !ok {
+				state = hublink.WorktreeRemoved
+			}
+			ws.Worktrees = append(ws.Worktrees, hublink.Worktree{Instance: id.Instance, State: state, Actor: id.Actor})
+		case v.Name == stack.BaseVolume(project, id.Workspace):
+			ws.Kind = hublink.WorkspaceGit
+		}
+	}
+	list := make([]hublink.Workspace, 0, len(byName))
+	for _, ws := range byName {
+		sort.Slice(ws.Worktrees, func(i, j int) bool { return ws.Worktrees[i].Instance < ws.Worktrees[j].Instance })
+		list = append(list, *ws)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	return list, nil
+}
+
+// Files carries one connection to the file server of a workspace volume: a directory's, or the worktree of instance. It makes the volume's
+// file helper when it has none, and runs `egzo files connect` in it.
+func (d *Engine) Files(ctx context.Context, project, workspace, instance string, in io.Reader, out, said io.Writer) error {
+	if !names.Identifier(workspace) || instance != "" && !names.Instance(instance) {
+		return fmt.Errorf("no workspace %q", workspace)
+	}
+	env := func(ctx context.Context) (stack.PrepEnv, error) {
+		published, err := stack.ReadPublished(ctx, d.client, project)
+		if err != nil {
+			return stack.PrepEnv{}, err
+		}
+		return stack.PrepEnv{Image: published.Image, User: published.User}, nil
+	}
+	target := stack.FilesTarget{Workspace: workspace, Instance: instance}
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		var id string
+		id, err = stack.FileHelper(ctx, d.client, env, project, target)
+		if err != nil {
+			return err
+		}
+		var code int
+		code, err = d.client.ExecStream(ctx, id, stack.FilesConnectCommand, engine.Stream{In: in, Out: out, Err: said}, nil)
+		if err == nil && code != 0 {
+			return fmt.Errorf("the file connection ended with code %d", code)
+		}
+		if err == nil || ctx.Err() != nil {
+			return err
+		}
+		// the helper may have idled out between finding it and the exec: make another, once
+	}
+	return err
 }

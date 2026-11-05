@@ -191,7 +191,7 @@ func attachAfterSpawn(ctx context.Context, s *session, name string) error {
 
 // removeInstances removes the instances named, and with them their worktrees. Nothing is removed unless
 // everything may be.
-func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names []string, force bool) ([]string, error) {
+func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names []string, force, worktrees bool) ([]string, error) {
 	release, err := lockOrWait(s, cmd)
 	if err != nil {
 		return nil, err
@@ -201,13 +201,13 @@ func removeInstances(ctx context.Context, cmd *cobra.Command, s *session, names 
 	if err != nil {
 		return nil, err
 	}
-	return removeObserved(ctx, cmd, s, observed, names, force)
+	return removeObserved(ctx, cmd, s, observed, names, force, worktrees)
 }
 
-// removeObserved is removeInstances under the lock, for what was just observed. An instance's worktree is
-// its own and goes with it, with no check for work in it: what was committed stays on the branch egzo/NAME
-// in the base clone.
-func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observed stack.Observed, names []string, force bool) ([]string, error) {
+// removeObserved is removeInstances under the lock, for what was just observed. An instance's worktrees stay
+// unless worktrees says to delete them, with no check for work in them: what was committed stays on the branch
+// egzo/NAME in the base clone either way.
+func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observed stack.Observed, names []string, force, worktrees bool) ([]string, error) {
 	for _, name := range names {
 		instance, ok := observed.Instance(name)
 		if !ok {
@@ -220,20 +220,21 @@ func removeObserved(ctx context.Context, cmd *cobra.Command, s *session, observe
 			return nil, fmt.Errorf("instance %q is running: stop it first (egzo stop %s) or use --force", name, name)
 		}
 	}
-	return stack.RemoveInstances(ctx, s.engine, observed, s.prepEnv(ctx), s.Resolved.Name, s.Dir, names, true, cmd.ErrOrStderr())
+	return stack.RemoveInstances(ctx, s.engine, observed, s.prepEnv(ctx), s.Resolved.Name, s.Dir, names, true, worktrees, cmd.ErrOrStderr())
 }
 
 func newAgentRmCommand(opts *options) *cobra.Command {
-	var force, asJSON, stopped, stale, dryRun, yes bool
+	var force, asJSON, stopped, stale, dryRun, yes, worktrees bool
 	var olderThan time.Duration
 	cmd := &cobra.Command{
 		Use:   "rm [INSTANCE...]",
 		Short: "Remove instances",
-		Long: "Remove instances: the container, the network, the home volume and the worktrees of its git workspaces,\n" +
-			"and the agent's registration in the control sidecar and the proxy. What was asked of the agent and is\n" +
-			"still open is closed as failed. A running instance needs --force. Nothing is checked first: what the\n" +
-			"agent committed stays on its branch egzo/NAME in the base clone, the rest of a worktree is gone.\n" +
-			"Directory workspaces are never touched.\n" +
+		Long: "Remove instances: the container, the network, the home volume, and the agent's registration in the\n" +
+			"control sidecar and the proxy. What was asked of the agent and is still open is closed as failed. A\n" +
+			"running instance needs --force. The worktrees of its git workspaces stay, with what the agent left\n" +
+			"uncommitted in them: --worktrees deletes them too, with no check first (what the agent committed stays\n" +
+			"on its branch egzo/NAME in the base clone), and `egzo workspace rm WORKSPACE --worktree NAME` deletes\n" +
+			"one later. Directory workspaces are never touched.\n" +
 			"\n" +
 			"Instead of names, a filter removes every instance that matches any of them: --stopped (not running),\n" +
 			"--stale (their template changed or is gone) and --older-than DURATION (created longer ago). It lists what\n" +
@@ -249,7 +250,7 @@ func newAgentRmCommand(opts *options) *cobra.Command {
 			case olderThan < 0:
 				return fmt.Errorf("--older-than must be a positive duration like 24h")
 			case filtered:
-				return removeMatching(cmd, opts, stopped, stale, olderThan, dryRun, yes, asJSON)
+				return removeMatching(cmd, opts, stopped, stale, olderThan, dryRun, yes, asJSON, worktrees)
 			}
 			ctx, stop := commandContext(cmd)
 			defer stop()
@@ -258,7 +259,7 @@ func newAgentRmCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			removed, err := removeInstances(ctx, cmd, s, args, force)
+			removed, err := removeInstances(ctx, cmd, s, args, force, worktrees)
 			if asJSON {
 				if removed == nil {
 					removed = []string{}
@@ -270,6 +271,7 @@ func newAgentRmCommand(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove a running instance")
+	cmd.Flags().BoolVar(&worktrees, "worktrees", false, "delete the instances' worktrees too, with what they hold that was not committed")
 	cmd.Flags().BoolVar(&stopped, "stopped", false, "instances that are not running")
 	cmd.Flags().BoolVar(&stale, "stale", false, "instances whose template changed or is gone")
 	cmd.Flags().DurationVar(&olderThan, "older-than", 0, "instances created longer ago than this (a duration like 24h)")
@@ -311,7 +313,7 @@ func removalCandidates(instances []stack.Instance, filters removeFilters, curren
 }
 
 // removeMatching removes the instances that match any filter, after listing them and asking.
-func removeMatching(cmd *cobra.Command, opts *options, stopped, stale bool, olderThan time.Duration, dryRun, yes, asJSON bool) error {
+func removeMatching(cmd *cobra.Command, opts *options, stopped, stale bool, olderThan time.Duration, dryRun, yes, asJSON, worktrees bool) error {
 	ctx, stop := commandContext(cmd)
 	defer stop()
 	s, err := openSession(ctx, opts)
@@ -380,7 +382,7 @@ func removeMatching(cmd *cobra.Command, opts *options, stopped, stale bool, olde
 			still = append(still, c.Name)
 		}
 	}
-	removed, err := removeObserved(ctx, cmd, s, observed, still, true)
+	removed, err := removeObserved(ctx, cmd, s, observed, still, true, worktrees)
 	if asJSON {
 		if removed == nil {
 			removed = []string{}

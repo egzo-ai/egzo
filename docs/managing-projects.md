@@ -128,11 +128,11 @@ sidecars.
 ## Tearing down
 
 ```console
-$ egzo agent rm NAME...          # an instance: container, network, home volume, worktree volumes (committed work stays on its branch)
+$ egzo agent rm NAME...          # an instance: container, network, home volume; its worktrees stay (--worktrees deletes them)
 $ egzo agent rm --stale       # remove instances matching a filter (see --help)
 $ egzo project down                # the whole project: sidecars, networks, volumes, CA. Refused while an agent runs
-$ egzo project down --force        # removes the running agents too, with their worktrees and homes
-$ egzo workspace rm NAME           # down keeps the workspace volumes (your files, the base clones); this deletes one
+$ egzo project down --force        # removes the running agents too, with their homes
+$ egzo workspace rm NAME           # down keeps the workspace volumes (your files, the base clones, the worktrees); this deletes one
 ```
 
 ## Looking around

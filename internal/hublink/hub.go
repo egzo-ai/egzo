@@ -349,6 +349,24 @@ func (p *Peer) Spec(ctx context.Context) ([]byte, error) {
 // DialPort connects to a port an agent exposed. As with a net.Dialer, ctx covers the dial and nothing after it: the connection lasts until it
 // is closed or the link goes.
 func (p *Peer) DialPort(ctx context.Context, agent string, port int) (net.Conn, error) {
+	return p.dial(ctx, Request{Verb: VerbForward, Agent: agent, Port: port})
+}
+
+// Workspaces lists the project's workspace volumes.
+func (p *Peer) Workspaces(ctx context.Context) ([]Workspace, error) {
+	var list []Workspace
+	err := p.ask(ctx, Request{Verb: VerbWorkspaces}, nil, &list)
+	return list, err
+}
+
+// DialFiles connects to the file server of a workspace: a directory, or with instance the worktree of that instance. It speaks HTTP, GET
+// only. ctx covers the dial, as for DialPort.
+func (p *Peer) DialFiles(ctx context.Context, workspace, instance string) (net.Conn, error) {
+	return p.dial(ctx, Request{Verb: VerbFiles, Workspace: workspace, Instance: instance})
+}
+
+// dial asks a verb that becomes a byte stream once its Done comes without an error.
+func (p *Peer) dial(ctx context.Context, request Request) (net.Conn, error) {
 	stream, err := p.openStream(ctx)
 	if err != nil {
 		return nil, err
@@ -363,7 +381,7 @@ func (p *Peer) DialPort(ctx context.Context, agent string, port int) (net.Conn, 
 		}
 		return nil, err
 	}
-	if err := lines.Write(Request{Verb: VerbForward, Agent: agent, Port: port}); err != nil {
+	if err := lines.Write(request); err != nil {
 		return failed(err)
 	}
 	for {

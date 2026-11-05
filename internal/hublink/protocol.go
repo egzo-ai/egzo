@@ -94,7 +94,8 @@ func (s Status) text() string {
 }
 
 // The verbs a hub may ask. There is no other: a hub cannot run a container, mount a path or exec a command of its choosing. forward reaches
-// a port an agent exposed, and no other: the link refuses the rest.
+// a port an agent exposed, and no other: the link refuses the rest. files reaches the files of one of the project's workspace volumes, read
+// only, through a helper the link makes (roadmap/hub-files.md).
 const (
 	VerbProject   = "project"
 	VerbPublished = "published"
@@ -107,6 +108,10 @@ const (
 	VerbLogs      = "logs"
 	VerbSpec      = "spec"
 	VerbForward   = "forward"
+	// VerbWorkspaces lists the project's workspace volumes.
+	VerbWorkspaces = "workspaces"
+	// VerbFiles is a stream to the file server of one workspace volume: HTTP, GET only.
+	VerbFiles = "files"
 )
 
 // The feeds a link pushes.
@@ -186,11 +191,13 @@ type Request struct {
 	Limit     int    `json:",omitempty"` // events
 	Size      Size   `json:",omitempty"` // attach
 	Port      int    `json:",omitempty"` // forward
+	Workspace string `json:",omitempty"` // files
+	Instance  string `json:",omitempty"` // files: the instance whose worktree, for a git workspace
 }
 
 // Reply is a line the link answers a Request with: progress of what it does, then one with Done. After a Done without Error,
-// attach goes on as a terminal: raw output from the link, input frames from the hub. forward goes on as raw bytes both ways, and its Done
-// says the server was reached.
+// attach goes on as a terminal: raw output from the link, input frames from the hub. forward and files go on as raw bytes both ways, and
+// their Done says the server was reached.
 type Reply struct {
 	Progress string          `json:",omitempty"`
 	Done     bool            `json:",omitempty"`

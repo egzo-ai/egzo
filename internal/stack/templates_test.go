@@ -346,7 +346,7 @@ func TestRemovingChecksEveryNameBeforeTouchingAnything(t *testing.T) {
 	}}
 	// a nil client: anything that reaches the engine panics, so these must fail first
 	for name, names := range map[string][]string{"an unknown name": {"a", "ghost"}, "a running instance": {"a", "b"}} {
-		removed, err := RemoveInstances(context.Background(), nil, observed, PrepEnv{}, "proj", "/p", names, false, io.Discard)
+		removed, err := RemoveInstances(context.Background(), nil, observed, PrepEnv{}, "proj", "/p", names, false, false, io.Discard)
 		if err == nil || len(removed) != 0 {
 			t.Errorf("%s: removed %v, err %v", name, removed, err)
 		}

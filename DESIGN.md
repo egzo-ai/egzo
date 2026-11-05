@@ -286,7 +286,7 @@ Commands are grouped by what they act on. There are no aliases for names that mo
   the CLI: the proxy injects the HTTPS token (the `github` service). Agents push the same way, so no agent holds a git
   credential. Questions about a volume that the CLI cannot read (is the base cloned, what url, which `egzo/*` branches
   exist) are answered by `egzo prep git info` in a prep container; `egzo prep git forget` makes a base forget the
-  worktrees of removed instances.
+  worktrees whose volumes were deleted.
 - **`up`** clones each base that an agent lists and that is missing, last and never fatally (a failure is a warning;
   `spawn` tries again, and an empty base volume that a failed clone made is removed). The clone has no instance to speak
   as, so it runs on a network of its own under the reserved identity `prep`, bound in the proxy to the egress profile of
@@ -299,11 +299,13 @@ Commands are grouped by what they act on. There are no aliases for names that mo
 - **Relative links.** Git writes the links between a worktree and its base as relative paths, `../.base/.git/...` and
   back, which resolve in every container because the two volumes are mounted side by side under these names. There
   is no worktree to open on the host: `egzo workspace get NAME/INSTANCE PATH DEST` copies files out.
-- **Removal.** An instance's worktree is its own: `agent rm` and `project down` delete its volume with the instance,
-  with no check for unsaved work (there is none yet; a check and a confirmation can come later), and the base forgets
-  it. The branch `egzo/<name>` stays in the base, so what was committed outlives the instance. `project down` keeps the
-  base clones and the directory volumes and says so; `egzo workspace rm` deletes them (refused while an instance mounts
-  the volume). `up` after `down` finds them again.
+- **Removal.** An instance's worktree outlives it: `agent rm` and `project down` keep its volume, with what the agent
+  left uncommitted, and the base keeps it as a worktree, so `spawn --reuse` continues in it and the hub shows its files.
+  `agent rm --worktrees` deletes it with the instance, with no check for unsaved work, and `workspace rm NAME --worktree
+  INSTANCE` later; the base forgets a worktree when its volume is deleted. The branch `egzo/<name>` stays in the base, so
+  what was committed outlives the worktree too. `project down` keeps the base clones, the worktrees and the directory
+  volumes and says so; `egzo workspace rm` deletes them (refused while an instance mounts the volume). `up` after `down`
+  finds them again.
 - **The project lock** is an engine-side lease, not a file: a container `<project>.lock` created and never started
   (creating a container under a name is atomic), labelled with its holder and its expiry (30 minutes). The command
   that took it removes it when it ends; `egzo project unlock` removes one left by a killed command. It is not
@@ -357,10 +359,10 @@ said in the message. Anything else per instance belongs in another template.
   the token and the profile's name. That is what lets the hub, which never touches secrets, spawn. Spawn with
   `-m` then sends the message; it waits in the queue until the harness is ready, as every message does.
   A spawn that fails halfway removes what it created, and never a worktree that holds work.
-- **`rm`** removes the instance's container, network, home volume and worktrees (the branch stays in the base).
+- **`rm`** removes the instance's container, network and home volume; its worktrees stay unless `--worktrees` (the branch stays in the base either way).
   A running instance needs `--force`.
-- **`down`** removes every instance, like every other resource of the project, and their worktrees. It never
-  deletes a base clone or a directory workspace.
+- **`down`** removes every instance, like every other resource of the project. It never deletes a workspace volume:
+  a base clone, a worktree or a directory.
 - **Stale.** An instance whose template changed since it was spawned, or whose template no longer exists, is
   **stale**: its `ai.egzo.template-hash` differs from the hash of the template in `egzo.yaml` (the hash covers
   everything that went into the instance: the agent, its egress profile, the workspaces it lists, its prompt's
@@ -930,12 +932,13 @@ Decisions taken while building (reversible; each is covered by specs):
   and a prep container does the git, on the instance's own network so the clone and the fetch go through the proxy
   as that instance (`up`'s base clone, which has no instance, uses a network and a binding of its own under the
   reserved name `prep`). The relative links `git worktree add --relative-paths` writes resolve in every container that
-  has the two volumes. Removing an instance deletes its worktree volume and has a prep container make the base forget
+  has the two volumes. Deleting a worktree volume (`agent rm --worktrees`, `workspace rm --worktree`) has a prep container make the base forget
   the entry it keeps about it (only that one: a `git worktree prune` would take the other instances' worktrees,
   which are not mounted there, for gone). `egzo prep git info` answers what the CLI cannot read in a volume.
 - **Sidecar image** (`Dockerfile`) is the static binary on Alpine with CA roots and git >= 2.48.
-- **Label kinds** in use: `control`, `proxy`, `agent` and `prep` (short-lived containers and the network of `up`'s
-  base clones, which never outlive the command).
+- **Label kinds** in use: `control`, `proxy`, `agent`, `prep` (short-lived containers and the network of `up`'s
+  base clones, which never outlive the command) and `files` (the hub's read-only view of a workspace volume, made by the
+  link on demand and gone after five idle minutes: roadmap/hub-files.md).
 - **Logging.** egzo makes no choice about logging: every container it creates (agents, control, proxy, the short-lived prep
   containers) gets **the engine's default log driver and options**, because that default is the sysadmin's decision
   (journald is common). egzo sets no `LogConfig`; `egzo.yaml` has no logging key (a Compose-style one may come later).
