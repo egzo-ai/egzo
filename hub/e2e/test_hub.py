@@ -104,6 +104,28 @@ def test_a_port_on_the_project_s_machine_is_an_address_to_copy_and_no_link(singl
     expect(row.get_by_role("link")).to_have_count(0)
 
 
+def test_the_files_of_the_workspaces_open_a_folder_at_a_time_and_a_file_downloads(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + single_hub.p("web"))
+    section(page, "Files").click()
+    workspaces = page.get_by_test_id("workspaces")
+    expect(workspaces.locator("tr[data-worktree=coder-0]")).to_contain_text("agent removed")
+    workspaces.get_by_role("link", name="docs").click()
+    files = page.get_by_test_id("files")
+    expect(files.locator("tr[data-entry='report.html']")).to_be_visible()
+    files.get_by_role("link", name="notes/").click()
+    expect(page).to_have_url(re.compile(r"/files\?w=docs&path=notes%2F$"))
+    with page.expect_download() as download:
+        page.get_by_test_id("files").get_by_role("link", name="plan.md").click()
+    assert download.value.suggested_filename == "plan.md"
+    with open(download.value.path()) as saved:
+        assert saved.read() == "# The plan\n"
+
+    page.get_by_label("Folder").get_by_role("link", name="Workspaces").click()
+    page.get_by_test_id("workspaces").get_by_role("link", name="coder-0").click()
+    expect(page.get_by_test_id("files").locator("tr[data-entry='wip.txt']")).to_be_visible()
+
+
 def test_a_project_whose_link_went_away_is_offline_with_what_was_last_known_and_comes_back(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + single_hub.p("web"))

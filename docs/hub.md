@@ -228,6 +228,23 @@ The denials are kept in the hub's database for 30 days after they were last seen
 the hub's latest 1000 events of the project, in memory; further back, `egzo proxy log` reads the proxy's own log, as far as the
 engine keeps it. The schema of the audit trail is in [sandboxing agents](sandboxing.md#see-what-happened).
 
+## Files
+
+The **Files** section of a project lists its [workspaces](workspaces.md). A directory workspace opens; a git workspace lists the worktree
+of each of its agents, running, stopped or removed ([`agent rm` keeps it](workspaces.md#git-workspaces)), and a worktree opens. The base
+clone has no files checked out and does not open. A folder opens a folder at a time; a file downloads. That is all: no viewer, no upload,
+no editing, no git.
+
+- **Read only.** Nothing the hub sends can change a file: the project's link serves each workspace from a helper container that mounts
+  its volume read only, with no network and no capability, and the server in it answers `GET` only. The helper goes once it has been
+  idle for five minutes, and before its volume is deleted.
+- **Nothing leaves the workspace.** A symbolic link is listed, never followed; pipes, sockets and devices are not listed. A folder of
+  more than 10,000 entries is cut, and says so.
+- **A file is a download, never a page.** What an agent wrote does not run on the hub's address: every file comes as
+  `application/octet-stream`, `Content-Disposition: attachment`, under a policy that allows nothing.
+- **Who.** A user, an admin or an owner of the project reads every workspace; a viewer and an operator with no role do not. Each
+  download is in the project's audit log, with who and what.
+
 ## How the hub keeps up
 
 The hub does not poll. Each project's link pushes what changed, on one outbound connection, and the pages read what the hub already holds:

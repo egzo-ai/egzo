@@ -370,3 +370,16 @@ export type ControlFrame =
   | { type: "busy"; holder: string }
   | { type: "taken"; holder: string }
   | { type: "error"; message: string };
+
+/** A workspace volume of a project. A directory's files open; a git workspace's base clone has none checked out, its worktrees do. */
+export interface WorkspaceRow {
+  name: string;
+  kind: "directory" | "git";
+  worktrees: { instance: string; state: "running" | "stopped" | "removed"; creator: string }[];
+}
+
+/** What a directory of a workspace holds, sorted by name; truncated when it holds more than the hub lists. */
+export interface Listing {
+  entries: { name: string; type: "dir" | "file" | "symlink"; size?: number; modified: string }[];
+  truncated: boolean;
+}

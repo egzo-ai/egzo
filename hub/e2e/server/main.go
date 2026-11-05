@@ -30,6 +30,7 @@ import (
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/hub/internal/web"
+	"github.com/egzo-ai/egzo/internal/files"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/proxy"
 )
@@ -164,6 +165,9 @@ func (w *world) seed(machine string) error {
 	e.SetAgent(links.Agent{Name: "coder-1", ID: newInstanceID(), Template: "coder", State: "running", Activity: "working", Actor: "operator",
 		Status: "refactoring the parser on " + machine, Created: now})
 	e.SetAgent(links.Agent{Name: "reviewer-1", Template: "reviewer", State: "exited", Activity: "stopped", Actor: "operator", Created: now})
+	if err := seedFiles(e); err != nil {
+		return err
+	}
 	other, template := "data", "analyst"
 	if machine != "local" {
 		other, template = "ml", "trainer"
@@ -376,4 +380,40 @@ func connID() string {
 	var raw [8]byte
 	rand.Read(raw[:])
 	return hex.EncodeToString(raw[:])
+}
+
+// seedFiles gives the project a directory workspace and a git workspace with the worktree of a removed agent, served by core's own file
+// server from directories of this machine.
+func seedFiles(e *fake.Engine) error {
+	docs, err := os.MkdirTemp("", "e2e-docs-")
+	if err != nil {
+		return err
+	}
+	worktree, err := os.MkdirTemp("", "e2e-worktree-")
+	if err != nil {
+		return err
+	}
+	for path, text := range map[string]string{
+		filepath.Join(docs, "notes", "plan.md"): "# The plan\n", filepath.Join(docs, "report.html"): "<script>alert(1)</script>",
+		filepath.Join(worktree, "wip.txt"): "not committed\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	for _, served := range []struct{ workspace, instance, dir string }{{"docs", "", docs}, {"repo", "coder-0", worktree}} {
+		root, err := os.OpenRoot(served.dir)
+		if err != nil {
+			return err
+		}
+		e.ServeFiles(served.workspace, served.instance, files.Handler{Root: root})
+	}
+	e.SetWorkspaces(
+		links.Workspace{Name: "docs", Kind: "directory", Worktrees: []links.Worktree{}},
+		links.Workspace{Name: "repo", Kind: "git", Worktrees: []links.Worktree{{Instance: "coder-0", State: "removed", Actor: "operator"}}},
+	)
+	return nil
 }

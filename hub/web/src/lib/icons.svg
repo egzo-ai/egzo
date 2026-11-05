@@ -13,6 +13,7 @@
 <symbol id="i-list" viewBox="0 0 16 16"><path d="M2.25 4h1.5 M6 4h7.75 M2.25 8h1.5 M6 8h7.75 M2.25 12h1.5 M6 12h7.75"/></symbol>
 <symbol id="i-pulse" viewBox="0 0 16 16"><path d="M1.25 8.5h3l2-5 3 9 2-4h3.5"/></symbol>
 <symbol id="i-file" viewBox="0 0 16 16"><path d="M3.25 1.75h6l3.5 3.5v9h-9.5z M9.25 1.75v3.5h3.5 M5.5 8.5h5 M5.5 11h5"/></symbol>
+<symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.75 3.25h4.5l1.5 1.75h6.5v7.75H1.75z"/></symbol>
 <symbol id="i-logs" viewBox="0 0 16 16"><path d="M2.25 3.25h11.5 M2.25 6.25h8 M2.25 9.25h11.5 M2.25 12.25h6"/></symbol>
 <symbol id="i-search" viewBox="0 0 16 16"><path d="M11.25 6.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0z M10 10l4 4"/></symbol>
 <symbol id="i-x" viewBox="0 0 16 16"><path d="M3.75 3.75l8.5 8.5 M12.25 3.75l-8.5 8.5"/></symbol>

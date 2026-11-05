@@ -135,6 +135,8 @@ In `hub/`, with the decisions above unless listed under "Not yet".
   the terminal websocket.
 - Previews ([agent-ports.md](agent-ports.md)): an agent's `http` port served to people's browsers on an origin of its own, signed in by redirects with one-time
   tickets, with the role checked on every request. Local ports ([declared-local-ports.md](declared-local-ports.md)) are listed next to them as addresses to copy.
+- Files ([hub-files.md](hub-files.md)): the project's workspaces and the worktrees agents left, read only, a folder at a time; a file is a download. The
+  link's `workspaces` and `files` verbs, and a file helper per volume.
 - Tests: Go unit tests with the seam faked, and core's real link against the endpoint; Playwright tests of the pages; `make hub-stack` (the
   compose stack: hub image, Dex, Caddy in front, a real project that links itself, a real terminal and a real preview).
 

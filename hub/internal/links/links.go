@@ -32,6 +32,11 @@ type Engine interface {
 	Logs(ctx context.Context, container string, tail int) (string, error)
 	// Spec returns the project's published templates as indented JSON, without any secret value.
 	Spec(ctx context.Context) ([]byte, error)
+	// Workspaces lists the project's workspace volumes: directories, and git workspaces with the worktrees of their instances.
+	Workspaces(ctx context.Context) ([]Workspace, error)
+	// DialFiles connects to the read-only file server of a directory workspace, or of the worktree of instance in a git workspace. It
+	// speaks HTTP, GET only. ctx covers the dial, as with DialPort.
+	DialFiles(ctx context.Context, workspace, instance string) (net.Conn, error)
 }
 
 // Conn is a link that has proved its key: the project's verbs, and the connection they travel on.
@@ -61,6 +66,8 @@ type (
 	AgentStatus   = hublink.AgentStatus
 	Exposure      = hublink.Exposure
 	Event         = hublink.Event
+	Workspace     = hublink.Workspace
+	Worktree      = hublink.Worktree
 	Size          = hublink.Size
 	Terminal      = hublink.Terminal
 	Hello         = hublink.Hello

@@ -71,7 +71,7 @@
       list: [
         ["agents", "Agents", p.agents.length],
         ["templates", "Templates", p.templates.length],
-        ...(p.role === "overseer" ? [] : [["activity", "Activity", null], ["network", "Network", null]]),
+        ...(p.role === "overseer" ? [] : [["files", "Files", null], ["activity", "Activity", null], ["network", "Network", null]]),
         ...(admin ? [["audit", "Audit log", null]] : []),
         ...(p.role === "owner" || app.user?.isOperator ? [["members", "Members", null]] : []),
         ["advanced", "Advanced", null],
@@ -109,7 +109,7 @@
       {@const p = sections.project}
       <div class="side-list" style="padding-top:var(--space-2)">
         {#each sections.list as [tab, name, count]}
-          {@const ic = ({ agents: "users", templates: "file", activity: "pulse", network: "swap", spec: "list", audit: "shield", members: "key", advanced: "more" } as Record<string, string>)[tab] ?? "list"}
+          {@const ic = ({ agents: "users", templates: "file", files: "folder", activity: "pulse", network: "swap", spec: "list", audit: "shield", members: "key", advanced: "more" } as Record<string, string>)[tab] ?? "list"}
           <a class="nav-item" href={href.project(p.id, tab)} title={name} aria-current={onPage && ((route.name === "project" && (route.tab === tab || (route.tab === "spec" && tab === "advanced"))) || (route.name === "agent" && tab === "agents")) ? "page" : undefined} onclick={showPage}>
             <span class="ic"><Icon name={ic} size="sm" /></span><span class="nm">{name}</span><span class="end"><span class="n">{count ?? ""}</span></span>
           </a>

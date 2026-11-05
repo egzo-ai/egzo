@@ -20,6 +20,7 @@
   import SpecView from "../components/SpecView.svelte";
   import TaskTable from "../components/TaskTable.svelte";
   import ErrorPage from "./ErrorPage.svelte";
+  import FilesView from "../components/FilesView.svelte";
 
   let { id, tab }: { id: string; tab: ProjectTab } = $props();
 
@@ -79,7 +80,7 @@
   // the sections are in the left nav; the page only says which one it is
   const tabs = $derived.by(() => {
     const list: [ProjectTab, string, number | null][] = [["agents", "Agents", agents.length], ["templates", "Templates", project?.templates.length ?? null]];
-    if (project?.role !== "overseer") list.push(["activity", "Activity", null], ["network", "Network", null]);
+    if (project?.role !== "overseer") list.push(["files", "Files", null], ["activity", "Activity", null], ["network", "Network", null]);
     if (project?.canAudit) list.push(["audit", "Audit log", null]);
     if (project?.canMembers) list.push(["members", "Members", null]);
     list.push(["advanced", "Advanced", null]);
@@ -301,6 +302,8 @@
       {:else}
         <div class="empty"><h2>No template</h2><p>The project has published no template: run <code>egzo project up</code> on the project.</p></div>
       {/if}
+    {:else if tab === "files"}
+      <FilesView project={id} />
     {:else if tab === "activity"}
       {#if activity}<TaskTable project={id} tasks={activity} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network"}

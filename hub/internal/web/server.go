@@ -63,6 +63,8 @@ type Server struct {
 
 	termMu    sync.Mutex
 	terminals map[string]map[*int]context.CancelFunc // open terminals by the hash of the session that opened them
+
+	filesState filesState
 }
 
 const (
@@ -145,6 +147,9 @@ func (s *Server) Handler() http.Handler {
 	api("POST "+project+"/a/{agent}/{verb}", s.operate)
 	api("GET "+project+"/a/{agent}/logs", s.logs)
 	api("GET "+project+"/a/{agent}/terminal", s.terminal)
+	api("GET "+project+"/workspaces", s.workspaces)
+	api("GET "+project+"/files/{workspace}/{path...}", s.files)
+	api("GET "+project+"/worktrees/{workspace}/{instance}/{path...}", s.files)
 	if !s.opts.OwnLink {
 		mux.HandleFunc("GET "+hublink.Path, s.link)
 	}

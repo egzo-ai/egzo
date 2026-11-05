@@ -53,6 +53,7 @@ const (
 	SeeMembers  Action = "see-members"  // see who holds what
 	Unlink      Action = "unlink"       // make the hub forget the project
 	Preview     Action = "preview"      // open an exposed port of an agent, from its link
+	Files       Action = "files"        // list and download the files of the project's workspaces, read only
 )
 
 // CLI is the actor string of the CLI and of agents spawned from it. No person is behind it on the hub: those agents are the
@@ -80,7 +81,7 @@ func Can(subject Subject, role Role, action Action, creator string) bool {
 	switch action {
 	case View:
 		return role == Overseer || role.AtLeast(User)
-	case Inspect, Spawn:
+	case Inspect, Spawn, Files:
 		return role.AtLeast(User)
 	case Operate:
 		if role.AtLeast(Admin) {

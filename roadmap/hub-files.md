@@ -1,6 +1,7 @@
 # Roadmap: the project's files in the hub
 
-**Status.** Planned (November 2026), being built on branch `hub-files`, on top of PR 88 (the hub's project-first navigation).
+**Status.** Built (November 2026) on branch `hub-files`, on top of PR 88 (the hub's project-first navigation). Docs:
+[hub.md, Files](../docs/hub.md#files). Open: the permissions below, and the external volume kind when it lands.
 
 ## Why
 
@@ -58,7 +59,7 @@ GET /notes/spec.pdf  a file: its bytes, Range supported, as application/octet-st
 ```
 
 - A directory without the slash redirects to it; a file with one is `404`.
-- Entries are sorted by name, at most 10,000; past that `truncated` is true.
+- Entries are sorted by name, at most 10,000 (the first the directory gives, not the first by name); past that `truncated` is true.
 - A symlink is listed and never followed or served. Pipes, sockets and devices are not listed, and refused.
 - Every path is opened through `os.Root`: nothing outside `/w` is reached, by `..` or by a link.
 - A file is opened `O_RDONLY|O_NONBLOCK|O_NOFOLLOW` and checked to be regular after it is open.
@@ -68,7 +69,8 @@ GET /notes/spec.pdf  a file: its bytes, Range supported, as application/octet-st
 ## Who may (provisional)
 
 Reading files is like reading the project's activity: `user` and above (`rbac.Files`). A viewer and an operator with no role see
-nothing. To be decided with the rest of the permissions: whether a `user` reads the worktree of another person's agent.
+nothing. Each download is written to the project's audit log. To be decided with the rest of the permissions: whether a `user` reads
+the worktree of another person's agent (the worktree volume carries the `actor` label of its instance, so the hub can tell).
 
 ## Out of scope
 
