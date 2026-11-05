@@ -21,6 +21,7 @@
 <symbol id="i-grid" viewBox="0 0 16 16"><path d="M1.75 2.75h12.5v10.5H1.75z M8 2.75v10.5 M1.75 8h12.5"/></symbol>
 <symbol id="i-single" viewBox="0 0 16 16"><path d="M1.75 2.75h12.5v10.5H1.75z"/></symbol>
 <symbol id="i-max" viewBox="0 0 16 16"><path d="M2.25 6V2.25H6 M10 2.25h3.75V6 M13.75 10v3.75H10 M6 13.75H2.25V10"/></symbol>
+<symbol id="i-download" viewBox="0 0 16 16"><path d="M8 2.25v8 M4.75 7.25L8 10.5l3.25-3.25 M2.75 11.5v2.25h10.5V11.5"/></symbol>
 <symbol id="i-popout" viewBox="0 0 16 16"><path d="M9.25 2.25h4.5v4.5 M13.75 2.25L8 8 M11.25 9.75v4H2.25v-9h4"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.25 2.75v3.75H9.5 M13 6.25A5.5 5.5 0 1 0 13.5 9.5"/></symbol>
 <symbol id="i-chev-d" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
