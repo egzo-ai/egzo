@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
+package web
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"mime"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"path"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/store"
+	"github.com/egzo-ai/egzo/internal/names"
+	"github.com/egzo-ai/egzo/internal/termsafe"
+)
+
+// The files of a project's workspaces (roadmap/hub-files.md): the hub lists the workspace volumes, and carries GET requests to the read-only
+// file server of one of them over the project's link. What comes back was written by an agent: a file is always a download, never a page of
+// the hub's origin.
+
+// filesConnsPerVolume bounds the connections to one volume's file server; a request over it waits for one to be free.
+const filesConnsPerVolume = 8
+
+// filesRequestHeaders are the only headers a request takes to the file server.
+var filesRequestHeaders = []string{"Range", "If-Range", "If-None-Match", "If-Modified-Since"}
+
+// filesResponseHeaders are the only headers of the file server's answer that reach the browser.
+var filesResponseHeaders = []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"}
+
+type workspaceJSON struct {
+	Name      string         `json:"name"`
+	Kind      string         `json:"kind"`
+	Worktrees []worktreeJSON `json:"worktrees"`
+}
+
+type worktreeJSON struct {
+	Instance string `json:"instance"`
+	State    string `json:"state"`
+	Creator  string `json:"creator"`
+}
+
+func (s *Server) workspaces(w http.ResponseWriter, r *http.Request, user store.User) {
+	list, err := s.hub.Workspaces(r.Context(), user, r.PathValue("project"))
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	n := s.namer(r.Context())
+	out := make([]workspaceJSON, 0, len(list))
+	for _, ws := range list {
+		row := workspaceJSON{Name: ws.Name, Kind: ws.Kind, Worktrees: []worktreeJSON{}}
+		for _, t := range ws.Worktrees {
+			row.Worktrees = append(row.Worktrees, worktreeJSON{Instance: t.Instance, State: t.State, Creator: n.actor(t.Actor)})
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workspaces": out})
+}
+
+// filesTarget is the volume a request is for.
+type filesTarget struct {
+	project, workspace, instance string
+}
+
+type filesRequest struct{}
+
+// filesState is what the server keeps for the file proxy.
+type filesState struct {
+	once    sync.Once
+	proxy   *httputil.ReverseProxy
+	targets sync.Map // pool key -> filesTarget
+}
+
+// files serves a file or a directory listing of a workspace volume: a directory workspace's, or with {instance} a worktree's.
+func (s *Server) files(w http.ResponseWriter, r *http.Request, user store.User) {
+	target := filesTarget{project: r.PathValue("project"), workspace: r.PathValue("workspace"), instance: r.PathValue("instance")}
+	if !names.Identifier(target.workspace) || target.instance != "" && !names.Instance(target.instance) {
+		s.apiFail(w, http.StatusNotFound, "not_found", "There is no such workspace.")
+		return
+	}
+	if err := s.hub.CanReadFiles(r.Context(), user, target.project); err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	// the hub's own policy is for its pages; what comes back here gets one that runs nothing (filesAnswered)
+	w.Header().Del("Content-Security-Policy")
+	asked := "/" + r.PathValue("path")
+	ctx := context.WithValue(r.Context(), filesRequest{}, filesCall{target: target, user: user, path: asked})
+	s.filesProxy().ServeHTTP(w, r.WithContext(ctx))
+}
+
+type filesCall struct {
+	target filesTarget
+	user   store.User
+	path   string
+}
+
+func (s *Server) filesProxy() *httputil.ReverseProxy {
+	s.filesState.once.Do(func() {
+		transport := &http.Transport{
+			DialContext:            s.dialFiles,
+			DisableCompression:     true,
+			MaxConnsPerHost:        filesConnsPerVolume,
+			MaxIdleConnsPerHost:    filesConnsPerVolume,
+			IdleConnTimeout:        time.Minute,
+			ResponseHeaderTimeout:  30 * time.Second,
+			MaxResponseHeaderBytes: 16 << 10,
+		}
+		s.filesState.proxy = &httputil.ReverseProxy{
+			Rewrite:        s.rewriteFiles,
+			Transport:      transport,
+			ModifyResponse: s.filesAnswered,
+			ErrorHandler:   s.filesFailed,
+			ErrorLog:       slog.NewLogLogger(s.log.Handler(), slog.LevelDebug),
+		}
+	})
+	return s.filesState.proxy
+}
+
+// poolKey names a volume for the transport, which keeps connections by address: one volume's never serve another's.
+func (t filesTarget) poolKey() string {
+	sum := sha256.Sum256([]byte(t.project + "\x00" + t.workspace + "\x00" + t.instance))
+	return hex.EncodeToString(sum[:12]) + ".files"
+}
+
+func (s *Server) rewriteFiles(pr *httputil.ProxyRequest) {
+	call := pr.In.Context().Value(filesRequest{}).(filesCall)
+	key := call.target.poolKey()
+	s.filesState.targets.Store(key, call.target)
+	header := http.Header{}
+	for _, name := range filesRequestHeaders {
+		if value := pr.In.Header.Get(name); value != "" {
+			header.Set(name, value)
+		}
+	}
+	pr.Out.Header = header
+	pr.Out.Host = "files"
+	pr.Out.URL.Scheme, pr.Out.URL.Host = "http", key
+	pr.Out.URL.Path, pr.Out.URL.RawPath, pr.Out.URL.RawQuery = call.path, "", ""
+}
+
+func (s *Server) dialFiles(ctx context.Context, _, address string) (net.Conn, error) {
+	key, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	found, ok := s.filesState.targets.Load(key)
+	if !ok {
+		return nil, errors.New("no such volume")
+	}
+	t := found.(filesTarget)
+	dialing, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return s.hub.DialFiles(dialing, t.project, t.workspace, t.instance)
+}
+
+// filesAnswered keeps what the browser needs of the answer, and nothing else. A file is a download, under a policy that runs nothing;
+// a refusal becomes the hub's own error.
+func (s *Server) filesAnswered(response *http.Response) error {
+	call := response.Request.Context().Value(filesRequest{}).(filesCall)
+	kept := http.Header{}
+	for _, name := range filesResponseHeaders {
+		if value := response.Header.Get(name); value != "" {
+			kept.Set(name, value)
+		}
+	}
+	kept.Set("X-Content-Type-Options", "nosniff")
+	kept.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	kept.Set("Cache-Control", "no-store")
+	switch {
+	case response.StatusCode == http.StatusMovedPermanently:
+		// a directory asked without its slash: the server answers with its name and a slash, nothing else is followed
+		if location := response.Header.Get("Location"); location == path.Base(strings.TrimSuffix(call.path, "/"))+"/" {
+			kept.Set("Location", location)
+		}
+	case response.StatusCode >= 400:
+		text, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+		response.Body.Close()
+		message := termsafe.Truncate(termsafe.Line(strings.TrimSpace(string(text))), 200)
+		if message == "" {
+			message = http.StatusText(response.StatusCode)
+		}
+		body, _ := json.Marshal(apiError{Code: "files", Message: capitalize(message) + "."})
+		response.Body = io.NopCloser(bytes.NewReader(body))
+		response.ContentLength = int64(len(body))
+		kept.Set("Content-Type", "application/json")
+		kept.Set("Content-Length", strconv.Itoa(len(body)))
+	case strings.HasSuffix(call.path, "/"):
+		kept.Set("Content-Type", "application/json")
+	default:
+		kept.Set("Content-Type", "application/octet-stream")
+		kept.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(call.path)}))
+		starts := response.StatusCode == http.StatusOK || strings.HasPrefix(response.Header.Get("Content-Range"), "bytes 0-")
+		if response.Request.Method == http.MethodGet && starts && (response.StatusCode == http.StatusOK || response.StatusCode == http.StatusPartialContent) {
+			s.hub.FileDownloaded(response.Request.Context(), call.user, call.target.project, call.target.workspace, call.target.instance, call.path)
+		}
+	}
+	response.Header = kept
+	return nil
+}
+
+// filesFailed says why the file server could not be reached. What a link said is not shown as it is.
+func (s *Server) filesFailed(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return // the person left
+	case errors.As(err, new(hub.OfflineError)):
+		s.problem(w, r, err)
+	case strings.Contains(err.Error(), "no volume") || strings.Contains(err.Error(), "not a workspace") || strings.Contains(err.Error(), "no workspace"):
+		s.apiFail(w, http.StatusNotFound, "not_found", "There is no such workspace, or its volume is gone.")
+	default:
+		s.log.Info("the files of a workspace could not be reached", "err", err)
+		s.apiFail(w, http.StatusBadGateway, "files_unreachable", "The project's file server could not be reached. Try again.")
+	}
+}

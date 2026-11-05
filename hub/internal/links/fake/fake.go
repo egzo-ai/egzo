@@ -40,6 +40,8 @@ type Engine struct {
 	auditSince []time.Time // the since of every connection that was served
 	exposed    map[string][]links.Exposure
 	servers    map[string]*server // what listens in an agent, by "agent:port"
+	workspaces []links.Workspace
+	files      map[string]*server // the file server of a workspace, by "workspace/instance"
 
 	// the connection
 	current  *Connection
@@ -56,7 +58,7 @@ func New(name, host string, templates ...string) *Engine {
 	if err != nil {
 		panic(err)
 	}
-	e := &Engine{key: public, host: host, attached: map[string]int{}, feedEvery: 30 * time.Second, exposed: map[string][]links.Exposure{}, servers: map[string]*server{},
+	e := &Engine{key: public, host: host, attached: map[string]int{}, feedEvery: 30 * time.Second, exposed: map[string][]links.Exposure{}, servers: map[string]*server{}, files: map[string]*server{},
 		project: links.Project{Name: name, Up: true, Templates: templates, Services: []links.Service{{Name: "control", State: "running", ID: "control-1"}, {Name: "proxy", State: "running", ID: "proxy-1"}}}}
 	e.current = &Connection{Engine: e, closed: make(chan struct{})}
 	close(e.current.closed)
@@ -663,6 +665,61 @@ func (e *Engine) DialPort(ctx context.Context, agent string, port int) (net.Conn
 	near, far := net.Pipe()
 	select {
 	case listening.conns <- far:
+		go func() { <-closed; near.Close() }()
+		return near, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-closed:
+		return nil, ErrDropped
+	}
+}
+
+// SetWorkspaces sets what the project's workspace volumes are.
+func (e *Engine) SetWorkspaces(list ...links.Workspace) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.workspaces = list
+}
+
+// ServeFiles makes handler the file server of a workspace, or of the worktree of instance in it.
+func (e *Engine) ServeFiles(workspace, instance string, handler http.Handler) {
+	s := &server{conns: make(chan net.Conn), done: make(chan struct{})}
+	e.mu.Lock()
+	e.files[workspace+"/"+instance] = s
+	e.mu.Unlock()
+	go (&http.Server{Handler: handler}).Serve(s)
+}
+
+// Workspaces lists what SetWorkspaces set.
+func (e *Engine) Workspaces(ctx context.Context) ([]links.Workspace, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.dropped(); err != nil {
+		return nil, err
+	}
+	e.record("workspaces")
+	return append([]links.Workspace(nil), e.workspaces...), nil
+}
+
+// DialFiles reaches a server of ServeFiles, through a pipe.
+func (e *Engine) DialFiles(ctx context.Context, workspace, instance string) (net.Conn, error) {
+	e.mu.Lock()
+	err := e.dropped()
+	serving := e.files[workspace+"/"+instance]
+	closed := e.current.closed
+	if err == nil {
+		e.record("files %s/%s", workspace, instance)
+	}
+	e.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if serving == nil {
+		return nil, fmt.Errorf("there is no volume for %s/%s", workspace, instance)
+	}
+	near, far := net.Pipe()
+	select {
+	case serving.conns <- far:
 		go func() { <-closed; near.Close() }()
 		return near, nil
 	case <-ctx.Done():

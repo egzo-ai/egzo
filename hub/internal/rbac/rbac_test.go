@@ -146,3 +146,11 @@ func TestEveryRoleOpensAPreviewAndOverseeingIsNotARole(t *testing.T) {
 		}
 	}
 }
+
+func TestFilesAreReadFromUserUpAndNeitherByAViewerNorByOverseeing(t *testing.T) {
+	for role, want := range map[Role]bool{None: false, Viewer: false, Overseer: false, User: true, Admin: true, Owner: true} {
+		if got := Can(Subject{ID: "u", IsOperator: true}, role, Files, ""); got != want {
+			t.Errorf("%q: %v, want %v", role, got, want)
+		}
+	}
+}
