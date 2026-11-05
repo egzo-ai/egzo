@@ -38,6 +38,7 @@ def project_document(image, allow=("github.com",), url=REPO):
             "coder": custom(image, workspaces=["repo"]),
             "reviewer": custom(image, workspaces=["repo"]),
             "branched": custom(image, workspaces=["other"]),
+            "pair": custom(image, workspaces=["repo", "other"]),
         },
     )
 
@@ -231,6 +232,19 @@ def test_a_worktree_is_never_replaced_and_outlives_its_instance_until_rm_worktre
     assert engine.run("volume", "create", *labels, leftover).returncode == 0
     p.ok("workspace rm repo --worktree gone")
     assert not engine.volume_exists(leftover) and engine.volume_exists(p.base_volume("repo"))
+
+
+def test_workspace_rm_worktree_deletes_one_workspace_s_worktree_and_leaves_the_instance_s_others_working(sandbox, engine):
+    p = sandbox
+    p.spawn("pair", "both")
+    p.ok("agent rm --force both")  # both worktrees stay
+    p.ok("workspace rm repo --worktree both")
+    assert not engine.volume_exists(p.worktree_volume("repo", "both")) and "both" not in git(engine, p, "worktree", "list")
+    assert engine.volume_exists(p.worktree_volume("other", "both"))
+    assert "both" in git(engine, p, "worktree", "list", workspace="other"), "the other base still knows its worktree"
+    assert git(engine, p, "status", "--porcelain", instance="both", workspace="other") == "", "and it is still a worktree"
+    p.ok("workspace rm other --worktree both")
+    assert "both" not in git(engine, p, "worktree", "list", workspace="other")
 
 
 def test_the_base_survives_failed_clones_failed_fetches_down_and_up_and_goes_with_workspace_rm(live_project, engine, agent_image):
