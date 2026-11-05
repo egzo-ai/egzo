@@ -68,6 +68,12 @@ def from_egzo(agent):
     ]
 
 
+def closed_by_egzo(agent):
+    """The messages egzo itself closed for the agent (id to outcome): the notices a later change replaced."""
+    events = [json.loads(line) for line in agent.project.run("events").stdout.splitlines() if line.startswith("{")]
+    return {e["id"]: e["data"]["outcome"] for e in events if e["type"] == "resolved" and e.get("actor") == "egzo" and e.get("agent") == agent.name}
+
+
 def test_an_agent_sees_its_profile_its_services_and_how_to_use_them_and_never_a_secret(sandbox, engine):
     team = Agent(engine, sandbox, sandbox.spawn("team"))
     plain = Agent(engine, sandbox, sandbox.spawn("plain"))
@@ -109,8 +115,7 @@ def test_egzo_agent_access_says_the_same_in_words(sandbox, engine):
 
 
 def test_egzo_agent_access_outside_an_agent_says_it_runs_inside_one(sandbox):
-    for line in ("agent access", "agent access --json"):
-        outside = sandbox.sh(line)
+    for outside in (sandbox.sh("agent access"), sandbox.sh("agent access --json")):
         assert outside.returncode != 0 and "agent container" in outside.stderr, outside.stderr
 
 
@@ -133,7 +138,20 @@ def test_when_up_changes_what_an_agent_can_reach_the_agent_is_told_what_changed_
         sandbox.write(document(engine.agent_image(), engine.session_image(egzo.binary)))
         sandbox.ok("project up", timeout=300)
     assert access_of(team)["allow"] == ["example.com"]
-    assert len(from_egzo(team)) == 2 and "hosts no longer allowed: pypi.org." in from_egzo(team)[-1]["text"], "taking it back is a change too"
+    assert len(from_egzo(team)) == 1, "back to the access it knew before the notice it did not resolve: nothing new to say"
+    assert closed_by_egzo(team) == {told["id"]: "superseded"}, "and that notice is closed: it says nothing true any more"
+
+    # once the agent resolved what it was told, taking a host back is told like any change
+    sandbox.write(document(engine.agent_image(), engine.session_image(egzo.binary), team_allow=("example.com", "pypi.org")))
+    try:
+        sandbox.ok("project up", timeout=300)
+        added = from_egzo(team)[-1]
+        assert team.call("GET", f"/v1/messages/{added['id']}")[0] == 200
+        assert team.resolve(added["id"], "read it")[0] == 200
+    finally:
+        sandbox.write(document(engine.agent_image(), engine.session_image(egzo.binary)))
+        sandbox.ok("project up", timeout=300)
+    assert "hosts no longer allowed: pypi.org." in from_egzo(team)[-1]["text"], "taking it back is a change too"
 
 
 def test_an_agent_cannot_message_egzo(sandbox, engine):
