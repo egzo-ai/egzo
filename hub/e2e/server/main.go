@@ -413,7 +413,8 @@ func seedFiles(e *fake.Engine) error {
 	}
 	e.SetWorkspaces(
 		links.Workspace{Name: "docs", Kind: "directory", Worktrees: []links.Worktree{}},
-		links.Workspace{Name: "repo", Kind: "git", Worktrees: []links.Worktree{{Instance: "coder-0", State: "removed", Actor: "operator"}}},
+		links.Workspace{Name: "repo", Kind: "git", Worktrees: []links.Worktree{{Instance: "coder-0", State: "removed", Actor: "operator"}},
+			Remote: "https://github.com/egzo-ai/egzo.git", Branch: "main"},
 	)
 	return nil
 }

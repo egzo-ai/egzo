@@ -59,7 +59,10 @@
               {:else}
                 <td><span class="name"><Icon name="folder" size="sm" /> {ws.name}</span></td>
                 <td class="muted">git</td>
-                <td class="muted" colspan="2">{ws.worktrees.length ? "the files are in the worktrees below" : "no worktree: spawn an agent that works in it"}</td>
+                <td class="muted" colspan="2" data-remote>
+                  {#if ws.remote}<span title={ws.remote}>{ws.remote.replace(/^https:\/\//, "")}</span> · {ws.branch || "default branch"}{/if}
+                  {#if !ws.worktrees.length}{#if ws.remote}<br />{/if}no worktree: spawn an agent that works in it{/if}
+                </td>
               {/if}
             </tr>
             {#each ws.worktrees as wt (wt.instance)}

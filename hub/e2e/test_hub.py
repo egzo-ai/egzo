@@ -110,6 +110,8 @@ def test_the_files_of_the_workspaces_open_a_folder_at_a_time_and_a_file_download
     section(page, "Files").click()
     workspaces = page.get_by_test_id("workspaces")
     expect(workspaces.locator("tr[data-worktree=coder-0]")).to_contain_text("agent removed")
+    expect(workspaces.locator("tr[data-workspace=repo] [data-remote]")).to_have_text("github.com/egzo-ai/egzo.git · main")
+    expect(workspaces.locator("tr[data-workspace=repo] a")).to_have_count(0)  # the remote is text, never a link
     workspaces.get_by_role("link", name="docs").click()
     files = page.get_by_test_id("files")
     expect(files.locator("tr[data-entry='report.html']")).to_be_visible()

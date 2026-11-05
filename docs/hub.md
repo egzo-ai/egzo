@@ -231,8 +231,8 @@ engine keeps it. The schema of the audit trail is in [sandboxing agents](sandbox
 ## Files
 
 The **Files** section of a project lists its [workspaces](workspaces.md). A directory workspace opens; a git workspace lists the worktree
-of each of its agents, running, stopped or removed ([`agent rm` keeps it](workspaces.md#git-workspaces)), and a worktree opens. The base
-clone has no files checked out and does not open. A folder opens a folder at a time; a file downloads. That is all: no viewer, no upload,
+of each of its agents, running, stopped or removed ([`agent rm` keeps it](workspaces.md#git-workspaces)), and a worktree opens. A git
+workspace shows the remote and branch it clones from, as text. The base clone has no files checked out and does not open. A folder opens a folder at a time; a file downloads. That is all: no viewer, no upload,
 no editing, no git.
 
 - **Read only.** Nothing the hub sends can change a file: the project's link serves each workspace from a helper container that mounts

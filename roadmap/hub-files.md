@@ -41,7 +41,8 @@ browser --GET--> hub --link stream "files"--> link --exec--> files helper contai
   `If-Modified-Since` and nothing else, and sends files with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and
   `Content-Security-Policy: sandbox`: a file an agent wrote never runs on the hub's origin.
 - **The link** has two new verbs. `workspaces` lists the workspace volumes it finds, with the worktrees and the state of their
-  instances. `files` names a workspace (and an instance, for a worktree) and becomes a byte stream, as `forward` does for a preview.
+  instances, and a git workspace's remote and branch from the templates `up` last published (https only, no credential, query or
+  fragment; the hub checks it again and shows it as text, never a link). `files` names a workspace (and an instance, for a worktree) and becomes a byte stream, as `forward` does for a preview.
 - **The helper** is one container per volume, made on the first connection: the egzo image, the agents' uid, the volume read-only at
   `/w`, no network, a read-only root, every capability dropped, `no-new-privileges`, small memory, pid and CPU limits. Its main process
   is `egzo files serve`; each connection is `egzo files connect` exec'd in it, which copies bytes between stdin/stdout and the server's

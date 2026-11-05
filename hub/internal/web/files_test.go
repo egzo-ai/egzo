@@ -36,7 +36,8 @@ func filesRig(t *testing.T) (*rig, *browser, *headersSeen) {
 	}
 	f.SetWorkspaces(
 		links.Workspace{Name: "docs", Kind: "directory", Worktrees: []links.Worktree{}},
-		links.Workspace{Name: "repo", Kind: "git", Worktrees: []links.Worktree{{Instance: "gone", State: "removed", Actor: rbac.Actor(r.userID("admin"))}}},
+		links.Workspace{Name: "repo", Kind: "git", Worktrees: []links.Worktree{{Instance: "gone", State: "removed", Actor: rbac.Actor(r.userID("admin"))}},
+			Remote: "https://github.com/egzo-ai/egzo.git", Branch: "main"},
 	)
 	b := r.browser()
 	b.signIn("admin")
@@ -79,6 +80,9 @@ func TestWorkspacesAreListedWithTheWorktreesAgentsLeftAndWhoMadeThem(t *testing.
 	listed := list(v, "workspaces")
 	if code != 200 || len(listed) != 2 || listed[0]["name"] != "docs" || listed[1]["kind"] != "git" {
 		t.Fatalf("%d %v", code, v)
+	}
+	if listed[1]["remote"] != "https://github.com/egzo-ai/egzo.git" || listed[1]["branch"] != "main" || listed[0]["remote"] != nil {
+		t.Errorf("remotes: %v", listed)
 	}
 	worktree := listed[1]["worktrees"].([]any)[0].(map[string]any)
 	if worktree["instance"] != "gone" || worktree["state"] != "removed" || worktree["creator"] != "admin" {

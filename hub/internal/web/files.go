@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -45,6 +46,8 @@ type workspaceJSON struct {
 	Name      string         `json:"name"`
 	Kind      string         `json:"kind"`
 	Worktrees []worktreeJSON `json:"worktrees"`
+	Remote    string         `json:"remote,omitempty"` // a git workspace's, shown as text and never as a link
+	Branch    string         `json:"branch,omitempty"`
 }
 
 type worktreeJSON struct {
@@ -63,12 +66,25 @@ func (s *Server) workspaces(w http.ResponseWriter, r *http.Request, user store.U
 	out := make([]workspaceJSON, 0, len(list))
 	for _, ws := range list {
 		row := workspaceJSON{Name: ws.Name, Kind: ws.Kind, Worktrees: []worktreeJSON{}}
+		if ws.Kind == "git" {
+			row.Remote, row.Branch = shownRemote(ws.Remote), termsafe.Truncate(termsafe.Line(ws.Branch), 200)
+		}
 		for _, t := range ws.Worktrees {
 			row.Worktrees = append(row.Worktrees, worktreeJSON{Instance: t.Instance, State: t.State, Creator: n.actor(t.Actor)})
 		}
 		out = append(out, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"workspaces": out})
+}
+
+// shownRemote is a remote as a link said it, if it is what a link says: an https URL with nothing that could be a secret. Anything else is
+// not shown.
+func shownRemote(remote string) string {
+	u, err := url.Parse(remote)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(remote) > 2000 {
+		return ""
+	}
+	return termsafe.Line(remote)
 }
 
 // filesTarget is the volume a request is for.

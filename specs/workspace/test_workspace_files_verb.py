@@ -6,7 +6,7 @@
 only: a path that ends with a slash lists a directory as JSON, any other path sends a regular file's bytes.
 
 The hub is fixtures/fakehub, core's real hub side of the protocol. The worktree of a removed agent is a volume made by hand with the labels
-egzo gives one, so no repository has to be cloned."""
+egzo gives one, so no agent has to be spawned in the git workspace; `up` clones its base, for the agent that lists it."""
 
 import json
 
@@ -17,14 +17,18 @@ from hubkit import eventually
 from support import custom, spec
 
 TIMEOUT = 30
+REPO = "https://github.com/octocat/Hello-World.git"
+
+pytestmark = pytest.mark.usefixtures("github")
 
 
 @pytest.fixture(scope="module")
 def linked(shared_project, engine, fake_hub):
     p = shared_project
-    p.up(spec(hub={"url": fake_hub.url, "ca": str(fake_hub.ca)}, egress={"default": {"allow": ["example.com"]}},
-              workspaces={"docs": {}, "repo": {"git": {"url": "https://github.com/octocat/Hello-World.git"}}},
-              agents={"writer": custom(engine.agent_image(), workspaces=["docs"])}))
+    p.up(spec(hub={"url": fake_hub.url, "ca": str(fake_hub.ca)}, egress={"default": {"allow": ["example.com", "github.com"]}},
+              workspaces={"docs": {}, "repo": {"git": {"url": REPO, "branch": "master"}}},
+              agents={"writer": custom(engine.agent_image(), workspaces=["docs"]), "coder": custom(engine.agent_image(), workspaces=["repo"])}),
+         timeout=400)
     p.ok("project register", input=fake_hub.code("alice") + "\n")
     assert eventually(lambda: fake_hub.verb(p.name, "workspaces").get("result") is not None, seconds=TIMEOUT), "the link never came"
     made = engine.in_volumes({p.volume("docs"): "/w"}, (
@@ -60,6 +64,8 @@ def test_workspaces_lists_directories_and_git_workspaces_with_the_worktrees_thei
     assert listed["docs"]["Kind"] == "directory" and listed["docs"]["Worktrees"] == []
     assert listed["repo"]["Kind"] == "git"
     assert listed["repo"]["Worktrees"] == [{"Instance": "gone", "State": "removed", "Actor": "user:7"}]
+    assert (listed["repo"].get("Remote"), listed["repo"].get("Branch")) == (REPO, "master"), "where a git workspace clones from"
+    assert "Remote" not in listed["docs"] and "Branch" not in listed["docs"]
 
 
 def test_a_directory_lists_as_json_and_a_file_comes_as_its_bytes(linked, fake_hub):

@@ -376,6 +376,9 @@ export interface WorkspaceRow {
   name: string;
   kind: "directory" | "git";
   worktrees: { instance: string; state: "running" | "stopped" | "removed"; creator: string }[];
+  /** A git workspace's remote (https, no credential) and branch, as the project was last brought up; absent when the link cannot tell. */
+  remote?: string;
+  branch?: string;
 }
 
 /** What a directory of a workspace holds, sorted by name; truncated when it holds more than the hub lists. */
