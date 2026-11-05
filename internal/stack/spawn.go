@@ -417,7 +417,7 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 		}
 		for _, volume := range volumes {
 			fmt.Fprintf(out, "remove volume %s\n", volume.Name)
-			if err := c.API.VolumeRemove(ctx, volume.ID, true); err != nil {
+			if err := removeVolume(ctx, c, project, volume.Name); err != nil {
 				return removed, fmt.Errorf("remove volume %s: %w", volume.Name, err)
 			}
 			if volume.Kind == kindWorkspace {

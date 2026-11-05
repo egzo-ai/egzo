@@ -113,7 +113,7 @@ func RemoveWorkspaces(ctx context.Context, c *engine.Client, observed Observed, 
 	for _, name := range names {
 		for _, volume := range owned[name] {
 			fmt.Fprintf(out, "remove volume %s\n", volume.Name)
-			if err := c.API.VolumeRemove(ctx, volume.ID, true); err != nil {
+			if err := removeVolume(ctx, c, project, volume.Name); err != nil {
 				return fmt.Errorf("remove volume %s: %w", volume.Name, err)
 			}
 		}
@@ -143,7 +143,7 @@ func RemoveWorktreeVolumes(ctx context.Context, c *engine.Client, env PrepEnv, o
 	for _, instance := range instances {
 		name := WorktreeVolume(project, workspace, instance)
 		fmt.Fprintf(out, "remove volume %s\n", name)
-		if err := c.API.VolumeRemove(ctx, name, true); err != nil {
+		if err := removeVolume(ctx, c, project, name); err != nil {
 			return fmt.Errorf("remove volume %s: %w", name, err)
 		}
 	}
