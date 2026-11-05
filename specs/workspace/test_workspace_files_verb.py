@@ -6,7 +6,8 @@
 only: a path that ends with a slash lists a directory as JSON, any other path sends a regular file's bytes.
 
 The hub is fixtures/fakehub, core's real hub side of the protocol. The worktree of a removed agent is a volume made by hand with the labels
-egzo gives one, so no agent has to be spawned in the git workspace; `up` clones its base, for the agent that lists it."""
+egzo gives one, so no repository has to be cloned: the git workspace's remote is on a reserved domain the project may not reach, so `up`
+fails to clone its base, says so and goes on, and the remote is still the one the project names. No spec here reaches the internet."""
 
 import json
 
@@ -17,18 +18,15 @@ from hubkit import eventually
 from support import custom, spec
 
 TIMEOUT = 30
-REPO = "https://github.com/octocat/Hello-World.git"
-
-pytestmark = pytest.mark.usefixtures("github")
+REPO = "https://code.test/team/repo.git"  # .test is reserved: it names nothing, and egress does not allow it anyway
 
 
 @pytest.fixture(scope="module")
 def linked(shared_project, engine, fake_hub):
     p = shared_project
-    p.up(spec(hub={"url": fake_hub.url, "ca": str(fake_hub.ca)}, egress={"default": {"allow": ["example.com", "github.com"]}},
+    p.up(spec(hub={"url": fake_hub.url, "ca": str(fake_hub.ca)}, egress={"default": {"allow": ["example.com"]}},
               workspaces={"docs": {}, "repo": {"git": {"url": REPO, "branch": "master"}}},
-              agents={"writer": custom(engine.agent_image(), workspaces=["docs"]), "coder": custom(engine.agent_image(), workspaces=["repo"])}),
-         timeout=400)
+              agents={"writer": custom(engine.agent_image(), workspaces=["docs"]), "coder": custom(engine.agent_image(), workspaces=["repo"])}))
     p.ok("project register", input=fake_hub.code("alice") + "\n")
     assert eventually(lambda: fake_hub.verb(p.name, "workspaces").get("result") is not None, seconds=TIMEOUT), "the link never came"
     made = engine.in_volumes({p.volume("docs"): "/w"}, (
