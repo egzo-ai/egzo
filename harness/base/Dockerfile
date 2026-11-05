@@ -8,7 +8,7 @@ ARG EGZO_IMAGE=ghcr.io/egzo-ai/egzo:latest
 ARG NODE_VERSION=24.22.2
 ARG NODE_SHA256_AMD64=48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75
 ARG NODE_SHA256_ARM64=eb187837a2230d4047161ac0be008584e16b46f726e9c9490ee35dc6b17d9ba8
-ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+ARG PLAYWRIGHT_MCP_VERSION=0.0.84
 FROM ${EGZO_IMAGE} AS egzo
 
 # Ubuntu 26.04: git >= 2.48 (egzo makes worktrees with relative links, `git worktree add --relative-paths`, and sets the
