@@ -51,8 +51,8 @@ The specs run on GitHub Actions, one fresh VM per reference platform (`.github/w
 | `podman` | a rootful Podman host, no gVisor | experimental, and not a supported platform |
 
 Every cell is Ubuntu 26.04, so a green cell reads as "works on Ubuntu 26.04 for that platform" ([#139](https://github.com/egzo-ai/egzo/issues/139)
-for other distributions). What is left before the matrix is a gate: [#134](https://github.com/egzo-ai/egzo/issues/134),
-[#135](https://github.com/egzo-ai/egzo/issues/135), [#136](https://github.com/egzo-ai/egzo/issues/136).
+for other distributions). Still open: red specs for unbuilt features against the required check
+([#135](https://github.com/egzo-ai/egzo/issues/135)), and the other cells becoming required ([#136](https://github.com/egzo-ai/egzo/issues/136)).
 
 ### Decided
 
@@ -64,14 +64,15 @@ for other distributions). What is left before the matrix is a gate: [#134](https
 
   | Event | Platforms | Blocks? |
   |---|---|---|
-  | `pull_request` | `docker` (the whole matrix while the workflow is tried out, `PR_FULL` in `specs.yml`) | yes, once it is a required check |
-  | `merge_group` (the merge queue) | all | yes: the gate in front of `main` |
+  | `pull_request` | `docker` | yes: `specs (docker)` is the required check for merging into `main` |
   | a push to `main` | all | no; a release tag requires its required cells to have passed |
   | nightly, and by hand | all | no; a red night is a finding |
   | a release tag | none | `release.yml` does not run them again: it builds nothing unless the tagged commit is on `main` and its push passed the required cells |
 
-  A pull request gets the Docker cell for a fast answer; the whole matrix runs once per merge, in the queue, on the result of
-  merging, so `main` never gets a change a platform rejects. The nightly run catches what no push touched: a new runner image
+  A pull request gets the Docker cell, and merges once it passes: `main` is linear (rebase merges only, no merge queue), and a
+  pull request need not be up to date with `main` to merge, as "Rebase and merge" rebases it then. The whole matrix runs on
+  every push to `main`, after the merge, so what one platform rejects, or two pull requests that pass apart and break together,
+  shows there. The nightly run catches what no push touched: a new runner image
   (an engine version), a new engine release, an online service the specs reach going away.
 - **Cells that are not proven are `experimental`**: they run and show, and cannot fail the run. `docker` is required from the
   start. `docker-gvisor`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history ([#136](https://github.com/egzo-ai/egzo/issues/136)), by

@@ -1,9 +1,8 @@
 name: specs
 
 # The specs (specs/) on the reference platforms: one job, so one fresh VM, per platform. What runs where:
-#   pull_request   the docker platform only, for a fast answer on the pull request;
-#   merge_group    every platform, the gate in front of main when the branch uses a merge queue (it must list this event);
-#   push           every platform, on main: what a merge produced, whatever way it got there (queue or not);
+#   pull_request   the docker platform only: `specs (docker)` is the required check for merging into main;
+#   push           every platform, on main: what a merge produced (there is no merge queue: the full matrix runs after the merge);
 #   schedule       every platform, nightly, to catch what no push touched (runner images, new engine releases, online services);
 #   dispatch       every platform, by hand.
 # release.yml does not run them again: it requires that the push to main of the tagged commit passed here.
@@ -11,7 +10,6 @@ name: specs
 # `specs (<platform>)`) and loses its `experimental` mark after a clean history; see specs/README.md, "In CI".
 on:
   pull_request:
-  merge_group:
   push:
     branches: [main]
   schedule:
