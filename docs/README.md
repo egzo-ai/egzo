@@ -1,14 +1,15 @@
 # egzo documentation
 
-Egzo is early (0.x releases): see [`roadmap/initial-release.md`](../roadmap/initial-release.md) for what the docs
-still have to be checked against. These pages are quick pointers, not a reference; `egzo <command> --help` and `egzo project check --resolved` are the
+Egzo is early (0.x releases): see the [1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1) for what is left, the docs'
+review included ([#132](https://github.com/egzo-ai/egzo/issues/132)). Planning, ideas and bugs are [GitHub issues](https://github.com/egzo-ai/egzo/issues). These pages are quick pointers, not a reference; `egzo <command> --help` and `egzo project check --resolved` are the
 detail, and the executable specs in `specs/` are the status report.
 
 ## Start here
 
 1. [Introduction](intro.md): what egzo is, how it is built, a first run
 2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, `egzo system check`
-   - [Using gVisor](gvisor.md): why, the cost, the two flags
+   - [Using Podman](podman.md): rootless Podman, and why rootful Podman is not supported yet
+   - [Using gVisor](gvisor.md): why, the cost, the two flags, terminal quirks
 
 ## Using egzo
 
@@ -31,3 +32,11 @@ detail, and the executable specs in `specs/` are the status report.
 13. [Sandboxing agents](sandboxing.md): writing egress policies
 14. [The security model](security.md): what is enforced and what is not
 15. [Troubleshooting](troubleshooting.md)
+
+## Reference
+
+How things work inside, for maintainers and the curious; moved from the design pages of the old roadmap.
+
+- [How a project links to a hub](reference/hub-link.md): the link, registering, the connection, versions, roles and invites
+- [Hub accounts and sign-in](reference/hub-accounts.md): users, identities, usernames, the starter account, OIDC
+- [OAuth sign-ins, what was checked](reference/oauth.md): Codex and Claude Code, and why the proxy holds the tokens

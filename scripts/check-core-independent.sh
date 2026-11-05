@@ -1,5 +1,5 @@
 #!/bin/sh
-# Core never depends on the hub: the hub imports core, never the reverse (roadmap/hub.md, "Code layout and rules").
+# Core never depends on the hub: the hub imports core, never the reverse (DESIGN.md, "The hub", "Code layout and rules").
 # Go's `internal` rule already stops it for anything under hub/internal; this also fails on a future move.
 set -eu
 cd "$(dirname "$0")/.."

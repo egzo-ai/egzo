@@ -1,5 +1,5 @@
 // What the Network view says about the proxy's audit trail: why a denial happened and how to fix it, by its reason code
-// (roadmap/proxy-audit.md), and the events of one connection as one row.
+// (docs/sandboxing.md, "See what happened"), and the events of one connection as one row.
 
 import type { Denial, NetworkEvent, NetworkReason } from "./types";
 

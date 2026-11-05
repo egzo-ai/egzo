@@ -504,7 +504,7 @@ type reasonJSON struct {
 	Text string `json:"text"`
 }
 
-// networkEventJSON is one event of a proxy's audit trail (roadmap/proxy-audit.md), in the web's spelling.
+// networkEventJSON is one event of a proxy's audit trail (docs/sandboxing.md, "See what happened"), in the web's spelling.
 type networkEventJSON struct {
 	Time        time.Time   `json:"time"`
 	Conn        string      `json:"conn"`

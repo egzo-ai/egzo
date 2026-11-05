@@ -20,7 +20,7 @@ import (
 )
 
 // Event is one line of the audit log: a step of one connection, and what the proxy decided about it. Bodies and query
-// strings are never recorded. See roadmap/proxy-audit.md for the schema.
+// strings are never recorded. See docs/sandboxing.md, "See what happened", for the schema.
 type Event struct {
 	Time time.Time `json:"time"`
 	// Conn is the connection: every event of one connection has the same.

@@ -1,5 +1,5 @@
 # The hub image. The build context is the repository root (docker build -f hub/Dockerfile .): the hub module requires core
-# from ../ (see roadmap/hub.md).
+# from ../ (see DESIGN.md, "The hub").
 ARG GO_VERSION=1.27.3
 # BuildKit sets it; the legacy builder needs it passed (the Makefile does).
 ARG BUILDPLATFORM

@@ -17,7 +17,7 @@ import (
 //     Projects and Project show.
 //   - the audit feed: the proxy's trail, kept for the Network view (network.go).
 //
-// A link opens them again when they break; the hub only follows. See roadmap/hub-link.md.
+// A link opens them again when they break; the hub only follows. See docs/reference/hub-link.md.
 
 // FeedOptions tune the feeds; the zero value is the production setting.
 type FeedOptions struct {

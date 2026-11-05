@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS audit (
 	client TEXT NOT NULL DEFAULT ''  -- the address the request came from, as far as the hub can tell (publicurl.ClientIP)
 );
 CREATE INDEX IF NOT EXISTS audit_project ON audit (project, id);
--- What the proxies denied, grouped: one row per instance, protocol, host and reason code (roadmap/proxy-audit.md).
+-- What the proxies denied, grouped: one row per instance, protocol, host and reason code (docs/hub.md, "Network").
 CREATE TABLE IF NOT EXISTS denials (
 	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
 	instance TEXT NOT NULL,              -- the instance's id; '' when the proxy could not tell who it was

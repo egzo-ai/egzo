@@ -63,4 +63,4 @@ something misbehaves, see [troubleshooting](troubleshooting.md).
 Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
 credential injection, git workspaces, Claude Code, OpenCode and Codex, message delivery, declared ports, and the operator commands. Not yet:
 the `pi` harness; the Podman and gVisor spec runs are reported in CI but are not required checks. A separate web UI, [the hub](hub.md), is built and is not part
-of the CLI. Binaries and images are published for Linux (amd64 and arm64), still as early 0.x releases ([`roadmap/initial-release.md`](../roadmap/initial-release.md)).
+of the CLI. Binaries and images are published for Linux (amd64 and arm64), still as early 0.x releases ([1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1)).

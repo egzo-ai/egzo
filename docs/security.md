@@ -62,7 +62,49 @@ Be clear about these before running agents on something you care about.
   put anything on a hub, and whoever holds a live code can: treat one as a password.
 - **A `build:` Dockerfile is trusted.** `egzo project up` builds it on the engine, outside the egress proxy, as you would by
   hand ([images](images.md#let-egzo-build-it)).
+- **Agents that share a git workspace trust each other.** Each has the base clone's `.git` mounted read-write, so one can damage the
+  others' history or plant a git setting that runs in the next spawn: see [below](#the-base-clone-of-a-git-workspace).
 - **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.
+
+## The base clone of a git workspace
+
+A git workspace is one base clone (the volume `<project>_ws.<name>.base`) and one worktree per agent. A worktree is private to its
+agent, but it is a view of the base: its `.git` is a file that points into the base, so every agent that lists the
+workspace has the base's `.git` mounted **read-write** (`/workspace/<name>/.base`). Git needs that to commit, create
+branches and move the index of a worktree.
+
+What one agent can do to the others through it:
+
+- **Damage shared history.** Delete or rewrite the branches `egzo/<other agent>`, the refs, or the object store. The
+  work an agent committed lives on its branch in the base, so this is also how committed work can be lost.
+- **Plant a git setting that runs code later.** egzo runs git with `core.hooksPath=/dev/null` and
+  `core.fsmonitor=false`, so a hook or a file-system monitor in the base never runs. It cannot disable every setting
+  the repository's own `.git/config` or `.git/info/attributes` can carry: a `filter.<name>.smudge` or `.process`
+  command plus an attribute line that selects it, `core.sshCommand`, `credential.helper`, `url.<base>.insteadOf`. Git
+  uses the base's config when egzo makes the next worktree (`git fetch` and `git worktree add`, which checks files
+  out), and then the planted command runs:
+  - in the prep container of the **next spawn**, which is on that instance's network, with its proxy token and its
+    egress profile: agent A's code gets agent B's identity and egress for as long as the job runs.
+
+The base lives in an engine volume, so no git of yours ever runs in it on your machine: only the prep containers and
+the agents do.
+
+The code that runs is code an agent wrote, so the issue is about agents that do not trust each other, or an agent
+that has been steered by a prompt injection and shares a workspace with agents holding more access.
+
+### Why it is accepted
+
+- Sharing the base is what makes worktrees cheap (one object store, one fetch) and keeps the relative links working
+  in every container. A private clone per agent costs the disk and the time that worktrees save.
+- Agents that list the same git workspace work on the same repository, for the same person: they already share
+  what they push.
+- The proxy decides what an identity can reach, so the worst case is bounded by the egress profiles of the agents
+  that share the workspace, not by anything outside the project.
+
+Until it is mitigated, list a git workspace only for agents that you trust with each other's work and access, and
+give agents that need more access (a deployment token) a workspace of their own.
+
+Ways to mitigate it are tracked in [#155](https://github.com/egzo-ai/egzo/issues/155).
 
 ## How secret injection works
 
@@ -78,7 +120,8 @@ What it does not give you is that the agent **cannot use** the secret. While it 
 the service's hosts accept, and the proxy adds the credential. The secret is hidden, the permission is not: a token
 that may delete repositories lets the agent delete repositories. Limit what a secret can do at its source (a
 fine-grained token, a dedicated account, the least privilege the work needs); egzo limits where it can be sent and who
-can see it.
+can see it. What injection cannot do (signed requests, credentials the client transforms, clients that ignore the proxy or its CA, big
+uploads to a placeholder host) is in [Sandboxing](sandboxing.md#limits-of-secret-injection).
 
 ## The proxy and TLS
 

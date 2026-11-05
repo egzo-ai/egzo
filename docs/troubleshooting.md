@@ -108,8 +108,8 @@ Known not to work:
 
 - **Rootful Podman, intermittent loss of outbound connectivity.** The proxy's first outbound connection sometimes
   times out; a project that comes up broken stays broken. It reproduces without egzo, appears host-level and is open
-  (`known-issues/rootful-podman-intermittent-egress.md`). Rootful Podman is not supported for now: use Docker or rootless Podman.
-- **`pi` has no integration**, because it has no MCP support (`known-issues/mcp-support-is-required.md`).
-- **The specs run on Ubuntu 26.04 only**, and only Docker is a required check (`known-issues/reference-platform-ci-matrix.md`).
+  ([Using Podman](podman.md#rootful-podman-outbound-connections-fail-at-random)). Rootful Podman is not supported for now: use Docker or rootless Podman.
+- **`pi` has no integration**, because it has no MCP support ([Supported harnesses](harnesses.md#a-harness-needs-mcp)).
+- **The specs run on Ubuntu 26.04 only**, and only Docker is a required check ([#136](https://github.com/egzo-ai/egzo/issues/136), [#139](https://github.com/egzo-ai/egzo/issues/139)).
 
 Please report anything else with the output of `egzo system check` and `egzo version`.

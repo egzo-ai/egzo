@@ -178,4 +178,20 @@ Each gets its own worktree, so the two results can be compared as branches.
 Each harness has an image, `ghcr.io/egzo-ai/egzo-harness-<name>:<egzo version>`. Build them from the repository with
 `make images`, or point egzo at another registry with `EGZO_HARNESS_PREFIX`. If an image cannot be pulled, `egzo agent spawn`
 stops and names the image and the `image:` override. See [Overriding base images](images.md), and [installing](install.md)
-for building them. `pi` waits on MCP support: `known-issues/mcp-support-is-required.md`.
+for building them. `pi` waits on MCP support: see [below](#a-harness-needs-mcp).
+
+## A harness needs MCP
+
+egzo's agent-facing verbs (`list_messages`, `get_message`, `resolve`, `update`, `ask`, `message`, `status`, `expose`, `unexpose`,
+`agents`) reach the agent as **MCP tools** served by the control
+sidecar at `http://control:7777/mcp`. So a harness has to be able to talk MCP over streamable HTTP, with a
+fixed header for the agent's credentials, to be integrated.
+
+- **Claude Code**, **OpenCode** and **Codex**, the integrated harnesses, all do, and the specs cover it
+  (`harness/test_harness_integrations.py`: the `egzo` MCP server is in each one's configuration).
+- **pi** (Mario Zechner's coding agent) has no MCP support, deliberately: its design leaves it out, and
+  people reach MCP servers through a bridge (`mcporter` or an extension). It is still an accepted harness
+  name in `egzo.yaml`, but it has no image and no integration, so it cannot be used today.
+- `custom` runs any image and has no MCP guarantee: the image author provides whatever the agent needs.
+
+A harness without MCP could be supported later through a command-line front end over the same verbs: [#154](https://github.com/egzo-ai/egzo/issues/154).

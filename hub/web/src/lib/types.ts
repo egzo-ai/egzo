@@ -228,7 +228,7 @@ export interface HubAuditEntry extends AuditEntry {
   projectName?: string;
 }
 
-/** Why the proxy decided what it did: a code from a fixed list (roadmap/proxy-audit.md), and a text for people. */
+/** Why the proxy decided what it did: a code from a fixed list (docs/sandboxing.md, "Reason codes"), and a text for people. */
 export interface NetworkReason {
   code: string;
   text: string;

@@ -60,7 +60,7 @@ podman)
 	# rootful Podman: the API service of root on /run/podman/podman.sock, which the runner user may use (the VM is thrown away).
 	# systemd's podman.socket makes /run/podman readable by root only, so the service is started here instead.
 	# Ubuntu's AppArmor puts a rootful Podman container's init and its exec'd processes in two stacked profiles as soon as
-	# no-new-privileges is set, and they then cannot signal or inspect each other (known-issues/rootful-podman-apparmor-stacking.md).
+	# no-new-privileges is set, and they then cannot signal or inspect each other (docs/podman.md).
 	sudo mkdir -p /etc/containers/containers.conf.d
 	printf '[containers]\napparmor_profile = "unconfined"\n' | sudo tee /etc/containers/containers.conf.d/50-spec-apparmor.conf
 	sudo systemctl disable --now podman.socket podman.service 2>/dev/null || true
