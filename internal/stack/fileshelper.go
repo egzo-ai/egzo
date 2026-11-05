@@ -5,8 +5,9 @@ package stack
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -164,35 +165,37 @@ func startFileHelper(ctx context.Context, c *engine.Client, env PrepEnv, project
 // RemoveFileHelpers removes the file helpers that mount any of volumes, before the volumes are deleted: a volume a container mounts cannot
 // be. A person browsing it sees the connection end.
 func RemoveFileHelpers(ctx context.Context, c *engine.Client, project string, volumes []string) error {
-	var failed []error
-	for _, volume := range volumes {
-		// one that exited is removing itself: wait for it, or the volume is still in use
-		for wait := 0; ; wait++ {
-			listed, err := fileHelpersOf(ctx, c, project, volume)
-			if err != nil {
-				return err
-			}
-			if len(listed) == 0 {
-				break
-			}
-			if wait == 50 {
-				failed = append(failed, fmt.Errorf("the file helper of %s is still there", volume))
-				break
-			}
+	if len(volumes) == 0 {
+		return nil
+	}
+	// one that exited is removing itself: wait for it, or the volume is still in use
+	for wait := 0; ; wait++ {
+		listed, err := fileHelpersOf(ctx, c, project, volumes)
+		if err != nil {
+			return err
+		}
+		if len(listed) == 0 {
+			return nil
+		}
+		if wait == 50 {
+			var left []string
 			for _, helper := range listed {
-				err := c.API.ContainerRemove(ctx, helper.ID, container.RemoveOptions{Force: true})
-				if err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
-					return fmt.Errorf("remove the file helper of %s: %w", volume, err)
-				}
+				left = append(left, helperName(helper))
 			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(100 * time.Millisecond):
+			return fmt.Errorf("the file helpers %s are still there", strings.Join(left, ", "))
+		}
+		for _, helper := range listed {
+			err := c.API.ContainerRemove(ctx, helper.ID, container.RemoveOptions{Force: true})
+			if err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) {
+				return fmt.Errorf("remove the file helper %s: %w", helperName(helper), err)
 			}
 		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	return errors.Join(failed...)
 }
 
 // removeVolume deletes a volume whose file helpers were removed (RemoveFileHelpers). A request of the hub in between makes a helper
@@ -218,11 +221,30 @@ func isFileHelper(labels map[string]string, project string) bool {
 	return labels[engine.LabelProject] == project && labels[engine.LabelKind] == kindFiles
 }
 
-func fileHelpersOf(ctx context.Context, c *engine.Client, project, volume string) ([]container.Summary, error) {
-	listed, err := c.API.ContainerList(ctx, container.ListOptions{All: true, Filters: filters.NewArgs(
-		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindFiles), filters.Arg("volume", volume))})
-	if err != nil {
-		return nil, fmt.Errorf("list the file helpers of %s: %w", volume, err)
+// helperName is a listed container's name.
+func helperName(helper container.Summary) string {
+	if len(helper.Names) == 0 {
+		return helper.ID
 	}
-	return listed, nil
+	return strings.TrimPrefix(helper.Names[0], "/")
+}
+
+// fileHelpersOf lists the file helpers of project that mount any of volumes, in one question to the engine.
+func fileHelpersOf(ctx context.Context, c *engine.Client, project string, volumes []string) ([]container.Summary, error) {
+	listed, err := c.API.ContainerList(ctx, container.ListOptions{All: true, Filters: filters.NewArgs(
+		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindFiles))})
+	if err != nil {
+		return nil, fmt.Errorf("list the file helpers of project %s: %w", project, err)
+	}
+	var found []container.Summary
+	for _, helper := range listed {
+		for _, volume := range volumes {
+			mounts := slices.ContainsFunc(helper.Mounts, func(m container.MountPoint) bool { return m.Name == volume })
+			if mounts || slices.Contains(helper.Names, "/"+fileHelperName(volume)) {
+				found = append(found, helper)
+				break
+			}
+		}
+	}
+	return found, nil
 }
