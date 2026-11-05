@@ -195,6 +195,11 @@ func RemoveFileHelpers(ctx context.Context, c *engine.Client, project string, vo
 	return errors.Join(failed...)
 }
 
+// isFileHelper says whether a container's labels are those of a file helper of project.
+func isFileHelper(labels map[string]string, project string) bool {
+	return labels[engine.LabelProject] == project && labels[engine.LabelKind] == kindFiles
+}
+
 func fileHelpersOf(ctx context.Context, c *engine.Client, project, volume string) ([]container.Summary, error) {
 	listed, err := c.API.ContainerList(ctx, container.ListOptions{All: true, Filters: filters.NewArgs(
 		filters.Arg("label", engine.LabelProject+"="+project), filters.Arg("label", engine.LabelKind+"="+kindFiles), filters.Arg("volume", volume))})
