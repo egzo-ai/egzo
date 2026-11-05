@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -77,5 +78,38 @@ func TestSetupSSHDoesNothingWithoutAToken(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".ssh")); err == nil {
 		t.Fatal("wrote something")
+	}
+}
+
+func TestARunningAgentFollowsTheServersTheProxyPublishes(t *testing.T) {
+	home, shared := t.TempDir(), t.TempDir()
+	published := filepath.Join(shared, "ssh_config")
+	os.WriteFile(published, []byte("Host prod\n    HostName proxy\n"), 0o644)
+	if err := setupSSH(home, "a-token", published); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(home, ".ssh", "config")
+	read := func() string { data, _ := os.ReadFile(config); return string(data) }
+	waitFor := func(what string, ok func(string) bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if ok(read()) {
+				return
+			}
+		}
+		t.Fatalf("%s; the config is:\n%s", what, read())
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go followSSH(home, "a-token", published, 10*time.Millisecond, done)
+
+	os.WriteFile(published, []byte("Host prod\n    HostName proxy\nHost staging\n    HostName proxy\n"), 0o644)
+	waitFor("a server the proxy published since is in the config", func(c string) bool { return strings.Contains(c, "Host staging") })
+	os.WriteFile(published, []byte("Host staging\n    HostName proxy\n"), 0o644)
+	waitFor("a server the proxy no longer publishes leaves it", func(c string) bool {
+		return !strings.Contains(c, "Host prod") && strings.Contains(c, "Host staging")
+	})
+	if strings.Count(read(), managedBegin) != 1 {
+		t.Fatalf("one managed block, rewritten in place:\n%s", read())
 	}
 }

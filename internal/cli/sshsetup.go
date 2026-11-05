@@ -4,11 +4,13 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -61,6 +63,38 @@ func setupSSH(home, token, publishedConfig string) error {
 		return err
 	}
 	return writeFileAtomic(path, withManagedBlock(string(existing), string(published)), 0o600)
+}
+
+// sshFollowInterval is how often a running agent looks at the servers the proxy publishes.
+const sshFollowInterval = 2 * time.Second
+
+// followSSH rewrites the agent's ssh config each time the servers the proxy published change, for as long as the agent
+// runs. It reads one small file of the shared volume each time: nothing is written until it changes. Errors are said once
+// per change, as setupSSH's at the start are: ssh that cannot follow is not worth stopping the agent for.
+// It returns when done closes; nil runs it for the life of the process.
+func followSSH(home, token, publishedConfig string, every time.Duration, done <-chan struct{}) {
+	if token == "" {
+		return
+	}
+	// nothing applied yet: the first look writes the config once more, so a change made since the agent started is not missed
+	var last []byte
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+		}
+		now, err := os.ReadFile(publishedConfig)
+		if err != nil && !errors.Is(err, os.ErrNotExist) || bytes.Equal(now, last) {
+			continue
+		}
+		last = now
+		if err := setupSSH(home, token, publishedConfig); err != nil {
+			fmt.Fprintf(os.Stderr, "egzo: could not update ssh: %v\n", err)
+		}
+	}
 }
 
 const (

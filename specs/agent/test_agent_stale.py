@@ -27,12 +27,13 @@ class Templates:
         self.original()
         project.up(self.document())
 
-    def document(self, coder_env="1", reviewer_env=None, prompt=True, egress="example.com", scratch=("scratch",), coder=True):
+    def document(self, coder_env="1", reviewer_env=None, prompt=True, egress="example.com", scratch=("scratch",), coder=True, services=None):
         agents = {"reviewer": custom(self.image, env={"R": reviewer_env} if reviewer_env else {})}
         if coder:
             agents["coder"] = custom(self.image, env={"V": coder_env}, workspaces=list(scratch), **({"prompt": "./prompt.md"} if prompt else {}))
         workspaces = {name: {} for name in ("scratch", "docs")}
-        return spec(egress={"default": {"allow": [egress]}}, workspaces=workspaces, agents=agents)
+        profile = {"allow": [egress], **({"services": services} if services else {})}
+        return spec(egress={"default": profile}, workspaces=workspaces, agents=agents)
 
     def original(self):
         (self.project.root / "prompt.md").write_text("be brief\n")
@@ -119,7 +120,11 @@ def test_what_makes_an_instance_stale_and_what_does_not(templates, engine):
     (p.root / "prompt.md").write_text("be brief\n")
 
     templates.change(egress="example.org")
-    assert "coder-1" in templates.stale(), "a changed egress profile"
+    assert templates.stale() == [], "the policy is the proxy's: allowing another host leaves the instances as they are"
+    templates.change(services={"docs": {"hosts": ["example.net"], "inspect": True}})
+    assert templates.stale() == [], "nor does a service that gives the agent nothing of its own"
+    templates.change(services={"site": {"hosts": ["example.net"], "credential": "env/SITE_SECRET", "placeholder": "SITE_PASSWORD"}})
+    assert sorted(templates.stale()) == ["coder-1", "reviewer-1"], "a placeholder is a variable in the container: it has to be made again"
     templates.original()
 
     templates.change(scratch=("scratch", "docs"))

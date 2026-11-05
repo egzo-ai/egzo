@@ -122,7 +122,9 @@ $ egzo project up                    # applies it
 ```
 
 If a template changed, running instances of it become **stale**: `ps` marks them and `up` refuses until you retire
-them. Remove them with `egzo agent rm NAME` or `egzo agent rm --stale`, then spawn again. `up --recreate` rebuilds the
+them. An egress change mostly does not count: allowing a host, a service that injects a header, `paths`, an ssh server or a new
+secret value only reloads the proxy, and running agents follow at the next `up`. A new placeholder variable, or another kind of
+model credential, changes what the agent's container holds, and does make it stale. Remove them with `egzo agent rm NAME` or `egzo agent rm --stale`, then spawn again. `up --recreate` rebuilds the
 sidecars.
 
 ## Tearing down

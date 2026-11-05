@@ -494,8 +494,9 @@ Each event is one step of one connection:
 | `ssh` | `exec`, `shell`, `sftp` | a command (`command`), a shell or an sftp session (`scp`, `sftp`) the agent started on the server |
 | `ssh` | `channel`, `request` | refused: port forwarding, X11, agent forwarding, a subsystem other than sftp |
 
-Changing a profile and running `egzo project up` reloads the proxy with the new policy; running instances keep their
-binding by profile name. After a proxy restart, `egzo restart proxy` (or `egzo project up`) loads the policy again; until
+Changing a profile and running `egzo project up` reloads the proxy with the new policy: running agents keep running and
+follow it at once, ssh servers included, keeping their binding by profile name (only a change to what their container holds,
+such as a new placeholder variable, makes them [stale](managing-projects.md)). After a proxy restart, `egzo restart proxy` (or `egzo project up`) loads the policy again; until
 then the proxy answers 503. `egzo project rotate-ca` issues a new project CA and restarts the agents.
 
 ### Reason codes

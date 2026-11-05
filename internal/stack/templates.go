@@ -15,6 +15,7 @@ import (
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/harness"
 )
 
 // publishedVersion is bumped when what Published holds changes in a way an older spawn cannot read.
@@ -38,9 +39,41 @@ type Template struct {
 	// secret. The text is made once and never changes, so the hash leaves it out: what decides whether
 	// an instance is stale is the profile's service, which names the variable and the secret.
 	Placeholders map[string]string `json:",omitempty"`
-	// Hash fingerprints all of the above. An instance carries the hash of the template it was spawned
-	// from; when the template's hash moves, the instance is stale.
+	// Hash fingerprints what goes into an instance of the template: an instance carries the hash of the
+	// template it was spawned from, and when it moves, the instance is stale. Of the egress profile it
+	// covers only what the agent container gets from it (agentFacing): the rest of the profile is the
+	// proxy's policy, which `up` reloads without touching the instances.
 	Hash string
+}
+
+// agentFacing is what an instance takes from its egress profile, which only a new container can change: the variables
+// the harness is given for the credential it uses (desired.go: bearerProvider, openAIKey, signInFor), the placeholder
+// variables and the secret each stands for, and the OAuth services whose stand-ins spawn gives the client. Whatever
+// agentContainer or a spawn reads from the profile belongs here, and nothing else: hosts, allow, paths, inspect and
+// ssh servers are the proxy's, and a new value of a secret reaches the proxy alone.
+type agentFacing struct {
+	Providers    harness.Providers
+	Placeholders map[string]string `json:",omitempty"` // variable -> secret reference
+	SignIns      []string          `json:",omitempty"`
+}
+
+func agentFacingOf(profile *config.ResolvedProfile, agent config.ResolvedAgent) agentFacing {
+	view := &config.Resolved{Egress: map[string]*config.ResolvedProfile{agent.Egress: profile}}
+	facing := agentFacing{Providers: harness.Providers{AnthropicBearer: bearerProvider(view, agent), OpenAIKey: openAIKey(view, agent),
+		AnthropicSignIn: signInFor(view, agent, "api.anthropic.com")}}
+	if profile == nil {
+		return facing
+	}
+	for _, service := range profile.Services {
+		if service.Placeholder != "" && service.SecretRef() != "" {
+			if facing.Placeholders == nil {
+				facing.Placeholders = map[string]string{}
+			}
+			facing.Placeholders[service.Placeholder] = service.SecretRef()
+		}
+	}
+	facing.SignIns = signInServices(profile, agent.Harness)
+	return facing
 }
 
 // Published is what `up` leaves in the control sidecar for spawn: the templates, and what is needed to
@@ -102,9 +135,14 @@ func PublishWith(project *config.Resolved, dir, image, harnessPrefix, user strin
 }
 
 func templateHash(template Template) string {
+	facing := agentFacingOf(template.Profile, template.Agent)
 	template.Hash = ""
 	template.Placeholders = nil
-	return hash(template)
+	template.Profile = nil // the proxy's: only what the agent takes from it counts
+	return hash(struct {
+		Template Template
+		Egress   agentFacing
+	}{template, facing})
 }
 
 // Names lists the templates, sorted.

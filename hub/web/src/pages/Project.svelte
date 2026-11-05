@@ -185,7 +185,7 @@
   {@const busy = a.task?.state === "running"}
   {@const made = a.state !== ""}
                 <tr data-agent={a.name} aria-selected={open} aria-busy={busy}>
-                  <td><a class="name" href={href.agent(id, a.name)}>{a.name}</a>{#if a.stale} <span class="pill" data-s="warn" title="the template changed after this agent was made">stale</span>{/if}{#if a.denied} <a class="pill" data-s="error" data-testid="denied" href={href.agent(id, a.name, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}</td>
+                  <td><a class="name" href={href.agent(id, a.name)}>{a.name}</a>{#if a.stale} <span class="pill" data-s="warn" title="its template changed in a way the running container cannot follow (an egress change only reloads the proxy): remove it and spawn again">stale</span>{/if}{#if a.denied} <a class="pill" data-s="error" data-testid="denied" href={href.agent(id, a.name, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}</td>
                   <td>{#if a.template}<a class="dim" href={href.project(id, "templates")}>{a.template}</a>{#if !project?.templates.includes(a.template)} <span class="pill" data-s="warn" title="the project no longer publishes this template">retired</span>{/if}{:else}<span class="muted">–</span>{/if}</td>
                   <td>
                     {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} />{/if}

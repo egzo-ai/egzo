@@ -362,8 +362,12 @@ said in the message. Anything else per instance belongs in another template.
   a base clone, a worktree or a directory.
 - **Stale.** An instance whose template changed since it was spawned, or whose template no longer exists, is
   **stale**: its `ai.egzo.template-hash` differs from the hash of the template in `egzo.yaml` (the hash covers
-  everything that went into the instance: the agent, its egress profile, the workspaces it lists, its prompt's
-  content, its image). `up` refuses before it publishes, so the file, not the last published templates, is what
+  everything that went into the instance's container: the agent, the workspaces it lists, its prompt's content, its
+  image, and of its egress profile only what the container gets from it: the variables of the credential its harness
+  uses, the placeholder variables and the secret each stands for, the OAuth services whose stand-ins spawn gives it).
+  The rest of the profile (allowed hosts, services' hosts and paths, `inspect`, ssh servers, a secret's value) is the
+  proxy's policy: `up` reloads it and running instances follow at once, without being stale. A running agent's
+  `egzo agent run` follows the ssh servers the proxy publishes and rewrites its `~/.ssh/config`. `up` refuses before it publishes, so the file, not the last published templates, is what
   an instance is compared with. Nothing restarts a stale instance. `ps` marks it, `agent rm --stale` clears it, and
   `up` refuses while one exists, naming them, so the user stops them first. `up --dry-run` prints `stale: NAME`
   for each and says it would refuse.

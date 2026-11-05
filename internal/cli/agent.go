@@ -141,6 +141,9 @@ func runAgent(args []string) error {
 	if err := setupSSH(home, os.Getenv("EGZO_TOKEN"), filepath.Join(proxy.AgentCADir, "ssh_config")); err != nil {
 		fmt.Fprintf(os.Stderr, "egzo: could not set up ssh: %v\n", err)
 	}
+	// The proxy publishes the servers again whenever `up` loads a policy: follow it, so that a server added to the profile
+	// is reached without restarting the agent, and a removed one leaves its config.
+	go followSSH(home, os.Getenv("EGZO_TOKEN"), filepath.Join(proxy.AgentCADir, "ssh_config"), sshFollowInterval, nil)
 
 	if hasIntegration {
 		options := harness.Options{
