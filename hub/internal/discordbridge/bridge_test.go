@@ -140,7 +140,9 @@ func (w *world) calls(prefix string) []string {
 	return out
 }
 
-func command(sub ...any) map[string]any { return map[string]any{"name": "egzo", "type": 1, "options": sub} }
+func command(sub ...any) map[string]any {
+	return map[string]any{"name": "egzo", "type": 1, "options": sub}
+}
 
 func TestAPersonLinksAddsAnAgentTalksToItAndAnswersItsQuestionWithAButton(t *testing.T) {
 	w := setup(t)
@@ -192,7 +194,7 @@ func TestAPersonLinksAddsAnAgentTalksToItAndAnswersItsQuestionWithAButton(t *tes
 	var body struct {
 		Components      json.RawMessage
 		Flags           int
-		AllowedMentions discord.AllowedMentions `json:"allowed_mentions"`
+		AllowedMentions discord.AllowedMentions   `json:"allowed_mentions"`
 		Reference       *discord.MessageReference `json:"message_reference"`
 	}
 	_ = posted.JSON(&body)

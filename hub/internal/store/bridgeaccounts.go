@@ -107,6 +107,11 @@ func (s *Store) BridgeAccounts(ctx context.Context, bridge string) ([]BridgeAcco
 	return scanBridgeAccounts(s.db.QueryContext(ctx, bridgeAccountSelect+`WHERE b.bridge = ? ORDER BY b.linked_at`, bridge))
 }
 
+// AllBridgeAccounts lists every linked account, for the operator's list of users.
+func (s *Store) AllBridgeAccounts(ctx context.Context) ([]BridgeAccount, error) {
+	return scanBridgeAccounts(s.db.QueryContext(ctx, bridgeAccountSelect+`ORDER BY b.bridge, b.linked_at`))
+}
+
 // BridgeAccountsOf lists a user's linked accounts.
 func (s *Store) BridgeAccountsOf(ctx context.Context, userID string) ([]BridgeAccount, error) {
 	return scanBridgeAccounts(s.db.QueryContext(ctx, bridgeAccountSelect+`WHERE b.user_id = ? ORDER BY b.bridge, b.linked_at`, userID))

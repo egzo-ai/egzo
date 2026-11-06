@@ -24,6 +24,10 @@ type chatAccountJSON struct {
 	Linked  time.Time `json:"linked"`
 }
 
+func chatAccountOf(a store.BridgeAccount) chatAccountJSON {
+	return chatAccountJSON{Bridge: a.Bridge, Account: a.ExternalID, Name: a.ExternalName, Linked: a.Linked.UTC()}
+}
+
 // peekChatLink says which chat account a code is for.
 func (s *Server) peekChatLink(w http.ResponseWriter, r *http.Request, user store.User) {
 	var body struct{ Code string }
@@ -55,7 +59,7 @@ func (s *Server) confirmChatLink(w http.ResponseWriter, r *http.Request, user st
 		s.problem(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, chatAccountJSON{Bridge: a.Bridge, Account: a.ExternalID, Name: a.ExternalName, Linked: a.Linked.UTC()})
+	writeJSON(w, http.StatusOK, chatAccountOf(a))
 }
 
 // chatAccounts lists the chat accounts the user linked.
@@ -67,7 +71,7 @@ func (s *Server) chatAccounts(w http.ResponseWriter, r *http.Request, user store
 	}
 	out := make([]chatAccountJSON, 0, len(list))
 	for _, a := range list {
-		out = append(out, chatAccountJSON{Bridge: a.Bridge, Account: a.ExternalID, Name: a.ExternalName, Linked: a.Linked.UTC()})
+		out = append(out, chatAccountOf(a))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
 }
