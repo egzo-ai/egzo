@@ -571,7 +571,11 @@ func agentContainer(
 			paths = append(paths, mount.Mount)
 		}
 		env2 := "EGZO_WORKSPACES=" + strings.Join(paths, ":")
-		spec.Env = append(spec.Env, env2)
+		described, err := json.Marshal(describeWorkspaces(project, agent, name))
+		if err != nil {
+			return spec, err
+		}
+		spec.Env = append(spec.Env, env2, harness.WorkspacesEnv+"="+string(described))
 		sort.Strings(spec.Env)
 	}
 

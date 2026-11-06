@@ -71,6 +71,7 @@ def sandbox(shared_project, engine, egzo):
                 "oc-asks": agent(harness="opencode", image=oc, permissions="default"),
                 "cc-scripted": agent(harness="claude-code", image=cc, workspaces=["scratch"], env={"ANTHROPIC_BASE_URL": f"http://127.0.0.1:{STUB_PORT}"}, **quick),
                 "oc-scripted": agent(harness="opencode", image=oc, workspaces=["scratch"], model="anthropic/claude-sonnet-5-5", **quick),
+                "cc-shared": agent(harness="claude-code", image=cc, workspaces=["scratch", "two:ro"]),
                 "cc-ports": agent(harness="claude-code", image=cc, ports={"web": "5173/http", "db": "5432/tcp"}),
                 "emit": agent(harness="custom", image=engine.session_image(egzo.binary), env={"FAKE_TUI": "emit"}),
             },
@@ -191,6 +192,21 @@ def test_an_agent_with_ports_is_told_them_and_one_without_is_told_nothing_about_
     assert "expose" not in untold and "0.0.0.0" not in untold
     assert "EGZO_PORTS" not in env_of(engine, p, plain)
     assert not [r for r in engine.resources(p.name) if r.name == f"{p.name}-{plain}-relay-1"], "an agent without ports has no relay"
+
+
+def test_an_agent_is_told_its_directory_workspaces_and_one_without_workspaces_is_told_nothing_about_them(sandbox, engine):
+    p = sandbox
+    shared, plain = p.spawn("cc-shared", "cc-s", timeout=900), p.spawn("cc-ports", "cc-n", timeout=900)
+    told = read(engine, p, shared, "$HOME/.egzo/instructions.md")
+    for needed in ("/workspace/scratch", "/workspace/two", "read-only for you", "you can read and write it", "sees the same files"):
+        assert needed in told, f"an agent with directory workspaces is not told {needed}"
+    assert "git show" not in told, "an agent with no git workspace is not told how to hand over commits"
+    assert json.loads(env_of(engine, p, shared)["EGZO_WORKSPACE_INFO"]) == [
+        {"name": "scratch", "kind": "directory", "path": "/workspace/scratch", "mode": "rw"},
+        {"name": "two", "kind": "directory", "path": "/workspace/two", "mode": "ro"},
+    ]
+    assert "Your workspaces" not in read(engine, p, plain, "$HOME/.egzo/instructions.md")
+    assert "EGZO_WORKSPACE_INFO" not in env_of(engine, p, plain)
 
 
 def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_report_to_control_and_reach_its_tools(sandbox, engine):

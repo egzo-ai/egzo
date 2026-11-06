@@ -84,6 +84,15 @@ workspace) and the base at `/workspace/shop/.base`, never another agent's worktr
   (`coder-2`) skips the names that left a worktree volume or a branch behind.
 - A git workspace cannot be `:ro`; git needs to write. For read-only files, use a directory workspace.
 
+## What an agent is told
+
+Each agent is told its own workspaces when it starts, in its instructions: the path of each, whether it is a directory (the same
+files for every agent that lists it, read-only with `:ro`) or a git worktree (its own, on the branch `egzo/<instance>`, started from the
+configured branch), and how to hand code to another agent: commit it and send the branch and commit, which the other reads with
+`git show` from the shared base, without a push. It is never told which other templates list a workspace, or anything else about them:
+what agents need to know to work together (who can reach what, whom to ask) belongs in their [prompts](project-file.md). A `custom`
+image gets the same description as JSON in `EGZO_WORKSPACE_INFO`.
+
 ## What removes what
 
 | | directory volume | base clone | worktree volume |

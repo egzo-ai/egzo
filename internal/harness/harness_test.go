@@ -445,7 +445,7 @@ func TestAnExistingMoreOpenFileBecomesPrivateWhenThePlanSaysSo(t *testing.T) {
 }
 
 func TestAnAgentWithPortsIsToldThemAndOneWithoutIsToldNothingAboutPorts(t *testing.T) {
-	none := string(Instructions("", nil))
+	none := string(Instructions("", nil, nil))
 	for _, word := range []string{"expose", "0.0.0.0", "declares", "unexpose"} {
 		if strings.Contains(none, word) {
 			t.Errorf("an agent without ports is told about %q", word)
@@ -455,20 +455,47 @@ func TestAnAgentWithPortsIsToldThemAndOneWithoutIsToldNothingAboutPorts(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	told := string(Instructions("my prompt", ports))
+	told := string(Instructions("my prompt", ports, nil))
 	for _, needed := range []string{"web (port 5173, http)", "db (port 5432, tcp)", "0.0.0.0", "expose(name, where)", `"hub"`, `"local"`, "unexpose(name)", "my prompt"} {
 		if !strings.Contains(told, needed) {
 			t.Errorf("an agent with ports is not told %q:\n%s", needed, told)
 		}
 	}
 	local, _ := ParsePorts(`{"ports":{"db":"5432/tcp"},"hub":false,"local":true}`)
-	if text := string(Instructions("", local)); strings.Contains(text, `"hub"`) || !strings.Contains(text, `"local"`) {
+	if text := string(Instructions("", local, nil)); strings.Contains(text, `"hub"`) || !strings.Contains(text, `"local"`) {
 		t.Errorf("only the places this project has are offered:\n%s", text)
 	}
 	if none, err := ParsePorts(""); none != nil || err != nil {
 		t.Error("no value is no ports")
 	}
 	if _, err := ParsePorts("{"); err == nil {
+		t.Error("a value that is not JSON was taken")
+	}
+}
+
+func TestAnAgentIsToldItsWorkspacesAndHowToHandCodeToAnother(t *testing.T) {
+	none := string(Instructions("", nil, nil))
+	if strings.Contains(none, "Your workspaces") || strings.Contains(none, "worktree") {
+		t.Errorf("an agent without workspaces is told about them:\n%s", none)
+	}
+	value := `[{"name":"repo","kind":"git","path":"/workspace/repo/coder-1","mode":"rw","branch":"egzo/coder-1","from":"main"},` +
+		`{"name":"docs","kind":"directory","path":"/workspace/docs","mode":"ro"}]`
+	workspaces, err := ParseWorkspaces(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	told := string(Instructions("my prompt", nil, workspaces))
+	for _, needed := range []string{"/workspace/repo/coder-1", "egzo/coder-1", "started from main", "/workspace/docs", "read-only for you",
+		"git show", "Never run git worktree prune", "my prompt"} {
+		if !strings.Contains(told, needed) {
+			t.Errorf("an agent with workspaces is not told %q:\n%s", needed, told)
+		}
+	}
+	dirs, _ := ParseWorkspaces(`[{"name":"docs","kind":"directory","path":"/workspace/docs","mode":"rw"}]`)
+	if text := string(Instructions("", nil, dirs)); strings.Contains(text, "git show") || !strings.Contains(text, "you can read and write it") {
+		t.Errorf("an agent with only a directory workspace is told about git, or not that it may write:\n%s", text)
+	}
+	if _, err := ParseWorkspaces("{"); err == nil {
 		t.Error("a value that is not JSON was taken")
 	}
 }

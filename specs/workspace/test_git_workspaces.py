@@ -158,6 +158,17 @@ def test_spawn_gives_each_instance_its_own_worktree_volume_on_its_own_branch_of_
     assert refused.returncode != 0 and not has_file(engine, p, "/workspace/repo/.base/README", None)
 
 
+def test_an_instance_is_told_its_own_worktrees_their_branches_and_nothing_about_other_agents(sandbox, engine):
+    p = sandbox
+    p.spawn("pair", "duo")
+    env = dict(e.split("=", 1) for e in engine.instance(p.name, "duo").raw["Config"]["Env"])
+    told = json.loads(env["EGZO_WORKSPACE_INFO"])
+    assert told == [
+        {"name": "repo", "kind": "git", "path": "/workspace/repo/duo", "mode": "rw", "branch": "egzo/duo"},
+        {"name": "other", "kind": "git", "path": "/workspace/other/duo", "mode": "rw", "branch": "egzo/duo", "from": "test"},
+    ], "each git workspace is described with the instance's own worktree and branch, and the branch it started from when one is configured"
+
+
 def test_the_fetch_goes_through_the_proxy_as_the_instance_and_no_credential_or_hook_reaches_an_agent(sandbox, engine):
     p = sandbox
     p.spawn("coder", "issue-9")

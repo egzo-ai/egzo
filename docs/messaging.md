@@ -47,7 +47,10 @@ not change gets nothing; a new agent gets its access without a message. An agent
 change closes the one it has not resolved and says everything that changed since. Nobody can send a message to `egzo`.
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
-request). Agents never share a network: this is the only path between them.
+request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
+paths between them. Each agent is told its own [workspaces](workspaces.md#what-an-agent-is-told) and how to hand over code;
+`agents` gives the other agents' names and activity, nothing more. What an agent needs to know about the others (for example "to
+reach service X, ask agent Y") belongs in its prompt.
 
 ## Ports an agent opens
 

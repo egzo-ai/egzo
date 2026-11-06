@@ -170,6 +170,11 @@ func runAgent(args []string) error {
 			return err
 		}
 		options.Ports = ports
+		workspaces, err := harness.ParseWorkspaces(os.Getenv(harness.WorkspacesEnv))
+		if err != nil {
+			return err
+		}
+		options.WorkspaceInfo = workspaces
 		plan, err := integration.Plan(options, args)
 		if err != nil {
 			return err
