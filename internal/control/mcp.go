@@ -98,6 +98,8 @@ type idResult struct {
 
 type listResult struct {
 	Messages []Message `json:"messages"`
+	// Sent is what the agent asked of others and is still waiting for, with where each stands and its latest update.
+	Sent []Sent `json:"sent"`
 }
 
 type agentsResult struct {
@@ -114,13 +116,15 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_messages",
 		Description: "List the messages you still have to deal with: requests and questions you were told about or fetched and have not " +
-			"resolved, plus replies and updates you have not read. Use it when you start, and whenever you are unsure what is open.",
+			"resolved, plus replies and updates you have not read. Use it when you start, and whenever you are unsure what is open. " +
+			"It also lists, under sent, what you asked of others and is not resolved yet: whether it was fetched, and the latest update on it, " +
+			"since updates are never announced.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, listResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
 			return nil, listResult{}, err
 		}
-		return nil, listResult{Messages: a.server.listFor(agent)}, nil
+		return nil, listResult{Messages: a.server.listFor(agent), Sent: a.server.sentBy(agent)}, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

@@ -30,6 +30,7 @@ ID = r"m[0-9a-f]{32}"
 REQUEST = re.compile(rf"^check egzo message ({ID}) and handle the request for me\.$")
 FROM_AGENT = re.compile(rf"^egzo message ({ID}) from another agent is waiting: fetch it and decide whether it fits your work\.$")
 REPLY = re.compile(rf"^egzo message ({ID}) is the reply to your earlier request: fetch it\.$")
+ANSWER = re.compile(rf"^egzo message ({ID}) answers your question on request ({ID}): fetch it\.$")
 
 
 def harness(image, *, inject=None, **env):
@@ -215,17 +216,19 @@ def test_a_request_is_announced_with_a_short_line_the_agent_fetches_and_resolves
     assert len(view.prompts(name)) == 5, "an update is not announced: only the five requests are"
 
 
-def test_a_question_makes_the_agent_wait_and_the_answer_is_announced_to_it(view):
+def test_a_question_makes_the_agent_wait_and_the_answer_is_announced_to_it_as_the_answer_on_its_request(view):
     p = view.project
     name = view.spawn()
     view.wait_activity(name, "idle")
-    p.ok("message send", name, "deploy it, and need-answer first")
+    request = p.ok("message send", name, "deploy it, and need-answer first").stdout.split()[1]
     question = wait_for(lambda: next((r for r in view.messages().values() if r["KIND"] == "question" and r["FROM"] == f"agent:{name}"), None), "the question", timeout=60)
     view.wait_activity(name, "idle")  # asking ends the turn
     row = next(r for r in table(p.ok("ps").stdout) if r["NAME"] == name)
     assert row["WAITING"] == "yes" and row["OPEN"] == "1"
     p.ok("message reply", question["ID"], "to staging")
-    wait_for(lambda: any(REPLY.match(line) for line in view.prompts(name)), "the answer to be announced", timeout=60)
+    answer = wait_for(lambda: next((m for m in map(ANSWER.match, view.prompts(name)) if m), None), "the answer to be announced", timeout=60)
+    assert answer.group(2) == request, "the answer names the request the question was asked on"
+    assert not any(REPLY.match(line) for line in view.prompts(name)), "an answer is not announced as the reply to a request"
     assert next(r for r in table(p.ok("ps").stdout) if r["NAME"] == name)["WAITING"] == ""
 
 

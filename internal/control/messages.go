@@ -96,12 +96,16 @@ var outcomes = map[string]bool{"done": true, "declined": true, "failed": true}
 
 // Message is one message and where it stands, derived from the log.
 type Message struct {
-	ID       string    `json:"id"`
-	From     string    `json:"from"`
-	To       string    `json:"to"`
-	Kind     string    `json:"kind"`
-	Text     string    `json:"text"`
-	Re       string    `json:"re,omitempty"`
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+	Re   string `json:"re,omitempty"`
+	// ReKind is, for a resolution, the kind of the message it closes (request or question), and On, for the answer to a
+	// question, the request the question was asked about: the reader knows an answer from a result.
+	ReKind   string    `json:"re_kind,omitempty"`
+	On       string    `json:"on,omitempty"`
 	State    string    `json:"state"`
 	Outcome  string    `json:"outcome,omitempty"`
 	Choices  []string  `json:"choices,omitempty"`
@@ -153,10 +157,17 @@ func (s *store) index(event Event) {
 		if json.Unmarshal(event.Data, &data) != nil || event.ID == "" {
 			return
 		}
-		s.messages[event.ID] = &Message{
+		m := &Message{
 			ID: event.ID, From: event.Actor, To: data.To, Kind: data.Kind, Text: event.Text, Re: data.Re,
 			State: stateQueued, Outcome: data.Outcome, Choices: data.Choices, Time: event.Time, Hops: data.Hops,
 		}
+		if closed := s.messages[data.Re]; data.Kind == kindResolution && closed != nil {
+			m.ReKind = closed.Kind
+			if closed.Kind == kindQuestion {
+				m.On = closed.Re
+			}
+		}
+		s.messages[event.ID] = m
 		s.order = append(s.order, event.ID)
 		if from := agentOf(event.Actor); from != "" && data.Kind == kindQuestion {
 			s.waiting[from]++
@@ -606,6 +617,39 @@ func (s *server) listFor(agent string) []Message {
 		}
 		return false
 	})
+}
+
+// Sent is a request or question an agent sent and that is not resolved, as its sender sees it: where it stands
+// (queued, announced, fetched, unconfirmed) and the latest update on it.
+type Sent struct {
+	Message
+	LatestUpdate *Note `json:"latest_update,omitempty"`
+}
+
+// Note is an update as a sender sees it on what it sent.
+type Note struct {
+	Text string    `json:"text"`
+	Time time.Time `json:"time"`
+}
+
+// sentBy is what an agent asked of others and is still waiting for: updates are never announced, so this is where the
+// sender sees them, and whether its request was fetched at all.
+func (s *server) sentBy(agent string) []Sent {
+	from := "agent:" + agent
+	out := []Sent{}
+	open := s.events.messagesOf(from, func(m Message) bool {
+		return m.From == from && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
+	})
+	for _, m := range open {
+		sent := Sent{Message: m}
+		updates := s.events.messagesOf(from, func(u Message) bool { return u.To == from && u.Kind == kindUpdate && u.Re == m.ID })
+		if len(updates) > 0 {
+			latest := updates[len(updates)-1]
+			sent.LatestUpdate = &Note{Text: latest.Text, Time: latest.Time}
+		}
+		out = append(out, sent)
+	}
+	return out
 }
 
 // overlay is what an agent owes: the requests it fetched and has not resolved, and whether a question

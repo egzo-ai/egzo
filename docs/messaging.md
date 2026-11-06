@@ -29,7 +29,7 @@ Agents get an `egzo` MCP server with these tools:
 
 | tool | use |
 |---|---|
-| `list_messages` | what the agent owes: open requests and questions, unread replies |
+| `list_messages` | what the agent owes: open requests and questions, unread replies; and under `sent`, what it asked of others and is not resolved, with its state (`queued`, `announced`, `fetched`, `unconfirmed`) and the latest update, since updates are never announced |
 | `get_message` | read a message addressed to it |
 | `resolve` | close a request or question with a result (`done`, `declined`, `failed`) |
 | `update` | a progress note for whoever asked |

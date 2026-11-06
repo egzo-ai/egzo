@@ -140,6 +140,29 @@ def test_agents_lists_the_others_with_their_activity_and_open_counts_and_status_
     assert "refactoring the parser" not in next(line for line in lines if b.name in line.split())
 
 
+def test_a_sender_sees_whether_what_it_sent_was_fetched_and_its_latest_update_until_it_is_resolved(pair):
+    a, b = pair
+    code, body = a.send(b.address, "count the files")
+    assert code in (200, 201)
+    sent = body["id"]
+
+    def mine():
+        code, listed = a.call("GET", "/v1/messages?sent=1")
+        assert code == 200
+        return {item["id"]: item for item in listed}
+
+    assert mine()[sent]["state"] == "queued" and "latest_update" not in mine()[sent]
+    b.get(sent)
+    assert b.call("POST", f"/v1/messages/{sent}/update", {"text": "counting now"})[0] == 201
+    seen = mine()[sent]
+    assert seen["state"] == "fetched" and seen["to"] == b.address and seen["latest_update"]["text"] == "counting now"
+    listed = a.tool("list_messages")["structuredContent"]
+    assert [item["id"] for item in listed["sent"]] == [sent], "list_messages lists what the agent sent, under sent"
+    assert sent not in {item["id"] for item in b.call("GET", "/v1/messages?sent=1")[1]}, "the recipient does not see it as sent"
+    b.resolve(sent, "230")
+    assert sent not in mine(), "a resolved request leaves the sender's list"
+
+
 def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team):
     coder, reviewer = team.coder, team.reviewer
     secret = "ghp_SPECSECRETSPECSECRETSPECSECRET"

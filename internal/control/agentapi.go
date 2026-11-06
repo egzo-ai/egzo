@@ -149,6 +149,10 @@ func (a *agentAPI) status(w http.ResponseWriter, r *http.Request, agent string) 
 }
 
 func (a *agentAPI) list(w http.ResponseWriter, r *http.Request, agent string) {
+	if r.URL.Query().Get("sent") != "" {
+		reply(w, http.StatusOK, a.server.sentBy(agent))
+		return
+	}
 	reply(w, http.StatusOK, a.server.listFor(agent))
 }
 

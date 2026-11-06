@@ -705,7 +705,7 @@ the typed line a user's authority, and makes a retry safe because the announceme
 
 | Tool | What it does |
 |---|---|
-| `list_messages()` | The agent's own open items: requests and questions it has been announced or has fetched and not resolved, and unread resolutions and updates. After a restart, or when context was compacted and ids were lost, this is how it finds what it owes. Never shows what was not announced yet. |
+| `list_messages()` | The agent's own open items: requests and questions it has been announced or has fetched and not resolved, and unread resolutions and updates. After a restart, or when context was compacted and ids were lost, this is how it finds what it owes. Never shows what was not announced yet. Also `sent`: the requests and questions it sent that are not resolved, with their state and latest update (`GET /v1/messages?sent=1`), so a sender sees progress and delivery without updates being announced. |
 | `get_message(id)` | Fetch one message addressed to the agent: sender, kind, text, `re`, time. Marks it `fetched`. |
 | `resolve(id, text, outcome)` | Close a request or question with a result. Sends a `resolution` to the sender. Terminal. |
 | `update(id, text)` | A progress note for the sender of request `id`. Agents are told to send one when they need time. |
@@ -731,7 +731,8 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 |---|---|
 | request from `operator` or a `user` | `check egzo message <id> and handle the request for me.` |
 | request or question from an `agent` | `egzo message <id> from another agent is waiting: fetch it and decide whether it fits your work.` |
-| resolution (a result or an answer) | `egzo message <id> is the reply to your earlier request: fetch it.` |
+| resolution (a result) | `egzo message <id> is the reply to your earlier request: fetch it.` |
+| resolution of a question (an answer) | `egzo message <id> answers your question on request <request id>: fetch it.` A resolution carries `re_kind` (the kind it closes) and, for an answer, `on` (the request the question was asked about). |
 | several of one kind | `check egzo messages <id1>, <id2> and handle each one.` (wording of the kind, ids listed) |
 
   A message pending when the harness starts is announced the same way once its TUI is ready.

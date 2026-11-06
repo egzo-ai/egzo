@@ -468,3 +468,59 @@ func TestEventsOfAConversationAreFiledUnderTheAgentInvolved(t *testing.T) {
 		}
 	}
 }
+
+func TestASenderSeesWhereWhatItSentStandsAndItsLatestUpdateUntilItIsResolved(t *testing.T) {
+	r := newRig(t)
+	r.project("lead", "helper")
+	sent := func() []Sent {
+		var out []Sent
+		decode(t, r.asAgent("lead", "GET", "/v1/messages?sent=1", ""), &out)
+		return out
+	}
+	response := r.asAgent("lead", "POST", "/v1/messages", `{"to":"agent:helper","text":"count the files"}`)
+	var created struct{ ID string }
+	decode(t, response, &created)
+	if got := sent(); len(got) != 1 || got[0].ID != created.ID || got[0].State != stateQueued || got[0].LatestUpdate != nil {
+		t.Fatalf("right after sending: %+v", got)
+	}
+	r.asAgent("helper", "GET", "/v1/messages/"+created.ID, "").Body.Close()
+	r.asAgent("helper", "POST", "/v1/messages/"+created.ID+"/update", `{"text":"first half"}`).Body.Close()
+	r.asAgent("helper", "POST", "/v1/messages/"+created.ID+"/update", `{"text":"counting now"}`).Body.Close()
+	got := sent()
+	if len(got) != 1 || got[0].State != stateFetched || got[0].LatestUpdate == nil || got[0].LatestUpdate.Text != "counting now" {
+		t.Fatalf("after a fetch and two updates: %+v", got)
+	}
+	var others []Sent
+	decode(t, r.asAgent("helper", "GET", "/v1/messages?sent=1", ""), &others)
+	if len(others) != 0 {
+		t.Errorf("the recipient sees the sender's request as its own: %+v", others)
+	}
+	r.asAgent("helper", "POST", "/v1/messages/"+created.ID+"/resolve", `{"text":"230","outcome":"done"}`).Body.Close()
+	if got := sent(); len(got) != 0 {
+		t.Errorf("a resolved request is still listed: %+v", got)
+	}
+}
+
+func TestAnAnswerToAQuestionSaysSoAndNamesTheRequest(t *testing.T) {
+	r := newRig(t)
+	r.project("lead", "helper")
+	response := r.asAgent("lead", "POST", "/v1/messages", `{"to":"agent:helper","text":"report a constant"}`)
+	var request struct{ ID string }
+	decode(t, response, &request)
+	r.asAgent("helper", "GET", "/v1/messages/"+request.ID, "").Body.Close()
+	var question struct{ ID string }
+	decode(t, r.asAgent("helper", "POST", "/v1/messages/"+request.ID+"/ask", `{"text":"which one?"}`), &question)
+	r.asAgent("lead", "GET", "/v1/messages/"+question.ID, "").Body.Close()
+	r.asAgent("lead", "POST", "/v1/messages/"+question.ID+"/resolve", `{"text":"the first","outcome":"done"}`).Body.Close()
+	r.idle("helper")
+	claimed := r.claim("helper", time.Minute)
+	want := "answers your question on request " + request.ID + ": fetch it."
+	if !strings.Contains(claimed.Line, want) || strings.Contains(claimed.Line, "reply to your earlier request") {
+		t.Errorf("announced %q, want it to contain %q", claimed.Line, want)
+	}
+	var got Message
+	decode(t, r.asAgent("helper", "GET", "/v1/messages/"+claimed.IDs[0], ""), &got)
+	if got.ReKind != kindQuestion || got.On != request.ID || got.Text != "the first" {
+		t.Errorf("fetched %+v", got)
+	}
+}
