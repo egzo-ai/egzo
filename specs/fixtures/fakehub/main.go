@@ -49,6 +49,7 @@ type registration struct {
 
 	peer  *hublink.Peer
 	feeds map[string][]json.RawMessage
+	after int // the sequence number of the last event of the events feed
 }
 
 type hub struct {
@@ -126,6 +127,17 @@ func (h *hub) link(w http.ResponseWriter, r *http.Request) {
 		Project: func(u hublink.ProjectUpdate) { record(hublink.FeedProject, u) },
 		Status:  func(s hublink.StatusLine) { record(hublink.FeedStatus, s) },
 		Audit:   func(e hublink.AuditEvent) { record(hublink.FeedAudit, e) },
+		Events: func(e hublink.Event) {
+			record(hublink.FeedEvents, e)
+			h.mu.Lock()
+			reg.after = max(reg.after, e.Seq)
+			h.mu.Unlock()
+		},
+		After: func() int { // where the events feed resumes: past the last event this hub has
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return reg.after
+		},
 		Unlink: func() hublink.Verdict {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -160,6 +172,8 @@ func answer(w http.ResponseWriter, value any) {
 type verbRequest struct {
 	Project, Verb, Template, Name, Actor, Agent, Container, Input string
 	Workspace, Instance                                           string // files
+	Text, Key, Message, Outcome                                   string // send, resolve
+	Interrupt                                                     bool   // send
 	Tail, Limit, Port                                             int
 	Seconds                                                       float64
 	HalfClose                                                     bool // forward: end the input, then read the answer
@@ -211,6 +225,11 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 		var out bytes.Buffer
 		_, _ = io.Copy(&out, conn)
 		return out.String(), steps, nil
+	case hublink.VerbSend:
+		result, err := peer.SendMessage(ctx, q.Agent, q.Actor, q.Text, q.Key, q.Interrupt)
+		return result, steps, err
+	case hublink.VerbResolve:
+		return nil, steps, peer.Resolve(ctx, q.Message, q.Actor, q.Text, q.Outcome)
 	case hublink.VerbWorkspaces:
 		result, err := peer.Workspaces(ctx)
 		return result, steps, err

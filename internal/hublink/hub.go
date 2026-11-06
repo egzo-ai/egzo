@@ -110,10 +110,13 @@ func (p *Peer) Closed() <-chan struct{} { return p.session.CloseChan() }
 // untrusted: names, status lines and audit events are data.
 type Handlers struct {
 	// Since says where the audit feed begins.
-	Since   func() time.Time
+	Since func() time.Time
+	// After says where the events feed begins: the sequence number of the last event the hub has, or zero for only the new ones.
+	After   func() int
 	Project func(ProjectUpdate)
 	Status  func(StatusLine)
 	Audit   func(AuditEvent)
+	Events  func(Event)
 	// Unlink is the link asking to be forgotten; the verdict it returns goes back to the link, and is the last thing on the connection.
 	Unlink func() Verdict
 	// Pace is called with the bytes read from a feed, before they are looked at, and holds the feed back for as long as it should wait:
@@ -123,7 +126,7 @@ type Handlers struct {
 
 // maxFeeds is how many streams a link may hold open towards the hub: one per feed, and as many again for feeds that are being opened
 // again. What a link does is untrusted, and each stream is a goroutine of the hub.
-const maxFeeds = 6
+const maxFeeds = 8
 
 // Run takes what the link sends until the connection ends.
 func (p *Peer) Run(ctx context.Context, h Handlers) error {
@@ -198,6 +201,9 @@ func (p *Peer) feed(stream net.Conn, h Handlers) error {
 	if open.Feed == FeedAudit && h.Since != nil {
 		start.Since = h.Since()
 	}
+	if open.Feed == FeedEvents && h.After != nil {
+		start.After = h.After()
+	}
 	if err := lines.Write(start); err != nil {
 		return err
 	}
@@ -208,6 +214,8 @@ func (p *Peer) feed(stream net.Conn, h Handlers) error {
 		return follow(lines, h.Status)
 	case FeedAudit:
 		return follow(lines, h.Audit)
+	case FeedEvents:
+		return follow(lines, h.Events)
 	}
 	return fmt.Errorf("no feed %q", open.Feed)
 }
@@ -311,6 +319,18 @@ func (p *Peer) Published(ctx context.Context) (Published, error) {
 func (p *Peer) Spawn(ctx context.Context, template, name, actor string, progress func(string)) (string, error) {
 	var agent string
 	return agent, p.ask(ctx, Request{Verb: VerbSpawn, Template: template, Name: name, Actor: actor}, progress, &agent)
+}
+
+// SendMessage sends what one of the hub's users said to an agent. actor is user:<id>; key is the platform's id of the message, and the
+// same key is the same message.
+func (p *Peer) SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error) {
+	var sent Sent
+	return sent, p.ask(ctx, Request{Verb: VerbSend, Agent: agent, Actor: actor, Text: text, Key: key, Interrupt: interrupt}, nil, &sent)
+}
+
+// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done.
+func (p *Peer) Resolve(ctx context.Context, message, actor, text, outcome string) error {
+	return p.ask(ctx, Request{Verb: VerbResolve, Message: message, Actor: actor, Text: text, Outcome: outcome}, nil, nil)
 }
 
 // Start starts an instance.

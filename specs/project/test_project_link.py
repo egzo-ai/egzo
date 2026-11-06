@@ -13,8 +13,9 @@ import time
 
 import pytest
 
+from agentapi import ID, Agent
 from hubkit import FakeHub, eventually, hub_host
-from support import SECRET_KEY_VARIABLE, agent, spec
+from support import SECRET_KEY_VARIABLE, agent, spec, table
 
 
 def document(engine, egzo, hub):
@@ -206,6 +207,76 @@ def test_the_feeds_are_pushed(linked, fake_hub, engine):
     container = engine.instance(p, "fromhub").name
     engine.exec(container, "curl", "-sS", "-m", "5", "https://denied.example.com")
     assert eventually(lambda: [e for e in hub.feed(p, "audit") if e.get("Host", e.get("host")) == "denied.example.com"])
+
+
+def message_events(hub, project):
+    return [e for e in hub.feed(project, "events") if e["Type"] == "message"]
+
+
+def test_the_hub_sends_a_message_for_one_of_its_users_and_sending_it_again_sends_nothing(linked, fake_hub):
+    p, hub = linked.name, fake_hub
+    first = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="hello from a chat", Key="chat-1")
+    assert ID.match(first["ID"])
+    again = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="hello from a chat", Key="chat-1")
+    assert again["ID"] == first["ID"], "the key is the platform's message id: a retry is the same message"
+    listed = [r for r in table(linked.ok("message ls").stdout) if r["ID"] == first["ID"]]
+    assert [(r["FROM"], r["TO"], r["KIND"]) for r in listed] == [("user:7", "agent:fromhub", "request")]
+
+    assert "user:" in hub.verb(p, "send", Agent="fromhub", Actor="operator", Text="x", Key="chat-2")["error"], "the hub speaks for its users only"
+    assert "user:" in hub.verb(p, "send", Agent="fromhub", Actor="agent:fromhub", Text="x", Key="chat-3")["error"]
+    assert "nobody" in hub.verb(p, "send", Agent="nobody", Actor="user:7", Text="x", Key="chat-4")["error"]
+    assert hub.verb(p, "send", Agent="fromhub", Actor="user:7", Text="x")["error"], "a send without a key could be sent twice"
+
+
+def test_the_events_feed_carries_what_an_agent_says_to_a_user_and_the_user_answers_through_the_link(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    agent = Agent(engine, linked, "fromhub")
+    sent = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="deploy it?", Key="chat-10")["ID"]
+    assert eventually(lambda: [e for e in message_events(hub, p) if e["ID"] == sent]), "what the user said is in the feed too"
+    assert agent.get(sent)["text"] == "deploy it?"
+
+    code, body = agent.call("POST", f"/v1/messages/{sent}/ask", {"text": "to staging or production?", "choices": ["staging", "production"]})
+    assert code in (200, 201), body
+    question = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "question" and e["Re"] == sent])
+    assert question, "the question reaches the hub"
+    q = question[0]
+    assert (q["Agent"], q["Actor"], q["To"], q["Text"], q["Choices"]) == ("fromhub", "agent:fromhub", "user:7", "to staging or production?", ["staging", "production"])
+
+    assert hub.verb(p, "resolve", Message=q["ID"], Actor="user:8", Text="production")["error"], "only the user it is addressed to answers it"
+    assert hub.verb(p, "resolve", Message=q["ID"], Actor="operator", Text="production")["error"], "and never as the operator"
+    hub.must(p, "resolve", Message=q["ID"], Actor="user:7", Text="staging")
+    answer = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == q["ID"]])
+    assert answer and (answer[0]["Actor"], answer[0]["To"], answer[0]["Text"]) == ("user:7", "agent:fromhub", "staging")
+
+    agent.resolve(sent, "deployed to staging")
+    result = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == sent])
+    assert result and (result[0]["To"], result[0]["Text"], result[0]["Outcome"]) == ("user:7", "deployed to staging", "done")
+
+
+def test_the_events_feed_never_carries_what_agents_say_to_each_other_or_the_operator(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    hub.must(p, "spawn", Template="web", Name="peer", Actor="user:7")
+    agent = Agent(engine, linked, "fromhub")
+    assert agent.send("agent:peer", "a secret between agents")[0] in (200, 201)
+    assert agent.send("operator", "a word for the operator")[0] in (200, 201)
+    marker = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="after them", Key="chat-20")["ID"]
+    assert eventually(lambda: [e for e in message_events(hub, p) if e["ID"] == marker])
+    for event in hub.feed(p, "events"):
+        assert "a secret between agents" not in json.dumps(event) and "a word for the operator" not in json.dumps(event)
+    between = [e for e in message_events(hub, p) if e.get("To") == "agent:peer"]
+    assert between and not between[0]["Text"], "that a message went is said, never what it says"
+    hub.must(p, "remove", Agent="peer")
+
+
+def test_the_events_feed_resumes_where_the_hub_is_after_the_connection_drops(linked, fake_hub):
+    p, hub = linked.name, fake_hub
+    before = fake_hub.registration(p)["Connections"]
+    hub.drop(p)
+    assert eventually(lambda: fake_hub.registration(p)["Connections"] > before)
+    marker = eventually(lambda: hub.verb(p, "send", Agent="fromhub", Actor="user:7", Text="after the drop", Key="chat-30").get("result"))
+    assert eventually(lambda: [e for e in message_events(hub, p) if e["ID"] == marker["ID"]])
+    seqs = [e["Seq"] for e in hub.feed(p, "events")]
+    assert seqs == sorted(set(seqs)), "nothing twice, nothing out of order"
 
 
 def test_the_hub_can_ask_nothing_else(linked, fake_hub):

@@ -123,7 +123,11 @@ type messageData struct {
 	Hops    int      `json:"hops"`
 	Outcome string   `json:"outcome,omitempty"`
 	Choices []string `json:"choices,omitempty"`
+	Key     string   `json:"key,omitempty"` // the sender's id for it: the same key from the same sender is the same message
 }
+
+// keyed is the index of what senders gave a key: sender and key -> message id.
+func keyed(from, key string) string { return from + "\x00" + key }
 
 // terminal reports whether nothing will ever be done with a message again: it is resolved, or it is a
 // reply or an update that has been read.
@@ -169,6 +173,9 @@ func (s *store) index(event Event) {
 		}
 		s.messages[event.ID] = m
 		s.order = append(s.order, event.ID)
+		if data.Key != "" {
+			s.keys[keyed(event.Actor, data.Key)] = event.ID
+		}
 		if from := agentOf(event.Actor); from != "" && data.Kind == kindQuestion {
 			s.waiting[from]++
 		}
@@ -382,6 +389,7 @@ func (s *server) rateLimit(from string, now time.Time) error {
 // sendRequest is what the verbs that create messages take.
 type sendRequest struct {
 	From, To, Text, Re, Kind string
+	Key                      string // a person's: a message with the same sender and key is not sent again
 	Choices                  []string
 	Interrupt                bool
 }
@@ -392,6 +400,15 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 	// The checks and the write are one step: concurrent senders must not each see room for one more.
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
+	if req.Key != "" {
+		if !validKey(req.Key) {
+			return Message{}, Event{}, badRequest("a key is 1 to %d printable characters", maxKeyLength)
+		}
+		if id, ok := s.events.keyedMessage(req.From, req.Key); ok {
+			m, _ := s.events.message(id)
+			return m, Event{}, nil // sent before: this is a retry
+		}
+	}
 	if !validText(req.Text) {
 		return Message{}, Event{}, badRequest("text must not be empty or longer than 16 KB")
 	}
@@ -435,6 +452,29 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 	return s.write(req, hops)
 }
 
+// maxKeyLength is the longest key a sender gives a message: a chat platform's id for it is far shorter.
+const maxKeyLength = 128
+
+func validKey(key string) bool {
+	if key == "" || len(key) > maxKeyLength {
+		return false
+	}
+	for _, r := range key {
+		if r <= 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// keyedMessage is the message a sender already sent with this key.
+func (s *store) keyedMessage(from, key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, ok := s.keys[keyed(from, key)]
+	return id, ok
+}
+
 // checkChoices keeps the quick answers an agent offers short and plain: a person reads them.
 func checkChoices(choices []string) error {
 	if len(choices) > maxChoices {
@@ -459,7 +499,7 @@ func (s *server) write(req sendRequest, hops int) (Message, Event, error) {
 	if kind == "" {
 		kind = kindRequest
 	}
-	data, _ := json.Marshal(messageData{To: req.To, Kind: kind, Re: req.Re, Hops: hops, Choices: req.Choices})
+	data, _ := json.Marshal(messageData{To: req.To, Kind: kind, Re: req.Re, Hops: hops, Choices: req.Choices, Key: req.Key})
 	id := newMessageID()
 	event, err := s.events.append(Event{Type: "message", Agent: involved(req.From, req.To), Actor: req.From, ID: id, Text: req.Text, Data: data})
 	if err != nil {
@@ -556,7 +596,7 @@ func (s *server) resolveForPerson(actor, id, text, outcome string) (string, erro
 	if !ok {
 		return "", errNoSuchMessage
 	}
-	if !isHuman(m.To) {
+	if !isHuman(m.To) || (strings.HasPrefix(actor, "user:") && m.To != actor) {
 		return "", badRequest("message %s is addressed to %s: only it can resolve it", id, m.To)
 	}
 	if m.Kind != kindRequest && m.Kind != kindQuestion {

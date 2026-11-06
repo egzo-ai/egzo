@@ -48,9 +48,10 @@ type store struct {
 	byAddress map[string][]string // address -> ids of the messages it sent or received
 	announced map[string]bool     // ids of the messages announced and not yet fetched
 	latest    map[string]AgentStatus
-	pending   map[string]bool // agents with an interrupt requested and not yet handed over
-	open      map[string]int  // agent -> requests and questions it fetched and has not resolved
-	waiting   map[string]int  // agent -> questions it asked that nobody has answered
+	pending   map[string]bool   // agents with an interrupt requested and not yet handed over
+	open      map[string]int    // agent -> requests and questions it fetched and has not resolved
+	waiting   map[string]int    // agent -> questions it asked that nobody has answered
+	keys      map[string]string // sender and key -> the id of the message it sent with that key
 }
 
 // defaultMaxLogBytes is when the log is compacted: state events, which are the bulk of it, and superseded
@@ -64,7 +65,7 @@ func newStore(path string) *store {
 	return &store{
 		path: path, wake: make(chan struct{}), maxLogBytes: defaultMaxLogBytes,
 		messages: map[string]*Message{}, byAddress: map[string][]string{}, announced: map[string]bool{},
-		latest: map[string]AgentStatus{}, pending: map[string]bool{}, open: map[string]int{}, waiting: map[string]int{},
+		latest: map[string]AgentStatus{}, pending: map[string]bool{}, open: map[string]int{}, waiting: map[string]int{}, keys: map[string]string{},
 	}
 }
 
@@ -229,6 +230,20 @@ func (s *store) since(seq int, agent string) ([]Event, <-chan struct{}) {
 		}
 	}
 	return out, s.wake
+}
+
+// start is where a reader that asked for the events after seq begins. A negative seq is the end of the log: only what comes
+// next. A seq past the end is a log that began again (the control volume was made anew): all of it is new to whoever asks.
+func (s *store) start(seq int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seq < 0 {
+		return s.lastSeq
+	}
+	if seq > s.lastSeq {
+		return 0
+	}
+	return seq
 }
 
 // all returns the whole log without copying it: the log only ever grows (or is replaced as a whole),

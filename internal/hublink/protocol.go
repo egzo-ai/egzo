@@ -112,6 +112,11 @@ const (
 	VerbWorkspaces = "workspaces"
 	// VerbFiles is a stream to the file server of one workspace volume: HTTP, GET only.
 	VerbFiles = "files"
+	// VerbSend is a message from one of the hub's users to an agent. Key makes it idempotent: the same key from the same user is the
+	// same message, however often it is sent.
+	VerbSend = "send"
+	// VerbResolve is one of the hub's users answering a question, or closing a request, that is addressed to them.
+	VerbResolve = "resolve"
 )
 
 // The feeds a link pushes.
@@ -119,6 +124,8 @@ const (
 	FeedProject = "project"
 	FeedStatus  = "status"
 	FeedAudit   = "audit"
+	// FeedEvents is the control sidecar's event stream, from the sequence number the hub has (FeedStart.After). See Event.
+	FeedEvents = "events"
 )
 
 // Hello is the link's first message.
@@ -193,6 +200,16 @@ type Request struct {
 	Port      int    `json:",omitempty"` // forward
 	Workspace string `json:",omitempty"` // files
 	Instance  string `json:",omitempty"` // files: the instance whose worktree, for a git workspace
+	Text      string `json:",omitempty"` // send, resolve
+	Key       string `json:",omitempty"` // send: makes it idempotent, the platform's id of the message
+	Interrupt bool   `json:",omitempty"` // send
+	Message   string `json:",omitempty"` // resolve: the id of the question or request
+	Outcome   string `json:",omitempty"` // resolve: done, declined or failed; "" is done
+}
+
+// Sent is what send answers: the message's id, the same however often the same key is sent.
+type Sent struct {
+	ID string
 }
 
 // Reply is a line the link answers a Request with: progress of what it does, then one with Done. After a Done without Error,
@@ -211,9 +228,11 @@ type FeedOpen struct {
 	Feed string
 }
 
-// FeedStart says where a feed begins: audit events after Since, or the end of the log's backlog when it is zero.
+// FeedStart says where a feed begins: audit events after Since, or the end of the log's backlog when it is zero; events after After.
 type FeedStart struct {
 	Since time.Time
+	// After is where the events feed begins: the events after this sequence number, or only those to come when it is zero.
+	After int
 }
 
 // ProjectUpdate is a line of the project feed: the whole project each time it changed.

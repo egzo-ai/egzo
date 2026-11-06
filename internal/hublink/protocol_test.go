@@ -588,3 +588,38 @@ func TestPreviewTemplates(t *testing.T) {
 		}
 	}
 }
+
+func TestTheEventsFeedStartsWhereTheHubSaysAndCarriesEvents(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub, control: NewLines(silence{})}
+	got := make(chan Event, 1)
+	go peer.Run(context.Background(), Handlers{
+		After:  func() int { return 41 },
+		Since:  func() time.Time { t.Error("the audit's start was asked for the events feed"); return time.Time{} },
+		Events: func(e Event) { got <- e },
+	})
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	if err := lines.Write(FeedOpen{Feed: FeedEvents}); err != nil {
+		t.Fatal(err)
+	}
+	var start FeedStart
+	if err := lines.Read(&start); err != nil || start.After != 41 {
+		t.Fatalf("start = %+v, %v", start, err)
+	}
+	sent := Event{Seq: 42, Type: "message", Agent: "coder", Actor: "agent:coder", ID: "m1", To: "user:7", Kind: "question", Text: "where?", Choices: []string{"a", "b"}}
+	if err := lines.Write(sent); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case e := <-got:
+		if e.Seq != 42 || e.To != "user:7" || e.Kind != "question" || len(e.Choices) != 2 || e.Text != "where?" {
+			t.Errorf("event = %+v", e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event never came")
+	}
+}
