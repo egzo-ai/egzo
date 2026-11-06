@@ -652,6 +652,26 @@ func (s *server) sentBy(agent string) []Sent {
 	return out
 }
 
+// deliveryCounts is where the messages for an agent stand: how many it has not fetched yet, how many are stuck
+// (unconfirmed), and since when it has waited for an answer, if it does.
+func (s *server) deliveryCounts(agent string) (queued, unconfirmed int, waitingSince *time.Time) {
+	address := "agent:" + agent
+	for _, m := range s.events.messagesOf(address, func(Message) bool { return true }) {
+		switch {
+		case m.To == address && m.Kind != kindUpdate && (m.State == stateQueued || m.State == stateAnnounced):
+			queued++
+		case m.To == address && m.Kind != kindUpdate && m.State == stateUnconfirmed:
+			unconfirmed++
+		case m.From == address && m.Kind == kindQuestion && m.State != stateResolved:
+			if waitingSince == nil || m.Time.Before(*waitingSince) {
+				t := m.Time
+				waitingSince = &t
+			}
+		}
+	}
+	return queued, unconfirmed, waitingSince
+}
+
 // overlay is what an agent owes: the requests it fetched and has not resolved, and whether a question
 // it asked is waiting for an answer.
 func (s *server) overlay(agent string) (open int, waiting bool) {

@@ -524,3 +524,43 @@ func TestAnAnswerToAQuestionSaysSoAndNamesTheRequest(t *testing.T) {
 		t.Errorf("fetched %+v", got)
 	}
 }
+
+func TestAnAgentsStatusCountsWhatIsQueuedForItWhatIsStuckAndSinceWhenItWaits(t *testing.T) {
+	r := newRig(t)
+	r.project("coder", "lead")
+	first := r.request("coder", "one")
+	r.request("coder", "two")
+	status := func(name string) AgentStatus {
+		for _, s := range r.srv.agentStatuses() {
+			if s.Agent == name {
+				return s
+			}
+		}
+		t.Fatalf("no status for %s", name)
+		return AgentStatus{}
+	}
+	if s := status("coder"); s.Queued != 2 || s.Unconfirmed != 0 || s.WaitingSince != nil {
+		t.Errorf("two requests waiting: %+v", s)
+	}
+	r.srv.fetch("coder", first)
+	asked, err := r.srv.ask("coder", first, "which one?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := status("coder"); s.Queued != 1 || s.Open != 1 || s.WaitingSince == nil {
+		t.Errorf("one fetched, a question asked: %+v", s)
+	}
+	r.srv.resolveForPerson("operator", asked, "the first", "done")
+	if s := status("coder"); s.WaitingSince != nil {
+		t.Errorf("an answered question is not waited on: %+v", s)
+	}
+	r.idle("coder")
+	for i := 0; i < maxAnnouncements; i++ {
+		r.claim("coder", time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
+	}
+	r.srv.expire(time.Now())
+	if s := status("coder"); s.Unconfirmed == 0 {
+		t.Errorf("a message announced %d times and never fetched is not stuck: %+v", maxAnnouncements, s)
+	}
+}

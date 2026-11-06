@@ -17,7 +17,7 @@ from conftest import LABEL_PREFIX
 from support import custom, spec
 
 ACTIVITIES = {"starting", "idle", "working", "blocked"}
-STATUS_FIELDS = {"agent", "status", "activity", "open", "waiting", "updated"}
+STATUS_FIELDS = {"agent", "status", "activity", "open", "waiting", "queued", "unconfirmed", "updated"}
 
 
 @pytest.fixture(scope="module")
@@ -109,6 +109,27 @@ def test_control_writes_the_status_of_the_agents_as_json_lines_on_standard_outpu
     heartbeats = eventually(lambda: [l for l in status_lines(engine, sandbox) if l["reason"] == "heartbeat"], timeout=interval + 20,
                             message=f"no heartbeat within {interval} seconds")
     assert any(s["agent"] == "coder-1" for s in heartbeats[0]["agents"]), "a heartbeat carries the whole state"
+
+
+def test_the_status_counts_what_waits_for_each_agent_and_since_when_it_waits_with_no_message_text(sandbox, engine):
+    coder = Agent(engine, sandbox, "coder-1")
+    assert coder.call("POST", "/v1/activity", {"state": "working"})[0] == 204  # nothing is announced to a working agent
+    first = sandbox.ok("message send", "coder-1", "secret plan alpha").stdout.split()[1]
+    sandbox.ok("message send", "coder-1", "secret plan beta")
+
+    def latest():
+        lines = [l for l in status_lines(engine, sandbox) if any(s["agent"] == "coder-1" for s in l["agents"])]
+        return next(s for s in lines[-1]["agents"] if s["agent"] == "coder-1") if lines else None
+
+    status = eventually(lambda: (s := latest()) and s["queued"] >= 2 and s, message="the queued messages never reached the status")
+    assert status["unconfirmed"] == 0 and "waiting_since" not in status
+    coder.get(first)
+    assert coder.call("POST", f"/v1/messages/{first}/ask", {"text": "which plan?"})[0] == 201
+    status = eventually(lambda: (s := latest()) and s.get("waiting_since") and s, message="the question never reached the status")
+    assert status["waiting"] is True and status["open"] == 1
+    assert not [l for l in status_lines(engine, sandbox) if "secret plan" in json.dumps(l) or "which plan" in json.dumps(l)], (
+        "a message's text never reaches the status"
+    )
 
 
 def test_everything_else_control_says_is_json_on_standard_error(sandbox, engine):
