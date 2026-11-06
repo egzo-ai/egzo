@@ -4,7 +4,8 @@
   import { ask } from "../lib/confirm.svelte";
   import { nav } from "../lib/router.svelte";
   import { failureText } from "../lib/signin";
-  import type { Identity } from "../lib/types";
+  import type { ChatAccount, Identity } from "../lib/types";
+  import { stamp } from "../lib/format";
   import PersonCell from "../components/PersonCell.svelte";
 
   const params = $derived(new URLSearchParams(nav.path.split("?")[1] ?? ""));
@@ -17,9 +18,29 @@
   // a way to sign in is a password (while local login is on) or an account at the current provider
   const ways = $derived((app.account.hasPassword ? 1 : 0) + (current ? 1 : 0));
 
+  let chats = $state<ChatAccount[]>([]);
+  const loadChats = () => api.chatAccounts().then((list) => (chats = list), () => {});
+
   $effect(() => {
     void refreshSession().catch(() => {});
+    void loadChats();
   });
+
+  async function unlinkChat(c: ChatAccount) {
+    const ok = await ask({
+      title: `Unlink ${c.name}?`,
+      lines: [`What this ${c.bridge} account says no longer reaches your agents, until you link it again from the chat.`],
+      confirm: "Unlink",
+    });
+    if (!ok) return;
+    try {
+      await api.unlinkChatAccount(c.bridge, c.account);
+      toast("Unlinked");
+      await loadChats();
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  }
 
   async function link() {
     busy = true;
@@ -74,6 +95,18 @@
           <button class="btn" data-size="sm" onclick={() => unlink(i)}>Unlink</button></p>
       {/each}
       {#if !app.account.sso && !current}<p class="muted" style="margin:0">The hub has no single sign-on configured.</p>{/if}
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="chats" data-testid="chat-accounts">
+    <header><h2 class="h-section" id="chats">Chat accounts</h2></header>
+    <div class="pad" style="display:grid;gap:var(--space-3)">
+      {#each chats as c (c.bridge + c.account)}
+        <p style="margin:0"><b>{c.name}</b> on {c.bridge}, linked {stamp(c.linked)}
+          <button class="btn" data-size="sm" data-variant="danger" onclick={() => unlinkChat(c)}>Unlink</button></p>
+      {:else}
+        <p class="muted" style="margin:0">None. To talk to your agents from a chat, run its register command there (on Discord, <code>/egzo register</code>) and open the link it gives you.</p>
+      {/each}
     </div>
   </section>
 </div>

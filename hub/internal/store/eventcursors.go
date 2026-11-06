@@ -66,9 +66,22 @@ func (s *Store) RecordEvent(ctx context.Context, project string, seq int, agent 
 	return out, tx.Commit()
 }
 
+// AddOutbox puts an event that is no project's message in the outbox: a change the bridges hear of. project may be empty.
+func (s *Store) AddOutbox(ctx context.Context, project, agent string, body []byte, at time.Time) (int64, error) {
+	var p any
+	if project != "" {
+		p = project
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO outbox (at, project, agent, body) VALUES (?, ?, ?, ?)`, at.UnixMilli(), p, agent, string(body))
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
 // OutboxAfter lists the outbox after seq, oldest first, at most limit entries.
 func (s *Store) OutboxAfter(ctx context.Context, after int64, limit int) ([]Outgoing, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT seq, at, project, agent, body FROM outbox WHERE seq > ? ORDER BY seq LIMIT ?`, after, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT seq, at, COALESCE(project, ''), agent, body FROM outbox WHERE seq > ? ORDER BY seq LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
 	}

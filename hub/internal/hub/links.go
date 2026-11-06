@@ -271,10 +271,32 @@ type heldProject struct {
 func (h *Hub) pushed(c *connection, update links.ProjectUpdate) {
 	project := withTemplates(cleanProject(update.Project), update.Published)
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	var gone []string
 	if c.served.Load() { // under the lock: what forgets a project stops listening first, and deletes this under the same lock
+		if before := h.held[c.project]; before != nil && before.known {
+			gone = removedAgents(before.project, project)
+		}
 		h.held[c.project] = &heldProject{project: project, known: true}
 	}
+	h.mu.Unlock()
+	for _, agent := range gone {
+		h.change(context.Background(), BridgeEvent{Type: EventAgentRemoved, Project: c.project, Agent: agent})
+	}
+}
+
+// removedAgents are the agents of before that after no longer has.
+func removedAgents(before, after links.Project) []string {
+	now := map[string]bool{}
+	for _, a := range after.Agents {
+		now[a.Name] = true
+	}
+	var gone []string
+	for _, a := range before.Agents {
+		if !now[a.Name] {
+			gone = append(gone, a.Name)
+		}
+	}
+	return gone
 }
 
 // unlinked is a link asking to be forgotten: a project is unlinked from its own file. Only an approved project can ask: one that was revoked
@@ -311,6 +333,7 @@ func (h *Hub) forget(ctx context.Context, reg store.Registration, state, action,
 	h.mu.Unlock()
 	h.feeds.forget(reg.ID)
 	h.forgetTasks(reg.ID)
+	h.change(ctx, BridgeEvent{Type: EventProjectRemoved, Project: reg.ID})
 	h.record(ctx, store.AuditEntry{Actor: actor, Action: action, Project: reg.ID, Detail: reg.Name + " on " + reg.Host, Allowed: true})
 	return nil
 }

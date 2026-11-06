@@ -18,6 +18,7 @@
   import ErrorPage from "./pages/ErrorPage.svelte";
   import Home from "./pages/Home.svelte";
   import Invite from "./pages/Invite.svelte";
+  import ChatLink from "./pages/ChatLink.svelte";
   import Project from "./pages/Project.svelte";
   import Settings from "./pages/Settings.svelte";
   import SignIn from "./pages/SignIn.svelte";
@@ -49,7 +50,7 @@
   $effect(() => {
     const r = nav.route;
     document.title =
-      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", links: "Links", invites: "Invites", audit: "Audit log", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : r.name === "invite" ? "Invite · " : "") + "egzo hub";
+      (r.name === "project" ? projectName(r.project) + " · " : r.name === "agent" ? r.agent + " · " : r.name === "settings" ? ({ users: "Users", links: "Links", invites: "Invites", audit: "Audit log", account: "Account" })[r.tab] + " · settings · " : r.name === "login" ? "Sign in · " : r.name === "invite" ? "Invite · " : r.name === "chat-link" ? "Link a chat account · " : "") + "egzo hub";
   });
 
   // the project the left nav is dedicated to; hub pages (projects, settings) have none and no left nav
@@ -80,6 +81,8 @@
   <SignIn />
 {:else if nav.route.name === "invite"}
   {#if app.ready}<Invite />{/if}
+{:else if nav.route.name === "chat-link"}
+  {#if app.ready}<ChatLink />{/if}
 {:else if app.ready && app.user}
   <div class="app" data-hub={workspace.scope === null ? "" : undefined} data-rail={workspace.rail ? "" : undefined} data-fullscreen={workspace.fullscreen && workspace.active ? "" : undefined} data-nav-open={workspace.navOpen ? "" : undefined}>
     {#if workspace.scope !== null}<Sidebar onsignout={leave} />{/if}
