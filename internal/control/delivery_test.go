@@ -307,3 +307,48 @@ func TestAgentsAreListedWithActivityAndStatus(t *testing.T) {
 		t.Errorf("agents = %+v", agents)
 	}
 }
+
+func TestAnUnconfirmedMessageIsAnnouncedAgainAfterABackoffAndNeverOnceFetched(t *testing.T) {
+	// with an ack timeout of a minute, the default: again after 5 minutes, then 15
+	r := newRig(t)
+	r.project("coder")
+	now := time.Now()
+	clock = func() time.Time { return now }
+	t.Cleanup(func() { clock = time.Now })
+	id := r.request("coder", "count")
+	r.idle("coder")
+	for i := 0; i < maxAnnouncements; i++ {
+		if got := r.claim("coder", time.Minute); len(got.IDs) != 1 {
+			t.Fatalf("announcement %d: %+v", i+1, got)
+		}
+		now = now.Add(61 * time.Second)
+	}
+	r.srv.expire(now)
+	if m, _ := r.srv.events.message(id); m.State != stateUnconfirmed {
+		t.Fatalf("state = %s", m.State)
+	}
+	now = now.Add(3 * time.Minute)
+	if got := r.claim("coder", time.Minute); len(got.IDs) != 0 {
+		t.Errorf("announced again before the backoff: %+v", got)
+	}
+	now = now.Add(3 * time.Minute)
+	if got := r.claim("coder", time.Minute); len(got.IDs) != 1 || got.IDs[0] != id {
+		t.Fatalf("not announced again after 5 minutes: %+v", got)
+	}
+	now = now.Add(61 * time.Second)
+	r.srv.expire(now)
+	now = now.Add(13 * time.Minute)
+	if got := r.claim("coder", time.Minute); len(got.IDs) != 0 {
+		t.Errorf("the second backoff is 15 minutes: %+v", got)
+	}
+	now = now.Add(3 * time.Minute)
+	if got := r.claim("coder", time.Minute); len(got.IDs) != 1 {
+		t.Fatalf("not announced again after 15 minutes: %+v", got)
+	}
+	r.srv.fetch("coder", id)
+	now = now.Add(2 * time.Hour)
+	r.srv.expire(now)
+	if got := r.claim("coder", time.Minute); len(got.IDs) != 0 {
+		t.Errorf("a fetched message was announced again: %+v", got)
+	}
+}
