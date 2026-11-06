@@ -104,7 +104,8 @@ Hooks (Claude Code) or a plugin (OpenCode) provide the activity ([harnesses](har
 ## Limits
 
 At most 20 open requests per recipient, threads at most 8 messages deep, and 30 messages a minute per sender, so a
-loop between two agents ends on its own. A message is at most 16 KB. `egzo events` streams everything as JSON
+loop between two agents ends on its own. A message is at most 16 KB, and every tool that sends a text says so in its
+description (the limit is one constant, `maxTextSize`): an agent knows it before it meets it. `egzo events` streams everything as JSON
 lines if you want to watch or script it.
 
 ## Tuning

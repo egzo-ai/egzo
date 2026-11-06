@@ -8,6 +8,7 @@ One project is up for the whole module (the `team` fixture). A spec that counts 
 a rate limit left on `coder` would show in every later spec. The people's side (`egzo message ...`) is in test_message_cli.py."""
 
 import json
+import re
 import time
 
 from agentapi import ID
@@ -211,6 +212,12 @@ def test_the_mcp_endpoint_offers_exactly_the_tools_and_acts_as_the_calling_agent
     assert {t["name"] for t in reply["result"]["tools"]} == {"list_messages", "get_message", "resolve", "update", "ask", "message", "status", "agents", "access", "expose", "unexpose"}
     descriptions = " ".join(t["description"] for t in reply["result"]["tools"])
     assert "sparingly" not in descriptions and "check_inbox" not in descriptions
+    for tool in reply["result"]["tools"]:
+        if tool["name"] in ("resolve", "update", "ask", "message"):
+            limit = re.search(r"at most (\d+) KB", tool["description"])
+            assert limit, f"{tool['name']} does not say how long its text may be"
+            code, refused = coder.send(reviewer.address, "x" * (int(limit.group(1)) * 1024 + 1))
+            assert code == 400 and f"{limit.group(1)} KB" in str(refused), "the limit it says is the one it keeps"
 
     message_id = team.send("coder", "please summarise the repo")
     got = coder.tool("get_message", id=message_id)

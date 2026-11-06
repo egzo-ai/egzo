@@ -6,6 +6,7 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -106,6 +107,9 @@ type agentsResult struct {
 	Agents []AgentStatus `json:"agents"`
 }
 
+// textLimit ends the description of every tool that sends a text: an agent knows the limit before it meets it.
+var textLimit = fmt.Sprintf(" The text is at most %d KB: put what is longer in a file of a workspace, and name the file.", maxTextSize>>10)
+
 func (a *agentAPI) mcpServer() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "egzo", Version: version.Version}, &mcp.ServerOptions{
 		Instructions: "How you receive and answer requests in this project. A short line typed in your terminal tells you a " +
@@ -143,7 +147,8 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "resolve",
 		Description: "Close a request or question you fetched, with its result. It is sent back to whoever asked, with the outcome " +
-			"(done, declined or failed). A request is not finished until you resolve it. Closing is final: a new request starts a new message.",
+			"(done, declined or failed). A request is not finished until you resolve it. Closing is final: a new request starts a new message." +
+			textLimit,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in resolveArgs) (*mcp.CallToolResult, idResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
@@ -154,8 +159,9 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update",
-		Description: "Tell whoever sent a request how it is going. Send one when the work will take a while. It does not close the request.",
+		Name: "update",
+		Description: "Tell whoever sent a request how it is going. Send one when the work will take a while. It does not close the request." +
+			textLimit,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in updateArgs) (*mcp.CallToolResult, idResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
@@ -168,7 +174,7 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "ask",
 		Description: "Ask the sender of a message something you need to know before you can finish. It returns at once and leaves the " +
-			"request open: the answer arrives later as another message, announced the same way.",
+			"request open: the answer arrives later as another message, announced the same way." + textLimit,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in askArgs) (*mcp.CallToolResult, idResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
@@ -182,7 +188,7 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 		Name: "message",
 		Description: "Send a new request to the operator, a user or another agent of this project, whenever you need something done. " +
 			"It does not close anything of yours. To have another agent do part of your work, send it a message, wait for its reply, " +
-			"then resolve your own request: a request cannot be handed over.",
+			"then resolve your own request: a request cannot be handed over." + textLimit,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in messageArgs) (*mcp.CallToolResult, idResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
@@ -201,7 +207,7 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 			return nil, okResult{}, err
 		}
 		if !validText(in.Text) {
-			return nil, okResult{}, errors.New("text must not be empty or longer than 16 KB")
+			return nil, okResult{}, errors.New(textTooLong)
 		}
 		return nil, okResult{OK: true}, a.server.reportStatus(agent, in.Text)
 	})
