@@ -36,7 +36,7 @@ Agents get an `egzo` MCP server with these tools:
 | `ask` | ask the sender a question; the answer comes back as a reply |
 | `message` | send a new request to the operator, a person or another agent |
 | `status` | one line on what it is doing, shown by `egzo ps` |
-| `agents` | the other agents, with their activity |
+| `agents` | the other agents, with their template, harness and activity |
 | `access` | what it may reach: its egress profile, the hosts it allows, each service and how to use its credential, the ssh servers (`egzo agent access` says the same) |
 | `expose` | open one of its declared ports for the hub or for the local machine, and get the address |
 | `unexpose` | close it |
@@ -49,7 +49,7 @@ change closes the one it has not resolved and says everything that changed since
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
 paths between them. Each agent is told its own [workspaces](workspaces.md#what-an-agent-is-told) and how to hand over code;
-`agents` gives the other agents' names and activity, nothing more. What an agent needs to know about the others (for example "to
+`agents` gives the other agents' names, templates, harnesses and activity, nothing more, and each agent is told its own name, template and harness. What an agent needs to know about the others (for example "to
 reach service X, ask agent Y") belongs in its prompt.
 
 ## Ports an agent opens

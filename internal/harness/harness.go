@@ -22,6 +22,8 @@ import (
 // Options is what an integration needs to know about the agent it prepares.
 type Options struct {
 	Agent string
+	// Template is the template the agent is an instance of, and Harness the harness it runs: what it is told about itself.
+	Template, Harness string
 	// Home is the agent's home directory, where the harness keeps its configuration.
 	Home string
 	// Workspaces are the directories mounted under /workspace, and Workdir the one it starts in.
@@ -366,7 +368,18 @@ func portsInstructions(ports *Ports) string {
 // Instructions is the platform instructions, then what the agent is told about its workspaces and its ports if it has any, then the agent's
 // own prompt.
 func Instructions(prompt string, ports *Ports, workspaces []Workspace) []byte {
+	return instructions(Options{Prompt: prompt, Ports: ports, WorkspaceInfo: workspaces})
+}
+
+// InstructionsFor is Instructions for an agent, with what it is told about itself first.
+func InstructionsFor(o Options) []byte { return instructions(o) }
+
+func instructions(o Options) []byte {
+	prompt, ports, workspaces := o.Prompt, o.Ports, o.WorkspaceInfo
 	text := PlatformInstructions
+	if o.Agent != "" && o.Template != "" && o.Harness != "" {
+		text += fmt.Sprintf("\nYou are the agent %s, an instance of the template %s, running on the harness %s. agents lists the others with their template and harness.\n", o.Agent, o.Template, o.Harness)
+	}
 	if len(workspaces) > 0 {
 		text += "\n" + workspacesInstructions(workspaces)
 		text = strings.TrimSuffix(text, "\n")

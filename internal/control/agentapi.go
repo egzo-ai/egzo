@@ -385,6 +385,9 @@ func (s *server) agentStatuses() []AgentStatus {
 	for name, status := range latest {
 		status.Agent = name
 		status.Open, status.Waiting = s.overlay(name)
+		if id, ok := s.readIdentity(name); ok {
+			status.Template, status.Harness = id.Template, id.Harness
+		}
 		status.Exposed = s.exposedBy(name, template)
 		out = append(out, status)
 	}

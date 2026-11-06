@@ -257,6 +257,8 @@ func (s *store) interruptPending(agent string) bool {
 // it owes (open requests, an unanswered question).
 type AgentStatus struct {
 	Agent    string     `json:"agent"`
+	Template string     `json:"template,omitempty"`
+	Harness  string     `json:"harness,omitempty"`
 	Status   string     `json:"status"`
 	Activity string     `json:"activity"`
 	Open     int        `json:"open"`

@@ -73,3 +73,39 @@ func ControlPushAccess(ctx context.Context, c *engine.Client, project, name stri
 	}
 	return nil
 }
+
+// identity is what other agents may know of an instance besides its name: its template and its harness.
+type identity struct {
+	Template string `json:"template"`
+	Harness  string `json:"harness"`
+}
+
+// pushIdentities gives the control sidecar the template and harness of each instance, in one request, for `agents`.
+func pushIdentities(ctx context.Context, c *engine.Client, project string, instances []Instance, p Published) error {
+	body := map[string]identity{}
+	for _, instance := range instances {
+		if template, ok := p.Templates[instance.Template]; ok && instance.State != "missing" {
+			body[instance.Name] = identity{Template: instance.Template, Harness: template.Agent.Harness}
+		}
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return putIdentities(ctx, c, project, body)
+}
+
+// ControlPushIdentity gives the control sidecar the template and harness of one new instance.
+func ControlPushIdentity(ctx context.Context, c *engine.Client, project, name, templateName string, template Template) error {
+	return putIdentities(ctx, c, project, map[string]identity{name: {Template: templateName, Harness: template.Agent.Harness}})
+}
+
+func putIdentities(ctx context.Context, c *engine.Client, project string, body map[string]identity) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	if _, err := ControlRequest(ctx, c, project, "PUT", "/v1/identities", data); err != nil {
+		return fmt.Errorf("tell control the agents' templates: %w", err)
+	}
+	return nil
+}

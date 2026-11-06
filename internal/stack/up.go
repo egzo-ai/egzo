@@ -175,6 +175,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 		if err := pushAccess(ctx, c, project.Name, observed.Instances(), published); err != nil {
 			return err
 		}
+		if err := pushIdentities(ctx, c, project.Name, observed.Instances(), published); err != nil {
+			return err
+		}
 	}
 	if len(plan) == 0 && !built && !pushed && !stored && !published2 {
 		fmt.Fprintln(out, "nothing to do")

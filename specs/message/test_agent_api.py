@@ -163,6 +163,20 @@ def test_a_sender_sees_whether_what_it_sent_was_fetched_and_its_latest_update_un
     assert sent not in mine(), "a resolved request leaves the sender's list"
 
 
+def test_agents_names_each_others_template_and_harness_and_nothing_else_of_it(pair, team):
+    a, b = pair
+    code, listed = a.call("GET", "/v1/agents")
+    assert code == 200
+    other = {item["agent"]: item for item in listed}[b.name]
+    assert (other["template"], other["harness"]) == ("worker", "custom")
+    for kept in ("workspaces", "egress", "prompt", "env", "image"):
+        assert kept not in other, f"agents shows a peer's {kept}"
+    team.project.ok("project up")
+    code, listed = a.call("GET", "/v1/agents")
+    assert {item["agent"]: item for item in listed}[b.name]["template"] == "worker", "up gives control the templates again"
+    assert a.exec("echo $EGZO_TEMPLATE").stdout.strip() == "worker", "an agent knows its own template"
+
+
 def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team):
     coder, reviewer = team.coder, team.reviewer
     secret = "ghp_SPECSECRETSPECSECRETSPECSECRET"

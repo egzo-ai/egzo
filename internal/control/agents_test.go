@@ -329,3 +329,32 @@ func TestRetiringWhileMessagesAreFetchedClaimedAndSentLeavesNothingOpenOrNegativ
 		}
 	}
 }
+
+func TestAgentsShowEachAgentsTemplateAndHarnessOnceCoreGaveThemAndForgetThemOnRemoval(t *testing.T) {
+	r := newRig(t)
+	r.project("coder", "reviewer")
+	body := `{"coder":{"template":"dev","harness":"claude-code"},"reviewer":{"template":"review","harness":"codex"},"ghost":{"template":"x","harness":"y"}}`
+	if response := r.asOperator("PUT", "/v1/identities", body); response.StatusCode != http.StatusNoContent {
+		t.Fatalf("put identities: status %d", response.StatusCode)
+	}
+	var seen []AgentStatus
+	decode(t, r.asAgent("coder", "GET", "/v1/agents", ""), &seen)
+	if len(seen) != 1 || seen[0].Agent != "reviewer" || seen[0].Template != "review" || seen[0].Harness != "codex" {
+		t.Errorf("coder sees %+v", seen)
+	}
+	if _, ok := r.srv.readIdentity("ghost"); ok {
+		t.Error("an unknown agent's identity was stored")
+	}
+	r.asOperator("DELETE", "/v1/agents/reviewer", "").Body.Close()
+	r.asOperator("PUT", "/v1/agents/reviewer", "").Body.Close()
+	var after []AgentStatus
+	decode(t, r.asOperator("GET", "/v1/agents", ""), &after)
+	for _, a := range after {
+		if a.Agent == "reviewer" && (a.Template != "" || a.Harness != "") {
+			t.Errorf("a new agent of a removed one's name inherits its identity: %+v", a)
+		}
+	}
+	if response := r.asOperator("PUT", "/v1/identities", "["); response.StatusCode != http.StatusBadRequest {
+		t.Errorf("a body that is not an object: status %d", response.StatusCode)
+	}
+}

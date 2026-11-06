@@ -478,6 +478,7 @@ func agentContainer(
 	env["EGZO_CONTROL_URL"] = "http://control:7777"
 	env["EGZO_TOKEN"] = token
 	env["EGZO_HARNESS"] = agent.Harness
+	env["EGZO_TEMPLATE"] = identity.Service
 	env["EGZO_PERMISSIONS"] = agent.Permissions
 	env["EGZO_HUMAN_QUIET"] = agent.Inject.HumanQuiet
 	env["EGZO_ACK_TIMEOUT"] = agent.Inject.AckTimeout
