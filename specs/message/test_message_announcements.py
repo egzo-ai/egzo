@@ -279,16 +279,22 @@ def test_a_blocked_agent_is_told_nothing_until_a_person_unblocks_it(view):
     wait_for(lambda: len(view.of_type("announced", name)) == 2, "the second announcement after unblocking")
 
 
-def test_a_message_the_agent_never_fetches_is_announced_again_then_unconfirmed(view):
+def test_a_message_the_agent_never_fetches_is_announced_again_then_unconfirmed_then_again_after_a_backoff(view):
+    """`deaf` has an ack timeout of 2 s: three announcements 2 s apart, then unconfirmed, then one more after 5 ack timeouts (10 s),
+    and unconfirmed again until the next backoff (15 ack timeouts)."""
     name = view.spawn("deaf")
     view.wait_activity(name, "idle")
     sent = view.project.ok("message send", name, "do you hear me").stdout.split()[1]
     wait_for(lambda: view.of_type("unconfirmed", name), "the unconfirmed event", timeout=60)
-    time.sleep(6)
-    assert len(view.of_type("announced", name)) == 3, "tried three times in all, never a fourth"
+    time.sleep(4)
+    assert len(view.of_type("announced", name)) == 3, "tried three times, then waits out the backoff"
     assert len(view.prompts(name)) == 3 and all(REQUEST.match(p) for p in view.prompts(name))
     assert view.messages()[sent]["STATE"] == "unconfirmed"
     assert [m["id"] for m in view.api(name).call("GET", "/v1/messages")[1]] == [sent], "still found by an agent that asks"
+    wait_for(lambda: len(view.of_type("announced", name)) == 4, "the announcement after the backoff", timeout=30)
+    wait_for(lambda: len(view.of_type("unconfirmed", name)) == 2, "unconfirmed again", timeout=30)
+    time.sleep(6)
+    assert len(view.of_type("announced", name)) == 4, "the next one waits out a longer backoff"
 
 
 def test_a_message_is_never_announced_while_a_person_is_typing_and_a_read_only_observer_does_not_hold_it_back(view):
