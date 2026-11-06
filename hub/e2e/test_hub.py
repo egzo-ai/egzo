@@ -430,6 +430,21 @@ def test_the_page_follows_the_agent_without_reloading(single_hub, page):
     expect(page.get_by_test_id("waiting")).to_have_count(0)
 
 
+def test_an_agents_messaging_counts_show_on_its_row_and_page_and_go_when_nothing_waits(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    single_hub.world("set-agent", project="web", agent="coder-1", state="working", text="on it", waiting=True, queued=2, unconfirmed=1, waitingMin=12)
+    projects_table(page).get_by_role("link", name="web").click()
+    row = page.locator("tr[data-agent=coder-1]")
+    expect(row.get_by_test_id("queued")).to_have_text("2 queued", timeout=8000)
+    expect(row.get_by_test_id("stuck")).to_have_text("1 stuck")
+    row.get_by_role("link", name="coder-1").click()
+    expect(page.get_by_test_id("waiting")).to_contain_text("waiting for an answer · 12 min")
+    expect(page.get_by_test_id("queued")).to_have_text("2 queued")
+    single_hub.world("set-agent", project="web", agent="coder-1", state="idle", text="done")
+    expect(page.get_by_test_id("queued")).to_have_count(0, timeout=8000)
+    expect(page.get_by_test_id("stuck")).to_have_count(0)
+
+
 def test_there_is_no_messaging_in_the_web_ui(single_hub, page):
     sign_in(page, single_hub, "admin")
     page.goto(single_hub.url + single_hub.p("web") + "/a/coder-1")

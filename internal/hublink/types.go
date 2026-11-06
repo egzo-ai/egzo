@@ -69,7 +69,11 @@ type Agent struct {
 	Status   string
 	Open     int
 	Waiting  bool   // it asked a question nobody answered
-	Actor    string // the `actor` label: who spawned it
+	// Queued, Unconfirmed and WaitingSince are its messaging counts, from the status feed (AgentStatus): the hub fills them.
+	Queued       int
+	Unconfirmed  int
+	WaitingSince time.Time
+	Actor        string // the `actor` label: who spawned it
 	Stale    bool
 	Created  time.Time
 	// TemplateHash is the hash of the template the instance was spawned from (a label), to compare with Published.

@@ -62,6 +62,12 @@ export interface AgentBrief {
   activity: string;
   status: string;
   waiting: boolean;
+  /** Its messaging counts: requests it fetched and has not resolved, messages not announced yet, messages announced and never
+   * fetched (stuck), and since when it waits for an answer. Never a message's text. */
+  open: number;
+  queued: number;
+  unconfirmed: number;
+  waitingSince: string | null;
   /** The verb of the task the hub runs on it. */
   task?: TaskVerb;
 }
@@ -99,6 +105,12 @@ export interface Agent {
   activity: string;
   status: string;
   waiting: boolean;
+  /** Its messaging counts: requests it fetched and has not resolved, messages not announced yet, messages announced and never
+   * fetched (stuck), and since when it waits for an answer. Never a message's text. */
+  open: number;
+  queued: number;
+  unconfirmed: number;
+  waitingSince: string | null;
   stale: boolean;
   creator: string;
   createdAt: string;

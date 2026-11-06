@@ -17,6 +17,7 @@
   import Modal from "../components/Modal.svelte";
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
+  import MessagePills from "../components/MessagePills.svelte";
   import SpecView from "../components/SpecView.svelte";
   import TaskTable from "../components/TaskTable.svelte";
   import ErrorPage from "./ErrorPage.svelte";
@@ -189,6 +190,7 @@
                   <td>{#if a.template}<a class="dim" href={href.project(id, "templates")}>{a.template}</a>{#if !project?.templates.includes(a.template)} <span class="pill" data-s="warn" title="the project no longer publishes this template">retired</span>{/if}{:else}<span class="muted">–</span>{/if}</td>
                   <td>
                     {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} />{/if}
+                    <MessagePills queued={a.queued} unconfirmed={a.unconfirmed} />
                     {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
                   </td>
                   <td class="wrap" style="white-space:normal;min-width:18ch">

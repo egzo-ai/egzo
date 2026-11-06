@@ -101,6 +101,19 @@ func TestAStoppedAgentIsStoppedWhatEverTheFeedSays(t *testing.T) {
 	}
 }
 
+func TestWhatWaitsForAStoppedAgentStillCounts(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	a := running("coder-1", "idle")
+	a.State, a.Queued, a.Unconfirmed = "exited", 2, 1
+	r.fakes["web"].SetAgent(a)
+	op := r.operator()
+	eventually(t, "the feed", func() bool { _, feed := r.agentOf(op, r.id("web"), "coder-1"); return feed.State == FeedLive })
+	if got, _ := r.agentOf(op, r.id("web"), "coder-1"); got.Queued != 2 || got.Unconfirmed != 1 {
+		t.Errorf("a stopped agent's queue is lost: %+v", got)
+	}
+}
+
 func TestAQuietSidecarIsStaleAfterThreeHeartbeats(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")

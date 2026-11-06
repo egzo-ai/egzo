@@ -290,6 +290,32 @@ func TestAnAgentWaitingOnAQuestion(t *testing.T) {
 	}
 }
 
+func TestAnAgentsMessagingCountsAreShownAndNoMessageText(t *testing.T) {
+	r := newRig(t)
+	r.link("web", "coder")
+	a := agent("coder-1", "operator")
+	a.Waiting, a.Open, a.Queued, a.Unconfirmed = true, 1, 2, 1
+	a.WaitingSince = time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	r.fakes["web"].SetAgent(a)
+	b := r.browser()
+	b.signIn("admin")
+	_, v := b.get("/p/" + r.id("web") + "/a/coder-1")
+	got := v["agent"].(map[string]any)
+	if got["open"] != float64(1) || got["queued"] != float64(2) || got["unconfirmed"] != float64(1) || got["waitingSince"] != "2026-11-06T10:00:00Z" {
+		t.Errorf("agent = %v", got)
+	}
+	_, projects := b.get("/projects")
+	if q := list(projects, "projects")[0]["agents"].([]any)[0].(map[string]any)["queued"]; q != float64(2) {
+		t.Errorf("the project list does not count what is queued: %v", projects)
+	}
+	idle := agent("coder-1", "operator")
+	r.fakes["web"].SetAgent(idle)
+	_, v = b.get("/p/" + r.id("web") + "/a/coder-1")
+	if got := v["agent"].(map[string]any); got["waitingSince"] != nil || got["queued"] != float64(0) {
+		t.Errorf("an agent with nothing pending = %v", got)
+	}
+}
+
 func TestStateChangingRequestsNeedTheOriginAndJSON(t *testing.T) {
 	r := newRig(t)
 	r.link("web", "coder")

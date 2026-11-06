@@ -195,6 +195,10 @@ type command struct {
 	Port    int    `json:"port"`
 	Waiting bool   `json:"waiting"`
 	Actor   string `json:"actor"`
+	// an agent's messaging counts (op set-agent), and how long ago its oldest question was asked, in minutes
+	Queued      int `json:"queued"`
+	Unconfirmed int `json:"unconfirmed"`
+	WaitingMin  int `json:"waitingMin"`
 	// an event of the proxy's audit trail (op audit): the agent's, to host, with a decision and a reason code
 	Host     string `json:"host"`
 	Decision string `json:"decision"`
@@ -293,8 +297,12 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			if a, ok := agentOf(e, c.Agent); ok {
 				id = a.ID
 			}
-			e.SetAgent(links.Agent{Name: c.Agent, ID: id, Template: "coder", State: container, Activity: orDefault(c.State, "idle"),
-				Status: c.Text, Waiting: c.Waiting, Actor: actor, Created: time.Now()})
+			agent := links.Agent{Name: c.Agent, ID: id, Template: "coder", State: container, Activity: orDefault(c.State, "idle"),
+				Status: c.Text, Waiting: c.Waiting, Queued: c.Queued, Unconfirmed: c.Unconfirmed, Actor: actor, Created: time.Now()}
+			if c.Waiting {
+				agent.WaitingSince = time.Now().Add(-time.Duration(c.WaitingMin) * time.Minute)
+			}
+			e.SetAgent(agent)
 		case "audit":
 			a, ok := agentOf(e, c.Agent)
 			if !ok {
@@ -395,7 +403,7 @@ func seedFiles(e *fake.Engine) error {
 	}
 	for path, text := range map[string]string{
 		filepath.Join(docs, "notes", "plan.md"): "# The plan\n", filepath.Join(docs, "report.html"): "<script>alert(1)</script>",
-		filepath.Join(worktree, "wip.txt"): "not committed\n",
+		filepath.Join(worktree, "wip.txt"):       "not committed\n",
 		filepath.Join(docs, "notes", "image.md"): "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", // a PNG named .md
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

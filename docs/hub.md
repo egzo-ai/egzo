@@ -207,6 +207,11 @@ resize changes it for the other, and what both type reaches the program. Avoid i
 When an agent cannot reach something, the **Network** tab of its page (and of the project page, for every agent, also in the
 sidebar) says what the proxy refused, why, and how to fix it. An agent that was refused a host in the last hour shows **N denied** in the agents list.
 
+**Messages.** The hub shows where an agent's messages stand, as counts: **N queued** (not announced to it yet: it is busy, someone is
+typing in its terminal, or it is stopped), **N stuck** (announced three times and never fetched: attach to see why, or run `egzo message ls`),
+and on its page how long it has been **waiting for an answer**. It never shows a message's text, lists questions or answers them: the hub is
+not a chat. Answer an agent in its terminal, with `egzo message reply`, or through a bridge.
+
 - **Denied** groups what the proxy refused or failed at by agent, host and reason, with how many times and when it was last
   seen. Wrong proxy credentials are grouped by the name they claimed, shown with `?`; **How to fix** says where the latest one
   came from. **How to fix** says what the reason means and what to change: for a host that is not in the profile, the YAML to add to
