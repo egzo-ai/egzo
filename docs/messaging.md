@@ -99,6 +99,10 @@ agent as a reply, announced in its terminal like any message.
 - `OPEN`: requests the agent has fetched and not resolved.
 - `WAITING`: it has asked a question nobody answered.
 
+The control sidecar's status (what the [hub](hub.md) follows) also counts, per agent, the messages `queued` for it (not fetched yet),
+those `unconfirmed` (announced three times and never fetched), and `waiting_since`, when its oldest unanswered question was asked. Counts and
+times only: no message text leaves the project this way.
+
 Hooks (Claude Code) or a plugin (OpenCode) provide the activity ([harnesses](harnesses.md)). For a `custom` image, quiet output means idle.
 
 ## Limits

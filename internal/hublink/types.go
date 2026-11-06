@@ -69,7 +69,11 @@ type Agent struct {
 	Status   string
 	Open     int
 	Waiting  bool   // it asked a question nobody answered
-	Actor    string // the `actor` label: who spawned it
+	// Queued, Unconfirmed and WaitingSince are its messaging counts, from the status feed (AgentStatus): the hub fills them.
+	Queued       int
+	Unconfirmed  int
+	WaitingSince time.Time
+	Actor        string // the `actor` label: who spawned it
 	Stale    bool
 	Created  time.Time
 	// TemplateHash is the hash of the template the instance was spawned from (a label), to compare with Published.
@@ -102,8 +106,14 @@ type AgentStatus struct {
 	Activity string // starting, idle, working or blocked
 	Open     int
 	Waiting  bool
-	Updated  time.Time
-	Exposed  []Exposure
+	// Queued counts the messages for the agent it has not fetched yet, Unconfirmed those announced and never fetched (stuck),
+	// and WaitingSince is when the oldest question it waits on was asked (zero when it waits on none). Only counts and times:
+	// a message's text never reaches the hub.
+	Queued       int
+	Unconfirmed  int
+	WaitingSince time.Time
+	Updated      time.Time
+	Exposed      []Exposure
 }
 
 // What a declared port speaks. A hub serves `http` as a preview; `tcp` and `udp` are local only.

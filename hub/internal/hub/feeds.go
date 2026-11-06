@@ -196,9 +196,17 @@ func (h *Hub) overlay(reg store.Registration, p links.Project) (links.Project, F
 		switch {
 		case !a.Running():
 			agents[i].Activity, agents[i].Waiting, agents[i].Status, agents[i].Open = "stopped", false, "", 0
+			if f == nil || feed.State != FeedLive {
+				break
+			}
+			if s, ok := f.agents[a.Name]; ok {
+				// what waits for a stopped agent is announced when it runs again: it still counts
+				agents[i].Queued, agents[i].Unconfirmed = s.Queued, s.Unconfirmed
+			}
 		case f != nil && feed.State == FeedLive:
 			if s, ok := f.agents[a.Name]; ok {
 				agents[i].Activity, agents[i].Status, agents[i].Open, agents[i].Waiting = s.Activity, s.Status, s.Open, s.Waiting
+				agents[i].Queued, agents[i].Unconfirmed, agents[i].WaitingSince = s.Queued, s.Unconfirmed, s.WaitingSince
 			} else {
 				agents[i].Activity, agents[i].Status, agents[i].Open, agents[i].Waiting = "starting", "", 0, false
 			}

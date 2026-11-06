@@ -814,7 +814,7 @@ func (e *Engine) Published(ctx context.Context) (links.Published, error) {
 func (e *Engine) statusLine(reason string) links.StatusLine {
 	line := links.StatusLine{Time: time.Now().UTC(), Reason: reason, Interval: e.feedEvery, Agents: []links.AgentStatus{}}
 	for _, a := range e.project.Agents {
-		line.Agents = append(line.Agents, links.AgentStatus{Agent: a.Name, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Updated: line.Time, Exposed: e.exposed[a.Name]})
+		line.Agents = append(line.Agents, links.AgentStatus{Agent: a.Name, Status: a.Status, Activity: a.Activity, Open: a.Open, Waiting: a.Waiting, Queued: a.Queued, Unconfirmed: a.Unconfirmed, WaitingSince: a.WaitingSince, Updated: line.Time, Exposed: e.exposed[a.Name]})
 	}
 	return line
 }

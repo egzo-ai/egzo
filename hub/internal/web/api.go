@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/hub"
+	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	"github.com/egzo-ai/egzo/internal/version"
@@ -184,13 +185,14 @@ func (s *Server) identitiesOf(list []store.Identity) []identityJSON {
 }
 
 type agentJSON struct {
-	Name       string        `json:"name"`
-	Template   string        `json:"template"`
-	State      string        `json:"state"`
-	Running    bool          `json:"running"`
-	Activity   string        `json:"activity"`
-	Status     string        `json:"status"`
-	Waiting    bool          `json:"waiting"`
+	Name     string `json:"name"`
+	Template string `json:"template"`
+	State    string `json:"state"`
+	Running  bool   `json:"running"`
+	Activity string `json:"activity"`
+	Status   string `json:"status"`
+	Waiting  bool   `json:"waiting"`
+	messaging
 	Stale      bool          `json:"stale"`
 	Creator    string        `json:"creator"`
 	CreatedAt  time.Time     `json:"createdAt"`
@@ -264,9 +266,26 @@ func taskOf(t hub.Task, n namer) taskJSON {
 	return j
 }
 
+// messaging is an agent's messaging status: counts and a time, never a message's text (the hub is not a chat).
+type messaging struct {
+	Open         int        `json:"open"`
+	Queued       int        `json:"queued"`
+	Unconfirmed  int        `json:"unconfirmed"`
+	WaitingSince *time.Time `json:"waitingSince"`
+}
+
+func messagingOf(a links.Agent) messaging {
+	m := messaging{Open: a.Open, Queued: a.Queued, Unconfirmed: a.Unconfirmed}
+	if !a.WaitingSince.IsZero() {
+		t := a.WaitingSince
+		m.WaitingSince = &t
+	}
+	return m
+}
+
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 	return agentJSON{Name: a.Name, Template: a.Template, State: a.State, Running: a.Running(), Activity: a.Activity, Status: a.Status,
-		Waiting: a.Waiting, Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder,
+		Waiting: a.Waiting, messaging: messagingOf(a.Agent), Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder,
 		Denied: a.Denied, Previews: previewsOf(a.Previews), Task: taskViewOf(a.Task, n)}
 }
 
@@ -381,7 +400,8 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		Activity string `json:"activity"`
 		Status   string `json:"status"`
 		Waiting  bool   `json:"waiting"`
-		Task     string `json:"task,omitempty"` // the verb of the task that runs on it
+		messaging
+		Task string `json:"task,omitempty"` // the verb of the task that runs on it
 	}
 	type project struct {
 		ID        string     `json:"id"`
@@ -406,7 +426,7 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request, user store.Use
 		}
 		for _, a := range ref.Project.Agents {
 			p.Agents = append(p.Agents, agent{Name: a.Name, Template: a.Template, Running: a.Running(), Activity: a.Activity, Status: a.Status, Waiting: a.Waiting,
-				Task: running[a.Name]})
+				messaging: messagingOf(a), Task: running[a.Name]})
 		}
 		out.Projects = append(out.Projects, p)
 	}

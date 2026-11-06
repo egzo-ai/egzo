@@ -110,3 +110,18 @@ func TestOnlyAPortOpenForTheHubIsRememberedForForwarding(t *testing.T) {
 		}
 	}
 }
+
+func TestAStatusLineCarriesTheMessagingCountsOfEachAgent(t *testing.T) {
+	line := `{"type":"status","v":1,"agents":[{"agent":"coder","open":1,"waiting":true,"queued":2,"unconfirmed":1,"waiting_since":"2026-11-06T10:00:00Z"},{"agent":"idle"}]}`
+	got, ok, err := parseStatusLine([]byte(line))
+	if !ok || err != nil || len(got.Agents) != 2 {
+		t.Fatalf("got %+v %v %v", got, ok, err)
+	}
+	coder := got.Agents[0]
+	if coder.Queued != 2 || coder.Unconfirmed != 1 || coder.WaitingSince.Format(time.RFC3339) != "2026-11-06T10:00:00Z" {
+		t.Errorf("coder = %+v", coder)
+	}
+	if !got.Agents[1].WaitingSince.IsZero() {
+		t.Errorf("an agent waiting on nothing has a time: %+v", got.Agents[1])
+	}
+}

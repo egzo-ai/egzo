@@ -385,6 +385,7 @@ func (s *server) agentStatuses() []AgentStatus {
 	for name, status := range latest {
 		status.Agent = name
 		status.Open, status.Waiting = s.overlay(name)
+		status.Queued, status.Unconfirmed, status.WaitingSince = s.deliveryCounts(name)
 		status.Exposed = s.exposedBy(name, template)
 		out = append(out, status)
 	}

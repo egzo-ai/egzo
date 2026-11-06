@@ -60,6 +60,7 @@ code { color: var(--text); background: var(--surface-2); padding: 0 var(--space-
   display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 var(--space-2) 0 6px;
   font-size: var(--text-xs); color: var(--c); background: var(--c-soft); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
   border-radius: var(--radius-1); white-space: nowrap; line-height: 1;
+  vertical-align: middle; /* side by side, a pill that starts with an icon has no text baseline */
 }
 .pill::before { content: "■"; font-size: 9px; width: 10px; text-align: center; }
 .pill[data-s="running"]  { --c: var(--status-running); --c-soft: var(--status-running-soft); }
