@@ -149,6 +149,8 @@ func runAgent(args []string) error {
 	if hasIntegration {
 		options := harness.Options{
 			Agent:            os.Getenv("EGZO_AGENT"),
+			Template:         os.Getenv("EGZO_TEMPLATE"),
+			Harness:          os.Getenv("EGZO_HARNESS"),
 			Home:             home,
 			Model:            os.Getenv("EGZO_MODEL"),
 			Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",

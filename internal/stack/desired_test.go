@@ -425,7 +425,7 @@ func TestHarnessAgentsCarryTheirIntegrationInTheirDefinition(t *testing.T) {
 	d := desire(t, project)
 	spec := findContainer(t, d, "proj-coder")
 	for _, want := range []string{
-		"EGZO_HARNESS=claude-code", "EGZO_MODEL=claude-sonnet-5-5", "EGZO_PERMISSIONS=bypass", "IS_SANDBOX=1",
+		"EGZO_HARNESS=claude-code", "EGZO_TEMPLATE=coder", "EGZO_MODEL=claude-sonnet-5-5", "EGZO_PERMISSIONS=bypass", "IS_SANDBOX=1",
 		"EGZO_HUMAN_QUIET=30s", "EGZO_ACK_TIMEOUT=60s", "EGZO_IDLE_SIGNAL=state", "EGZO_WORKSPACES=/workspace/shared",
 	} {
 		if !slices.Contains(spec.Env, want) {

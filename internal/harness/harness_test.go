@@ -499,3 +499,15 @@ func TestAnAgentIsToldItsWorkspacesAndHowToHandCodeToAnother(t *testing.T) {
 		t.Error("a value that is not JSON was taken")
 	}
 }
+
+func TestAnAgentIsToldItsNameTemplateAndHarness(t *testing.T) {
+	o := options(t)
+	o.Template, o.Harness = "dev", "codex"
+	if told := string(InstructionsFor(o)); !strings.Contains(told, "You are the agent coder, an instance of the template dev, running on the harness codex.") {
+		t.Errorf("the agent is not told who it is:\n%s", told)
+	}
+	o.Template = ""
+	if told := string(InstructionsFor(o)); strings.Contains(told, "You are the agent") {
+		t.Errorf("an agent whose template is not known is told a partial identity:\n%s", told)
+	}
+}

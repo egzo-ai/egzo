@@ -146,7 +146,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	var undo undoStack
 	spawned := Spawned{Name: name, ID: identity.ID, Template: req.Template, Container: InstanceContainer(project, name), Actor: actor, TemplateHash: template.Hash}
 	plan := spawnPlan{
-		project: project, dir: dir, name: name, published: published, view: view, template: template, resources: desired,
+		project: project, dir: dir, name: name, published: published, view: view, template: template, templateName: req.Template, resources: desired,
 		env: env, identity: identity, worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
 		container: func(tokens map[string]string) (ContainerSpec, error) {
 			inputs := published.inputs(instances, tokens, nil)
@@ -190,6 +190,7 @@ type spawnPlan struct {
 	published          Published
 	view               *config.Resolved
 	template           Template
+	templateName       string
 	resources          Desired // the network, the home volume and the attachments
 	worktrees          []Worktree
 	options            WorktreeOptions
@@ -266,6 +267,9 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	undo.add(func(ctx context.Context) { unbindProxy(ctx, c, p.project, p.name) })
 	// What the agent may reach, for its `access`: a new agent is told nothing more, it asks.
 	if err := ControlPushAccess(ctx, c, p.project, p.name, p.template); err != nil {
+		return err
+	}
+	if err := ControlPushIdentity(ctx, c, p.project, p.name, p.templateName, p.template); err != nil {
 		return err
 	}
 	// The relay comes before the agent: it holds the host ports, and an agent whose ports could not be published is not worth starting. It
