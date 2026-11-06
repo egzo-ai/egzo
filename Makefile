@@ -54,6 +54,7 @@ hub-web-test:
 
 hub-build: hub-web
 	cd hub && CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=$(VERSION)" -o ../bin/egzo-hub ./cmd/egzo-hub
+	cd hub && CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=$(VERSION)" -o ../bin/egzo-discord ./cmd/egzo-discord
 
 hub-test:
 	cd hub && $(GO) vet ./... && $(GO) test -race ./...

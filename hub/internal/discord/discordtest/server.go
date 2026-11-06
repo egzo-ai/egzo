@@ -26,6 +26,7 @@ type Request struct {
 	Method, Path string
 	Header       http.Header
 	Body         []byte
+	Response     []byte // what the fake answered
 }
 
 // JSON decodes the request's body.
@@ -319,6 +320,7 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v10")
 	s.mu.Lock()
 	s.requests = append(s.requests, Request{Method: r.Method, Path: path, Header: r.Header.Clone(), Body: body})
+	index := len(s.requests) - 1
 	limited := false
 	for prefix, n := range s.limited {
 		if n > 0 && strings.HasPrefix(path, prefix) {
@@ -364,6 +366,10 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(path, "/channels/") {
 			out["channel_id"] = strings.Split(path, "/")[2]
 		}
-		json.NewEncoder(w).Encode(out)
+		data, _ := json.Marshal(out)
+		s.mu.Lock()
+		s.requests[index].Response = data
+		s.mu.Unlock()
+		w.Write(data)
 	}
 }
