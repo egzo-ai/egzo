@@ -22,11 +22,14 @@ COPY . .
 COPY --from=web /src/hub/internal/web/dist hub/internal/web/dist
 ARG VERSION=dev
 ARG TARGETOS TARGETARCH
-RUN cd hub && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=${VERSION}" -o /egzo-hub ./cmd/egzo-hub
+RUN cd hub && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=${VERSION}" -o /egzo-hub ./cmd/egzo-hub \
+ && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-X github.com/egzo-ai/egzo/internal/version.Version=${VERSION}" -o /egzo-discord ./cmd/egzo-discord
 
 FROM docker.io/library/alpine:3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 hub && mkdir /data && chown hub /data
 COPY --from=build /egzo-hub /egzo-hub
+# The Discord bridge, a service of its own in the compose stack (entrypoint /egzo-discord): see docs/hub-bridges.md.
+COPY --from=build /egzo-discord /egzo-discord
 USER hub
 VOLUME /data
 EXPOSE 8080 8081

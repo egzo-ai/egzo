@@ -54,6 +54,8 @@ type MessageReference struct {
 	MessageID Snowflake `json:"message_id,omitempty"`
 	ChannelID Snowflake `json:"channel_id,omitempty"`
 	GuildID   Snowflake `json:"guild_id,omitempty"`
+	// FailIfNotExists false posts a reply as a plain message when what it answers was deleted.
+	FailIfNotExists *bool `json:"fail_if_not_exists,omitempty"`
 }
 
 // Channel types the bridge cares about.
@@ -202,6 +204,28 @@ type Command struct {
 	Description string          `json:"description"`
 	Type        int             `json:"type,omitempty"`
 	Options     json.RawMessage `json:"options,omitempty"`
+	Contexts    []int           `json:"contexts,omitempty"` // 0: in a guild only
+}
+
+// Permissions a bridge looks for in an interaction's member.
+const (
+	PermissionAdministrator = 1 << 3
+	PermissionManageRoles   = 1 << 28
+)
+
+// Has reports whether a member's permissions, as an interaction carries them, include perm. An administrator has them all.
+func (m *Member) Has(perm uint64) bool {
+	if m == nil {
+		return false
+	}
+	var p uint64
+	for _, r := range m.Permissions {
+		if r < '0' || r > '9' {
+			return false
+		}
+		p = p*10 + uint64(r-'0')
+	}
+	return p&PermissionAdministrator != 0 || p&perm == perm
 }
 
 // Event is one event of the gateway, as it came: its name, its number and its data.

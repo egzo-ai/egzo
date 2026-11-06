@@ -35,5 +35,20 @@ services:
     volumes:
       - hub-data:/data
 
+  # The Discord bridge, optional: uncomment it and its volume, and set EGZO_DISCORD_TOKEN, EGZO_DISCORD_BRIDGE_SECRET and
+  # EGZO_BRIDGES=discord:<that secret> in .env (see .env.example and docs/hub-bridges.md).
+  # discord:
+  #   image: ghcr.io/egzo-ai/egzo-hub:${EGZO_HUB_VERSION:-latest}
+  #   entrypoint: ["/egzo-discord"]
+  #   restart: unless-stopped
+  #   environment:
+  #     EGZO_DISCORD_TOKEN: ${EGZO_DISCORD_TOKEN:?set EGZO_DISCORD_TOKEN in .env}
+  #     EGZO_BRIDGE_SECRET: ${EGZO_DISCORD_BRIDGE_SECRET:?set EGZO_DISCORD_BRIDGE_SECRET in .env}
+  #     EGZO_HUB_URL: http://hub:8080
+  #   volumes:
+  #     - discord-data:/data
+  #   depends_on: [hub]
+
 volumes:
   hub-data:
+  # discord-data:

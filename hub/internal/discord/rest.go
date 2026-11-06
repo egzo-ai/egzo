@@ -181,7 +181,7 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 	case *multipartBody:
 		payload, contentType = b.data, b.contentType
 	default:
-		data, err := json.Marshal(b)
+		data, err := marshal(b)
 		if err != nil {
 			return err
 		}
@@ -254,6 +254,17 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 		}
 		return nil
 	}
+}
+
+// marshal is JSON with <, > and & as they are: a mention is <@id>, and what is sent reads as what is shown.
+func marshal(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	e := json.NewEncoder(&buf)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSpace(buf.Bytes()), nil
 }
 
 func decodeError(status int, data []byte) error {
@@ -400,7 +411,7 @@ func multipartMessage(m MessageCreate) (*multipartBody, error) {
 	for i, f := range m.Files {
 		m.Attachments = append(m.Attachments, Attachment{ID: i, Filename: f.Name})
 	}
-	payload, err := json.Marshal(m)
+	payload, err := marshal(m)
 	if err != nil {
 		return nil, err
 	}
@@ -509,6 +520,12 @@ func (c *REST) SetGuildCommands(ctx context.Context, app, guild Snowflake, comma
 // Respond answers an interaction: within 3 seconds, or Discord tells the person it failed.
 func (c *REST) Respond(ctx context.Context, i Interaction, r InteractionResponse) error {
 	return c.Do(ctx, http.MethodPost, "/interactions/"+string(i.ID)+"/"+i.Token+"/callback", r, nil)
+}
+
+// EditOriginal replaces the answer to an interaction, such as a deferred one, for up to 15 minutes.
+func (c *REST) EditOriginal(ctx context.Context, app Snowflake, token string, m MessageCreate) (Message, error) {
+	var out Message
+	return out, c.Do(ctx, http.MethodPatch, "/webhooks/"+string(app)+"/"+token+"/messages/@original", m, &out)
 }
 
 // FollowUp sends a message after an interaction was answered, for up to 15 minutes.
