@@ -85,7 +85,7 @@
       <h1 class="h-page">{a.name}</h1>
       {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />{/if}
       {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
-      {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting" title="it asked a question nobody answered yet: answer it in its terminal, with egzo message reply, or through a bridge">waiting for an answer{#if a.waitingSince} · {duration(a.waitingSince)}{/if}</span>{/if}
+      {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting" title="It asked a question nobody has answered yet. Answer it in its terminal (Attach), or through a bridge.">waiting for an answer{#if a.waitingSince} · {duration(a.waitingSince)}{/if}</span>{/if}
       <MessagePills queued={a.queued} unconfirmed={a.unconfirmed} />
       {#if a.stale}<span class="pill" data-s="warn" title="its template changed in a way the running container cannot follow (an egress change only reloads the proxy): remove it and spawn again">stale</span>{/if}
       {#if a.denied}<a class="pill" data-s="error" href={href.agent(project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}

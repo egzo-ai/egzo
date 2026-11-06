@@ -29,6 +29,7 @@
 <symbol id="i-check" viewBox="0 0 16 16"><path d="M2.75 8.5l3.25 3.25 7.25-7.5"/></symbol>
 <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 1.75l6.5 12H1.5z M8 6.25v3.5 M8 11.5v1"/></symbol>
 <symbol id="i-lock" viewBox="0 0 16 16"><path d="M2.75 7.25h10.5v7H2.75z M5 7.25V5a3 3 0 0 1 6 0v2.25"/></symbol>
+<symbol id="i-mail" viewBox="0 0 16 16"><path d="M1.75 3.75h12.5v8.5H1.75z M1.75 4.25L8 9l6.25-4.75"/></symbol>
 <symbol id="i-ask" viewBox="0 0 16 16"><path d="M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0z M6.25 6.25a1.75 1.75 0 1 1 2.6 1.5c-.6.35-.85.7-.85 1.5 M8 11v1"/></symbol>
 <symbol id="i-more" viewBox="0 0 16 16"><path d="M3 8h1.5 M7.25 8h1.5 M11.5 8H13"/></symbol>
 <symbol id="i-signout" viewBox="0 0 16 16"><path d="M6.25 2.25h-4v11.5h4 M10 5l3 3-3 3 M13 8H5.75"/></symbol>
