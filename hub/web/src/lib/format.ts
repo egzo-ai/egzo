@@ -20,6 +20,19 @@ export function ago(iso: string, now = Date.now()): string {
   return `${Math.floor(s / 86400)} days ago`;
 }
 
+/** The label of the pill of an agent that waits for an answer, with how long it has waited when that is known: minutes, hours, days,
+ * never seconds (a pill is read at a glance). */
+export function waitingLabel(since: string | null, now = Date.now()): string {
+  const t = since ? +new Date(since) : NaN;
+  if (isNaN(t) || t <= 0) return "waiting for an answer";
+  const s = Math.max(0, (now - t) / 1000);
+  let waited = "under a minute";
+  if (s >= 48 * 3600) waited = `${Math.floor(s / 86400)} days`;
+  else if (s >= 3600) waited = `${Math.floor(s / 3600)} h`;
+  else if (s >= 60) waited = `${Math.floor(s / 60)} min`;
+  return `waiting for an answer · ${waited}`;
+}
+
 /** How long until a moment that is still to come. */
 export function until(iso: string, now = Date.now()): string {
   const t = +new Date(iso);

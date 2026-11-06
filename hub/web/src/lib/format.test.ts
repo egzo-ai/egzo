@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityKind, activityLabel, ago, duration, initials, taskEnded, taskFailedLabel, until } from "./format";
+import { activityKind, activityLabel, ago, duration, initials, taskEnded, taskFailedLabel, until, waitingLabel } from "./format";
 
 describe("format", () => {
   it("says how long until", () => {
@@ -50,5 +50,18 @@ describe("format", () => {
     expect(duration("2026-10-14T12:00:00Z", "2026-10-14T12:02:05Z")).toBe("2 min 5 s");
     expect(duration("2026-10-14T12:00:00Z", "2026-10-14T12:03:00Z")).toBe("3 min");
     expect(duration("2026-10-14T12:00:00Z", undefined, Date.parse("2026-10-14T12:00:30Z"))).toBe("30 s");
+  });
+});
+
+describe("waitingLabel", () => {
+  const now = Date.parse("2026-11-06T12:00:00Z");
+  it("says how long an agent has waited, never in seconds", () => {
+    expect(waitingLabel("2026-11-06T11:47:57Z", now)).toBe("waiting for an answer · 12 min");
+    expect(waitingLabel("2026-11-06T11:59:30Z", now)).toBe("waiting for an answer · under a minute");
+    expect(waitingLabel("2026-11-06T09:00:00Z", now)).toBe("waiting for an answer · 3 h");
+    expect(waitingLabel("2026-11-01T12:00:00Z", now)).toBe("waiting for an answer · 5 days");
+  });
+  it("says only that it waits when the time is not known", () => {
+    expect(waitingLabel(null, now)).toBe("waiting for an answer");
   });
 });
