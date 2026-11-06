@@ -40,3 +40,32 @@ func TestAPersonConfirmsAChatLinkSignedInSeesTheAccountAndRemovesIt(t *testing.T
 		t.Errorf("unlink twice = %d", status)
 	}
 }
+
+func TestTheOperatorSeesWhichChatAccountsEachUserLinked(t *testing.T) {
+	r := newRig(t)
+	code, _, err := r.hub.BridgeCode(ctx, "discord", "d-7", "joe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice := r.browser()
+	alice.signIn("alice")
+	if status, out := alice.post("/chat-links/confirm", json_{"code": code}); status != 200 {
+		t.Fatalf("confirm = %d %v", status, out)
+	}
+	op := r.browser()
+	op.signIn("admin")
+	_, users := op.get("/users")
+	for _, u := range list(users, "users") {
+		chats := list(u, "chatAccounts")
+		switch u["username"] {
+		case "alice":
+			if len(chats) != 1 || chats[0]["name"] != "joe" || chats[0]["bridge"] != "discord" {
+				t.Errorf("alice's chat accounts = %v", u["chatAccounts"])
+			}
+		default:
+			if _, ok := u["chatAccounts"].([]any); !ok || len(chats) != 0 {
+				t.Errorf("%v's chat accounts = %v", u["username"], u["chatAccounts"])
+			}
+		}
+	}
+}
