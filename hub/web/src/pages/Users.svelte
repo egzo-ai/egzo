@@ -113,7 +113,7 @@
     {/if}
     <div class="table-wrap">
       <table class="table" data-testid="users">
-        <thead><tr><th>Person</th><th>Signs in with</th><th>Last signed in</th><th>Access</th><th>Projects</th><th></th></tr></thead>
+        <thead><tr><th>Person</th><th>Accounts</th><th>Last signed in</th><th>Access</th><th>Projects</th><th></th></tr></thead>
         <tbody>
           {#each shown as u (u.id)}
             <tr data-user={u.id} data-dim={u.disabled ? "" : undefined}>
@@ -124,6 +124,9 @@
                   <div class={i.current ? "" : "muted"}>{i.email || i.name || "an account"} at {i.issuer}{where(i)}
                     {#if u.disabled}<button class="btn" data-size="sm" aria-label="Remove {i.email || i.issuer} from {u.username}" disabled={busy === u.id} onclick={() => removeIdentity(u, i)}>Remove</button>{/if}
                   </div>
+                {/each}
+                {#each u.chatAccounts as c (c.bridge + c.account)}
+                  <div data-testid="chat-account" title="Linked {day(c.linked)}, to chat with their agents">{c.name} on {c.bridge}</div>
                 {/each}
               </td>
               <td class="muted">{u.lastLoginAt ? day(u.lastLoginAt) : "never"}</td>

@@ -200,6 +200,8 @@ export interface UserRow extends User {
   lastLoginAt: string | null;
   hasPassword: boolean;
   identities: Identity[];
+  /** The chat accounts they linked, through a bridge. */
+  chatAccounts: ChatAccount[];
   /** The projects they connected, which their quota is measured against. */
   projects: number;
 }

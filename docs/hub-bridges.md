@@ -33,7 +33,7 @@ A person links their chat account to their hub user once:
 The code is after the `#`, so a browser sends it to no server and no log holds it. It is good for 15 minutes and once.
 
 From then on, the hub knows whose that account is. A bridge names the **chat account** a message comes from, never a hub user, so it
-can only speak for accounts people linked. A person sees their chat accounts on their **Account** page, and removes one there. Linking
+can only speak for accounts people linked. A person sees their chat accounts on their **Account** page, and removes one there; an operator sees everyone's under Settings, Users. Linking
 the same chat account again moves it to whoever confirms last.
 
 ## How a message travels

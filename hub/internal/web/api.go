@@ -763,11 +763,12 @@ func (n namer) actor(actor string) string {
 
 type userRowJSON struct {
 	userJSON
-	CreatedAt   time.Time      `json:"createdAt"`
-	LastLoginAt *time.Time     `json:"lastLoginAt"`
-	HasPassword bool           `json:"hasPassword"`
-	Identities  []identityJSON `json:"identities"`
-	Projects    int            `json:"projects"` // the projects they connected, which their quota is measured against
+	CreatedAt   time.Time         `json:"createdAt"`
+	LastLoginAt *time.Time        `json:"lastLoginAt"`
+	HasPassword bool              `json:"hasPassword"`
+	Identities  []identityJSON    `json:"identities"`
+	Chats       []chatAccountJSON `json:"chatAccounts"` // the chat accounts they linked, through a bridge
+	Projects    int               `json:"projects"`     // the projects they connected, which their quota is measured against
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.User) {
@@ -785,10 +786,23 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, user store.Us
 	for _, i := range identities {
 		byUser[i.UserID] = append(byUser[i.UserID], i)
 	}
+	chats, err := s.hub.Store().AllBridgeAccounts(r.Context())
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	chatsOf := map[string][]chatAccountJSON{}
+	for _, a := range chats {
+		chatsOf[a.UserID] = append(chatsOf[a.UserID], chatAccountOf(a))
+	}
 	local := s.hub.SignIn().LocalLogin
 	rows := make([]userRowJSON, 0, len(users))
 	for _, u := range users {
 		row := userRowJSON{userJSON: userOf(u.User), CreatedAt: u.CreatedAt, HasPassword: u.HasPassword && local, Identities: s.identitiesOf(byUser[u.ID]), Projects: u.Projects}
+		row.Chats = chatsOf[u.ID]
+		if row.Chats == nil {
+			row.Chats = []chatAccountJSON{}
+		}
 		if !u.LastLoginAt.IsZero() {
 			row.LastLoginAt = &u.LastLoginAt
 		}
