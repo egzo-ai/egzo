@@ -147,7 +147,7 @@ def test_when_up_changes_what_an_agent_can_reach_the_agent_is_told_what_changed_
         sandbox.ok("project up", timeout=300)
         added = from_egzo(team)[-1]
         assert team.call("GET", f"/v1/messages/{added['id']}")[0] == 200
-        assert team.resolve(added["id"], "read it")[0] == 200
+        assert team.resolve(added["id"], "read it")[0] == 204
     finally:
         sandbox.write(document(engine.agent_image(), engine.session_image(egzo.binary)))
         sandbox.ok("project up", timeout=300)
