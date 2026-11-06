@@ -410,7 +410,7 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 		}
 	}
 	if !validText(req.Text) {
-		return Message{}, Event{}, badRequest("text must not be empty or longer than 16 KB")
+		return Message{}, Event{}, badRequest("%s", textTooLong)
 	}
 	kind, name, ok := parseAddress(req.To)
 	if !ok || kind == egzoSender {
@@ -568,7 +568,7 @@ func (s *server) resolveMessage(actor string, m Message, text, outcome string) (
 		return "", badRequest("outcome must be done, declined or failed")
 	}
 	if !validText(text) {
-		return "", badRequest("text must not be empty or longer than 16 KB")
+		return "", badRequest("%s", textTooLong)
 	}
 	data, _ := json.Marshal(messageData{To: m.From, Kind: kindResolution, Re: m.ID, Hops: m.Hops, Outcome: outcome})
 	id := newMessageID()
@@ -615,7 +615,7 @@ func (s *server) update(agent, id, text string) (string, error) {
 		return "", err
 	}
 	if !validText(text) {
-		return "", badRequest("text must not be empty or longer than 16 KB")
+		return "", badRequest("%s", textTooLong)
 	}
 	if !s.takeBudget(agent, "update", time.Now()) {
 		return "", tooMany("updates")

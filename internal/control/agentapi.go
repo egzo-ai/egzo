@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -102,6 +103,9 @@ func unauthorized(w http.ResponseWriter) {
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 
+// textTooLong is why a text is refused.
+var textTooLong = fmt.Sprintf("text must not be empty or longer than %d KB", maxTextSize>>10)
+
 func validText(text string) bool {
 	return strings.TrimSpace(text) != "" && len(text) <= maxTextSize
 }
@@ -138,7 +142,7 @@ func (a *agentAPI) status(w http.ResponseWriter, r *http.Request, agent string) 
 		return
 	}
 	if !validText(body.Text) {
-		http.Error(w, "text must not be empty or longer than 16 KB", http.StatusBadRequest)
+		http.Error(w, textTooLong, http.StatusBadRequest)
 		return
 	}
 	if err := a.server.reportStatus(agent, body.Text); err != nil {
