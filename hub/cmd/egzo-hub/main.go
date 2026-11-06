@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -102,7 +103,7 @@ func run(log *slog.Logger) error {
 	}
 	people := app.Handler()
 	if len(cfg.Bridges) > 0 {
-		people = withBridges(people, bridges.New(h, cfg.Bridges, log).Handler())
+		people = withBridges(people, bridges.New(h, cfg.Bridges, cmp.Or(cfg.PublicURL, cfg.LinkURL), log).Handler())
 		log.Info("chat bridges", "bridges", strings.Join(slices.Sorted(maps.Keys(cfg.Bridges)), ","), "path", bridges.Prefix)
 	}
 	servers := []*http.Server{listen(newServer(cfg.Listen, people, readLimit), "people")}

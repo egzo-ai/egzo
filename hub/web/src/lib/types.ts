@@ -361,6 +361,21 @@ export interface NewInvite {
 }
 
 /** What a code grants and the ways to take it, for whoever holds the code. */
+/** A chat account linked to the user through a bridge (docs/hub-bridges.md). */
+export interface ChatAccount {
+  bridge: string;
+  account: string;
+  name: string;
+  linked: string;
+}
+
+/** What a chat-link code is for, before the person confirms it. */
+export interface ChatLinkPreview {
+  bridge: string;
+  name: string;
+  expires: string;
+}
+
 export interface InvitePreview {
   invite: Invite;
   local: boolean;
