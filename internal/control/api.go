@@ -48,6 +48,8 @@ type server struct {
 	exposureMu sync.Mutex
 	// localMax is how many ports may be open for the local machine at once in the project; zero means local ports are off.
 	localMax int
+	// waiting keeps the agents with a wait running (wait.go).
+	waiting waiters
 	// registry is signalled when an agent is registered or removed, so the status log writes the new list.
 	registry chan struct{}
 }

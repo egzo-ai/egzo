@@ -35,6 +35,7 @@ Agents get an `egzo` MCP server with these tools:
 | `update` | a progress note for whoever asked |
 | `ask` | ask the sender a question; the answer comes back as a reply |
 | `message` | send a new request to the operator, a person or another agent |
+| `wait` | wait within its turn for what it sent: returns when one is fetched, updated or resolved, or a message arrives for it, and within 25 s at most, since harnesses cut a tool call off at 30 s (OpenCode) or 60 s (Codex); to wait longer it calls `wait` again in a loop, or sleeps and polls `list_messages`. Usually it ends its turn instead and the reply is announced |
 | `status` | one line on what it is doing, shown by `egzo ps` |
 | `agents` | the other agents, with their activity |
 | `access` | what it may reach: its egress profile, the hosts it allows, each service and how to use its credential, the ssh servers (`egzo agent access` says the same) |

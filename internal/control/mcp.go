@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -63,6 +64,11 @@ type messageArgs struct {
 	To   string `json:"to" jsonschema:"operator, user:<id> or agent:<name>"`
 	Text string `json:"text" jsonschema:"what you need, with everything the recipient needs to know"`
 	Re   string `json:"re,omitempty" jsonschema:"optional: the id of the request this one is part of"`
+}
+
+type waitArgs struct {
+	IDs     []string `json:"ids" jsonschema:"the ids of requests or questions you sent"`
+	Seconds int      `json:"seconds,omitempty" jsonschema:"how long to wait at most, in seconds; at most 25, the default"`
 }
 
 type textArgs struct {
@@ -190,6 +196,21 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 		}
 		id, err := a.server.sendFromAgent(agent, in.To, in.Text, in.Re)
 		return nil, idResult{ID: id}, err
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "wait",
+		Description: "Wait, within your turn, for requests or questions you sent: it returns as soon as one is fetched, updated or " +
+			"resolved (with the id of the reply to fetch), or a message arrives for you, and at the latest after 25 seconds, " +
+			"because harnesses cut a tool call off at 30 seconds or more. To wait longer, call it again in a loop, or sleep and poll " +
+			"list_messages: whichever suits the work. Usually you do not need it: end your turn, and the reply is announced to you.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in waitArgs) (*mcp.CallToolResult, Waited, error) {
+		agent, err := callerOf(req)
+		if err != nil {
+			return nil, Waited{}, err
+		}
+		waited, err := a.server.wait(ctx, agent, in.IDs, time.Duration(in.Seconds)*time.Second)
+		return nil, waited, err
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

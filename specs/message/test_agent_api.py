@@ -163,6 +163,23 @@ def test_a_sender_sees_whether_what_it_sent_was_fetched_and_its_latest_update_un
     assert sent not in mine(), "a resolved request leaves the sender's list"
 
 
+def test_wait_returns_when_what_was_sent_changes_and_within_25_seconds_and_the_tool_says_so(pair):
+    a, b = pair
+    sent = a.send(b.address, "count the files")[1]["id"]
+    started = time.time()
+    code, waited = a.call("POST", "/v1/wait", {"ids": [sent], "seconds": 2})
+    assert code == 200 and waited["changed"] is False and waited["sent"][0]["state"] == "queued"
+    assert 2 <= time.time() - started < 10
+    code, waited = a.call("POST", "/v1/wait", {"ids": [sent], "seconds": 600})
+    assert code == 200 and time.time() - started < 40, "a wait never blocks past 25 seconds, whatever it is asked"
+    b.get(sent)
+    code, waited = a.call("POST", "/v1/wait", {"ids": [sent], "seconds": 1})
+    assert code == 200 and waited["sent"][0]["state"] == "fetched", "the answer says where the message stands now"
+    assert b.call("POST", "/v1/wait", {"ids": [sent], "seconds": 1})[0] == 404, "only the sender waits on a message"
+    described = {t["name"]: t["description"] for t in a.mcp("tools/list")["result"]["tools"]}["wait"]
+    assert "25 seconds" in described and "again" in described, "the tool says how long it blocks and to call it again to wait longer"
+
+
 def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team):
     coder, reviewer = team.coder, team.reviewer
     secret = "ghp_SPECSECRETSPECSECRETSPECSECRET"
@@ -208,7 +225,7 @@ def test_state_reports_arrive_as_events_without_what_the_agent_read_or_said(team
 def test_the_mcp_endpoint_offers_exactly_the_tools_and_acts_as_the_calling_agent(team):
     coder, reviewer = team.coder, team.reviewer
     reply = coder.mcp("tools/list")
-    assert {t["name"] for t in reply["result"]["tools"]} == {"list_messages", "get_message", "resolve", "update", "ask", "message", "status", "agents", "access", "expose", "unexpose"}
+    assert {t["name"] for t in reply["result"]["tools"]} == {"list_messages", "get_message", "resolve", "update", "ask", "message", "status", "agents", "wait", "access", "expose", "unexpose"}
     descriptions = " ".join(t["description"] for t in reply["result"]["tools"])
     assert "sparingly" not in descriptions and "check_inbox" not in descriptions
 

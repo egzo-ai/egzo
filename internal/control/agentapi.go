@@ -41,6 +41,7 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages/{id}/update", a.authenticated(a.update))
 	mux.HandleFunc("POST /v1/messages/{id}/ask", a.authenticated(a.ask))
 	mux.HandleFunc("GET /v1/agents", a.authenticated(a.agents))
+	mux.HandleFunc("POST /v1/wait", a.authenticated(a.wait))
 	mux.HandleFunc("GET /v1/access", a.authenticated(a.access))
 	mux.HandleFunc("POST /v1/state", a.authenticatedLimit(maxStatePayload, a.state))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
@@ -226,6 +227,20 @@ func (a *agentAPI) ask(w http.ResponseWriter, r *http.Request, agent string) {
 		return
 	}
 	reply(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+func (a *agentAPI) wait(w http.ResponseWriter, r *http.Request, agent string) {
+	var body waitArgs
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `expected {"ids": [...], "seconds": N}`, http.StatusBadRequest)
+		return
+	}
+	waited, err := a.server.wait(r.Context(), agent, body.IDs, time.Duration(body.Seconds)*time.Second)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	reply(w, http.StatusOK, waited)
 }
 
 func (a *agentAPI) agents(w http.ResponseWriter, r *http.Request, agent string) {
