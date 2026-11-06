@@ -10,6 +10,7 @@ import (
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/harness"
 )
 
 func gitProject() *config.Resolved {
@@ -182,5 +183,22 @@ func TestPathsInsideAWorkspaceNeverLeaveIt(t *testing.T) {
 		if _, err := InsidePath(bad); err == nil || !strings.Contains(err.Error(), "outside the workspace") {
 			t.Errorf("%q: err = %v", bad, err)
 		}
+	}
+}
+
+func TestAnInstanceIsToldItsOwnWorkspacesAndNothingAboutOtherAgents(t *testing.T) {
+	project := gitProject()
+	agent := project.Agents["coder"]
+	agent.Workspaces = append(agent.Workspaces, config.Mount{Name: "data", Mount: "/workspace/data", Mode: "ro"})
+	got := describeWorkspaces(project, agent, "coder-2")
+	want := []harness.Workspace{
+		{Name: "repo", Kind: "git", Path: "/workspace/repo/coder-2", Mode: "rw", Branch: "egzo/coder-2", From: "main"},
+		{Name: "data", Kind: "directory", Path: "/workspace/data", Mode: "ro"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("described %+v\nwant %+v", got, want)
+	}
+	if none := describeWorkspaces(project, config.ResolvedAgent{}, "x"); len(none) != 0 {
+		t.Errorf("an agent without workspaces is told %+v", none)
 	}
 }

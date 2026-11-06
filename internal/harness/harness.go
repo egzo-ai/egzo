@@ -32,6 +32,8 @@ type Options struct {
 	Prompt string
 	// Ports is what the agent is told about the ports its template declares; nil when it declares none.
 	Ports *Ports
+	// WorkspaceInfo is what the agent is told about its own workspaces; nil when it lists none.
+	WorkspaceInfo []Workspace
 	// Bypass is true unless the agent opted out with `permissions: default`.
 	Bypass bool
 	// ControlURL is the control sidecar's agent API, and Authorization the Basic credentials of the agent.
@@ -361,9 +363,14 @@ func portsInstructions(ports *Ports) string {
 		"call expose again. Call unexpose(name) when you are done.\n\n"
 }
 
-// Instructions is the platform instructions, then what the agent is told about its ports if it has any, then the agent's own prompt.
-func Instructions(prompt string, ports *Ports) []byte {
+// Instructions is the platform instructions, then what the agent is told about its workspaces and its ports if it has any, then the agent's
+// own prompt.
+func Instructions(prompt string, ports *Ports, workspaces []Workspace) []byte {
 	text := PlatformInstructions
+	if len(workspaces) > 0 {
+		text += "\n" + workspacesInstructions(workspaces)
+		text = strings.TrimSuffix(text, "\n")
+	}
 	if ports != nil && len(ports.Ports) > 0 {
 		text += "\n" + portsInstructions(ports)
 		text = strings.TrimSuffix(text, "\n")

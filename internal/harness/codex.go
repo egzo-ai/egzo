@@ -77,7 +77,7 @@ func (c codex) Plan(o Options, args []string) (Plan, error) {
 		"mcp_servers.egzo.url=" + tomlString(strings.TrimRight(o.ControlURL, "/")+"/mcp"),
 		"mcp_servers.egzo.http_headers={Authorization=" + tomlString(o.Authorization) + "}",
 		"sandbox_mode=" + tomlString("danger-full-access"), // the container is the sandbox
-		"developer_instructions=" + tomlString(string(Instructions(o.Prompt, o.Ports))),
+		"developer_instructions=" + tomlString(string(Instructions(o.Prompt, o.Ports, o.WorkspaceInfo))),
 	}
 	if o.Bypass {
 		overrides = append(overrides, "approval_policy="+tomlString("never"))

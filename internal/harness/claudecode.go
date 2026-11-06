@@ -170,7 +170,7 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 		settings["model"] = o.Model
 	}
 
-	instructions := Instructions(o.Prompt, o.Ports)
+	instructions := Instructions(o.Prompt, o.Ports, o.WorkspaceInfo)
 	command := append([]string{}, args...)
 	if len(command) == 0 {
 		command = []string{"claude"}

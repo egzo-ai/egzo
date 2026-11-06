@@ -17,6 +17,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/gitprep"
+	"github.com/egzo-ai/egzo/internal/harness"
 )
 
 // A git workspace is a base clone and one worktree per instance, each in an engine volume (see volumes.go):
@@ -504,4 +505,22 @@ func ForgetWorktrees(ctx context.Context, c *engine.Client, env PrepEnv, project
 		return fmt.Errorf("could not make the base clones forget the removed worktrees: %s", strings.Join(failed, "; "))
 	}
 	return nil
+}
+
+// describeWorkspaces is what an instance is told about its own workspaces (harness.WorkspacesEnv): where each one is, its kind, and for a
+// git workspace the branch of its worktree and the branch it started from. Nothing about other agents or templates.
+func describeWorkspaces(project *config.Resolved, agent config.ResolvedAgent, instance string) []harness.Workspace {
+	out := make([]harness.Workspace, 0, len(agent.Workspaces))
+	for _, mount := range agent.Workspaces {
+		ws := harness.Workspace{Name: mount.Name, Kind: "directory", Path: mount.Mount, Mode: "rw"}
+		if mount.Mode == "ro" {
+			ws.Mode = "ro"
+		}
+		if declared := project.Workspaces[mount.Name]; declared.Git != nil {
+			ws.Kind, ws.Path, ws.Mode = "git", containerWorktree(mount.Name, instance), "rw"
+			ws.Branch, ws.From = gitprep.Branch(instance), declared.Git.Branch
+		}
+		out = append(out, ws)
+	}
+	return out
 }
