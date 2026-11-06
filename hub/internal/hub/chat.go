@@ -20,10 +20,11 @@ import (
 // through a bridge. The hub is the broker: what agents say to users waits in the outbox, which bridges read from where they are. The hub is the second check on every message: the bridge vetted the platform's side, and the hub checks the person.
 // A message it refuses is dropped and audited, and nobody is told: the bridge gets an error, never something to show.
 
-// Inbound is a message for an agent from one of the hub's users, as a bridge hands it over. Via names the bridge, for the audit log.
+// Inbound is a message for an agent from a person on a chat platform, as a bridge hands it over. Via names the bridge, and Account
+// the person's chat account there: the hub knows whose it is (bridgeaccounts.go), and a bridge never names a hub user.
 type Inbound struct {
 	Via       string
-	User      string // the hub user id the bridge linked the person to
+	Account   string
 	Text      string
 	Key       string // the platform's id for the message: the same key is the same message
 	Interrupt bool
@@ -39,14 +40,20 @@ func (h *Hub) Deliver(ctx context.Context, project, agent string, in Inbound) (s
 	if in.Answer != "" {
 		action = "agent.answer"
 	}
+	actor := in.Via + ":" + in.Account // until the account is known to be someone's
 	refuse := func(err error, why string) (string, error) {
-		h.record(ctx, store.AuditEntry{Actor: rbac.Actor(in.User), Action: action, Project: project, Agent: agent, Detail: fmt.Sprintf("refused, via %s: %s", in.Via, why)})
+		h.record(ctx, store.AuditEntry{Actor: actor, Action: action, Project: project, Agent: agent, Detail: fmt.Sprintf("refused, via %s: %s", in.Via, why)})
 		return "", err
 	}
-	user, err := h.store.User(ctx, in.User)
+	account, err := h.store.BridgeAccountOf(ctx, in.Via, in.Account)
+	if err != nil {
+		return refuse(ErrForbidden, "a chat account nobody linked")
+	}
+	user, err := h.store.User(ctx, account.UserID)
 	if err != nil {
 		return refuse(ErrForbidden, "no such user")
 	}
+	actor = rbac.Actor(user.ID)
 	if user.Disabled() {
 		return refuse(ErrForbidden, "the user is disabled")
 	}
@@ -83,21 +90,40 @@ func (h *Hub) Deliver(ctx context.Context, project, agent string, in Inbound) (s
 	return id, nil
 }
 
-// BridgeMessage is one message of a conversation between an agent and a user, as every bridge reads it.
-type BridgeMessage struct {
-	Seq     int64     `json:"seq"` // its place in the outbox: a bridge resumes after the last one it handled
-	Time    time.Time `json:"time"`
-	Project string    `json:"project"`
-	Agent   string    `json:"agent"`
-	ID      string    `json:"id"`
-	From    string    `json:"from"` // agent:<name> or user:<id>
-	To      string    `json:"to"`
-	Kind    string    `json:"kind"` // request, question, resolution, update
-	Re      string    `json:"re,omitempty"`
-	Text    string    `json:"text"`
-	Choices []string  `json:"choices,omitempty"`
-	Outcome string    `json:"outcome,omitempty"`
+// BridgeEvent is one entry of what bridges read: a message between an agent and a user, or a change a bridge acts on.
+type BridgeEvent struct {
+	Seq  int64     `json:"seq"` // its place in the outbox: a bridge resumes after the last one it handled
+	Time time.Time `json:"time"`
+	// Type is "message", or a change: "agent.removed", "project.removed", "account.linked", "account.unlinked", "user.disabled",
+	// "role.changed".
+	Type    string `json:"type"`
+	Project string `json:"project,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	// A message's.
+	ID      string   `json:"id,omitempty"`
+	From    string   `json:"from,omitempty"` // agent:<name> or user:<id>
+	To      string   `json:"to,omitempty"`
+	Kind    string   `json:"kind,omitempty"` // request, question, resolution, update
+	Re      string   `json:"re,omitempty"`
+	Text    string   `json:"text,omitempty"`
+	Choices []string `json:"choices,omitempty"`
+	Outcome string   `json:"outcome,omitempty"`
+	// A change's: the user it is about, and the account linked or unlinked.
+	User    string `json:"user,omitempty"`
+	Bridge  string `json:"bridge,omitempty"`
+	Account string `json:"account,omitempty"`
 }
+
+// Changes a bridge hears of.
+const (
+	EventMessage         = "message"
+	EventAgentRemoved    = "agent.removed"
+	EventProjectRemoved  = "project.removed"
+	EventAccountLinked   = "account.linked"
+	EventAccountUnlinked = "account.unlinked"
+	EventUserDisabled    = "user.disabled"
+	EventRoleChanged     = "role.changed"
+)
 
 // outboxRetention is how long the outbox keeps a message: a bridge away for longer misses it.
 const outboxRetention = 7 * 24 * time.Hour
@@ -118,7 +144,7 @@ func (h *Hub) handleEvent(ctx context.Context, project string, event links.Event
 		}
 	}
 	if keep {
-		body, _ = json.Marshal(BridgeMessage{Time: event.Time, Project: project, Agent: event.Agent, ID: event.ID, From: event.Actor, To: event.To,
+		body, _ = json.Marshal(BridgeEvent{Type: EventMessage, Time: event.Time, Project: project, Agent: event.Agent, ID: event.ID, From: event.Actor, To: event.To,
 			Kind: event.Kind, Re: event.Re, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome})
 	}
 	if body == nil && event.Type != "start" && !h.cursorDue(project) {
@@ -184,7 +210,7 @@ func (h *Hub) outboxChanged() {
 
 // Outbox lists what bridges read, after seq, at most limit messages, and a channel that closes when there is more. A negative seq is the end
 // of the outbox: only what comes next. A seq past the end is a hub whose database was made anew: all of it is new to the bridge.
-func (h *Hub) Outbox(ctx context.Context, after int64, limit int) ([]BridgeMessage, int64, <-chan struct{}, error) {
+func (h *Hub) Outbox(ctx context.Context, after int64, limit int) ([]BridgeEvent, int64, <-chan struct{}, error) {
 	h.outboxMu.Lock()
 	wake := h.outboxWake
 	h.outboxMu.Unlock()
@@ -202,9 +228,9 @@ func (h *Hub) Outbox(ctx context.Context, after int64, limit int) ([]BridgeMessa
 	if err != nil {
 		return nil, after, wake, err
 	}
-	out := make([]BridgeMessage, 0, len(entries))
+	out := make([]BridgeEvent, 0, len(entries))
 	for _, e := range entries {
-		var m BridgeMessage
+		var m BridgeEvent
 		if json.Unmarshal(e.Body, &m) == nil {
 			m.Seq = e.Seq
 			out = append(out, m)
@@ -212,6 +238,18 @@ func (h *Hub) Outbox(ctx context.Context, after int64, limit int) ([]BridgeMessa
 		after = e.Seq
 	}
 	return out, after, wake, nil
+}
+
+// change puts a change in the outbox for the bridges.
+func (h *Hub) change(ctx context.Context, e BridgeEvent) {
+	e.Time = time.Now().UTC()
+	body, _ := json.Marshal(e)
+	// Kept apart from the project's row: a project that is forgotten takes its messages with it, never what says it was forgotten.
+	if _, err := h.store.AddOutbox(context.WithoutCancel(ctx), "", e.Agent, body, e.Time); err != nil {
+		h.log.Error("a change was not told to the bridges", "type", e.Type, "err", err)
+		return
+	}
+	h.outboxChanged()
 }
 
 // eventsAfter is where a project's events feed resumes: -1 when the hub never read it. An error ends the feed, which the link opens again.

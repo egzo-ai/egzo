@@ -11,7 +11,21 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
+	"github.com/egzo-ai/egzo/hub/internal/store"
 )
+
+// account links a chat account to the user, as confirming a bridge code does, and returns the account.
+func (r *rig) account(u store.User) string {
+	r.t.Helper()
+	code, _, err := r.hub.BridgeCode(ctx, "discord", "d-"+u.ID, u.Username)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	if _, err := r.hub.ConfirmBridgeCode(ctx, u, code); err != nil {
+		r.t.Fatal(err)
+	}
+	return "d-" + u.ID
+}
 
 func TestAUserChatsWithTheirOwnAgentsAndAnAdministratorWithAnyAndEveryRefusalIsAudited(t *testing.T) {
 	r := newRig(t)
@@ -24,8 +38,13 @@ func TestAUserChatsWithTheirOwnAgentsAndAnAdministratorWithAnyAndEveryRefusalIsA
 	web.SetAgent(agent("coder-1", "user:"+alice.ID))
 	web.SetAgent(agent("cli-1", rbac.CLI))
 
+	accounts := map[string]string{alice.ID: r.account(alice), bob.ID: r.account(bob), carol.ID: r.account(carol)}
 	say := func(who, to, key string) error {
-		_, err := r.hub.Deliver(ctx, id, to, Inbound{Via: "discord", User: who, Text: "hello", Key: key})
+		account, ok := accounts[who]
+		if !ok {
+			account = "d-unlinked"
+		}
+		_, err := r.hub.Deliver(ctx, id, to, Inbound{Via: "discord", Account: account, Text: "hello", Key: key})
 		return err
 	}
 	if err := say(alice.ID, "coder-1", "k1"); err != nil {
@@ -41,7 +60,7 @@ func TestAUserChatsWithTheirOwnAgentsAndAnAdministratorWithAnyAndEveryRefusalIsA
 		t.Errorf("an administrator to any agent: %v", err)
 	}
 	if err := say("u-nobody", "coder-1", "k5"); !errors.Is(err, ErrForbidden) {
-		t.Errorf("a user the hub does not know: %v", err)
+		t.Errorf("a chat account nobody linked: %v", err)
 	}
 	if _, _, err := r.store.SetDisabled(ctx, alice.ID, true); err != nil {
 		t.Fatal(err)
@@ -90,10 +109,10 @@ func TestAnAnswerGoesToTheProjectUnderTheSameRule(t *testing.T) {
 	r.store.SetRole(ctx, id, alice.ID, rbac.User)
 	r.store.SetRole(ctx, id, bob.ID, rbac.User)
 	web.SetAgent(agent("coder-1", "user:"+alice.ID))
-	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", User: bob.ID, Text: "yes", Answer: "mq"}); !errors.Is(err, ErrForbidden) {
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(bob), Text: "yes", Answer: "mq"}); !errors.Is(err, ErrForbidden) {
 		t.Errorf("bob answering for alice's agent: %v", err)
 	}
-	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", User: alice.ID, Text: "yes", Answer: "mq"}); err != nil {
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(alice), Text: "yes", Answer: "mq"}); err != nil {
 		t.Errorf("alice: %v", err)
 	}
 	calls := web.Calls()
@@ -111,7 +130,7 @@ func TestAMessageForAnOfflineProjectIsDroppedAndAudited(t *testing.T) {
 	web.SetAgent(agent("coder-1", rbac.CLI))
 	web.Drop()
 	eventually(t, "the hub to see it go", func() bool { return r.hub.connected(id) == nil })
-	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", User: alice.ID, Text: "x", Key: "k"}); err == nil {
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(alice), Text: "x", Key: "k"}); err == nil {
 		t.Error("a message for an offline project went somewhere")
 	}
 }

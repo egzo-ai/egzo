@@ -389,6 +389,20 @@ func (e *Engine) SetAgent(a links.Agent) {
 	e.push("change")
 }
 
+// RemoveAgent takes an agent away, as `egzo agent rm` would, and pushes the project.
+func (e *Engine) RemoveAgent(name string) {
+	e.mu.Lock()
+	kept := e.project.Agents[:0]
+	for _, a := range e.project.Agents {
+		if a.Name != name {
+			kept = append(kept, a)
+		}
+	}
+	e.project.Agents = kept
+	e.mu.Unlock()
+	e.push("change")
+}
+
 // SetServices replaces the sidecars, as one that stopped or came back does.
 func (e *Engine) SetServices(services ...links.Service) {
 	e.mu.Lock()

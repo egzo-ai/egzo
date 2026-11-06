@@ -44,7 +44,7 @@ var projectID = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 type Inbound struct {
 	Project   string `json:"project"`
 	Agent     string `json:"agent"`
-	User      string `json:"user"` // the hub user id the bridge linked the person to
+	Account   string `json:"account"` // the person's account on the platform, which they linked to a hub user
 	Text      string `json:"text"`
 	Key       string `json:"key,omitempty"` // the platform's id for the message: the same key is the same message
 	Interrupt bool   `json:"interrupt,omitempty"`
@@ -56,15 +56,20 @@ type Inbound struct {
 type Server struct {
 	hub    *hub.Hub
 	tokens map[[32]byte]string // sha256 of the secret -> the bridge's name
+	public string              // the hub's address, for the link a person opens to confirm a code
 	log    *slog.Logger
 }
 
-// New serves the bridges named in bridges (name -> secret, from config.ParseBridges).
-func New(h *hub.Hub, bridges map[string]string, log *slog.Logger) *Server {
+// LinkPath is the web page where a person confirms a bridge code. The code goes after its #: a browser sends it to no server, and no
+// log holds it.
+const LinkPath = "/chat-link"
+
+// New serves the bridges named in bridges (name -> secret, from config.ParseBridges). public is the hub's address people use.
+func New(h *hub.Hub, bridges map[string]string, public string, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{hub: h, tokens: map[[32]byte]string{}, log: log}
+	s := &Server{hub: h, tokens: map[[32]byte]string{}, public: strings.TrimSuffix(public, "/"), log: log}
 	for name, secret := range bridges {
 		s.tokens[sha256.Sum256([]byte(secret))] = name
 	}
@@ -76,6 +81,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+Prefix+"/messages", s.authed(s.stream))
 	mux.HandleFunc("POST "+Prefix+"/messages", s.authed(s.deliver))
+	mux.HandleFunc("POST "+Prefix+"/codes", s.authed(s.code))
+	mux.HandleFunc("GET "+Prefix+"/accounts", s.authed(s.accounts))
+	mux.HandleFunc("GET "+Prefix+"/agents", s.authed(s.agents))
+	mux.HandleFunc("POST "+Prefix+"/may-add", s.authed(s.mayAdd))
 	return mux
 }
 
@@ -165,7 +174,7 @@ func (s *Server) deliver(w http.ResponseWriter, r *http.Request, bridge string) 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), deliverLimit)
 	defer cancel()
-	id, err := s.hub.Deliver(ctx, in.Project, in.Agent, hub.Inbound{Via: bridge, User: in.User, Text: in.Text, Key: in.Key,
+	id, err := s.hub.Deliver(ctx, in.Project, in.Agent, hub.Inbound{Via: bridge, Account: in.Account, Text: in.Text, Key: in.Key,
 		Interrupt: in.Interrupt, Answer: in.Answer, Outcome: in.Outcome})
 	if err != nil {
 		status := http.StatusForbidden
@@ -181,8 +190,99 @@ func (s *Server) deliver(w http.ResponseWriter, r *http.Request, bridge string) 
 
 // wellFormed checks the shape of what a bridge posts; the hub checks the person.
 func wellFormed(in Inbound) bool {
-	return projectID.MatchString(in.Project) && corenames.Instance(in.Agent) && in.User != "" && len(in.User) <= 64 &&
+	return projectID.MatchString(in.Project) && corenames.Instance(in.Agent) && validAccount(in.Account) &&
 		strings.TrimSpace(in.Text) != "" && (in.Answer != "" || in.Key != "")
+}
+
+// validAccount is a platform's id for a person, as a bridge names it.
+func validAccount(account string) bool {
+	if account == "" || len(account) > 64 {
+		return false
+	}
+	for _, r := range account {
+		if r <= 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// code makes a link code for a person's account: the bridge shows them the address, they confirm it signed in on the hub.
+func (s *Server) code(w http.ResponseWriter, r *http.Request, bridge string) {
+	var in struct {
+		Account string `json:"account"`
+		Name    string `json:"name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxIn)).Decode(&in); err != nil || !validAccount(in.Account) || len(in.Name) > 100 {
+		answer(w, http.StatusBadRequest, map[string]string{"error": "expected {account, name}"})
+		return
+	}
+	code, expires, err := s.hub.BridgeCode(r.Context(), bridge, in.Account, strings.TrimSpace(in.Name))
+	if err != nil {
+		s.log.Error("make a bridge code", "bridge", bridge, "err", err)
+		answer(w, http.StatusInternalServerError, map[string]string{"error": "no code"})
+		return
+	}
+	answer(w, http.StatusOK, map[string]any{"code": code, "url": s.public + LinkPath + "#" + code, "expires": expires.UTC()})
+}
+
+// Account is a linked account, as a bridge reads the list.
+type Account struct {
+	Account  string `json:"account"`
+	Name     string `json:"name"`
+	User     string `json:"user"` // the hub user id, as messages name it: user:<id>
+	Username string `json:"username"`
+}
+
+// accounts lists the accounts linked through this bridge: whom user:<id> is on the platform.
+func (s *Server) accounts(w http.ResponseWriter, r *http.Request, bridge string) {
+	list, err := s.hub.BridgeAccounts(r.Context(), bridge)
+	if err != nil {
+		answer(w, http.StatusInternalServerError, map[string]string{"error": "no list"})
+		return
+	}
+	out := make([]Account, 0, len(list))
+	for _, a := range list {
+		out = append(out, Account{Account: a.ExternalID, Name: a.ExternalName, User: a.UserID, Username: a.Username})
+	}
+	answer(w, http.StatusOK, out)
+}
+
+// agents lists the agents the person behind ?account= may chat with.
+func (s *Server) agents(w http.ResponseWriter, r *http.Request, bridge string) {
+	account := r.URL.Query().Get("account")
+	if !validAccount(account) {
+		answer(w, http.StatusBadRequest, map[string]string{"error": "expected ?account="})
+		return
+	}
+	list, err := s.hub.ChatAgents(r.Context(), bridge, account)
+	if errors.Is(err, hub.ErrForbidden) {
+		answer(w, http.StatusForbidden, map[string]string{"error": "not linked"})
+		return
+	} else if err != nil {
+		answer(w, http.StatusInternalServerError, map[string]string{"error": "no list"})
+		return
+	}
+	answer(w, http.StatusOK, list)
+}
+
+// mayAdd says whether the person may add an agent to a place.
+func (s *Server) mayAdd(w http.ResponseWriter, r *http.Request, bridge string) {
+	var in struct {
+		Account string `json:"account"`
+		Project string `json:"project"`
+		Agent   string `json:"agent"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxIn)).Decode(&in); err != nil || !validAccount(in.Account) || !projectID.MatchString(in.Project) || !corenames.Instance(in.Agent) {
+		answer(w, http.StatusBadRequest, map[string]string{"error": "expected {account, project, agent}"})
+		return
+	}
+	ok, err := s.hub.MayAdd(r.Context(), bridge, in.Account, in.Project, in.Agent)
+	if err != nil {
+		answer(w, http.StatusInternalServerError, map[string]string{"error": "cannot say"})
+		return
+	}
+	answer(w, http.StatusOK, map[string]bool{"allowed": ok})
 }
 
 func answer(w http.ResponseWriter, status int, body any) {

@@ -171,9 +171,28 @@ CREATE TABLE IF NOT EXISTS event_cursors (
 CREATE TABLE IF NOT EXISTS outbox (
 	seq INTEGER PRIMARY KEY AUTOINCREMENT,
 	at INTEGER NOT NULL,                 -- Unix milliseconds
-	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	project TEXT REFERENCES projects(id) ON DELETE CASCADE, -- none for what is not a project's: an account linked, a user disabled
 	agent TEXT NOT NULL,
-	body TEXT NOT NULL                   -- the message as bridges read it, JSON
+	body TEXT NOT NULL                   -- the event as bridges read it, JSON
+);
+-- The chat accounts people linked to their hub user, one bridge each (bridgeaccounts.go). An account is one user's; a user may have
+-- several.
+CREATE TABLE IF NOT EXISTS bridge_accounts (
+	bridge TEXT NOT NULL,
+	external_id TEXT NOT NULL,           -- the platform's id for the person, such as a Discord user id
+	external_name TEXT NOT NULL,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	linked_at INTEGER NOT NULL,
+	PRIMARY KEY (bridge, external_id)
+);
+CREATE INDEX IF NOT EXISTS bridge_accounts_user ON bridge_accounts (user_id);
+-- A code a bridge asked for, for a person to confirm signed in: only its hash.
+CREATE TABLE IF NOT EXISTS bridge_codes (
+	hash BLOB PRIMARY KEY,
+	bridge TEXT NOT NULL,
+	external_id TEXT NOT NULL,
+	external_name TEXT NOT NULL,
+	expires_at INTEGER NOT NULL
 );
 -- A person signed in to a preview (previews.go): they end with the hub session they came from.
 CREATE TABLE IF NOT EXISTS preview_tickets (

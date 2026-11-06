@@ -265,6 +265,9 @@ func (h *Hub) SetDisabled(ctx context.Context, actor store.User, targetID string
 		return nil, err
 	}
 	entry.Allowed = true
+	if on {
+		h.change(ctx, BridgeEvent{Type: EventUserDisabled, User: targetID})
+	}
 	return ended, h.store.Audit(ctx, entry)
 }
 
