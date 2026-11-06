@@ -398,10 +398,11 @@ func (d *Engine) Forward(ctx context.Context, project, agent string, port int, c
 	return err
 }
 
-// noisy are the event types that are not worth a person's time, or that carry message texts, which the hub does not show.
+// noisy are the event types that are not worth a person's time.
 var noisy = map[string]bool{"state": true}
 
-// withText are the types whose text is shown: what the agent says about itself. The text of a message never is.
+// withText are the types whose text is shown: what the agent says about itself. The text of a message is only in the events feed,
+// and only when a user is one end of it.
 var withText = map[string]bool{"status": true, "activity": true, "exposed": true, "unexposed": true}
 
 func (d *Engine) Events(ctx context.Context, project, agent string, limit int) ([]Event, error) {
@@ -416,33 +417,140 @@ func (d *Engine) Events(ctx context.Context, project, agent string, limit int) (
 	return ParseEvents(data, limit), nil
 }
 
-// ParseEvents reads the control sidecar's JSON lines: the last limit events that are worth showing, oldest first.
+// ParseEvents reads the control sidecar's JSON lines: the last limit events that are worth showing, oldest first. No message
+// text is in them: they are what the web UI shows.
 func ParseEvents(data []byte, limit int) []Event {
 	var events []Event
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	for scanner.Scan() {
-		var raw struct {
-			Seq   int       `json:"seq"`
-			Time  time.Time `json:"time"`
-			Type  string    `json:"type"`
-			Agent string    `json:"agent"`
-			Actor string    `json:"actor"`
-			Text  string    `json:"text"`
+		if event, _, ok := parseEvent(scanner.Bytes(), false); ok {
+			events = append(events, event)
 		}
-		if json.Unmarshal(scanner.Bytes(), &raw) != nil || noisy[raw.Type] {
-			continue
-		}
-		event := Event{Seq: raw.Seq, Time: raw.Time, Type: raw.Type, Agent: raw.Agent, Actor: raw.Actor}
-		if withText[raw.Type] {
-			event.Text = raw.Text
-		}
-		events = append(events, event)
 	}
 	if limit > 0 && len(events) > limit {
 		events = events[len(events)-limit:]
 	}
 	return events
+}
+
+// parseEvent reads one line of the control sidecar's event stream. seq is the line's sequence number, also for an event that is not
+// worth showing (ok false). userTexts keeps the text of a message one end of which is a user: what the hub relays to its users.
+func parseEvent(line []byte, userTexts bool) (event Event, seq int, ok bool) {
+	var raw struct {
+		Seq   int       `json:"seq"`
+		Time  time.Time `json:"time"`
+		Type  string    `json:"type"`
+		Agent string    `json:"agent"`
+		Actor string    `json:"actor"`
+		ID    string    `json:"id"`
+		Text  string    `json:"text"`
+		Data  struct {
+			To      string   `json:"to"`
+			Kind    string   `json:"kind"`
+			Re      string   `json:"re"`
+			Outcome string   `json:"outcome"`
+			Choices []string `json:"choices"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(line, &raw); err != nil {
+		var bare struct {
+			Seq int `json:"seq"`
+		}
+		_ = json.Unmarshal(line, &bare)
+		return Event{}, bare.Seq, false
+	}
+	if noisy[raw.Type] {
+		return Event{}, raw.Seq, false
+	}
+	event = Event{Seq: raw.Seq, Time: raw.Time, Type: raw.Type, Agent: raw.Agent, Actor: raw.Actor, ID: raw.ID, Outcome: raw.Data.Outcome}
+	if raw.Type == "message" {
+		event.To, event.Kind, event.Re, event.Choices = raw.Data.To, raw.Data.Kind, raw.Data.Re, raw.Data.Choices
+	}
+	switch {
+	case withText[raw.Type]:
+		event.Text = raw.Text
+	case raw.Type == "message" && userTexts && (isUser(raw.Actor) || isUser(raw.Data.To)):
+		event.Text = raw.Text
+	}
+	return event, raw.Seq, true
+}
+
+func isUser(address string) bool { return strings.HasPrefix(address, "user:") }
+
+// FollowEvents follows the control sidecar's event stream from the events after seq, or from the next one when seq is zero, with
+// the texts of the messages users send and are sent. on gets each event worth showing; seen, every sequence number read, so that
+// following again starts past those too.
+func (d *Engine) FollowEvents(ctx context.Context, project string, after int, on func(Event), seen func(int)) error {
+	if after <= 0 {
+		after = -1
+	}
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := stack.ControlStream(ctx, d.client, project, "GET", fmt.Sprintf("/v1/events?after=%d&follow=1", after), writer, io.Discard)
+		writer.CloseWithError(err)
+		done <- err
+	}()
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64<<10), maxLogLine)
+	for scanner.Scan() {
+		event, seq, ok := parseEvent(scanner.Bytes(), true)
+		if ok {
+			on(event)
+		}
+		if seq > 0 {
+			seen(seq)
+		}
+	}
+	reader.CloseWithError(io.EOF) // the stream may still be writing a line too long to read: let it end
+	err := <-done
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err == nil {
+		err = scanner.Err()
+	}
+	if err == nil {
+		return hublink.ErrStreamEnded
+	}
+	return err
+}
+
+// Send is a message from one of the hub's users to an agent. The hub speaks for its users and no one else, and every message it
+// sends has a key, the chat platform's id for it, so that a retry is the same message.
+func (d *Engine) Send(ctx context.Context, project, agent, actor, text, key string, interrupt bool) (hublink.Sent, error) {
+	if !isUser(actor) {
+		return hublink.Sent{}, fmt.Errorf("the hub sends as one of its users, user:<id>, not as %q", actor)
+	}
+	if key == "" {
+		return hublink.Sent{}, errors.New("a message from the hub needs a key: without one a retry is sent twice")
+	}
+	body, _ := json.Marshal(map[string]any{"to": "agent:" + agent, "from": actor, "text": text, "key": key, "interrupt": interrupt})
+	data, err := stack.ControlRequest(ctx, d.client, project, "POST", "/v1/messages", body)
+	if err != nil {
+		return hublink.Sent{}, err
+	}
+	var sent struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &sent); err != nil || sent.ID == "" {
+		return hublink.Sent{}, fmt.Errorf("the control sidecar said %q", strings.TrimSpace(string(data)))
+	}
+	return hublink.Sent{ID: sent.ID}, nil
+}
+
+// Resolve is one of the hub's users answering a question, or closing a request, addressed to them.
+func (d *Engine) Resolve(ctx context.Context, project, message, actor, text, outcome string) error {
+	if !isUser(actor) {
+		return fmt.Errorf("the hub answers as one of its users, user:<id>, not as %q", actor)
+	}
+	if outcome == "" {
+		outcome = "done"
+	}
+	body, _ := json.Marshal(map[string]string{"actor": actor, "text": text, "outcome": outcome})
+	_, err := stack.ControlRequest(ctx, d.client, project, "POST", "/v1/messages/"+url.PathEscape(message)+"/resolve", body)
+	return err
 }
 
 func (d *Engine) Logs(ctx context.Context, project, name string, tail int) (string, error) {

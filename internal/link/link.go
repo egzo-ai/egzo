@@ -637,6 +637,10 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 			return l.options.Engine.Forward(ctx, l.options.Project, request.Agent, request.Port, protocol == hublink.ProtocolHTTP, in, out, said)
 		}, stream, portforward.Connected)
 		return
+	case hublink.VerbSend:
+		result, err = engine.Send(ctx, project, request.Agent, request.Actor, request.Text, request.Key, request.Interrupt)
+	case hublink.VerbResolve:
+		err = engine.Resolve(ctx, project, request.Message, request.Actor, request.Text, request.Outcome)
 	case hublink.VerbWorkspaces:
 		result, err = engine.Workspaces(ctx, project)
 	case hublink.VerbFiles:

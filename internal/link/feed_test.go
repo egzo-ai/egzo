@@ -5,6 +5,7 @@ package link
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -108,5 +109,38 @@ func TestOnlyAPortOpenForTheHubIsRememberedForForwarding(t *testing.T) {
 		if _, ok := l.exposure("coder-1", port); ok {
 			t.Errorf("port %d is open for the local machine and must never be forwarded to the hub", port)
 		}
+	}
+}
+
+func TestTheEventsFeedKeepsTheTextOfAMessageOnlyWhenAUserIsOneEndOfIt(t *testing.T) {
+	line := func(actor, to, kind, text string) []byte {
+		return []byte(fmt.Sprintf(`{"seq":9,"type":"message","agent":"coder","actor":%q,"id":"m1","text":%q,"data":{"to":%q,"kind":%q,"re":"m0","choices":["a"]}}`, actor, text, to, kind))
+	}
+	for _, c := range []struct {
+		actor, to string
+		feed      bool
+		want      string
+	}{
+		{"user:7", "agent:coder", true, "from a user"},
+		{"agent:coder", "user:7", true, "to a user"},
+		{"agent:coder", "agent:peer", true, ""},
+		{"agent:coder", "operator", true, ""},
+		{"operator", "agent:coder", true, ""},
+		{"agent:coder", "user:7", false, ""}, // the events verb, for the web UI
+	} {
+		event, seq, ok := parseEvent(line(c.actor, c.to, "question", c.want+"x"), c.feed)
+		want := c.want
+		if want != "" {
+			want += "x"
+		}
+		if !ok || seq != 9 || event.Text != want || event.To != c.to || event.Kind != "question" || event.Re != "m0" || event.ID != "m1" {
+			t.Errorf("%s -> %s (feed %v): %+v", c.actor, c.to, c.feed, event)
+		}
+	}
+	if _, seq, ok := parseEvent([]byte(`{"seq":10,"type":"state","agent":"coder","text":"screen"}`), true); ok || seq != 10 {
+		t.Errorf("a state event is not worth sending, but its seq is read: %v %d", ok, seq)
+	}
+	if event, _, _ := parseEvent([]byte(`{"seq":11,"type":"resolved","agent":"coder","actor":"user:7","id":"m1","text":"the answer","data":{"outcome":"done"}}`), true); event.Text != "" || event.Outcome != "done" {
+		t.Errorf("a resolved event says the outcome and leaves the text to its resolution message: %+v", event)
 	}
 }

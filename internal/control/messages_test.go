@@ -524,3 +524,83 @@ func TestAnAnswerToAQuestionSaysSoAndNamesTheRequest(t *testing.T) {
 		t.Errorf("fetched %+v", got)
 	}
 }
+
+func TestAKeyMakesASendIdempotentPerSenderAndSurvivesARestart(t *testing.T) {
+	r := newRig(t)
+	r.project("coder")
+	send := func(body string) (int, string) {
+		response := r.asOperator("POST", "/v1/messages", body)
+		var sent struct{ ID string }
+		if response.StatusCode == 200 {
+			decode(t, response, &sent)
+		} else {
+			response.Body.Close()
+		}
+		return response.StatusCode, sent.ID
+	}
+	code, first := send(`{"to":"agent:coder","from":"user:7","text":"hi","key":"discord-1"}`)
+	if code != 200 {
+		t.Fatalf("send: %d", code)
+	}
+	if _, again := send(`{"to":"agent:coder","from":"user:7","text":"hi","key":"discord-1"}`); again != first {
+		t.Errorf("the same key sent a second message: %s and %s", first, again)
+	}
+	if _, other := send(`{"to":"agent:coder","from":"user:8","text":"hi","key":"discord-1"}`); other == first || other == "" {
+		t.Errorf("another sender's key is its own: %q", other)
+	}
+	if n := len(r.srv.events.selectMessages(func(m Message) bool { return m.Kind == kindRequest })); n != 2 {
+		t.Errorf("%d requests, want 2", n)
+	}
+	for _, key := range []string{strings.Repeat("k", maxKeyLength+1), "with space", "tab\t"} {
+		body := fmt.Sprintf(`{"to":"agent:coder","from":"user:7","text":"hi","key":%q}`, key)
+		if code, _ := send(body); code != 400 {
+			t.Errorf("key %q: %d, want 400", key, code)
+		}
+	}
+	reopened, err := newServer(r.srv.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := reopened.events.keyedMessage("user:7", "discord-1"); !ok || id != first {
+		t.Errorf("after a restart the key is %q, %v", id, ok)
+	}
+}
+
+func TestAUserResolvesOnlyWhatIsAddressedToThemAndTheOperatorAnything(t *testing.T) {
+	r := newRig(t)
+	r.project("coder")
+	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","from":"user:7","text":"deploy"}`)
+	var sent struct{ ID string }
+	decode(t, response, &sent)
+	r.srv.fetch("coder", sent.ID)
+	question, err := r.srv.ask("coder", sent.ID, "where?", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.srv.resolveForPerson("user:8", question, "prod", "done"); statusOf(t, err) != http.StatusBadRequest {
+		t.Errorf("another user answered: %v", err)
+	}
+	if _, err := r.srv.resolveForPerson("user:7", question, "staging", "done"); err != nil {
+		t.Errorf("the user it asked: %v", err)
+	}
+	other, _ := r.srv.ask("coder", sent.ID, "and then?", nil)
+	if _, err := r.srv.resolveForPerson("operator", other, "nothing", "done"); err != nil {
+		t.Errorf("the operator answers for anyone: %v", err)
+	}
+}
+
+func TestReadingEventsStartsAtTheEndForANegativeSeqAndAtTheStartPastTheEnd(t *testing.T) {
+	r := newRig(t)
+	r.project("coder")
+	r.request("coder", "one")
+	last := r.srv.events.start(-1)
+	if last == 0 {
+		t.Fatal("no events")
+	}
+	if got := r.srv.events.start(last + 10); got != 0 {
+		t.Errorf("past the end: %d, want 0 (a log that began again)", got)
+	}
+	if got := r.srv.events.start(last - 1); got != last-1 {
+		t.Errorf("inside the log: %d", got)
+	}
+}

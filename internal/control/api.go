@@ -314,6 +314,7 @@ func (s *server) listSpecs(w http.ResponseWriter, r *http.Request) {
 // streamEvents writes the event stream as JSON lines; with follow=1 it stays open for new events.
 func (s *server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
+	after = s.events.start(after)
 	agent := r.URL.Query().Get("agent")
 	follow := r.URL.Query().Get("follow") == "1"
 	flusher, _ := w.(http.Flusher)
@@ -345,6 +346,7 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 		From      string `json:"from"`
 		Text      string `json:"text"`
 		Interrupt bool   `json:"interrupt"`
+		Key       string `json:"key"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil {
 		http.Error(w, "expected {\"to\": \"agent:name\", \"text\": message}", http.StatusBadRequest)
@@ -357,12 +359,16 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "from must be operator or user:<id>", http.StatusBadRequest)
 		return
 	}
-	message, event, err := s.send(sendRequest{From: body.From, To: body.To, Text: body.Text, Interrupt: body.Interrupt})
+	message, event, err := s.send(sendRequest{From: body.From, To: body.To, Text: body.Text, Interrupt: body.Interrupt, Key: body.Key})
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{"id": message.ID, "seq": event.Seq})
+	reply := map[string]any{"id": message.ID}
+	if event.Seq > 0 {
+		reply["seq"] = event.Seq
+	}
+	json.NewEncoder(w).Encode(reply)
 }
 
 // listMessages is `egzo message ls`: the open requests and questions, or with all=1 everything. agent=

@@ -27,11 +27,11 @@ const settleDelay = 200 * time.Millisecond
 // refreshEvery is how often the project is read without an event: `up` publishing templates touches no container, so no event says so.
 var refreshEvery = time.Minute
 
-// pushFeeds pushes the three feeds until ctx ends. A feed that ends is opened again, and a feed's engine stream that breaks is
+// pushFeeds pushes the feeds until ctx ends. A feed that ends is opened again, and a feed's engine stream that breaks is
 // followed again, with a growing delay: a control sidecar being recreated is an ordinary moment.
 func (l *Link) pushFeeds(ctx context.Context, session *yamux.Session) {
 	var wg sync.WaitGroup
-	for feed, push := range map[string]pusher{hublink.FeedProject: l.pushProject, hublink.FeedStatus: l.pushStatus, hublink.FeedAudit: l.pushAudit} {
+	for feed, push := range map[string]pusher{hublink.FeedProject: l.pushProject, hublink.FeedStatus: l.pushStatus, hublink.FeedAudit: l.pushAudit, hublink.FeedEvents: l.pushEvents} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -231,6 +231,20 @@ func (l *Link) pushAudit(ctx context.Context, lines *hublink.Lines, start hublin
 	deliver := sendAudit(lines, send, &since)
 	return retry(ctx, send.failed, func() error {
 		return l.options.Engine.FollowAudit(ctx, l.options.Project, since, deliver)
+	})
+}
+
+func (l *Link) pushEvents(ctx context.Context, lines *hublink.Lines, start hublink.FeedStart) error {
+	ctx, send := sending(ctx)
+	after := start.After
+	return retry(ctx, send.failed, func() error {
+		return l.options.Engine.FollowEvents(ctx, l.options.Project, after, func(event Event) {
+			send.note(lines.Write(event))
+		}, func(seq int) {
+			if send.failed() == nil {
+				after = seq // following again starts past what was sent, and past what is not worth sending
+			}
+		})
 	})
 }
 

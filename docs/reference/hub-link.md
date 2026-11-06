@@ -30,9 +30,9 @@ hub: https://my-egzo.example.org
   proxy). The link holds one outbound HTTPS connection to the hub on port 443, which NAT and company proxies pass. Nothing on the
   project's host listens on anything.
 - **The hub asks, the link does.** Down the connection the hub sends egzo's verbs: list, spawn, start, stop, remove, attach, open a
-  preview stream. The link runs them on its own engine with the core packages (`stack.Spawn`,
+  preview stream, send a message for one of its users and answer one. The link runs them on its own engine with the core packages (`stack.Spawn`,
   `RemoveInstances`, `Observe`, `ExecStream`). Up the connection the link pushes the project as it changes, the agents' status
-  feed and the proxy's audit trail.
+  feed, the proxy's audit trail and the control sidecar's events (see [Messages](#messages)).
 - **The link exposes egzo's verbs and nothing else.** The hub cannot run a container, mount a path or exec a command of its
   choosing: it spawns from the project's own templates and attaches to the agents' sessions. The project file and the CLI stay
   the only way to change a project.
@@ -41,7 +41,7 @@ hub: https://my-egzo.example.org
 
 | | Before (the hub pulls) | After (projects link) |
 |---|---|---|
-| A compromised hub | root on every engine host | egzo's verbs on the linked projects: spawn from their templates, attach to their agents |
+| A compromised hub | root on every engine host | egzo's verbs on the linked projects: spawn from their templates, attach to their agents, talk to them as any of its users |
 | Reachability | the hub reaches each engine | each project reaches the hub, outbound 443 |
 | What the hub shows | everything on its engines | the projects whose owners linked them |
 | Who decides | the hub's operator | the project's owner, in the project file |
@@ -129,6 +129,23 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
   and links that present a code only. The UI stays where it is.
 - **What a link says is untrusted.** A linked project speaks for itself only; its names, status lines and audit events are data,
   shown escaped, limited in size and rate.
+
+## Messages
+
+The hub relays what its users say to agents, and what agents say to them, for the chat bridges (#145). It never speaks as the operator.
+
+- **`send`** is a message from a hub user to an agent: `Agent`, `Actor` (`user:<id>`, nothing else), `Text`, `Interrupt`, and a `Key`,
+  the chat platform's id for the message. The key is required: the same key from the same user is the same message, so a retry after a
+  dropped connection sends nothing twice. It answers the message's id. While the project is offline there is no link to ask, and nothing
+  queues: the hub drops the message.
+- **`resolve`** is a hub user answering a question, or closing a request, addressed to them: `Message`, `Actor`, `Text`, `Outcome`. A
+  user answers only what is addressed to that user; the operator, at the CLI, answers anything.
+- **The `events` feed** follows the control sidecar's event stream. It begins after `FeedStart.After`, the sequence number of the last
+  event the hub has, so a link that was away resumes where the hub is and loses nothing; zero is only the events to come. An event of a
+  log that began again (the control volume made anew) has a smaller number than the hub's: the link sends the whole new log.
+- **What the feed carries.** Every event worth showing (no `state`). A message says who it went from and to, its kind and what it is
+  about, and its text **only when a user is one end of it**: what agents say to each other or to the operator stays in the project.
+  The `events` verb, which the web UI's timelines ask, carries no message text at all.
 
 ## Versions
 

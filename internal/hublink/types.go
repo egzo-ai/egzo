@@ -132,7 +132,9 @@ type Exposure struct {
 	Address  string // where the port is reached: the hub makes its own for a port open for the hub, and shows this one for a port open for `local`
 }
 
-// Event is one entry of the control sidecar's event stream, as the web UI shows it.
+// Event is one entry of the control sidecar's event stream, as the web UI shows it and as the events feed carries it. A message
+// (Type "message") says who it went from (Actor) and to, its kind and what it is about; its Text is there only when a user is one end
+// of it, the sender or the recipient: what agents say to each other or to the operator stays in the project.
 type Event struct {
 	Seq   int
 	Time  time.Time
@@ -140,6 +142,13 @@ type Event struct {
 	Agent string
 	Actor string
 	Text  string
+	// A message's, and the message an event is about (fetched, resolved).
+	ID      string   `json:",omitempty"`
+	To      string   `json:",omitempty"`
+	Kind    string   `json:",omitempty"` // request, question, resolution, update
+	Re      string   `json:",omitempty"`
+	Outcome string   `json:",omitempty"`
+	Choices []string `json:",omitempty"`
 }
 
 // The kinds of a workspace.
