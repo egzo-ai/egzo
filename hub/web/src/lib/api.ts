@@ -1,4 +1,6 @@
 import type {
+  ChatAccount,
+  ChatLinkPreview,
   AgentAnswer, AuditEntry, FileView, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Listing, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, Template, UserRow, WorkspaceRow,
 } from "./types";
 
@@ -54,6 +56,10 @@ export const api = {
   /** Starts linking an account at the login provider; the answer is where to send the browser. */
   link: () => request<{ url: string }>("POST", "/me/link"),
   unlink: (identity: string) => request<{ ok: true }>("DELETE", `/me/identities/${enc(identity)}`),
+  chatAccounts: () => request<{ accounts: ChatAccount[] }>("GET", "/me/chat-accounts").then((r) => r.accounts),
+  unlinkChatAccount: (bridge: string, account: string) => request<{ ok: true }>("DELETE", `/me/chat-accounts/${enc(bridge)}/${enc(account)}`),
+  peekChatLink: (code: string) => request<ChatLinkPreview>("POST", "/chat-links/peek", { code }),
+  confirmChatLink: (code: string) => request<ChatAccount>("POST", "/chat-links/confirm", { code }),
   projects: () => request<ProjectList>("GET", "/projects"),
 
   /** Every registration, whatever its state: operators. */

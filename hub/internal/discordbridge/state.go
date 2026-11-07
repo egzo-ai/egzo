@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) Neopeak Internet Solutions inc.
+
+package discordbridge
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/egzo-ai/egzo/hub/internal/discord"
+)
+
+// The bridge's own state, in SQLite on its volume. The hub knows none of it: which role is which agent, the channels each is in, and
+// which Discord message is which egzo message, so that a reply or a click goes back to the right one.
+
+const schema = `
+PRAGMA journal_mode = WAL;
+CREATE TABLE IF NOT EXISTS cursor (id INTEGER PRIMARY KEY CHECK (id = 1), seq INTEGER NOT NULL);
+-- An agent added to a guild: the role people mention to address it.
+CREATE TABLE IF NOT EXISTS agents (
+	guild TEXT NOT NULL,
+	role TEXT NOT NULL,
+	project TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	name TEXT NOT NULL,
+	home TEXT NOT NULL,                 -- the channel where what it says unprompted goes: the first it was added to
+	PRIMARY KEY (guild, role),
+	UNIQUE (guild, project, agent)
+);
+-- The channels an agent is in.
+CREATE TABLE IF NOT EXISTS places (
+	guild TEXT NOT NULL,
+	role TEXT NOT NULL,
+	channel TEXT NOT NULL,
+	PRIMARY KEY (guild, role, channel)
+);
+-- A Discord message and the egzo message it is: one a person sent to an agent, or one the bot posted for an agent.
+CREATE TABLE IF NOT EXISTS posts (
+	message TEXT PRIMARY KEY,
+	channel TEXT NOT NULL,
+	guild TEXT NOT NULL,
+	project TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	egzo TEXT NOT NULL,                 -- the egzo message's id
+	kind TEXT NOT NULL,                 -- request (a person's), question, resolution, update, request (an agent's)
+	choices TEXT NOT NULL DEFAULT '[]',
+	at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS posts_egzo ON posts (egzo);
+`
+
+// Agent is an agent added to a guild.
+type Agent struct {
+	Guild, Role          discord.Snowflake
+	Project, Agent, Name string
+	Home                 discord.Snowflake
+}
+
+// Post is a Discord message that is an egzo message.
+type Post struct {
+	Message, Channel, Guild discord.Snowflake
+	Project, Agent, Egzo    string
+	Kind                    string
+	Choices                 []string
+}
+
+// State is the bridge's database.
+type State struct{ db *sql.DB }
+
+// OpenState opens the database at path, making it if needed.
+func OpenState(path string) (*State, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &State{db: db}, nil
+}
+
+func (s *State) Close() error { return s.db.Close() }
+
+// Cursor is the seq of the last outbox event handled, -1 when none ever was: only what comes next.
+func (s *State) Cursor(ctx context.Context) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, `SELECT seq FROM cursor WHERE id = 1`).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return -1, nil
+	}
+	return seq, err
+}
+
+func (s *State) SetCursor(ctx context.Context, seq int64) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO cursor (id, seq) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET seq = excluded.seq`, seq)
+	return err
+}
+
+// AddAgent records an agent's role in a guild, with its first channel as its home.
+func (s *State) AddAgent(ctx context.Context, a Agent) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO agents (guild, role, project, agent, name, home) VALUES (?, ?, ?, ?, ?, ?)`,
+		a.Guild, a.Role, a.Project, a.Agent, a.Name, a.Home)
+	return err
+}
+
+const agentSelect = `SELECT guild, role, project, agent, name, home FROM agents `
+
+func scanAgents(rows *sql.Rows, err error) ([]Agent, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Agent
+	for rows.Next() {
+		var a Agent
+		if err := rows.Scan(&a.Guild, &a.Role, &a.Project, &a.Agent, &a.Name, &a.Home); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// AgentInGuild is the role an agent has in a guild, if it was added there.
+func (s *State) AgentInGuild(ctx context.Context, guild discord.Snowflake, project, agent string) (Agent, bool, error) {
+	list, err := scanAgents(s.db.QueryContext(ctx, agentSelect+`WHERE guild = ? AND project = ? AND agent = ?`, guild, project, agent))
+	if err != nil || len(list) == 0 {
+		return Agent{}, false, err
+	}
+	return list[0], true, nil
+}
+
+// AgentByRole is the agent a role is.
+func (s *State) AgentByRole(ctx context.Context, guild, role discord.Snowflake) (Agent, bool, error) {
+	list, err := scanAgents(s.db.QueryContext(ctx, agentSelect+`WHERE guild = ? AND role = ?`, guild, role))
+	if err != nil || len(list) == 0 {
+		return Agent{}, false, err
+	}
+	return list[0], true, nil
+}
+
+// AgentEverywhere lists the guilds an agent is in.
+func (s *State) AgentEverywhere(ctx context.Context, project, agent string) ([]Agent, error) {
+	return scanAgents(s.db.QueryContext(ctx, agentSelect+`WHERE project = ? AND (? = '' OR agent = ?)`, project, agent, agent))
+}
+
+// AgentsIn lists the agents that are in a channel.
+func (s *State) AgentsIn(ctx context.Context, guild, channel discord.Snowflake) ([]Agent, error) {
+	return scanAgents(s.db.QueryContext(ctx, `SELECT a.guild, a.role, a.project, a.agent, a.name, a.home FROM agents a
+		JOIN places p ON p.guild = a.guild AND p.role = a.role WHERE a.guild = ? AND p.channel = ? ORDER BY a.name`, guild, channel))
+}
+
+// AddPlace puts an agent in a channel.
+func (s *State) AddPlace(ctx context.Context, guild, role, channel discord.Snowflake) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO places (guild, role, channel) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`, guild, role, channel)
+	return err
+}
+
+// InPlace reports whether an agent is in a channel.
+func (s *State) InPlace(ctx context.Context, guild, role, channel discord.Snowflake) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM places WHERE guild = ? AND role = ? AND channel = ?`, guild, role, channel).Scan(&n)
+	return n > 0, err
+}
+
+// RemovePlace takes an agent out of a channel, and returns how many channels it is still in. A home that is left moves to another channel.
+func (s *State) RemovePlace(ctx context.Context, guild, role, channel discord.Snowflake) (int, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM places WHERE guild = ? AND role = ? AND channel = ?`, guild, role, channel); err != nil {
+		return 0, err
+	}
+	var left int
+	var other sql.NullString
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), MIN(channel) FROM places WHERE guild = ? AND role = ?`, guild, role).Scan(&left, &other); err != nil {
+		return 0, err
+	}
+	if other.Valid {
+		_, err := s.db.ExecContext(ctx, `UPDATE agents SET home = ? WHERE guild = ? AND role = ? AND home = ?`, other.String, guild, role, channel)
+		return left, err
+	}
+	return left, nil
+}
+
+// RemoveChannel takes every agent out of a channel the bot can no longer use, and returns the roles left in no channel.
+func (s *State) RemoveChannel(ctx context.Context, guild, channel discord.Snowflake) ([]discord.Snowflake, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT role FROM places WHERE guild = ? AND channel = ?`, guild, channel)
+	if err != nil {
+		return nil, err
+	}
+	var roles []discord.Snowflake
+	for rows.Next() {
+		var r discord.Snowflake
+		if rows.Scan(&r) == nil {
+			roles = append(roles, r)
+		}
+	}
+	rows.Close()
+	var empty []discord.Snowflake
+	for _, r := range roles {
+		left, err := s.RemovePlace(ctx, guild, r, channel)
+		if err != nil {
+			return nil, err
+		}
+		if left == 0 {
+			empty = append(empty, r)
+		}
+	}
+	return empty, nil
+}
+
+// RemoveAgent forgets an agent's role in a guild, and its channels.
+func (s *State) RemoveAgent(ctx context.Context, guild, role discord.Snowflake) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM places WHERE guild = ? AND role = ?`, guild, role); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE guild = ? AND role = ?`, guild, role)
+	return err
+}
+
+// AddPost records that a Discord message is an egzo message.
+func (s *State) AddPost(ctx context.Context, p Post) error {
+	choices, _ := json.Marshal(p.Choices)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO posts (message, channel, guild, project, agent, egzo, kind, choices, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (message) DO NOTHING`, p.Message, p.Channel, p.Guild, p.Project, p.Agent, p.Egzo, p.Kind, string(choices), time.Now().UnixMilli())
+	return err
+}
+
+func scanPost(row *sql.Row) (Post, bool, error) {
+	var p Post
+	var choices string
+	err := row.Scan(&p.Message, &p.Channel, &p.Guild, &p.Project, &p.Agent, &p.Egzo, &p.Kind, &choices)
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, false, nil
+	}
+	_ = json.Unmarshal([]byte(choices), &p.Choices)
+	return p, err == nil, err
+}
+
+const postSelect = `SELECT message, channel, guild, project, agent, egzo, kind, choices FROM posts `
+
+// PostOf is the egzo message a Discord message is.
+func (s *State) PostOf(ctx context.Context, message discord.Snowflake) (Post, bool, error) {
+	return scanPost(s.db.QueryRowContext(ctx, postSelect+`WHERE message = ?`, message))
+}
+
+// PostFor is the first Discord message that is an egzo message: where to answer it.
+func (s *State) PostFor(ctx context.Context, egzo string) (Post, bool, error) {
+	return scanPost(s.db.QueryRowContext(ctx, postSelect+`WHERE egzo = ? ORDER BY at LIMIT 1`, egzo))
+}
+
+// PurgePosts forgets posts older than before: a reply to them goes nowhere.
+func (s *State) PurgePosts(ctx context.Context, before time.Time) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM posts WHERE at < ?`, before.UnixMilli())
+	return err
+}

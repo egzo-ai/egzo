@@ -122,6 +122,7 @@ func (h *Hub) SetRole(ctx context.Context, actor store.User, project, targetID s
 	}
 	h.endLostTerminals(project, targetID, role)
 	h.endLostPreviews(project, targetID, role)
+	h.change(ctx, BridgeEvent{Type: EventRoleChanged, Project: project, User: targetID})
 	audit.Allowed = true
 	return h.store.Audit(ctx, audit)
 }

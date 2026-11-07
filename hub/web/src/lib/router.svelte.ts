@@ -12,6 +12,7 @@ export type Route =
   | { name: "home" }
   | { name: "login" }
   | { name: "invite" }
+  | { name: "chat-link" }
   | { name: "settings"; tab: SettingsTab }
   | { name: "project"; project: string; tab: ProjectTab }
   | { name: "agent"; project: string; agent: string; tab: AgentTab }
@@ -30,6 +31,7 @@ export function parse(pathname: string): Route {
   if (parts.length === 0) return { name: "home" };
   if (parts[0] === "login" && parts.length === 1) return { name: "login" };
   if (parts[0] === "invite" && parts.length === 1) return { name: "invite" };
+  if (parts[0] === "chat-link" && parts.length === 1) return { name: "chat-link" };
   // /settings alone lands on the first tab
   if (parts[0] === "settings" && parts.length === 1) return { name: "settings", tab: "links" };
   if (parts[0] === "settings" && parts.length === 2 && (settingsTabs as string[]).includes(parts[1]!)) return { name: "settings", tab: parts[1] as SettingsTab };

@@ -62,9 +62,23 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(New(h, map[string]string{"discord": secret, "slack": secret + "-slack"}, nil).Handler())
+	server := httptest.NewServer(New(h, map[string]string{"discord": secret, "slack": secret + "-slack"}, "https://hub.example.org", nil).Handler())
 	t.Cleanup(server.Close)
-	return &rig{t: t, hub: h, server: server, web: web, project: reg.ID, admin: admin}
+	r := &rig{t: t, hub: h, server: server, web: web, project: reg.ID, admin: admin}
+	r.linkAccount("d-admin", admin)
+	return r
+}
+
+// linkAccount links a Discord account to a user, as the person confirming a code does.
+func (r *rig) linkAccount(account string, u store.User) {
+	r.t.Helper()
+	code, _, err := r.hub.BridgeCode(ctx, "discord", account, "joe")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	if _, err := r.hub.ConfirmBridgeCode(ctx, u, code); err != nil {
+		r.t.Fatal(err)
+	}
 }
 
 func waitFor(t *testing.T, what string, check func() bool) {
@@ -95,7 +109,7 @@ func (r *rig) post(token string, in Inbound) (int, map[string]string) {
 }
 
 // open reads the stream after seq, line by line, until the test ends.
-func (r *rig) open(token string, after string) (*http.Response, <-chan hub.BridgeMessage) {
+func (r *rig) open(token string, after string) (*http.Response, <-chan hub.BridgeEvent) {
 	r.t.Helper()
 	req, _ := http.NewRequest("GET", r.server.URL+Prefix+"/messages?after="+after, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -105,14 +119,14 @@ func (r *rig) open(token string, after string) (*http.Response, <-chan hub.Bridg
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	lines := make(chan hub.BridgeMessage, 16)
+	lines := make(chan hub.BridgeEvent, 16)
 	if resp.StatusCode == 200 {
 		go func() {
 			defer resp.Body.Close()
 			scanner := bufio.NewScanner(resp.Body)
 			for scanner.Scan() {
-				var m hub.BridgeMessage
-				if strings.TrimSpace(scanner.Text()) != "" && json.Unmarshal(scanner.Bytes(), &m) == nil {
+				var m hub.BridgeEvent
+				if strings.TrimSpace(scanner.Text()) != "" && json.Unmarshal(scanner.Bytes(), &m) == nil && m.Type == hub.EventMessage {
 					lines <- m
 				}
 			}
@@ -121,7 +135,7 @@ func (r *rig) open(token string, after string) (*http.Response, <-chan hub.Bridg
 	return resp, lines
 }
 
-func next(t *testing.T, lines <-chan hub.BridgeMessage) hub.BridgeMessage {
+func next(t *testing.T, lines <-chan hub.BridgeEvent) hub.BridgeEvent {
 	t.Helper()
 	select {
 	case m := <-lines:
@@ -129,7 +143,7 @@ func next(t *testing.T, lines <-chan hub.BridgeMessage) hub.BridgeMessage {
 	case <-time.After(3 * time.Second):
 		t.Fatal("nothing came")
 	}
-	return hub.BridgeMessage{}
+	return hub.BridgeEvent{}
 }
 
 func TestABridgeIsKnownByItsTokenAndNothingElse(t *testing.T) {
@@ -146,7 +160,7 @@ func TestABridgeIsKnownByItsTokenAndNothingElse(t *testing.T) {
 
 func TestWhatABridgePostsIsDeliveredUnderItsNameAndARefusalSaysNothingOfWhy(t *testing.T) {
 	r := newRig(t)
-	code, out := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", User: r.admin.ID, Text: "deploy it", Key: "d-1"})
+	code, out := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "deploy it", Key: "d-1"})
 	if code != 200 || out["id"] == "" {
 		t.Fatalf("deliver = %d %v", code, out)
 	}
@@ -154,17 +168,17 @@ func TestWhatABridgePostsIsDeliveredUnderItsNameAndARefusalSaysNothingOfWhy(t *t
 	if last := calls[len(calls)-1]; last != "send coder-1 user:"+r.admin.ID+" d-1" {
 		t.Errorf("the project got %q", last)
 	}
-	if code, again := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", User: r.admin.ID, Text: "deploy it", Key: "d-1"}); code != 200 || again["id"] != out["id"] {
+	if code, again := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "deploy it", Key: "d-1"}); code != 200 || again["id"] != out["id"] {
 		t.Errorf("a retry is the same message: %d %v", code, again)
 	}
-	if code, out := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", User: "u-nobody", Text: "x", Key: "d-2"}); code != http.StatusForbidden || out["error"] != "not delivered" {
+	if code, out := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", Account: "d-nobody", Text: "x", Key: "d-2"}); code != http.StatusForbidden || out["error"] != "not delivered" {
 		t.Errorf("an unknown user = %d %v", code, out)
 	}
 	for _, bad := range []Inbound{
-		{Project: r.project, Agent: "coder-1", User: r.admin.ID, Text: "no key"},
-		{Project: r.project, Agent: "Bad_Name", User: r.admin.ID, Text: "x", Key: "k"},
-		{Project: "../x", Agent: "coder-1", User: r.admin.ID, Text: "x", Key: "k"},
-		{Project: r.project, Agent: "coder-1", User: r.admin.ID, Text: "  ", Key: "k"},
+		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "no key"},
+		{Project: r.project, Agent: "Bad_Name", Account: "d-admin", Text: "x", Key: "k"},
+		{Project: "../x", Agent: "coder-1", Account: "d-admin", Text: "x", Key: "k"},
+		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "  ", Key: "k"},
 	} {
 		if code, _ := r.post(secret, bad); code != http.StatusBadRequest {
 			t.Errorf("%+v: %d", bad, code)
@@ -204,8 +218,71 @@ func TestTheStreamGivesWhatComesAndABridgeResumesAfterTheLastItHandled(t *testin
 	if m := next(t, again); m.ID != "m3" {
 		t.Errorf("resumed with %+v, want the update", m)
 	}
-	_, slack := r.open(secret+"-slack", "0")
+	_, slack := r.open(secret+"-slack", "0") // what came before, the account linked, is no message and is skipped here
 	if m := next(t, slack); m.ID != "m1" {
 		t.Errorf("another bridge reads from its own place: %+v", m)
+	}
+}
+
+func (r *rig) call(method, path string, body any, out any) int {
+	r.t.Helper()
+	var data []byte
+	if body != nil {
+		data, _ = json.Marshal(body)
+	}
+	req, _ := http.NewRequest(method, r.server.URL+Prefix+path, strings.NewReader(string(data)))
+	req.Header.Set("Authorization", "Bearer "+secret)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if out != nil {
+		_ = json.NewDecoder(resp.Body).Decode(out)
+	}
+	return resp.StatusCode
+}
+
+func TestABridgeGetsACodeAPersonConfirmsAndThenKnowsTheirAccount(t *testing.T) {
+	r := newRig(t)
+	var made struct{ Code, URL string }
+	if code := r.call("POST", "/codes", map[string]string{"account": "d-joe", "name": "joe"}, &made); code != 200 ||
+		!strings.HasPrefix(made.URL, "https://hub.example.org"+LinkPath+"#egzo-chat-") || !strings.HasSuffix(made.URL, made.Code) {
+		t.Fatalf("code = %d %+v", code, made)
+	}
+	if _, err := r.hub.ConfirmBridgeCode(ctx, r.admin, made.Code); err != nil { // signed in on the hub, at that address
+		t.Fatal(err)
+	}
+	var list []Account
+	if code := r.call("GET", "/accounts", nil, &list); code != 200 || len(list) != 2 {
+		t.Fatalf("accounts = %d %+v", code, list)
+	}
+	found := false
+	for _, a := range list {
+		if a.Account == "d-joe" && a.User == r.admin.ID && a.Username == "admin" && a.Name == "joe" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("d-joe is not listed: %+v", list)
+	}
+}
+
+func TestABridgeAsksWhichAgentsAPersonMayChatWithAndWhetherTheyMayAddOne(t *testing.T) {
+	r := newRig(t)
+	var agents []hub.ChatAgent
+	if code := r.call("GET", "/agents?account=d-admin", nil, &agents); code != 200 || len(agents) != 1 || agents[0].Agent != "coder-1" || !agents[0].Admin {
+		t.Errorf("agents = %d %+v", code, agents)
+	}
+	if code := r.call("GET", "/agents?account=d-nobody", nil, nil); code != http.StatusForbidden {
+		t.Errorf("an account nobody linked = %d", code)
+	}
+	var may struct{ Allowed bool }
+	if code := r.call("POST", "/may-add", map[string]string{"account": "d-admin", "project": r.project, "agent": "coder-1"}, &may); code != 200 || !may.Allowed {
+		t.Errorf("the owner = %d %+v", code, may)
+	}
+	may.Allowed = true
+	if code := r.call("POST", "/may-add", map[string]string{"account": "d-nobody", "project": r.project, "agent": "coder-1"}, &may); code != 200 || may.Allowed {
+		t.Errorf("nobody = %d %+v", code, may)
 	}
 }
