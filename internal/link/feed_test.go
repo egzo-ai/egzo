@@ -112,7 +112,7 @@ func TestOnlyAPortOpenForTheHubIsRememberedForForwarding(t *testing.T) {
 	}
 }
 
-func TestTheEventsFeedKeepsTheTextOfAMessageOnlyWhenAUserIsOneEndOfIt(t *testing.T) {
+func TestTheEventsFeedKeepsTheTextAndChoicesOfAMessageOnlyWhenAUserIsOneEndOfIt(t *testing.T) {
 	line := func(actor, to, kind, text string) []byte {
 		return []byte(fmt.Sprintf(`{"seq":9,"type":"message","agent":"coder","actor":%q,"id":"m1","text":%q,"data":{"to":%q,"kind":%q,"re":"m0","choices":["a"]}}`, actor, text, to, kind))
 	}
@@ -133,7 +133,8 @@ func TestTheEventsFeedKeepsTheTextOfAMessageOnlyWhenAUserIsOneEndOfIt(t *testing
 		if want != "" {
 			want += "x"
 		}
-		if !ok || seq != 9 || event.Text != want || event.To != c.to || event.Kind != "question" || event.Re != "m0" || event.ID != "m1" {
+		if !ok || seq != 9 || event.Text != want || event.To != c.to || event.Kind != "question" || event.Re != "m0" || event.ID != "m1" ||
+			(len(event.Choices) == 1) != (want != "") {
 			t.Errorf("%s -> %s (feed %v): %+v", c.actor, c.to, c.feed, event)
 		}
 	}

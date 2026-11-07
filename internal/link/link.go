@@ -74,6 +74,9 @@ type Link struct {
 	template sync.Mutex // one template at a time goes to the control sidecar
 
 	exposed map[string]map[int]string // the protocol of what each agent exposes, as the latest status line says
+
+	eventsSeen  int  // the last event the events feed read, for a hub that has none yet
+	eventsKnown bool // eventsSeen is set
 }
 
 // registering is one `egzo project register`. The code stays in memory, and only until the hub answers: it is never in a Status, a log

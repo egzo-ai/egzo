@@ -312,14 +312,18 @@ func (s *server) listSpecs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// streamEvents writes the event stream as JSON lines; with follow=1 it stays open for new events.
+// streamEvents writes the event stream as JSON lines; with follow=1 it stays open for new events. A negative after, only what comes
+// next, begins with a line {"type":"start","seq":N}: where that is, so that a reader who follows again resumes there and misses nothing.
 func (s *server) streamEvents(w http.ResponseWriter, r *http.Request) {
-	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
-	after = s.events.start(after)
+	asked, _ := strconv.Atoi(r.URL.Query().Get("after"))
+	after := s.events.start(asked)
 	agent := r.URL.Query().Get("agent")
 	follow := r.URL.Query().Get("follow") == "1"
 	flusher, _ := w.(http.Flusher)
 	encoder := json.NewEncoder(w)
+	if asked < 0 {
+		encoder.Encode(map[string]any{"type": "start", "seq": after})
+	}
 	for {
 		events, wake := s.events.since(after, agent)
 		for _, event := range events {

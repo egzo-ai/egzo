@@ -465,26 +465,25 @@ func parseEvent(line []byte, userTexts bool) (event Event, seq int, ok bool) {
 	}
 	event = Event{Seq: raw.Seq, Time: raw.Time, Type: raw.Type, Agent: raw.Agent, Actor: raw.Actor, ID: raw.ID, Outcome: raw.Data.Outcome}
 	if raw.Type == "message" {
-		event.To, event.Kind, event.Re, event.Choices = raw.Data.To, raw.Data.Kind, raw.Data.Re, raw.Data.Choices
+		event.To, event.Kind, event.Re = raw.Data.To, raw.Data.Kind, raw.Data.Re
 	}
 	switch {
 	case withText[raw.Type]:
 		event.Text = raw.Text
 	case raw.Type == "message" && userTexts && (isUser(raw.Actor) || isUser(raw.Data.To)):
-		event.Text = raw.Text
+		// the choices are words of the sender too: they go with the text
+		event.Text, event.Choices = raw.Text, raw.Data.Choices
 	}
 	return event, raw.Seq, true
 }
 
 func isUser(address string) bool { return strings.HasPrefix(address, "user:") }
 
-// FollowEvents follows the control sidecar's event stream from the events after seq, or from the next one when seq is zero, with
+// FollowEvents follows the control sidecar's event stream from the events after seq, or from the next one when seq is negative, with
 // the texts of the messages users send and are sent. on gets each event worth showing; seen, every sequence number read, so that
-// following again starts past those too.
+// following again starts past those too. From the next one, seen is first told where that is (0 for an empty log): following again from
+// there misses nothing that came in between.
 func (d *Engine) FollowEvents(ctx context.Context, project string, after int, on func(Event), seen func(int)) error {
-	if after <= 0 {
-		after = -1
-	}
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
@@ -495,6 +494,14 @@ func (d *Engine) FollowEvents(ctx context.Context, project string, after int, on
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64<<10), maxLogLine)
 	for scanner.Scan() {
+		var start struct {
+			Type string `json:"type"`
+			Seq  int    `json:"seq"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &start) == nil && start.Type == "start" {
+			seen(start.Seq)
+			continue
+		}
 		event, seq, ok := parseEvent(scanner.Bytes(), true)
 		if ok {
 			on(event)
