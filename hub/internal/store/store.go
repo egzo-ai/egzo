@@ -160,6 +160,21 @@ CREATE TABLE IF NOT EXISTS audit_cursors (
 	project TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
 	at INTEGER NOT NULL                  -- Unix nanoseconds
 );
+-- How far the hub read each project's events: the sequence number of the last event it handled. Its own table, so that a database of
+-- this schema version made before it gets it when the hub opens it.
+CREATE TABLE IF NOT EXISTS event_cursors (
+	project TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+	seq INTEGER NOT NULL
+);
+-- What agents and users said to each other, for the chat bridges (docs/hub-bridges.md): kept a week. seq never comes back, so a
+-- bridge that resumes after it never misses or repeats one.
+CREATE TABLE IF NOT EXISTS outbox (
+	seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	at INTEGER NOT NULL,                 -- Unix milliseconds
+	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	agent TEXT NOT NULL,
+	body TEXT NOT NULL                   -- the message as bridges read it, JSON
+);
 -- A person signed in to a preview (previews.go): they end with the hub session they came from.
 CREATE TABLE IF NOT EXISTS preview_tickets (
 	token_hash TEXT PRIMARY KEY,

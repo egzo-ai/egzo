@@ -154,3 +154,19 @@ func TestFilesAreReadFromUserUpAndNeitherByAViewerNorByOverseeing(t *testing.T) 
 		}
 	}
 }
+
+func TestChatIsWhoeverMayOperateTheAgent(t *testing.T) {
+	alice := Subject{ID: "alice"}
+	for _, c := range []struct {
+		role    Role
+		creator string
+		want    bool
+	}{
+		{User, "user:alice", true}, {User, "user:bob", false}, {User, CLI, false},
+		{Admin, "user:bob", true}, {Owner, CLI, true}, {Viewer, "user:alice", false}, {Overseer, "user:alice", false},
+	} {
+		if got := Can(alice, c.role, Chat, c.creator); got != c.want || got != Can(alice, c.role, Operate, c.creator) {
+			t.Errorf("%s chatting with an agent of %s: %v, want %v", c.role, c.creator, got, c.want)
+		}
+	}
+}

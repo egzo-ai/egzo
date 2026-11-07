@@ -44,6 +44,11 @@ type Hub struct {
 	tasks    taskList                // what the hub does on the projects (tasks.go)
 	previews previewSite             // set by ServePreviews
 
+	outboxMu   sync.Mutex
+	outboxWake chan struct{} // closed and made anew when the outbox has more
+	cursorMu   sync.Mutex
+	cursorAt   map[string]time.Time // project -> when its events cursor was last written
+
 	previewMu  sync.Mutex
 	previewing map[*openPreview]struct{} // what preview servers are answering now
 }
@@ -53,7 +58,8 @@ func New(s *store.Store, log *slog.Logger, opt FeedOptions) *Hub {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	h := &Hub{store: s, log: log, conns: map[string]*connection{}, held: map[string]*heldProject{}, attached: map[string]*Attachment{}}
+	h := &Hub{store: s, log: log, conns: map[string]*connection{}, held: map[string]*heldProject{}, attached: map[string]*Attachment{},
+		outboxWake: make(chan struct{}), cursorAt: map[string]time.Time{}}
 	h.feeds = newFeedManager(h, opt)
 	return h
 }

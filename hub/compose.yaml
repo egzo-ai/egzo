@@ -30,6 +30,8 @@ services:
       EGZO_TRUSTED_PROXIES: ${EGZO_TRUSTED_PROXIES:-}
       # Previews of what agents expose: a domain of their own, with a wildcard certificate in front. See docs/hub.md.
       EGZO_PREVIEW_DOMAIN: ${EGZO_PREVIEW_DOMAIN:-}
+      # Chat bridges, optional: name:secret pairs, one per bridge service below that you uncomment. See docs/hub-bridges.md.
+      EGZO_BRIDGES: ${EGZO_BRIDGES:-}
     volumes:
       - hub-data:/data
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -34,6 +35,8 @@ type Config struct {
 	// PreviewListen is where they are served (EGZO_PREVIEW_LISTEN, :8081 by default).
 	PreviewDomain string
 	PreviewListen string
+	// Bridges are the chat bridges that may use the bridge API (EGZO_BRIDGES, name:secret pairs), by name; none: there is no bridge API.
+	Bridges map[string]string
 }
 
 // Parse reads the settings through get (os.Getenv in production). Every missing required setting is named in the one error.
@@ -59,6 +62,11 @@ func Parse(get func(string) string) (Config, error) {
 			c.TrustedProxy = append(c.TrustedProxy, p)
 		}
 	}
+	bridges, err := ParseBridges(get("EGZO_BRIDGES"))
+	if err != nil {
+		return c, err
+	}
+	c.Bridges = bridges
 	if v := get("EGZO_LOCAL_LOGIN"); v != "" {
 		on, err := strconv.ParseBool(v)
 		if err != nil {
@@ -135,4 +143,34 @@ func or(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// MinSecret is the shortest secret a bridge may have.
+const MinSecret = 32
+
+var bridgeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// ParseBridges reads EGZO_BRIDGES: name:secret pairs, separated by commas. A secret is the bridge's token.
+func ParseBridges(value string) (map[string]string, error) {
+	out := map[string]string{}
+	secrets := map[string]bool{}
+	for _, pair := range strings.Split(value, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		name, secret, ok := strings.Cut(pair, ":")
+		switch {
+		case !ok || !bridgeName.MatchString(name):
+			return nil, fmt.Errorf("EGZO_BRIDGES: %q is not name:secret with a name of lowercase letters, digits and dashes", name)
+		case len(secret) < MinSecret:
+			return nil, fmt.Errorf("EGZO_BRIDGES: the secret of %s is shorter than %d characters", name, MinSecret)
+		case out[name] != "":
+			return nil, fmt.Errorf("EGZO_BRIDGES: %s is named twice", name)
+		case secrets[secret]:
+			return nil, fmt.Errorf("EGZO_BRIDGES: the secret of %s is another bridge's: a secret names one bridge", name)
+		}
+		out[name], secrets[secret] = secret, true
+	}
+	return out, nil
 }

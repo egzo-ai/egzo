@@ -26,12 +26,13 @@ detail, and the executable specs in `specs/` are the status report.
 10. [The hub](hub.md): running it, linking projects, the terminal in the browser, previews, settings
 11. [Hub access](hub-access.md): the starter account, single sign-on, invites, people, roles, operators, quotas
 12. [The hub API](hub-api.md): the JSON API the web app talks to
+13. [Chat bridges](hub-bridges.md): how people talk to agents from a chat platform, and what the hub checks
 
 ## Safety and problems
 
-13. [Sandboxing agents](sandboxing.md): writing egress policies
-14. [The security model](security.md): what is enforced and what is not
-15. [Troubleshooting](troubleshooting.md)
+14. [Sandboxing agents](sandboxing.md): writing egress policies
+15. [The security model](security.md): what is enforced and what is not
+16. [Troubleshooting](troubleshooting.md)
 
 ## Reference
 

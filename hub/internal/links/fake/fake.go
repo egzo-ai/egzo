@@ -42,6 +42,9 @@ type Engine struct {
 	servers    map[string]*server // what listens in an agent, by "agent:port"
 	workspaces []links.Workspace
 	files      map[string]*server // the file server of a workspace, by "workspace/instance"
+	keys       map[string]string  // the messages sent, by actor and key
+	seq        int                // the last event's sequence number
+	afters     []int              // the after of every events feed that was opened
 
 	// the connection
 	current  *Connection
@@ -214,10 +217,81 @@ func (e *Engine) startFeeds() {
 		}
 	}
 	e.mu.Unlock()
+	if h.After != nil {
+		if after, err := h.After(); err == nil {
+			e.mu.Lock()
+			e.afters = append(e.afters, after)
+			e.mu.Unlock()
+		}
+	}
 	e.push("start")
 	e.mu.Lock()
 	e.pushed = true
 	e.mu.Unlock()
+}
+
+// EventsAfters lists where each connection's events feed began, in order.
+func (e *Engine) EventsAfters() []int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]int(nil), e.afters...)
+}
+
+// PushEvent pushes an event of the control sidecar, numbered after the last one.
+func (e *Engine) PushEvent(event links.Event) {
+	e.mu.Lock()
+	h, serving := e.handlers, e.serving
+	e.seq++
+	event.Seq = e.seq
+	if event.Time.IsZero() {
+		event.Time = time.Now().UTC()
+	}
+	e.mu.Unlock()
+	if h != nil && serving && h.Events != nil {
+		h.Events(event)
+	}
+}
+
+// SendMessage is a message from one of the hub's users; the same actor and key are the same message. The message is pushed on the events
+// feed, as control would.
+func (e *Engine) SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (links.Sent, error) {
+	e.mu.Lock()
+	if err := e.dropped(); err != nil {
+		e.mu.Unlock()
+		return links.Sent{}, err
+	}
+	if _, err := e.agent(agent); err != nil {
+		e.mu.Unlock()
+		return links.Sent{}, err
+	}
+	if !strings.HasPrefix(actor, "user:") || key == "" {
+		e.mu.Unlock()
+		return links.Sent{}, fmt.Errorf("the hub sends as user:<id>, with a key")
+	}
+	if e.keys == nil {
+		e.keys = map[string]string{}
+	}
+	if id, ok := e.keys[actor+" "+key]; ok {
+		e.mu.Unlock()
+		return links.Sent{ID: id}, nil
+	}
+	id := fmt.Sprintf("m%032d", len(e.keys)+1)
+	e.keys[actor+" "+key] = id
+	e.record("send %s %s %s", agent, actor, key)
+	e.mu.Unlock()
+	e.PushEvent(links.Event{Type: "message", Agent: agent, Actor: actor, ID: id, To: "agent:" + agent, Kind: "request", Text: text})
+	return links.Sent{ID: id}, nil
+}
+
+// Resolve is one of the hub's users answering a message.
+func (e *Engine) Resolve(ctx context.Context, message, actor, text, outcome string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.dropped(); err != nil {
+		return err
+	}
+	e.record("resolve %s %s %s", message, actor, text)
+	return nil
 }
 
 // AuditFollows lists the since of every connection, in order.

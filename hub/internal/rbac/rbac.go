@@ -54,6 +54,7 @@ const (
 	Unlink      Action = "unlink"       // make the hub forget the project
 	Preview     Action = "preview"      // open an exposed port of an agent, from its link
 	Files       Action = "files"        // list and download the files of the project's workspaces, read only
+	Chat        Action = "chat"         // talk to an agent and answer its questions, from a chat platform: whoever may operate it
 )
 
 // CLI is the actor string of the CLI and of agents spawned from it. No person is behind it on the hub: those agents are the
@@ -83,7 +84,7 @@ func Can(subject Subject, role Role, action Action, creator string) bool {
 		return role == Overseer || role.AtLeast(User)
 	case Inspect, Spawn, Files:
 		return role.AtLeast(User)
-	case Operate:
+	case Operate, Chat:
 		if role.AtLeast(Admin) {
 			return true
 		}
