@@ -604,3 +604,23 @@ func TestReadingEventsStartsAtTheEndForANegativeSeqAndAtTheStartPastTheEnd(t *te
 		t.Errorf("inside the log: %d", got)
 	}
 }
+
+func TestOnlyWhatComesNextBeginsBySayingWhereThatIs(t *testing.T) {
+	r := newRig(t)
+	r.project("coder")
+	r.request("coder", "one")
+	last := r.srv.events.start(-1)
+	var start struct {
+		Type string
+		Seq  int
+	}
+	decode(t, r.asOperator("GET", "/v1/events?after=-1", ""), &start)
+	if start.Type != "start" || start.Seq != last {
+		t.Errorf("first line = %+v, want start at %d", start, last)
+	}
+	var first struct{ Type string }
+	decode(t, r.asOperator("GET", "/v1/events?after=0", ""), &first)
+	if first.Type == "start" {
+		t.Error("reading from a seq has no start line")
+	}
+}
