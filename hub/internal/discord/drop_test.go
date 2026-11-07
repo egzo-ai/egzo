@@ -14,14 +14,19 @@ import (
 func TestTheClientCuttingItsOwnConnectionResumes(t *testing.T) {
 	fake := discordtest.New("t")
 	t.Cleanup(fake.Close)
-	g := &Gateway{Token: "t", Intents: IntentGuilds, URL: fake.GatewayURL()}
+	ready := make(chan struct{}, 1)
+	// the fake says it is connected when it sends READY: the client must have read it, to know the session it resumes
+	g := &Gateway{Token: "t", Intents: IntentGuilds, URL: fake.GatewayURL(), Handler: func(e Event) {
+		if e.Type == "READY" {
+			ready <- struct{}{}
+		}
+	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	connected := fake.Connected()
 	go func() { done <- g.Run(ctx) }()
 	defer func() { cancel(); <-done }()
-	<-connected
-	connected = fake.Connected()
+	<-ready
+	connected := fake.Connected()
 	g.drop()
 	select {
 	case <-connected:
