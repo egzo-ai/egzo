@@ -141,8 +141,9 @@ The hub relays what its users say to agents, and what agents say to them, for th
 - **`resolve`** is a hub user answering a question, or closing a request, addressed to them: `Message`, `Actor`, `Text`, `Outcome`. A
   user answers only what is addressed to that user; the operator, at the CLI, answers anything.
 - **The `events` feed** follows the control sidecar's event stream. It begins after `FeedStart.After`, the sequence number of the last
-  event the hub has, so a link that was away resumes where the hub is and loses nothing; zero is only the events to come, counted from where the link first began for that hub, so a feed opened again before
-  anything reached the hub misses nothing either (the control sidecar's stream begins with a `start` line saying where that is). An event of a
+  event the hub has, so a link that was away resumes where the hub is and loses nothing. A hub that never read the feed says -1: only the
+  events to come, and the first is a `start` event whose `Seq` says where that is, which the hub keeps like any other, so a feed opened
+  again before anything else came misses nothing either. A hub that cannot tell where it is ends the feed rather than guess. An event of a
   log that began again (the control volume made anew) has a smaller number than the hub's: the link sends the whole new log.
 - **What the feed carries.** Every event worth showing (no `state`). A message says who it went from and to, its kind and what it is
   about, and its text and choices **only when a user is one end of it**: what agents say to each other or to the operator stays in the project.

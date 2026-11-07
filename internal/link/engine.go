@@ -481,8 +481,8 @@ func isUser(address string) bool { return strings.HasPrefix(address, "user:") }
 
 // FollowEvents follows the control sidecar's event stream from the events after seq, or from the next one when seq is negative, with
 // the texts of the messages users send and are sent. on gets each event worth showing; seen, every sequence number read, so that
-// following again starts past those too. From the next one, seen is first told where that is (0 for an empty log): following again from
-// there misses nothing that came in between.
+// following again starts past those too. From the next one, the first event is Type "start", whose Seq says where that is (0 for an
+// empty log): following again from there misses nothing that came in between.
 func (d *Engine) FollowEvents(ctx context.Context, project string, after int, on func(Event), seen func(int)) error {
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
@@ -499,6 +499,7 @@ func (d *Engine) FollowEvents(ctx context.Context, project string, after int, on
 			Seq  int    `json:"seq"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &start) == nil && start.Type == "start" {
+			on(Event{Type: "start", Seq: start.Seq})
 			seen(start.Seq)
 			continue
 		}

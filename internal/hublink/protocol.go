@@ -231,7 +231,8 @@ type FeedOpen struct {
 // FeedStart says where a feed begins: audit events after Since, or the end of the log's backlog when it is zero; events after After.
 type FeedStart struct {
 	Since time.Time
-	// After is where the events feed begins: the events after this sequence number, or only those to come when it is zero.
+	// After is where the events feed begins: the events after this sequence number; negative, only those to come. The first event of a
+	// feed that begins with those to come is Type "start", whose Seq says where that is: the hub keeps it as where it is, like any event.
 	After int
 }
 
