@@ -594,7 +594,7 @@ func TestTheEventsFeedStartsWhereTheHubSaysAndCarriesEvents(t *testing.T) {
 	peer := &Peer{session: hub, control: NewLines(silence{})}
 	got := make(chan Event, 1)
 	go peer.Run(context.Background(), Handlers{
-		After:  func() int { return 41 },
+		After:  func() (int, error) { return 41, nil },
 		Since:  func() time.Time { t.Error("the audit's start was asked for the events feed"); return time.Time{} },
 		Events: func(e Event) { got <- e },
 	})
@@ -621,5 +621,41 @@ func TestTheEventsFeedStartsWhereTheHubSaysAndCarriesEvents(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the event never came")
+	}
+}
+
+func TestAHubThatCannotTellWhereItIsEndsTheEventsFeed(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub, control: NewLines(silence{})}
+	go peer.Run(context.Background(), Handlers{After: func() (int, error) { return 0, errors.New("the database is away") }})
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	if err := lines.Write(FeedOpen{Feed: FeedEvents}); err != nil {
+		t.Fatal(err)
+	}
+	var start FeedStart
+	if err := lines.Read(&start); err == nil {
+		t.Errorf("the feed began at %+v", start)
+	}
+}
+
+func TestAHubWithNoWordOnTheEventsFeedGetsOnlyWhatComes(t *testing.T) {
+	link, hub := pair(t)
+	peer := &Peer{session: hub, control: NewLines(silence{})}
+	go peer.Run(context.Background(), Handlers{})
+	stream, err := link.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := NewLines(stream)
+	if err := lines.Write(FeedOpen{Feed: FeedEvents}); err != nil {
+		t.Fatal(err)
+	}
+	var start FeedStart
+	if err := lines.Read(&start); err != nil || start.After != -1 {
+		t.Errorf("start = %+v, %v", start, err)
 	}
 }

@@ -111,8 +111,9 @@ func (p *Peer) Closed() <-chan struct{} { return p.session.CloseChan() }
 type Handlers struct {
 	// Since says where the audit feed begins.
 	Since func() time.Time
-	// After says where the events feed begins: the sequence number of the last event the hub has, or zero for only the new ones.
-	After   func() int
+	// After says where the events feed begins: the sequence number of the last event the hub has, or -1 when it never read the feed,
+	// for only the events to come. An error ends the feed, which the link opens again: answering a guess could skip events.
+	After   func() (int, error)
 	Project func(ProjectUpdate)
 	Status  func(StatusLine)
 	Audit   func(AuditEvent)
@@ -201,8 +202,15 @@ func (p *Peer) feed(stream net.Conn, h Handlers) error {
 	if open.Feed == FeedAudit && h.Since != nil {
 		start.Since = h.Since()
 	}
-	if open.Feed == FeedEvents && h.After != nil {
-		start.After = h.After()
+	if open.Feed == FeedEvents {
+		start.After = -1
+		if h.After != nil {
+			after, err := h.After()
+			if err != nil {
+				return err
+			}
+			start.After = after
+		}
 	}
 	if err := lines.Write(start); err != nil {
 		return err

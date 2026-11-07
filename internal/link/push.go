@@ -234,40 +234,20 @@ func (l *Link) pushAudit(ctx context.Context, lines *hublink.Lines, start hublin
 	})
 }
 
-// pushEvents follows the events from where the hub says. A hub that has none yet (After 0) gets only the new ones: from where this link
-// already began for it, so that a feed opened again misses nothing, or else from the end of the log.
+// pushEvents follows the events from where the hub says. A hub that never read them (a negative After) gets only those to come, beginning
+// with a "start" event that says where that is: the hub keeps it as where it is, so a feed opened again misses nothing.
 func (l *Link) pushEvents(ctx context.Context, lines *hublink.Lines, start hublink.FeedStart) error {
 	ctx, send := sending(ctx)
 	after := start.After
-	if after == 0 {
-		after = l.eventsFrom()
-	}
 	return retry(ctx, send.failed, func() error {
 		return l.options.Engine.FollowEvents(ctx, l.options.Project, after, func(event Event) {
 			send.note(lines.Write(event))
 		}, func(seq int) {
 			if send.failed() == nil {
 				after = seq // following again starts past what was sent, and past what is not worth sending
-				l.eventsAt(seq)
 			}
 		})
 	})
-}
-
-// eventsFrom is where the events feed of a hub with none yet begins: past what this link already read for it, or -1, the end of the log.
-func (l *Link) eventsFrom() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.eventsKnown {
-		return -1
-	}
-	return l.eventsSeen
-}
-
-func (l *Link) eventsAt(seq int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.eventsSeen, l.eventsKnown = seq, true
 }
 
 // sendAudit sends an event and moves since past it: only past one that went out, or following again would skip it.

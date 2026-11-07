@@ -49,7 +49,7 @@ type registration struct {
 
 	peer  *hublink.Peer
 	feeds map[string][]json.RawMessage
-	after int // the sequence number of the last event of the events feed
+	after int // the sequence number of the last event of the events feed; -1 before the first
 }
 
 type hub struct {
@@ -95,7 +95,7 @@ func (h *hub) link(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		delete(h.codes, peer.Code)
-		reg = &registration{Project: peer.Hello.Project, Key: key, State: hublink.StateApproved, Owner: owner, ID: "p-" + key[:8], feeds: map[string][]json.RawMessage{}}
+		reg = &registration{Project: peer.Hello.Project, Key: key, State: hublink.StateApproved, Owner: owner, ID: "p-" + key[:8], feeds: map[string][]json.RawMessage{}, after: -1}
 		h.regs[key] = reg
 	}
 	reg.Host, reg.Templates, reg.Connections = peer.Hello.Host, peer.Hello.Templates, reg.Connections+1
@@ -128,15 +128,17 @@ func (h *hub) link(w http.ResponseWriter, r *http.Request) {
 		Status:  func(s hublink.StatusLine) { record(hublink.FeedStatus, s) },
 		Audit:   func(e hublink.AuditEvent) { record(hublink.FeedAudit, e) },
 		Events: func(e hublink.Event) {
-			record(hublink.FeedEvents, e)
+			if e.Type != "start" {
+				record(hublink.FeedEvents, e)
+			}
 			h.mu.Lock()
-			reg.after = max(reg.after, e.Seq)
+			reg.after = e.Seq // in order; smaller after a log that began again
 			h.mu.Unlock()
 		},
-		After: func() int { // where the events feed resumes: past the last event this hub has
+		After: func() (int, error) { // where the events feed resumes: past the last event this hub has
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			return reg.after
+			return reg.after, nil
 		},
 		Unlink: func() hublink.Verdict {
 			h.mu.Lock()
