@@ -27,6 +27,7 @@ type Request struct {
 	Header       http.Header
 	Body         []byte
 	Response     []byte // what the fake answered
+	answered     bool
 }
 
 // JSON decodes the request's body.
@@ -203,13 +204,13 @@ func (s *Server) RateLimit(path string, n int) {
 	s.limited[path] = n
 }
 
-// Requests lists the REST requests so far, with prefix as the start of their "METHOD path" ("" for all).
+// Requests lists the REST requests answered so far, with prefix as the start of their "METHOD path" ("" for all).
 func (s *Server) Requests(prefix string) []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []Request
 	for _, r := range s.requests {
-		if strings.HasPrefix(r.Method+" "+r.Path, prefix) {
+		if r.answered && strings.HasPrefix(r.Method+" "+r.Path, prefix) {
 			out = append(out, r)
 		}
 	}
@@ -321,6 +322,12 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.requests = append(s.requests, Request{Method: r.Method, Path: path, Header: r.Header.Clone(), Body: body})
 	index := len(s.requests) - 1
+	// a request is listed once it is answered: a test reads what the fake said
+	defer func() {
+		s.mu.Lock()
+		s.requests[index].answered = true
+		s.mu.Unlock()
+	}()
 	limited := false
 	for prefix, n := range s.limited {
 		if n > 0 && strings.HasPrefix(path, prefix) {
