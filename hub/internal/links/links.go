@@ -37,6 +37,11 @@ type Engine interface {
 	// DialFiles connects to the read-only file server of a directory workspace, or of the worktree of instance in a git workspace. It
 	// speaks HTTP, GET only. ctx covers the dial, as with DialPort.
 	DialFiles(ctx context.Context, workspace, instance string) (net.Conn, error)
+	// SendMessage is what one of the hub's users said to an agent: actor is "user:<id>", and key the chat platform's id for the message,
+	// which makes it idempotent.
+	SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error)
+	// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done.
+	Resolve(ctx context.Context, message, actor, text, outcome string) error
 }
 
 // Conn is a link that has proved its key: the project's verbs, and the connection they travel on.
@@ -73,6 +78,7 @@ type (
 	Hello         = hublink.Hello
 	Verdict       = hublink.Verdict
 	Handlers      = hublink.Handlers
+	Sent          = hublink.Sent
 )
 
 // AuditBacklog is how many lines of a proxy's log a link reads first when the hub has no time to start from.

@@ -121,7 +121,7 @@ A role is held on one project. Roles live in the hub's database; the project fil
 | Role | May |
 |---|---|
 | viewer | open the [preview](hub.md#previews) of any agent of the project, from the link they were given. Nothing else: the project is not listed for them, and they see neither its agents nor its previews |
-| user | see the project and its agents; spawn agents; start, stop, remove and open the terminal of their own, and read their logs and network |
+| user | see the project and its agents; spawn agents; start, stop, remove and open the terminal of their own, chat with them through a [bridge](hub-bridges.md), and read their logs and network |
 | admin | the same on every agent of the project, those spawned from the CLI included; read the audit log |
 | owner | an admin who also grants and removes roles, invites, and can unlink the project |
 

@@ -148,3 +148,32 @@ func cleanStatus(line links.StatusLine) links.StatusLine {
 	line.Agents = agents
 	return line
 }
+
+// maxMessageText is the longest text of a message an agent sends, as control limits it; maxChoices and maxChoice, its quick answers.
+const (
+	maxMessageText = 16 << 10
+	maxChoices     = 10
+	maxChoice      = 64
+	maxMessageID   = 64
+)
+
+// cleanEvent keeps of an event what the hub relays: a message's text keeps its line breaks, everything else is a word.
+func cleanEvent(e links.Event) links.Event {
+	out := links.Event{Seq: e.Seq, Time: e.Time, Type: word(e.Type, maxWord), Actor: word(e.Actor, maxActor), To: word(e.To, maxActor),
+		Kind: word(e.Kind, maxWord), ID: word(e.ID, maxMessageID), Re: word(e.Re, maxMessageID), Outcome: word(e.Outcome, maxWord)}
+	if corenames.Instance(e.Agent) {
+		out.Agent = e.Agent
+	}
+	if e.Type == "message" {
+		out.Text = termsafe.Truncate(termsafe.Block(e.Text), maxMessageText)
+	} else {
+		out.Text = word(e.Text, maxText)
+	}
+	for _, choice := range e.Choices {
+		if len(out.Choices) == maxChoices {
+			break
+		}
+		out.Choices = append(out.Choices, word(choice, maxChoice))
+	}
+	return out
+}

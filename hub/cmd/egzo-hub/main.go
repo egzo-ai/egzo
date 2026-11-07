@@ -6,15 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/auth"
+	"github.com/egzo-ai/egzo/hub/internal/bridges"
 	"github.com/egzo-ai/egzo/hub/internal/config"
 	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/preview"
@@ -97,7 +100,12 @@ func run(log *slog.Logger) error {
 		}()
 		return server
 	}
-	servers := []*http.Server{listen(newServer(cfg.Listen, app.Handler(), readLimit), "people")}
+	people := app.Handler()
+	if len(cfg.Bridges) > 0 {
+		people = withBridges(people, bridges.New(h, cfg.Bridges, log).Handler())
+		log.Info("chat bridges", "bridges", strings.Join(slices.Sorted(maps.Keys(cfg.Bridges)), ","), "path", bridges.Prefix)
+	}
+	servers := []*http.Server{listen(newServer(cfg.Listen, people, readLimit), "people")}
 	if cfg.LinkListen != "" {
 		servers = append(servers, listen(newServer(cfg.LinkListen, app.LinkHandler(), readLimit), "links"))
 	}
@@ -116,6 +124,14 @@ func run(log *slog.Logger) error {
 		server.Shutdown(shutdown)
 	}
 	return nil
+}
+
+// withBridges serves the bridge API next to the UI: it has tokens of its own, and none of the UI's cookies or origin checks.
+func withBridges(app, api http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(bridges.Prefix+"/", api)
+	mux.Handle("/", app)
+	return mux
 }
 
 // readLimit is how long a request may take to arrive: every body the hub takes is small, so one that is still coming is somebody holding a

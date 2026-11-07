@@ -127,3 +127,23 @@ func TestPreviews(t *testing.T) {
 		}
 	}
 }
+
+func TestBridgesAreNamedWithASecretOfTheirOwn(t *testing.T) {
+	secret := strings.Repeat("s", MinSecret)
+	got, err := ParseBridges(" discord:" + secret + ", slack:" + strings.Repeat("t", MinSecret) + ",")
+	if err != nil || len(got) != 2 || got["discord"] != secret {
+		t.Fatalf("%v %v", got, err)
+	}
+	for _, bad := range []string{"discord", "discord:short", "Disc:" + secret, "a:" + secret + ",a:" + secret, "a:" + secret + ",b:" + secret} {
+		if _, err := ParseBridges(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	if _, err := Parse(env(with(map[string]string{"EGZO_BRIDGES": "discord:short"}))); err == nil {
+		t.Error("a bad EGZO_BRIDGES was accepted")
+	}
+	c, _ := Parse(env(with(nil)))
+	if len(c.Bridges) != 0 {
+		t.Errorf("defaults: %v", c.Bridges)
+	}
+}

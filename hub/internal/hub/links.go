@@ -230,6 +230,32 @@ func (h *Hub) handlers(c *connection) links.Handlers {
 				h.feeds.handleAudit(c.project, event)
 			}
 		},
+		After: func() (int, error) { return h.eventsAfter(c.project) },
+		Events: func(event links.Event) {
+			if !c.served.Load() {
+				return
+			}
+			c.lines.wait(time.Second / linesPerSecond)
+			event = cleanEvent(event)
+			// an event that was not kept holds the feed, and the link waits: going past it would lose it once the cursor moves
+			for wait := 100 * time.Millisecond; ; wait = min(2*wait, 5*time.Second) {
+				err := h.handleEvent(c.ctx, c.project, event)
+				if err == nil {
+					return
+				}
+				h.log.Error("an event was not kept", "project", c.project, "seq", event.Seq, "err", err)
+				select {
+				case <-time.After(wait):
+				case <-c.ctx.Done():
+					return
+				case <-c.link.Closed():
+					return
+				}
+				if !c.served.Load() {
+					return
+				}
+			}
+		},
 		Unlink: func() links.Verdict { return h.unlinked(c) },
 		Pace:   func(n int) { c.bytes.wait(time.Duration(n) * time.Second / bytesPerSecond) },
 	}

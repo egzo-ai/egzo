@@ -876,3 +876,61 @@ func TestTheWholeAuditLogReadsInPagesNewestFirst(t *testing.T) {
 		t.Errorf("the rest = %+v, %v", rest, err)
 	}
 }
+
+func TestTheEventCursorCanGoBackAndGoesWithItsProject(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	if seq, err := s.EventCursor(ctx, web); err != nil || seq != -1 {
+		t.Fatalf("a project never read: %d %v", seq, err)
+	}
+	s.SetEventCursor(ctx, web, 40)
+	s.SetEventCursor(ctx, web, 3) // a control volume made anew numbers from one again
+	if got, _ := s.EventCursor(ctx, web); got != 3 {
+		t.Errorf("cursor = %d", got)
+	}
+	if err := s.ForgetProject(ctx, web, hublink.StateApproved); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.EventCursor(ctx, web); got != -1 {
+		t.Error("the cursor outlived its project")
+	}
+}
+
+func TestAnEventAndWhatItSaysAreRecordedInOneStepAndTheOutboxNumbersNeverComeBack(t *testing.T) {
+	s := open(t)
+	web := registered(t, s, "web")
+	if last, err := s.OutboxLast(ctx); err != nil || last != 0 {
+		t.Fatalf("an empty outbox: %d %v", last, err)
+	}
+	now := time.Now()
+	first, err := s.RecordEvent(ctx, web, 5, "coder-1", []byte(`{"text":"one"}`), now.Add(-8*24*time.Hour))
+	if err != nil || first == 0 {
+		t.Fatalf("record: %d %v", first, err)
+	}
+	if none, err := s.RecordEvent(ctx, web, 6, "", nil, now); err != nil || none != 0 {
+		t.Errorf("an event that says nothing to a user: %d %v", none, err)
+	}
+	second, _ := s.RecordEvent(ctx, web, 7, "coder-1", []byte(`{"text":"two"}`), now)
+	if seq, _ := s.EventCursor(ctx, web); seq != 7 {
+		t.Errorf("cursor = %d", seq)
+	}
+	got, _ := s.OutboxAfter(ctx, 0, 10)
+	if len(got) != 2 || string(got[0].Body) != `{"text":"one"}` || got[1].Seq != second || got[1].Agent != "coder-1" {
+		t.Errorf("outbox = %+v", got)
+	}
+	if got, _ := s.OutboxAfter(ctx, first, 10); len(got) != 1 || got[0].Seq != second {
+		t.Errorf("after the first = %+v", got)
+	}
+	s.PurgeOutbox(ctx, now.Add(-7*24*time.Hour))
+	third, _ := s.RecordEvent(ctx, web, 8, "coder-1", []byte(`{}`), now)
+	if got, _ := s.OutboxAfter(ctx, 0, 10); len(got) != 2 || got[0].Seq != second {
+		t.Errorf("after the purge = %+v", got)
+	}
+	s.PurgeOutbox(ctx, now.Add(time.Hour))
+	if last, _ := s.OutboxLast(ctx); last != third {
+		t.Errorf("the last number is %d, want %d even with the outbox empty", last, third)
+	}
+	if fourth, _ := s.RecordEvent(ctx, web, 9, "coder-1", []byte(`{}`), now); fourth <= third {
+		t.Errorf("a number came back: %d after %d", fourth, third)
+	}
+}

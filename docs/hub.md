@@ -293,6 +293,7 @@ All settings are environment variables. The compose file passes the common ones 
 | `EGZO_TRUSTED_PROXIES` | none | addresses or CIDRs of the reverse proxy whose `X-Forwarded-Host` and `X-Forwarded-Proto` are believed |
 | `EGZO_PREVIEW_DOMAIN` | none | turns [previews](#previews) on: the domain they live under, with a port if people reach them on one. It needs `EGZO_PUBLIC_URL` |
 | `EGZO_PREVIEW_LISTEN` | `:8081` | the port of the previews |
+| `EGZO_BRIDGES` | none | the [chat bridges](hub-bridges.md) that may use the bridge API, `name:secret` pairs; none: no bridge API |
 
 The hub does not terminate TLS. Behind a proxy set `EGZO_TRUSTED_PROXIES`, so the login redirect and the cookies use the right
 address and scheme.
