@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -45,14 +46,17 @@ func (e *FatalError) Error() string {
 	return fmt.Sprintf("discord gateway closed with %d: %s", e.Code, e.Reason)
 }
 
+// fatalToken is the close code for a wrong token.
+const fatalToken = 4004
+
 // fatal are the close codes after which the client stops.
 var fatal = map[int]string{
-	4004: "the token is wrong",
-	4010: "an invalid shard",
-	4011: "sharding is required",
-	4012: "an API version Discord does not speak",
-	4013: "intents that do not exist",
-	4014: "intents the bot may not have: enable Message Content in the Developer Portal",
+	fatalToken: "the token is wrong",
+	4010:       "an invalid shard",
+	4011:       "sharding is required",
+	4012:       "an API version Discord does not speak",
+	4013:       "intents that do not exist",
+	4014:       "intents the bot may not have: enable Message Content in the Developer Portal",
 }
 
 // fresh are the close codes after which the session cannot be resumed, and the client identifies again.
@@ -68,7 +72,7 @@ type Gateway struct {
 	Handler func(Event) // called for every event, in order, from one goroutine
 	Log     *slog.Logger
 	// Sessions says how many sessions the bot may still start, and when that renews: REST.GatewayBot. Before identifying (never before a
-	// resume) the client asks, and waits for the renewal when there are none left. nil asks nothing.
+	// resume) the client asks, and waits for the renewal when there are none left; a token it refuses stops the client. nil asks nothing.
 	Sessions func(context.Context) (GatewayBot, error)
 
 	mu        sync.Mutex
@@ -218,12 +222,16 @@ func (g *Gateway) connect(ctx context.Context) error {
 }
 
 // budget waits until the bot may start a session: Discord allows so many a day (1000 for most bots), and a bot that loops on
-// identifying would spend them all and be locked out until the reset.
+// identifying would spend them all and be locked out until the reset. A wrong token stops here, before a session is spent.
 func (g *Gateway) budget(ctx context.Context) error {
 	if g.Sessions == nil {
 		return nil
 	}
 	limits, err := g.Sessions(ctx)
+	var e *Error
+	if errors.As(err, &e) && e.Status == http.StatusUnauthorized { // the same wrong token identify would send: 4004 before the dial
+		return &FatalError{Code: fatalToken, Reason: fatal[fatalToken]}
+	}
 	if err != nil {
 		return err
 	}
