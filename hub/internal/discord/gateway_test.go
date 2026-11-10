@@ -230,6 +230,28 @@ func TestNoSessionStartsLeftWaitsForTheResetBeforeIdentifying(t *testing.T) {
 	}
 }
 
+func TestFewSessionStartsLeftWaitsForTheReset(t *testing.T) {
+	fake := discordtest.New(token)
+	t.Cleanup(fake.Close)
+	fake.SessionStarts(3, 400*time.Millisecond) // spending the last ones risks Discord resetting the token
+	rest := discord.NewREST(token, fake.API(), nil)
+	g := &discord.Gateway{Token: token, Intents: discord.IntentGuilds, URL: fake.GatewayURL(), Sessions: rest.GatewayBot}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	connected := fake.Connected()
+	began := time.Now()
+	go func() { done <- g.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+	select {
+	case <-connected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("never connected")
+	}
+	if took := time.Since(began); took < 400*time.Millisecond {
+		t.Errorf("identified after %v with 3 starts left", took)
+	}
+}
+
 func TestAWrongTokenStopsBeforeIdentifying(t *testing.T) {
 	fake := discordtest.New(token)
 	t.Cleanup(fake.Close)
