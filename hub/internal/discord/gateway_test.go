@@ -229,3 +229,24 @@ func TestNoSessionStartsLeftWaitsForTheResetBeforeIdentifying(t *testing.T) {
 		t.Errorf("identified after %v, before the starts renewed", took)
 	}
 }
+
+func TestAWrongTokenStopsBeforeIdentifying(t *testing.T) {
+	fake := discordtest.New(token)
+	t.Cleanup(fake.Close)
+	rest := discord.NewREST("wrong", fake.API(), nil)
+	g := &discord.Gateway{Token: "wrong", Intents: discord.IntentGuilds, URL: fake.GatewayURL(), Sessions: rest.GatewayBot}
+	done := make(chan error, 1)
+	go func() { done <- g.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		var f *discord.FatalError
+		if !errors.As(err, &f) || !strings.Contains(err.Error(), "token") {
+			t.Errorf("err = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("it kept trying")
+	}
+	if identifies, _ := fake.Counts(); identifies != 0 {
+		t.Errorf("identified %d times with a token the API refused", identifies)
+	}
+}
