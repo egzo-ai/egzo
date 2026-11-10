@@ -47,7 +47,22 @@ type Bridge struct {
 	channels map[discord.Snowflake]discord.Channel
 	hinted   map[discord.Snowflake]time.Time // people told to link their account, and when
 	asked    map[discord.Snowflake]time.Time // people the hub was asked about, and when
+	running  int                             // interactions being worked on
+	runs     map[discord.Snowflake]int       // and how many of them each person's are
+	stopped  bool                            // Run is returning
+
+	work    sync.WaitGroup // the interactions' goroutines
+	agentMu sync.Mutex     // adding and removing agents, one at a time: two adds of an agent would make two roles
 }
+
+// Interactions are worked on beside the gateway's events, not in their line: Discord waits 3 seconds for an answer. These bound how many,
+// in all and for each person; one more is answered at once that the bridge is busy.
+const (
+	maxInteractions      = 16
+	maxPersonal          = 2
+	autocompleteDeadline = 2500 * time.Millisecond // the hub's answer to an autocomplete must leave time to send it within Discord's 3 s
+	busyDeadline         = 3 * time.Second
+)
 
 // New makes the bridge.
 func New(cfg Config) *Bridge {
@@ -62,7 +77,8 @@ func New(cfg Config) *Bridge {
 	}
 	return &Bridge{cfg: cfg, rest: discord.NewREST(cfg.Token, cfg.API, nil), hub: cfg.Hub, state: cfg.State, log: cfg.Log,
 		accounts: map[discord.Snowflake]Account{}, byUser: map[string]Account{}, roles: map[discord.Snowflake]map[discord.Snowflake]discord.Role{},
-		channels: map[discord.Snowflake]discord.Channel{}, hinted: map[discord.Snowflake]time.Time{}, asked: map[discord.Snowflake]time.Time{}}
+		channels: map[discord.Snowflake]discord.Channel{}, hinted: map[discord.Snowflake]time.Time{}, asked: map[discord.Snowflake]time.Time{},
+		runs: map[discord.Snowflake]int{}}
 }
 
 // Run keeps the bridge up until ctx ends, or Discord refuses the bot in a way that trying again cannot fix.
@@ -78,11 +94,27 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.mu.Lock()
 	b.app = app.ID
 	b.mu.Unlock()
-	events := make(chan discord.Event, 256)
-	gateway := &discord.Gateway{Token: b.cfg.Token, Intents: discord.IntentGuilds | discord.IntentGuildMessages | discord.IntentMessageContent,
-		URL: gw.URL, Handler: func(e discord.Event) { events <- e }, Log: b.log, Sessions: b.rest.GatewayBot}
+	defer b.work.Wait() // after cancel, below: the interactions end with ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer func() {
+		b.mu.Lock()
+		b.stopped = true // no interaction starts once Run waits for those that did
+		b.mu.Unlock()
+	}()
+	events := make(chan discord.Event, 256)
+	handler := func(e discord.Event) {
+		if e.Type == "INTERACTION_CREATE" { // not in line behind the other events: Discord waits 3 seconds for an answer
+			var i discord.Interaction
+			if json.Unmarshal(e.Data, &i) == nil {
+				b.start(ctx, i)
+			}
+			return
+		}
+		events <- e
+	}
+	gateway := &discord.Gateway{Token: b.cfg.Token, Intents: discord.IntentGuilds | discord.IntentGuildMessages | discord.IntentMessageContent,
+		URL: gw.URL, Handler: handler, Log: b.log, Sessions: b.rest.GatewayBot}
 	failed := make(chan error, 1)
 	go func() { failed <- gateway.Run(ctx) }()
 	go b.outbound(ctx)
@@ -201,11 +233,6 @@ func (b *Bridge) handle(ctx context.Context, e discord.Event) {
 		var m discord.Message
 		if json.Unmarshal(e.Data, &m) == nil {
 			b.onMessage(ctx, m)
-		}
-	case "INTERACTION_CREATE":
-		var i discord.Interaction
-		if json.Unmarshal(e.Data, &i) == nil {
-			b.onInteraction(ctx, i)
 		}
 	}
 }
@@ -528,10 +555,66 @@ func boolean(o discord.CommandOption) bool {
 	return v
 }
 
-func (b *Bridge) onInteraction(ctx context.Context, i discord.Interaction) {
+// start works on an interaction on its own goroutine, or answers at once that the bridge is busy. It does not block: the gateway's handler
+// calls it.
+func (b *Bridge) start(ctx context.Context, i discord.Interaction) {
 	if i.Member == nil || i.Member.User == nil || i.GuildID == "" {
 		return
 	}
+	person := i.Member.User.ID
+	busy := ""
+	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		return
+	}
+	b.work.Add(1)
+	switch {
+	case b.runs[person] >= maxPersonal:
+		busy = "⏳ Your earlier commands are still running. Try again in a moment."
+	case b.running >= maxInteractions:
+		busy = "⏳ egzo is busy. Try again in a moment."
+	default:
+		b.running++
+		b.runs[person]++
+	}
+	b.mu.Unlock()
+	if busy != "" {
+		go func() {
+			defer b.work.Done()
+			b.busy(ctx, i, busy)
+		}()
+		return
+	}
+	go func() {
+		defer b.work.Done()
+		defer func() {
+			b.mu.Lock()
+			b.running--
+			if b.runs[person]--; b.runs[person] == 0 {
+				delete(b.runs, person)
+			}
+			b.mu.Unlock()
+		}()
+		b.onInteraction(ctx, i)
+	}()
+}
+
+// busy answers an interaction that the bridge is busy: a message only the person sees, or the one choice of an autocomplete.
+func (b *Bridge) busy(ctx context.Context, i discord.Interaction, text string) {
+	ctx, cancel := context.WithTimeout(ctx, busyDeadline)
+	defer cancel()
+	r := discord.InteractionResponse{Type: discord.ResponseMessage,
+		Data: map[string]any{"content": text, "flags": discord.Ephemeral, "allowed_mentions": discord.AllowedMentions{Parse: []string{}}}}
+	if i.Type == discord.InteractionAutocomplete {
+		r = discord.InteractionResponse{Type: discord.ResponseAutocomplete, Data: map[string]any{"choices": []discord.Choice{{Name: "Busy, try again in a moment", Value: "-"}}}}
+	}
+	if err := b.rest.Respond(ctx, i, r); err != nil {
+		b.log.Warn("answer that the bridge is busy", "err", err)
+	}
+}
+
+func (b *Bridge) onInteraction(ctx context.Context, i discord.Interaction) {
 	switch i.Type {
 	case discord.InteractionAutocomplete:
 		b.autocomplete(ctx, i)
@@ -556,9 +639,14 @@ func (b *Bridge) autocomplete(ctx context.Context, i discord.Interaction) {
 			}
 		}
 	} else {
-		list, err := b.hub.Agents(ctx, string(i.Member.User.ID))
-		if errors.Is(err, ErrNotLinked) {
+		hubCtx, cancel := context.WithTimeout(ctx, autocompleteDeadline)
+		list, err := b.hub.Agents(hubCtx, string(i.Member.User.ID))
+		cancel()
+		switch {
+		case errors.Is(err, ErrNotLinked):
 			choices = []discord.Choice{{Name: "Link your account first: /egzo register", Value: "-"}}
+		case err != nil:
+			choices = []discord.Choice{{Name: "The hub is not answering, try again in a moment", Value: "-"}}
 		}
 		for _, a := range list {
 			if len(names) == 2 && names[1] == "add" && !a.Admin {
@@ -686,6 +774,8 @@ func (b *Bridge) addAgent(ctx context.Context, i discord.Interaction, value, nam
 		b.finish(ctx, i, "You may not add this agent: it takes admin on its project, with a linked account (`/egzo register`).")
 		return
 	}
+	b.agentMu.Lock()
+	defer b.agentMu.Unlock()
 	place, _ := b.place(i.ChannelID)
 	a, exists, err := b.state.AgentInGuild(ctx, i.GuildID, project, agent)
 	if err != nil {
@@ -739,6 +829,8 @@ func (b *Bridge) removeAgent(ctx context.Context, i discord.Interaction, value s
 		b.finish(ctx, i, "Removing an agent takes Discord's Manage Roles permission.")
 		return
 	}
+	b.agentMu.Lock()
+	defer b.agentMu.Unlock()
 	a, exists, _ := b.state.AgentInGuild(ctx, i.GuildID, project, agent)
 	if !exists {
 		b.finish(ctx, i, "That agent is in no channel of this server.")
