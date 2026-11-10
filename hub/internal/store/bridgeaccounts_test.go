@@ -72,3 +72,31 @@ func TestExpiredBridgeCodesArePurged(t *testing.T) {
 		t.Errorf("the live code: %+v, %v", c, err)
 	}
 }
+
+func TestANewBridgeCodeReplacesTheAccountsEarlierOne(t *testing.T) {
+	s := open(t)
+	alice := login(t, s, "alice")
+	now := time.Now()
+	first, _, _ := s.CreateBridgeCode(ctx, "discord", "d-7", "joe", now)
+	other, _, _ := s.CreateBridgeCode(ctx, "discord", "d-8", "ann", now)
+	for range 5 {
+		if _, _, err := s.CreateBridgeCode(ctx, "discord", "d-7", "joe", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, _, _ := s.CreateBridgeCode(ctx, "discord", "d-7", "joe", now)
+	if _, err := s.BridgeCodeFor(ctx, first, now); !errors.Is(err, ErrBadCode) {
+		t.Errorf("the replaced code: %v", err)
+	}
+	if _, err := s.BridgeCodeFor(ctx, other, now); err != nil {
+		t.Errorf("another account's code: %v", err)
+	}
+	var n int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bridge_codes WHERE external_id = 'd-7'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("%d codes for one account", n)
+	}
+	if _, err := s.ConfirmBridgeCode(ctx, last, alice.ID, now); err != nil {
+		t.Errorf("the last code: %v", err)
+	}
+}
