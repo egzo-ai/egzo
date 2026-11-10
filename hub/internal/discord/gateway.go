@@ -59,6 +59,10 @@ var fatal = map[int]string{
 	4014:       "intents the bot may not have: enable Message Content in the Developer Portal",
 }
 
+// sessionStartMargin is how many session starts the client leaves unspent: Discord resets the bot's token when the daily limit is
+// hit, and its documentation does not say whether spending the last one counts.
+const sessionStartMargin = 5
+
 // fresh are the close codes after which the session cannot be resumed, and the client identifies again.
 var fresh = map[int]bool{4007: true, 4009: true}
 
@@ -72,7 +76,7 @@ type Gateway struct {
 	Handler func(Event) // called for every event, in order, from one goroutine
 	Log     *slog.Logger
 	// Sessions says how many sessions the bot may still start, and when that renews: REST.GatewayBot. Before identifying (never before a
-	// resume) the client asks, and waits for the renewal when there are none left; a token it refuses stops the client. nil asks nothing.
+	// resume) the client asks, and waits for the renewal when only a few are left; a token it refuses stops the client. nil asks nothing.
 	Sessions func(context.Context) (GatewayBot, error)
 
 	mu        sync.Mutex
@@ -221,8 +225,8 @@ func (g *Gateway) connect(ctx context.Context) error {
 	}
 }
 
-// budget waits until the bot may start a session: Discord allows so many a day (1000 for most bots), and a bot that loops on
-// identifying would spend them all and be locked out until the reset. A wrong token stops here, before a session is spent.
+// budget waits until the bot may start a session: Discord allows so many a day (1000 for most bots), and hitting the limit ends every
+// session and resets the bot's token. A wrong token stops here, before a session is spent.
 func (g *Gateway) budget(ctx context.Context) error {
 	if g.Sessions == nil {
 		return nil
@@ -235,11 +239,11 @@ func (g *Gateway) budget(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if limits.SessionStartLimit.Remaining > 0 {
+	if limits.SessionStartLimit.Remaining > sessionStartMargin {
 		return nil
 	}
 	wait := time.Duration(limits.SessionStartLimit.ResetAfter) * time.Millisecond
-	g.Log.Warn("discord gateway: no session starts left today, waiting for the reset", "wait", wait)
+	g.Log.Warn("discord gateway: almost no session starts left today, waiting for the reset", "left", limits.SessionStartLimit.Remaining, "wait", wait)
 	return sleep(ctx, wait)
 }
 
