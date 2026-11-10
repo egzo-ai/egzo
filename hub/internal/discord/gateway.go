@@ -72,8 +72,10 @@ type Gateway struct {
 	Token   string
 	Intents int
 	// URL is where the gateway is, from GatewayBot; the session's resume URL replaces it while there is a session.
-	URL     string
-	Handler func(Event) // called for every event, in order, from one goroutine
+	URL string
+	// Handler is called for every event, in order, from the goroutine that reads the connection. It must not block: while it runs,
+	// heartbeat acks go unread, and a call longer than a heartbeat interval (about 41 seconds) closes the connection as a zombie.
+	Handler func(Event)
 	Log     *slog.Logger
 	// Sessions says how many sessions the bot may still start, and when that renews: REST.GatewayBot. Before identifying (never before a
 	// resume) the client asks, and waits for the renewal when only a few are left; a token it refuses stops the client. nil asks nothing.
