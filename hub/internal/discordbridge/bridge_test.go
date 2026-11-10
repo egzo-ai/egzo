@@ -449,8 +449,7 @@ func TestACommandIsAnsweredWhileTheHubHoldsAMessage(t *testing.T) {
 func TestPastTwoInteractionsAPersonIsToldTheirEarlierOnesStillRun(t *testing.T) {
 	h, o := hang()
 	w := setupWith(t, o)
-	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
-	w.linked(joe)
+	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}} // no earlier interaction of his is still finishing
 	h.arm(t, "POST "+bridges.Prefix+"/messages")
 	w.interaction("811", discord.InteractionCommand, say(w.project, "one"), joe, nil)
 	w.interaction("812", discord.InteractionCommand, say(w.project, "two"), joe, nil)
