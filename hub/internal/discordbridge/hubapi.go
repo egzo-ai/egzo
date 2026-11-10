@@ -88,7 +88,12 @@ type HubAPI struct {
 	HTTP   *http.Client
 }
 
+// hubTimeout bounds a call to the hub, the outbox's stream aside: each takes milliseconds, and a hub that hangs must not hold the bridge.
+const hubTimeout = 10 * time.Second
+
 func (h *HubAPI) do(ctx context.Context, method, path string, body, out any) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, hubTimeout)
+	defer cancel()
 	var payload io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -107,7 +112,7 @@ func (h *HubAPI) do(ctx context.Context, method, path string, body, out any) (in
 	}
 	client := h.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 40 * time.Second}
+		client = http.DefaultClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {
