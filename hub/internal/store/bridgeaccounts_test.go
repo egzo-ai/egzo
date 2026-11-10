@@ -54,3 +54,21 @@ func TestABridgeCodeLinksAnAccountOnceAndTheAccountFollowsWhoeverConfirmsLast(t 
 		t.Errorf("accounts left %+v", list)
 	}
 }
+
+func TestExpiredBridgeCodesArePurged(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	s.CreateBridgeCode(ctx, "discord", "d-7", "joe", now.Add(-time.Hour))
+	live, _, _ := s.CreateBridgeCode(ctx, "discord", "d-8", "ann", now)
+	if err := s.PurgeBridgeCodes(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	var kept int
+	s.db.QueryRow(`SELECT COUNT(*) FROM bridge_codes`).Scan(&kept)
+	if kept != 1 {
+		t.Errorf("%d codes are kept", kept)
+	}
+	if c, err := s.BridgeCodeFor(ctx, live, now); err != nil || c.ExternalID != "d-8" {
+		t.Errorf("the live code: %+v, %v", c, err)
+	}
+}
