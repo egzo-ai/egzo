@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -377,5 +379,124 @@ func TestABridgeThatStartsBeforeTheHubStillPostsToPeopleLinkedBefore(t *testing.
 	posted := w.request("the request", "POST /channels/"+room+"/messages")
 	if !strings.Contains(string(posted.Body), "may I merge?") || !strings.Contains(string(posted.Body), "<@7>") {
 		t.Errorf("posted %s", posted.Body)
+	}
+}
+
+// hanging is a hub that holds the calls to some routes until the test ends.
+type hanging struct {
+	routes  sync.Map // such as "POST /bridge/v1/messages": true
+	held    atomic.Int32
+	release chan struct{}
+}
+
+func hang() (*hanging, setupOptions) {
+	h := &hanging{release: make(chan struct{})}
+	return h, setupOptions{api: func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if _, held := h.routes.Load(r.Method + " " + r.URL.Path); held {
+				h.held.Add(1)
+				select {
+				case <-h.release:
+				case <-r.Context().Done():
+				}
+				return
+			}
+			next.ServeHTTP(rw, r)
+		})
+	}}
+}
+
+// arm holds the routes from now on; until the test ends.
+func (h *hanging) arm(t *testing.T, routes ...string) {
+	for _, r := range routes {
+		h.routes.Store(r, true)
+	}
+	t.Cleanup(func() { close(h.release) }) // before the hub's server closes: it waits for the calls it holds
+}
+
+func say(project, text string) map[string]any {
+	return command(map[string]any{"type": 1, "name": "say", "options": []any{
+		map[string]any{"type": 3, "name": "agent", "value": project + "/coder-1"}, map[string]any{"type": 3, "name": "text", "value": text}}})
+}
+
+// answered is the answer to an interaction: its type, and what it says.
+func (w *world) answered(id string) (int, string) {
+	w.t.Helper()
+	var r struct {
+		Type int
+		Data json.RawMessage
+	}
+	_ = w.request("the answer to "+id, "POST /interactions/"+id+"/tok-"+id+"/callback").JSON(&r)
+	return r.Type, string(r.Data)
+}
+
+func TestACommandIsAnsweredWhileTheHubHoldsAMessage(t *testing.T) {
+	h, o := hang()
+	w := setupWith(t, o)
+	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
+	role := w.linked(joe)
+	h.arm(t, "POST "+bridges.Prefix+"/messages")
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "800", ChannelID: room, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
+		Content: "<@&" + role + "> status?", MentionRoles: []discord.Snowflake{discord.Snowflake(role)}})
+	eventually(t, "the hub to hold the message", func() bool { return h.held.Load() == 1 })
+	w.interaction("801", discord.InteractionCommand, command(map[string]any{"type": 1, "name": "register"}), joe, nil)
+	if kind, _ := w.answered("801"); kind != discord.ResponseDeferredMessage {
+		t.Errorf("answered %d", kind)
+	}
+	w.request("the code", "PATCH /webhooks/2/tok-801/messages/@original")
+}
+
+func TestPastTwoInteractionsAPersonIsToldTheirEarlierOnesStillRun(t *testing.T) {
+	h, o := hang()
+	w := setupWith(t, o)
+	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
+	w.linked(joe)
+	h.arm(t, "POST "+bridges.Prefix+"/messages")
+	w.interaction("811", discord.InteractionCommand, say(w.project, "one"), joe, nil)
+	w.interaction("812", discord.InteractionCommand, say(w.project, "two"), joe, nil)
+	eventually(t, "the hub to hold both", func() bool { return h.held.Load() == 2 })
+	w.interaction("813", discord.InteractionAutocomplete, say(w.project, "thr"), joe, nil)
+	if kind, data := w.answered("813"); kind != discord.ResponseAutocomplete || !strings.Contains(data, "Busy, try again") {
+		t.Errorf("answered %d %s", kind, data)
+	}
+	w.interaction("814", discord.InteractionCommand, say(w.project, "three"), joe, nil)
+	if kind, data := w.answered("814"); kind != discord.ResponseMessage || !strings.Contains(data, "Your earlier commands are still running") ||
+		!strings.Contains(data, `"flags":64`) {
+		t.Errorf("answered %d %s", kind, data)
+	}
+	ann := discord.Member{User: &discord.User{ID: "8", Username: "ann"}}
+	w.interaction("815", discord.InteractionCommand, command(map[string]any{"type": 1, "name": "register"}), ann, nil)
+	w.request("ann's code", "PATCH /webhooks/2/tok-815/messages/@original") // joe's limit is joe's
+}
+
+func TestPastSixteenInteractionsOneMoreIsToldTheBridgeIsBusy(t *testing.T) {
+	h, o := hang()
+	w := setupWith(t, o)
+	h.arm(t, "POST "+bridges.Prefix+"/messages")
+	for n := range 16 {
+		id := strconv.Itoa(820 + n)
+		w.interaction(id, discord.InteractionCommand, say(w.project, "hi"), discord.Member{User: &discord.User{ID: discord.Snowflake(id), Username: "p" + id}}, nil)
+	}
+	eventually(t, "the hub to hold 16", func() bool { return h.held.Load() == 16 })
+	w.interaction("850", discord.InteractionCommand, say(w.project, "hi"), discord.Member{User: &discord.User{ID: "850", Username: "late"}}, nil)
+	if kind, data := w.answered("850"); kind != discord.ResponseMessage || !strings.Contains(data, "egzo is busy") {
+		t.Errorf("answered %d %s", kind, data)
+	}
+}
+
+func TestAnAutocompleteTheHubDoesNotAnswerInTimeSaysSo(t *testing.T) {
+	h, o := hang()
+	w := setupWith(t, o)
+	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
+	w.linked(joe)
+	h.arm(t, "GET "+bridges.Prefix+"/agents")
+	start := time.Now()
+	w.interaction("860", discord.InteractionAutocomplete, say(w.project, "st"), joe, nil)
+	kind, data := w.answered("860")
+	if kind != discord.ResponseAutocomplete || !strings.Contains(data, "The hub is not answering") {
+		t.Errorf("answered %d %s", kind, data)
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("answered after %s: Discord gives up at 3 s", took)
 	}
 }
