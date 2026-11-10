@@ -6,10 +6,12 @@ package discordbridge_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,7 +53,17 @@ func (w *world) recorded(message string) {
 	})
 }
 
-func setup(t *testing.T) *world {
+func setup(t *testing.T) *world { return setupWith(t, setupOptions{}) }
+
+// setupOptions change the world before the bridge starts.
+type setupOptions struct {
+	// api wraps the hub's bridge API, as the bridge reaches it.
+	api func(http.Handler) http.Handler
+	// before runs before the bridge starts.
+	before func(*world)
+}
+
+func setupWith(t *testing.T, o setupOptions) *world {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
 	if err != nil {
@@ -70,7 +82,11 @@ func setup(t *testing.T) *world {
 	eventually(t, "the link", web.Served)
 	web.SetAgent(links.Agent{Name: "coder-1", Template: "coder", State: "running", Actor: "operator", Created: time.Now()})
 	reg, _ := s.RegistrationByKey(ctx, web.Hello().Key)
-	api := httptest.NewServer(bridges.New(h, map[string]string{"discord": secret}, "https://hub.example.org", nil).Handler())
+	var handler http.Handler = bridges.New(h, map[string]string{"discord": secret}, "https://hub.example.org", nil).Handler()
+	if o.api != nil {
+		handler = o.api(handler)
+	}
+	api := httptest.NewServer(handler)
 	t.Cleanup(api.Close)
 
 	d := discordtest.New(token)
@@ -83,13 +99,16 @@ func setup(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { state.Close() })
+	w := &world{t: t, hub: h, admin: admin, project: reg.ID, web: web, discord: d, state: state}
+	if o.before != nil {
+		o.before(w)
+	}
 	run, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
 		done <- discordbridge.New(discordbridge.Config{Token: token, API: d.API(), Hub: &discordbridge.HubAPI{URL: api.URL, Secret: secret}, State: state}).Run(run)
 	}()
 	t.Cleanup(func() { stop(); <-done })
-	w := &world{t: t, hub: h, admin: admin, project: reg.ID, web: web, discord: d, state: state}
 	w.request("the commands", "PUT /applications/2/guilds/"+guild+"/commands")
 	return w
 }
@@ -316,5 +335,47 @@ func TestAChannelTheBotCanNoLongerSeeLosesItsAgents(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if sends := w.calls("send"); len(sends) != 0 {
 		t.Errorf("a message in a channel the agent left went to it: %v", sends)
+	}
+}
+
+func TestABridgeThatStartsBeforeTheHubStillPostsToPeopleLinkedBefore(t *testing.T) {
+	var down, streaming atomic.Bool
+	down.Store(true)
+	w := setupWith(t, setupOptions{
+		api: func(next http.Handler) http.Handler { // the hub is not up yet when the bridge starts
+			return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				if down.Load() {
+					http.Error(rw, "starting", http.StatusBadGateway)
+					return
+				}
+				if r.Method == http.MethodGet && r.URL.Path == bridges.Prefix+"/messages" {
+					streaming.Store(true)
+				}
+				next.ServeHTTP(rw, r)
+			})
+		},
+		before: func(w *world) { // joe linked his account, and coder-1 is in the channel, from an earlier run of the bridge
+			code, _, err := w.hub.BridgeCode(ctx, "discord", "7", "joe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.hub.ConfirmBridgeCode(ctx, w.admin, code); err != nil {
+				t.Fatal(err)
+			}
+			a := discordbridge.Agent{Guild: guild, Role: "900", Project: w.project, Agent: "coder-1", Name: "coder-1", Home: room}
+			if err := w.state.AddAgent(ctx, a); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.state.AddPlace(ctx, guild, "900", room); err != nil {
+				t.Fatal(err)
+			}
+		},
+	})
+	down.Store(false)
+	eventually(t, "the bridge to read the hub's outbox", streaming.Load)
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "may I merge?", ID: "mr"})
+	posted := w.request("the request", "POST /channels/"+room+"/messages")
+	if !strings.Contains(string(posted.Body), "may I merge?") || !strings.Contains(string(posted.Body), "<@7>") {
+		t.Errorf("posted %s", posted.Body)
 	}
 }

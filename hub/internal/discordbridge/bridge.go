@@ -78,9 +78,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.mu.Lock()
 	b.app = app.ID
 	b.mu.Unlock()
-	if err := b.refreshAccounts(ctx); err != nil {
-		b.log.Warn("read the linked accounts", "err", err)
-	}
 	events := make(chan discord.Event, 256)
 	gateway := &discord.Gateway{Token: b.cfg.Token, Intents: discord.IntentGuilds | discord.IntentGuildMessages | discord.IntentMessageContent,
 		URL: gw.URL, Handler: func(e discord.Event) { events <- e }, Log: b.log, Sessions: b.rest.GatewayBot}
@@ -373,15 +370,8 @@ func (b *Bridge) say(ctx context.Context, m discord.Message, text string) {
 func (b *Bridge) outbound(ctx context.Context) {
 	delay := time.Second
 	for ctx.Err() == nil {
-		after, err := b.state.Cursor(ctx)
-		if err != nil {
-			b.log.Error("read the cursor", "err", err)
-		}
 		began := time.Now()
-		err = b.hub.Stream(ctx, after, func(e Event) error {
-			b.outgoing(ctx, e)
-			return b.state.SetCursor(ctx, e.Seq)
-		})
+		err := b.follow(ctx)
 		if ctx.Err() != nil {
 			return
 		}
@@ -396,6 +386,23 @@ func (b *Bridge) outbound(ctx context.Context) {
 		}
 		delay = min(delay*2, time.Minute)
 	}
+}
+
+// follow reads the linked accounts, then the outbox from the cursor. What an agent says to a person goes to their Discord account, so
+// the outbox is never read without the accounts: a message to someone the bridge does not know is dropped. Reading them at every
+// connection covers a hub that was not up yet when the bridge started, and one that comes back with accounts linked while it was away.
+func (b *Bridge) follow(ctx context.Context) error {
+	if err := b.refreshAccounts(ctx); err != nil {
+		return fmt.Errorf("read the linked accounts: %w", err)
+	}
+	after, err := b.state.Cursor(ctx)
+	if err != nil {
+		return fmt.Errorf("read the cursor: %w", err)
+	}
+	return b.hub.Stream(ctx, after, func(e Event) error {
+		b.outgoing(ctx, e)
+		return b.state.SetCursor(ctx, e.Seq)
+	})
 }
 
 // outgoing is one event of the outbox.
