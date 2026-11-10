@@ -35,13 +35,24 @@ type BridgeCode struct {
 	Expires      time.Time
 }
 
-// CreateBridgeCode makes a code for a chat account. What it returns is the only time the code exists in the clear.
+// CreateBridgeCode makes a code for a chat account. What it returns is the only time the code exists in the clear. An account has one
+// code at a time: a new one replaces the one before, so asking again and again keeps one row.
 func (s *Store) CreateBridgeCode(ctx context.Context, bridge, externalID, externalName string, now time.Time) (string, time.Time, error) {
 	code := newCode(BridgeCodePrefix)
 	expires := now.Add(BridgeCodeLife)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO bridge_codes (hash, bridge, external_id, external_name, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		hashCode(code), bridge, externalID, externalName, expires.UnixMilli())
-	return code, expires, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM bridge_codes WHERE bridge = ? AND external_id = ?`, bridge, externalID); err != nil {
+		return "", time.Time{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO bridge_codes (hash, bridge, external_id, external_name, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		hashCode(code), bridge, externalID, externalName, expires.UnixMilli()); err != nil {
+		return "", time.Time{}, err
+	}
+	return code, expires, tx.Commit()
 }
 
 // BridgeCodeFor says what a code that is still good is for.
