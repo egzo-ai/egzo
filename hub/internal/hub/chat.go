@@ -5,8 +5,8 @@ package hub
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
