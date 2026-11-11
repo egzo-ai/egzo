@@ -287,6 +287,9 @@ func (h *Hub) change(ctx context.Context, e BridgeEvent) {
 		return
 	}
 	h.outboxChanged()
+	if e.User != "" { // an account linked or unlinked, a user disabled, a role changed: whether they can be reached may have too
+		h.peopleChanged()
+	}
 }
 
 // eventsAfter is where a project's events feed resumes: -1 when the hub never read it. An error ends the feed, which the link opens again.

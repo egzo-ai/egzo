@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // Identity is what other agents may know of an agent besides its name and activity: the template it is an instance of
@@ -18,6 +20,10 @@ import (
 type Identity struct {
 	Template string `json:"template"`
 	Harness  string `json:"harness"`
+	// Starter is who started the agent (operator, user:<id>, service:<name>), and StarterName a hub user's name, as spawn gave it: the
+	// agent is told, and nobody else. `up` gives no name, and the one spawn gave is kept.
+	Starter     string `json:"starter,omitempty"`
+	StarterName string `json:"starter_name,omitempty"`
 }
 
 func (s *server) identityFile(agent string) string {
@@ -55,7 +61,15 @@ func (s *server) putIdentities(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.agentFile(agent); !ok || !s.knownAgent(agent) {
 			continue
 		}
-		data, err := json.Marshal(body[agent])
+		id := body[agent]
+		if before, ok := s.readIdentity(agent); ok && id.StarterName == "" && id.Starter == before.Starter {
+			id.StarterName = before.StarterName
+		}
+		if id.Starter != "" && !names.Actor(id.Starter, "user", "service") || !validPersonName(id.StarterName) {
+			http.Error(w, "a starter is operator, user:<id> or service:<name>, and its name one short line", http.StatusBadRequest)
+			return
+		}
+		data, err := json.Marshal(id)
 		if err == nil {
 			err = os.MkdirAll(filepath.Dir(s.identityFile(agent)), 0o755)
 		}

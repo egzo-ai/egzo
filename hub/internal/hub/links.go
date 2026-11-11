@@ -150,6 +150,7 @@ func (h *Hub) arrived(ctx context.Context, c *connection) error {
 		previous.end()
 	}
 	err := h.store.Connected(ctx, c.project, c.hello.Project, c.hello.Host, c.hello.Release)
+	h.people.forget(c.project)
 	if err == nil {
 		h.feeds.connected(c)
 		c.served.Store(true)
@@ -282,6 +283,7 @@ func (h *Hub) pushed(c *connection, update links.ProjectUpdate) {
 	for _, agent := range gone {
 		h.change(context.Background(), BridgeEvent{Type: EventAgentRemoved, Project: c.project, Agent: agent})
 	}
+	go h.tellPeople(c.project) // its agents, and so who started them, may have changed
 }
 
 // removedAgents are the agents of before that after no longer has.

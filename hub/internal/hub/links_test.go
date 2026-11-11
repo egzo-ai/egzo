@@ -437,11 +437,11 @@ func TestATaskThatRanWhenTheLinkDroppedIsInterruptedAndTheProjectGoesOn(t *testi
 	f := r.link("web", "coder")
 	op, id := r.operator(), r.id("web")
 	f.Hold()
-	task, err := r.hub.StartSpawn(ctx, op, id, "coder", "fix-bug")
+	task, err := r.hub.StartSpawn(ctx, op, id, Spawning{Template: "coder", Name: "fix-bug"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued, err := r.hub.StartSpawn(ctx, op, id, "coder", "after")
+	queued, err := r.hub.StartSpawn(ctx, op, id, Spawning{Template: "coder", Name: "after"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,7 +675,7 @@ func TestATaskAsksTheLinkNothingAfterItsVerb(t *testing.T) {
 	f := r.link("web", "coder")
 	op, id := r.operator(), r.id("web")
 	reads := f.ProjectReads()
-	task, err := r.hub.StartSpawn(ctx, op, id, "coder", "fix-bug")
+	task, err := r.hub.StartSpawn(ctx, op, id, Spawning{Template: "coder", Name: "fix-bug"})
 	if err != nil {
 		t.Fatal(err)
 	}

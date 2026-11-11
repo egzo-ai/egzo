@@ -234,7 +234,7 @@ func (d *Engine) instance(ctx context.Context, project, agent string) (stack.Obs
 	return observed, nil, fmt.Errorf("agent %q has no container: it needs to be removed and spawned again", agent)
 }
 
-func (d *Engine) Spawn(ctx context.Context, project, template, name, actor string, progress func(string)) (string, error) {
+func (d *Engine) Spawn(ctx context.Context, project string, s hublink.SpawnRequest, progress func(string)) (string, error) {
 	published, err := stack.ReadPublished(ctx, d.client, project)
 	if err != nil {
 		return "", err
@@ -245,7 +245,8 @@ func (d *Engine) Spawn(ctx context.Context, project, template, name, actor strin
 		return "", err
 	}
 	defer release()
-	spawned, err := stack.Spawn(ctx, d.client, project, "", stack.SpawnRequest{Template: template, Name: name, Actor: actor}, &steps{progress: progress})
+	spawned, err := stack.Spawn(ctx, d.client, project, "", stack.SpawnRequest{Template: s.Template, Name: s.Name, Actor: s.Actor,
+		StarterName: s.StarterName, Task: s.Task, Unattended: s.Unattended}, &steps{progress: progress})
 	if err != nil {
 		return "", err
 	}
@@ -569,6 +570,20 @@ func (d *Engine) Resolve(ctx context.Context, project, message, actor, text, out
 		return hublink.Resolved{}, fmt.Errorf("control sidecar: an answer to resolve that is not readable: %w", err)
 	}
 	return hublink.Resolved{ID: resolved.ID, Already: resolved.Already}, nil
+}
+
+// People is what the hub knows now of the users who started the project's agents. Only user:<id>, the hub's own.
+func (d *Engine) People(ctx context.Context, project string, people map[string]hublink.Person) error {
+	body := map[string]map[string]any{}
+	for id, p := range people {
+		if !isUser(id) {
+			return fmt.Errorf("the hub speaks of its users, user:<id>, not of %q", id)
+		}
+		body[id] = map[string]any{"name": p.Name, "reachable": p.Reachable}
+	}
+	data, _ := json.Marshal(body)
+	_, err := stack.ControlRequest(ctx, d.client, project, "PUT", "/v1/people", data)
+	return err
 }
 
 // Undelivered is the hub saying that an agent's message to one of its users did not reach them: the agent is told why.

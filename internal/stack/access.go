@@ -10,6 +10,7 @@ import (
 
 	"github.com/egzo-ai/egzo/internal/access"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // AccessOf is what an instance of the template is told about what it may reach: its profile, the hosts it allows, each
@@ -74,10 +75,13 @@ func ControlPushAccess(ctx context.Context, c *engine.Client, project, name stri
 	return nil
 }
 
-// identity is what other agents may know of an instance besides its name: its template and its harness.
+// identity is what other agents may know of an instance besides its name, its template and its harness, and what it knows of itself: who
+// started it. `up` does not know the starter's name: control keeps the one spawn gave.
 type identity struct {
-	Template string `json:"template"`
-	Harness  string `json:"harness"`
+	Template    string `json:"template"`
+	Harness     string `json:"harness"`
+	Starter     string `json:"starter,omitempty"`
+	StarterName string `json:"starter_name,omitempty"`
 }
 
 // pushIdentities gives the control sidecar the template and harness of each instance, in one request, for `agents`.
@@ -85,7 +89,7 @@ func pushIdentities(ctx context.Context, c *engine.Client, project string, insta
 	body := map[string]identity{}
 	for _, instance := range instances {
 		if template, ok := p.Templates[instance.Template]; ok && instance.State != "missing" {
-			body[instance.Name] = identity{Template: instance.Template, Harness: template.Agent.Harness}
+			body[instance.Name] = identity{Template: instance.Template, Harness: template.Agent.Harness, Starter: starterOf(instance.Actor)}
 		}
 	}
 	if len(body) == 0 {
@@ -94,9 +98,18 @@ func pushIdentities(ctx context.Context, c *engine.Client, project string, insta
 	return putIdentities(ctx, c, project, body)
 }
 
-// ControlPushIdentity gives the control sidecar the template and harness of one new instance.
-func ControlPushIdentity(ctx context.Context, c *engine.Client, project, name, templateName string, template Template) error {
-	return putIdentities(ctx, c, project, map[string]identity{name: {Template: templateName, Harness: template.Agent.Harness}})
+// ControlPushIdentity gives the control sidecar the template and harness of one new instance, and who started it.
+func ControlPushIdentity(ctx context.Context, c *engine.Client, project, name, templateName string, template Template, from InstanceIdentity) error {
+	return putIdentities(ctx, c, project, map[string]identity{name: {Template: templateName, Harness: template.Agent.Harness,
+		Starter: starterOf(from.Actor), StarterName: from.StarterName}})
+}
+
+// starterOf is who started an instance: its actor label, the operator when it has none.
+func starterOf(actor string) string {
+	if actor == "" {
+		return names.Operator
+	}
+	return actor
 }
 
 func putIdentities(ctx context.Context, c *engine.Client, project string, body map[string]identity) error {

@@ -51,6 +51,8 @@ type Hub struct {
 
 	previewMu  sync.Mutex
 	previewing map[*openPreview]struct{} // what preview servers are answering now
+
+	people peopleState // what each project was told of who started its agents (people.go)
 }
 
 // New builds a hub; log may be nil.

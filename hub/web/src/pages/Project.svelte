@@ -33,7 +33,7 @@
   let invites = $state<Invite[]>([]);
   let activity = $state<Task[] | null>(null);
   let spawning = $state(false);
-  let spawnForm = $state({ template: "", name: "", suggested: "" });
+  let spawnForm = $state({ template: "", name: "", suggested: "", task: "", unattended: false });
   let spawnError = $state("");
   let templates = $state<Template[] | null>(null);
   let templatesError = $state("");
@@ -109,7 +109,7 @@
   function openSpawn(chosen?: string) {
     const template = chosen ?? project?.templates[0] ?? "";
     const suggested = suggest(template);
-    spawnForm = { template, name: suggested, suggested };
+    spawnForm = { template, name: suggested, suggested, task: "", unattended: false };
     spawnError = "";
     spawning = true;
   }
@@ -131,10 +131,11 @@
     spawnError = "";
     submitting = true;
     try {
-      const task = await api.spawn(id, spawnForm.template, spawnForm.name.trim());
+      const unattended = spawnForm.unattended; // nobody opens the terminal of an agent that runs alone
+      const task = await api.spawn(id, spawnForm.template, spawnForm.name.trim(), spawnForm.task.trim(), unattended);
       spawning = false;
       followTask(id, task, (ended) => {
-        if (ended.state === "done" && onScreen(id, ended.agent) && nav.route.name === "agent") openTerm(id, ended.agent);
+        if (ended.state === "done" && !unattended && onScreen(id, ended.agent) && nav.route.name === "agent") openTerm(id, ended.agent);
       });
       navigate(href.agent(id, task.agent));
     } catch (err) {
@@ -379,6 +380,11 @@
               <button type="button" class="btn" data-icon-only aria-label="Another suggestion" title="Another suggestion" onclick={anotherName}><Icon name="refresh" /></button>
             </span>
             <span class="help">Lowercase letters, digits, - and _. The name stays with the agent's branch, even after it is removed.</span></div>
+          <div class="field"><label for="sp-task">Task{#if !spawnForm.unattended} <span class="muted">(optional)</span>{/if}</label>
+            <textarea id="sp-task" class="textarea" bind:value={spawnForm.task} required={spawnForm.unattended} maxlength="16000" rows="3"></textarea>
+            <span class="help">{spawnForm.unattended ? "Sent to the agent as a request from you. It answers you on your chat account." : "Typed as the agent's first prompt, as if you typed it in its terminal."}</span></div>
+          <label class="check"><input type="checkbox" bind:checked={spawnForm.unattended} data-testid="unattended" /> Unattended: nobody watches its terminal</label>
+          {#if spawnForm.unattended}<span class="help">It reports to you on your linked chat account (<a href={href.account()}>Account</a>), and says on its status line what it waits for.</span>{/if}
         {/if}
         {#if spawnError}<div class="field-error" role="alert">{spawnError}</div>{/if}
       </form>

@@ -173,9 +173,12 @@ func answer(w http.ResponseWriter, value any) {
 
 type verbRequest struct {
 	Project, Verb, Template, Name, Actor, Agent, Container, Input string
-	Workspace, Instance                                           string // files
-	Text, Key, Message, Outcome                                   string // send, resolve, undelivered
-	Interrupt                                                     bool   // send
+	Workspace, Instance                                           string                    // files
+	Text, Key, Message, Outcome                                   string                    // send, resolve, undelivered
+	Interrupt                                                     bool                      // send
+	StarterName, Task                                             string                    // spawn
+	Unattended                                                    bool                      // spawn
+	People                                                        map[string]hublink.Person // people
 	Tail, Limit, Port                                             int
 	Seconds                                                       float64
 	HalfClose                                                     bool // forward: end the input, then read the answer
@@ -192,8 +195,11 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 		result, err := peer.Published(ctx)
 		return result, steps, err
 	case hublink.VerbSpawn:
-		result, err := peer.Spawn(ctx, q.Template, q.Name, q.Actor, progress)
+		result, err := peer.Spawn(ctx, hublink.SpawnRequest{Template: q.Template, Name: q.Name, Actor: q.Actor, StarterName: q.StarterName, Task: q.Task,
+			Unattended: q.Unattended}, progress)
 		return result, steps, err
+	case hublink.VerbPeople:
+		return nil, steps, peer.People(ctx, q.People)
 	case hublink.VerbStart:
 		return nil, steps, peer.Start(ctx, q.Agent)
 	case hublink.VerbStop:

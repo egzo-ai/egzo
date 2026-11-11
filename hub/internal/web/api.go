@@ -77,6 +77,12 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusConflict, "conflict", "The task is still running: it ends on its own.")
 	case errors.Is(err, hub.ErrNameRequired):
 		s.apiFail(w, http.StatusBadRequest, "bad_request", "Give the agent a name.")
+	case errors.Is(err, hub.ErrTaskRequired):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "An unattended agent needs a task: nobody types into its terminal.")
+	case errors.Is(err, hub.ErrTaskTooLong):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "The task is too long: at most 16 KB. Put the rest in a file of a workspace, and name the file.")
+	case errors.Is(err, hub.ErrNoChatAccount):
+		s.apiFail(w, http.StatusConflict, "no_chat_account", "Link a chat account first: an unattended agent reports to you there.")
 	case errors.Is(err, hub.ErrBadName):
 		s.apiFail(w, http.StatusBadRequest, "bad_request", "That name is not valid: "+err.Error()+".")
 	case errors.As(err, new(hub.ExistsError)):
@@ -436,11 +442,15 @@ func (s *Server) agent(w http.ResponseWriter, r *http.Request, user store.User) 
 
 // spawn is answered at once: the task runs on in the hub, and the agent is in the project from now on (hub/internal/hub/tasks.go).
 func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) {
-	var body struct{ Template, Name string }
+	var body struct {
+		Template, Name, Task string
+		Unattended           bool
+	}
 	if !decode(w, r, &body) {
 		return
 	}
-	t, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("project"), strings.TrimSpace(body.Template), strings.TrimSpace(body.Name))
+	t, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("project"), hub.Spawning{Template: strings.TrimSpace(body.Template),
+		Name: strings.TrimSpace(body.Name), Task: strings.TrimSpace(body.Task), Unattended: body.Unattended})
 	if err != nil {
 		s.problem(w, r, err)
 		return

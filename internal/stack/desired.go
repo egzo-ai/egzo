@@ -22,6 +22,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/harness"
+	"github.com/egzo-ai/egzo/internal/names"
 )
 
 // revision is bumped when how egzo creates resources changes, so existing projects converge.
@@ -333,6 +334,9 @@ type InstanceIdentity struct {
 	Template     string
 	Actor        string
 	TemplateHash string
+	// StarterName and Unattended are what the agent is told of who started it and how (see SpawnRequest).
+	StarterName string
+	Unattended  bool
 }
 
 // DesireInstance computes the resources of one instance: its network, its home volume, its container,
@@ -361,6 +365,8 @@ func DesireInstance(view *config.Resolved, dir string, in Inputs, name string, f
 	if err != nil {
 		return desired, err
 	}
+	spec.Env = append(spec.Env, starterEnv(from)...)
+	sort.Strings(spec.Env) // the config hash takes it in order
 	desired.Networks = []NetworkSpec{network}
 	desired.Containers = []ContainerSpec{spec}
 	if relay, ok := in.Relay[name]; ok {
@@ -664,4 +670,20 @@ func bearerProvider(project *config.Resolved, agent config.ResolvedAgent) bool {
 		}
 	}
 	return false
+}
+
+// starterEnv tells the agent who started it, and whether it is unattended: its instructions say so (harness.Starter).
+func starterEnv(from InstanceIdentity) []string {
+	actor := from.Actor
+	if actor == "" {
+		actor = names.Operator
+	}
+	env := []string{harness.StarterEnv + "=" + actor}
+	if from.StarterName != "" {
+		env = append(env, harness.StarterNameEnv+"="+from.StarterName)
+	}
+	if from.Unattended {
+		env = append(env, harness.UnattendedEnv+"=1")
+	}
+	return env
 }

@@ -5,6 +5,7 @@ package stack
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/names"
+	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
 // SpawnRequest says what to spawn.
@@ -22,8 +24,14 @@ type SpawnRequest struct {
 	Template string
 	// Name is the instance's name; empty gives `<template>-<n>`.
 	Name string
-	// Actor is who asks: "operator" for the CLI, "user:<id>" or "service:<name>" for another tool.
+	// Actor is who asks: "operator" for the CLI, "user:<id>" or "service:<name>" for another tool. The agent is told it started it.
 	Actor string
+	// StarterName is what the agent calls its starter besides its id: a hub user's name. Empty for the operator.
+	StarterName string
+	// Task is what the agent starts on. Typed as its first prompt, as if the starter had typed it; with Unattended, sent as a request from
+	// the starter instead, and the agent is told nobody reads its terminal. Unattended needs a task and a user:<id> starter.
+	Task       string
+	Unattended bool
 	// NoFetch makes the worktrees from the base clones as they are, without fetching first.
 	NoFetch bool
 	// Reuse continues with a worktree or a branch an earlier instance of the name left, instead of refusing it.
@@ -127,10 +135,14 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if !names.Actor(actor, "user", "service") {
 		return Spawned{}, fmt.Errorf("invalid actor %q: use operator, user:<id> or service:<name>", actor)
 	}
+	if err := checkStart(req, actor); err != nil {
+		return Spawned{}, err
+	}
 
 	instances := map[string]string{name: req.Template}
 	view := published.View(instances)
-	identity := InstanceIdentity{ID: NewInstanceID(), Template: req.Template, Actor: actor, TemplateHash: template.Hash}
+	identity := InstanceIdentity{ID: NewInstanceID(), Template: req.Template, Actor: actor, TemplateHash: template.Hash, StarterName: req.StarterName,
+		Unattended: req.Unattended}
 	// The resources first: their specs do not depend on the token, which only exists once the instance is
 	// registered, and the registration must wait until the network has decided who wins a race.
 	desired, err := DesireInstance(view, dir, published.inputs(instances, map[string]string{}, nil), name, identity)
@@ -148,6 +160,7 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	plan := spawnPlan{
 		project: project, dir: dir, name: name, published: published, view: view, template: template, templateName: req.Template, resources: desired,
 		env: env, identity: identity, worktrees: worktrees, homeExisted: homeExisted, options: WorktreeOptions{NoFetch: req.NoFetch, Reuse: req.Reuse},
+		task: req.Task,
 		container: func(tokens map[string]string) (ContainerSpec, error) {
 			inputs := published.inputs(instances, tokens, nil)
 			inputs.SignIns = map[string]map[string]string{name: signInEnv(ctx, c, project, view, name)}
@@ -187,6 +200,7 @@ type spawnPlan struct {
 	project, dir, name string
 	env                PrepEnv
 	identity           InstanceIdentity
+	task               string // see SpawnRequest.Task
 	published          Published
 	view               *config.Resolved
 	template           Template
@@ -269,7 +283,11 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	if err := ControlPushAccess(ctx, c, p.project, p.name, p.template); err != nil {
 		return err
 	}
-	if err := ControlPushIdentity(ctx, c, p.project, p.name, p.templateName, p.template); err != nil {
+	if err := ControlPushIdentity(ctx, c, p.project, p.name, p.templateName, p.template, p.identity); err != nil {
+		return err
+	}
+	// The task waits in control before the agent starts: it is the first thing the agent gets once it takes input.
+	if err := controlTask(ctx, c, p.project, p.name, p.identity, p.task); err != nil {
 		return err
 	}
 	// The relay comes before the agent: it holds the host ports, and an agent whose ports could not be published is not worth starting. It
@@ -442,4 +460,50 @@ func RemoveInstances(ctx context.Context, c *engine.Client, observed Observed, e
 		removed = append(removed, name)
 	}
 	return removed, nil
+}
+
+// maxStarterName is the longest name of a starter: a hub user's name.
+const maxStarterName = 100
+
+// checkStart refuses a spawn whose starter, task or unattended settings do not go together.
+func checkStart(req SpawnRequest, actor string) error {
+	if len(req.StarterName) > maxStarterName || termsafe.Line(req.StarterName) != req.StarterName || strings.ContainsAny(req.StarterName, "\n\r") {
+		return fmt.Errorf("a starter's name is one line of at most %d characters", maxStarterName)
+	}
+	if req.StarterName != "" && !strings.HasPrefix(actor, "user:") {
+		return fmt.Errorf("only a user:<id> starter has a name")
+	}
+	if req.Unattended && req.Task == "" {
+		return fmt.Errorf("an unattended agent needs a task: nobody types into its terminal")
+	}
+	if req.Unattended && !strings.HasPrefix(actor, "user:") {
+		return fmt.Errorf("an unattended agent reports to a hub user, user:<id>, not %s", actor)
+	}
+	if len(req.Task) > maxTask {
+		return fmt.Errorf("a task is at most %d KB: put what is longer in a file of a workspace, and name the file", maxTask>>10)
+	}
+	return nil
+}
+
+// maxTask is the longest task: the most text a message carries.
+const maxTask = 16 << 10
+
+// controlTask gives control the task an agent starts on: a request from its starter for an unattended agent, keyed by the instance so a
+// retry sends it once; else the first prompt typed into its terminal.
+func controlTask(ctx context.Context, c *engine.Client, project, name string, identity InstanceIdentity, task string) error {
+	if task == "" {
+		return nil
+	}
+	if identity.Unattended {
+		body, _ := json.Marshal(map[string]string{"from": identity.Actor, "to": "agent:" + name, "text": task, "key": "spawn:" + identity.ID})
+		if _, err := ControlRequest(ctx, c, project, "POST", "/v1/messages", body); err != nil {
+			return fmt.Errorf("give %s its task: %w", name, err)
+		}
+		return nil
+	}
+	body, _ := json.Marshal(map[string]string{"text": task})
+	if _, err := ControlRequest(ctx, c, project, "PUT", "/v1/agents/"+name+"/task", body); err != nil {
+		return fmt.Errorf("give %s its task: %w", name, err)
+	}
+	return nil
 }

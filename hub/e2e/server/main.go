@@ -339,6 +339,9 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 		case "calls":
 			json.NewEncoder(rw).Encode(e.Calls())
 			return
+		case "spawns": // what each spawn asked: the starter, the task, unattended
+			json.NewEncoder(rw).Encode(e.Spawns())
+			return
 		default:
 			http.Error(rw, "unknown op "+c.Op, 400)
 			return

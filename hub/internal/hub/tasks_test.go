@@ -41,7 +41,7 @@ func TestASpawnIsOneAgentFromWhenItIsAskedForAndGoesOnWithoutTheRequest(t *testi
 	r.fakes["web"].Hold()
 
 	request, cancel := context.WithCancel(ctx)
-	started, err := r.hub.StartSpawn(request, alice, r.id("web"), "coder", "fix-bug")
+	started, err := r.hub.StartSpawn(request, alice, r.id("web"), Spawning{Template: "coder", Name: "fix-bug"})
 	if err != nil || started.ID == "" || started.State != store.TaskRunning || started.Verb != VerbSpawn {
 		t.Fatalf("start: %+v %v", started, err)
 	}
@@ -76,16 +76,16 @@ func TestASpawnNeedsANameNotTakenARoleAndIsRefusedAtOnce(t *testing.T) {
 	r.fakes["web"].SetAgent(agent("taken", "operator"))
 	op := r.operator()
 	alice := r.login("alice")
-	if _, err := r.hub.StartSpawn(ctx, op, r.id("web"), "coder", ""); !errors.Is(err, ErrNameRequired) {
+	if _, err := r.hub.StartSpawn(ctx, op, r.id("web"), Spawning{Template: "coder", Name: ""}); !errors.Is(err, ErrNameRequired) {
 		t.Errorf("a spawn without a name: %v", err)
 	}
-	if _, err := r.hub.StartSpawn(ctx, op, r.id("web"), "coder", "Not-Valid"); !errors.Is(err, ErrBadName) {
+	if _, err := r.hub.StartSpawn(ctx, op, r.id("web"), Spawning{Template: "coder", Name: "Not-Valid"}); !errors.Is(err, ErrBadName) {
 		t.Errorf("a spawn of a name an agent cannot have: %v", err)
 	}
-	if _, err := r.hub.StartSpawn(ctx, op, r.id("web"), "coder", "taken"); !errors.As(err, new(ExistsError)) {
+	if _, err := r.hub.StartSpawn(ctx, op, r.id("web"), Spawning{Template: "coder", Name: "taken"}); !errors.As(err, new(ExistsError)) {
 		t.Errorf("a spawn of a name an agent has: %v", err)
 	}
-	if _, err := r.hub.StartSpawn(ctx, alice, r.id("web"), "coder", "mine"); !errors.Is(err, ErrNotFound) {
+	if _, err := r.hub.StartSpawn(ctx, alice, r.id("web"), Spawning{Template: "coder", Name: "mine"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a spawn without a role: %v", err)
 	}
 	if tasks, _ := r.hub.Tasks(ctx, op, r.id("web"), "", 10); len(tasks) != 0 {
@@ -137,7 +137,7 @@ func TestATaskThatRunsCannotBeDismissedAndAFailureGivesWayToTheNextTask(t *testi
 	r.hub.Spawn(ctx, op, r.id("web"), "ghost", "again")
 	failed, _ := r.agentIn(op, r.id("web"), "again")
 	r.fakes["web"].Hold()
-	running, err := r.hub.StartSpawn(ctx, op, r.id("web"), "reviewer", "again")
+	running, err := r.hub.StartSpawn(ctx, op, r.id("web"), Spawning{Template: "reviewer", Name: "again"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,9 +199,9 @@ func TestTheSpawnsAndRemovalsOfAProjectRunOneAfterTheOtherInOrder(t *testing.T) 
 	r.fakes["web"].SetAgent(agent("old", "operator"))
 	op := r.operator()
 	r.fakes["web"].Hold()
-	first, _ := r.hub.StartSpawn(ctx, op, r.id("web"), "coder", "one")
+	first, _ := r.hub.StartSpawn(ctx, op, r.id("web"), Spawning{Template: "coder", Name: "one"})
 	removal, _ := r.hub.StartOperation(ctx, op, VerbRm, r.id("web"), "old")
-	second, _ := r.hub.StartSpawn(ctx, op, r.id("web"), "coder", "two")
+	second, _ := r.hub.StartSpawn(ctx, op, r.id("web"), Spawning{Template: "coder", Name: "two"})
 	eventually(t, "the later ones to wait", func() bool {
 		a, _ := r.agentIn(op, r.id("web"), "two")
 		b, _ := r.agentIn(op, r.id("web"), "old")

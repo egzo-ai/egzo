@@ -16,9 +16,13 @@ type Engine interface {
 	Project(ctx context.Context) (Project, error)
 	// Published reads the templates the project's control sidecar holds, which a command in the sidecar answers.
 	Published(ctx context.Context) (Published, error)
-	// Spawn makes an instance of a template; actor is the `actor` label it gets ("user:<id>"). It calls progress with each step it
-	// takes ("create container ..."), as `egzo spawn` prints them.
-	Spawn(ctx context.Context, template, name, actor string, progress func(step string)) (agent string, err error)
+	// Spawn makes an instance of a template; Actor is the `actor` label it gets ("user:<id>"), who the agent is told started it, with
+	// their name, the task it starts on, and whether it is unattended (hublink.SpawnRequest). It calls progress with each step it takes
+	// ("create container ..."), as `egzo spawn` prints them.
+	Spawn(ctx context.Context, s SpawnRequest, progress func(step string)) (agent string, err error)
+	// People tells the project what the hub knows now of the users who started its agents, all of them: their names, and whether a
+	// bridge can reach them.
+	People(ctx context.Context, people map[string]Person) error
 	Start(ctx context.Context, agent string) error
 	Stop(ctx context.Context, agent string) error
 	// Remove removes an instance and what it owns, calling progress with each step, as `egzo agent rm` prints them.
@@ -83,6 +87,8 @@ type (
 	Handlers      = hublink.Handlers
 	Sent          = hublink.Sent
 	Resolved      = hublink.Resolved
+	SpawnRequest  = hublink.SpawnRequest
+	Person        = hublink.Person
 )
 
 // AuditBacklog is how many lines of a proxy's log a link reads first when the hub has no time to start from.
