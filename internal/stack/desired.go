@@ -162,9 +162,11 @@ type Inputs struct {
 	SignIns map[string]map[string]string
 }
 
-// The proxy and link keep their sockets under /run/egzo, on a tmpfs mounted at /run itself, not at /run/egzo: on a
-// read-only root, sysbox mounts its own root-owned /run (mode 755) unless the container has a mount at exactly /run,
-// and that would hide /run/egzo and leave the sidecar unable to create it (sysbox-runc, cfgSyscontMountsReadOnly).
+// The proxy and link keep their sockets in a tmpfs at /run/egzo, under a tmpfs of their own at /run. Both are for
+// sysbox: on a read-only root it mounts a root-owned /run (mode 755) after the container's own mounts unless one is at
+// exactly /run, which would hide /run/egzo; and it gives a tmpfs mounted on a directory the image already has that
+// directory's mode, ignoring mode=, so under sysbox /run is 755 whatever it asks. /run/egzo is in no image.
+// (sysbox-runc: cfgSyscontMountsReadOnly, and the tmpfs case of mountToRootfs.)
 //
 // The sidecars' tmpfs mounts carry no uid or gid but an explicit mode 1777, which the sidecar's user can write, because Podman refuses the uid option ("unknown mount option uid=...") on rootless hosts. The sidecar user is the only one in the container.
 //
@@ -180,6 +182,7 @@ const (
 	proxyPids         = 2048
 	defaultAgentPids  = 4096
 	sidecarTmpfsState = "rw,nosuid,size=1m,mode=1777"
+	sidecarTmpfsRun   = "rw,noexec,nosuid,size=64k,mode=1777"
 )
 
 // ReadPrompts reads the prompt file of every agent that has one. The text travels in the published template and
@@ -278,7 +281,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 			Memory:         proxyMemory,
 			MemorySwap:     proxyMemory,
 			PidsLimit:      proxyPids,
-			Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run": sidecarTmpfsState},
+			Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run": sidecarTmpfsRun, "/run/egzo": sidecarTmpfsState},
 			Network:        egress.Name,
 			Healthcheck:    []string{"/egzo", "proxy", "healthcheck"},
 			ReadonlyRootfs: true,

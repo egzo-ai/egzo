@@ -128,7 +128,7 @@ func desireLink(project *config.Resolved, in Inputs, identity engine.Identity) (
 			{Source: state.Name, Target: linkState},
 			{Source: in.LinkSocket.Path, Target: LinkEngineSocket, Bind: true},
 		},
-		Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run": sidecarTmpfsState},
+		Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run": sidecarTmpfsRun, "/run/egzo": sidecarTmpfsState},
 		Network:        network.Name,
 		Restart:        "unless-stopped", // it comes back locked, which says what to do where a stopped container says nothing
 		Healthcheck:    []string{"/egzo", "link", "--healthcheck"},

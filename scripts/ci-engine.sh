@@ -113,6 +113,10 @@ docker-sysbox)
 			--tmpfs "$tmpfs:rw,nosuid,size=1m,mode=1777" alpine:3 sh -c \
 			'id; ls -ld /run /run/egzo 2>&1; grep -E " /run| /tmp" /proc/self/mountinfo; mkdir -p /run/egzo && echo mkdir ok' || true
 	done
+	echo "--- read-only root, user 65532, a tmpfs at /run and one at /run/egzo (what the proxy and link get)"
+	docker run --rm --read-only --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges \
+		--tmpfs "/run:rw,noexec,nosuid,size=64k,mode=1777" --tmpfs "/run/egzo:rw,nosuid,size=1m,mode=1777" alpine:3 sh -c \
+		'ls -ld /run /run/egzo; grep -E " /run" /proc/self/mountinfo; touch /run/egzo/x && echo write ok' || true
 	echo "--- the same, root filesystem writable"
 	docker run --rm --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges \
 		--tmpfs "/run:rw,nosuid,size=1m,mode=1777" alpine:3 sh -c \
