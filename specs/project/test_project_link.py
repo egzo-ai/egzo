@@ -219,6 +219,8 @@ def test_the_hub_sends_a_message_for_one_of_its_users_and_sending_it_again_sends
     assert ID.match(first["ID"])
     again = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="hello from a chat", Key="chat-1")
     assert again["ID"] == first["ID"], "the key is the platform's message id: a retry is the same message"
+    reused = hub.verb(p, "send", Agent="fromhub", Actor="user:7", Text="something else", Key="chat-1")["error"]
+    assert "chat-1" in reused, "the same key with another text is a bridge's mistake: refused, never taken for the first message"
     listed = [r for r in table(linked.ok("message ls").stdout) if r["ID"] == first["ID"]]
     assert [(r["FROM"], r["TO"], r["KIND"]) for r in listed] == [("user:7", "agent:fromhub", "request")]
 
@@ -244,9 +246,18 @@ def test_the_events_feed_carries_what_an_agent_says_to_a_user_and_the_user_answe
 
     assert hub.verb(p, "resolve", Message=q["ID"], Actor="user:8", Text="production")["error"], "only the user it is addressed to answers it"
     assert hub.verb(p, "resolve", Message=q["ID"], Actor="operator", Text="production")["error"], "and never as the operator"
-    hub.must(p, "resolve", Message=q["ID"], Actor="user:7", Text="staging")
+    first = hub.must(p, "resolve", Message=q["ID"], Actor="user:7", Text="staging", Key="click-1")
+    assert ID.match(first["ID"]) and not first["Already"]
     answer = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == q["ID"]])
-    assert answer and (answer[0]["Actor"], answer[0]["To"], answer[0]["Text"]) == ("user:7", "agent:fromhub", "staging")
+    assert answer and (answer[0]["ID"], answer[0]["Actor"], answer[0]["To"], answer[0]["Text"]) == (first["ID"], "user:7", "agent:fromhub", "staging")
+
+    again = hub.must(p, "resolve", Message=q["ID"], Actor="user:7", Text="staging", Key="click-1")
+    assert again == first, "the key is the platform's id for the click: a retry is the same answer, and it went through"
+    second = hub.must(p, "resolve", Message=q["ID"], Actor="user:7", Text="production", Key="click-2")
+    assert second == {"ID": first["ID"], "Already": True}, "a second answer changes nothing, and says the person answered already"
+    assert "click-1" in hub.verb(p, "resolve", Message=q["ID"], Actor="user:7", Text="production", Key="click-1")["error"], \
+        "the same key with another answer is a bridge's mistake"
+    assert len([e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == q["ID"]]) == 1, "one answer, whatever came after"
 
     agent.resolve(sent, "deployed to staging")
     result = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == sent])

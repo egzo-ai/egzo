@@ -41,10 +41,12 @@ type Engine struct {
 	exposed    map[string][]links.Exposure
 	servers    map[string]*server // what listens in an agent, by "agent:port"
 	workspaces []links.Workspace
-	files      map[string]*server // the file server of a workspace, by "workspace/instance"
-	keys       map[string]string  // the messages sent, by actor and key
-	seq        int                // the last event's sequence number
-	afters     []int              // the after of every events feed that was opened
+	files      map[string]*server   // the file server of a workspace, by "workspace/instance"
+	keys       map[string]string    // the messages sent, and the answers, by actor and key
+	answers    map[string][2]string // message -> who answered it and their answer's id
+	lose       int                  // how many sends and answers to come are made and their reply lost: LoseReplies
+	seq        int                  // the last event's sequence number
+	afters     []int                // the after of every events feed that was opened
 
 	// the connection
 	current  *Connection
@@ -278,20 +280,64 @@ func (e *Engine) SendMessage(ctx context.Context, agent, actor, text, key string
 	id := fmt.Sprintf("m%032d", len(e.keys)+1)
 	e.keys[actor+" "+key] = id
 	e.record("send %s %s %s", agent, actor, key)
+	lost := e.lost()
 	e.mu.Unlock()
 	e.PushEvent(links.Event{Type: "message", Agent: agent, Actor: actor, ID: id, To: "agent:" + agent, Kind: "request", Text: text})
+	if lost != nil {
+		return links.Sent{}, lost
+	}
 	return links.Sent{ID: id}, nil
 }
 
-// Resolve is one of the hub's users answering a message.
-func (e *Engine) Resolve(ctx context.Context, message, actor, text, outcome string) error {
+// LoseReplies makes the next n sends and answers happen, and then fail as a call the hub gave up waiting on: what a project that answers
+// too late looks like.
+func (e *Engine) LoseReplies(n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lose = n
+}
+
+func (e *Engine) lost() error {
+	if e.lose == 0 {
+		return nil
+	}
+	e.lose--
+	return fmt.Errorf("the project did not answer: %w", context.DeadlineExceeded)
+}
+
+// Resolve is one of the hub's users answering a message. As control: the same actor and key are the same answer, and a second answer
+// of the same actor is already.
+func (e *Engine) Resolve(ctx context.Context, message, actor, text, outcome, key string) (links.Resolved, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := e.dropped(); err != nil {
-		return err
+		return links.Resolved{}, err
 	}
-	e.record("resolve %s %s %s", message, actor, text)
-	return nil
+	if e.keys == nil {
+		e.keys = map[string]string{}
+	}
+	if e.answers == nil {
+		e.answers = map[string][2]string{}
+	}
+	if id, ok := e.keys[actor+" "+key]; ok && key != "" {
+		return links.Resolved{ID: id}, nil
+	}
+	if first, ok := e.answers[message]; ok {
+		if first[0] != actor {
+			return links.Resolved{}, fmt.Errorf("message %s is already resolved", message)
+		}
+		return links.Resolved{ID: first[1], Already: true}, nil
+	}
+	id := fmt.Sprintf("r%032d", len(e.answers)+1)
+	e.answers[message] = [2]string{actor, id}
+	if key != "" {
+		e.keys[actor+" "+key] = id
+	}
+	e.record("resolve %s %s %s %s", message, actor, text, key)
+	if err := e.lost(); err != nil {
+		return links.Resolved{}, err
+	}
+	return links.Resolved{ID: id}, nil
 }
 
 // Undelivered is the hub telling an agent that its message did not reach a person.

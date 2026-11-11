@@ -169,7 +169,7 @@ func TestAskQuestionsTheRequesterAndLeavesTheRequestOpen(t *testing.T) {
 	if open, waiting := r.srv.overlay("coder"); open != 1 || !waiting {
 		t.Errorf("overlay = %d, %v", open, waiting)
 	}
-	answer, err := r.srv.resolveForPerson("operator", questionID, "yes", "done")
+	answer, _, err := r.srv.resolveForPerson("operator", questionID, "yes", "done", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,8 +180,11 @@ func TestAskQuestionsTheRequesterAndLeavesTheRequestOpen(t *testing.T) {
 	if open, waiting := r.srv.overlay("coder"); open != 1 || waiting {
 		t.Errorf("overlay after the answer = %d, %v", open, waiting)
 	}
-	if _, err := r.srv.resolveForPerson("operator", questionID, "again", "done"); statusOf(t, err) != http.StatusConflict {
-		t.Errorf("answering twice: %v", err)
+	if first, already, err := r.srv.resolveForPerson("operator", questionID, "again", "done", ""); err != nil || !already || first != answer {
+		t.Errorf("answering twice: %s, %v, %v: want the first answer, already", first, already, err)
+	}
+	if reply, _ := r.srv.events.message(answer); reply.Text != "yes" {
+		t.Errorf("a second answer changed the first: %q", reply.Text)
 	}
 }
 
@@ -189,10 +192,10 @@ func TestAPersonCanOnlyResolveWhatIsAddressedToAPerson(t *testing.T) {
 	r := newRig(t)
 	r.project("coder")
 	id := r.request("coder", "mine to do")
-	if _, err := r.srv.resolveForPerson("operator", id, "I did it", "done"); statusOf(t, err) != http.StatusBadRequest || !strings.Contains(err.Error(), "agent:coder") {
+	if _, _, err := r.srv.resolveForPerson("operator", id, "I did it", "done", ""); statusOf(t, err) != http.StatusBadRequest || !strings.Contains(err.Error(), "agent:coder") {
 		t.Errorf("err = %v", err)
 	}
-	if _, err := r.srv.resolveForPerson("operator", "m"+strings.Repeat("0", 32), "x", "done"); statusOf(t, err) != http.StatusNotFound {
+	if _, _, err := r.srv.resolveForPerson("operator", "m"+strings.Repeat("0", 32), "x", "done", ""); statusOf(t, err) != http.StatusNotFound {
 		t.Errorf("an unknown id: %v", err)
 	}
 }
@@ -545,6 +548,14 @@ func TestAKeyMakesASendIdempotentPerSenderAndSurvivesARestart(t *testing.T) {
 	if _, again := send(`{"to":"agent:coder","from":"user:7","text":"hi","key":"discord-1"}`); again != first {
 		t.Errorf("the same key sent a second message: %s and %s", first, again)
 	}
+	for _, body := range []string{
+		`{"to":"agent:coder","from":"user:7","text":"another text","key":"discord-1"}`,
+		`{"to":"agent:helper","from":"user:7","text":"hi","key":"discord-1"}`,
+	} {
+		if code, _ := send(body); code != http.StatusConflict {
+			t.Errorf("the key again with another message: %d, want 409 (%s)", code, body)
+		}
+	}
 	if _, other := send(`{"to":"agent:coder","from":"user:8","text":"hi","key":"discord-1"}`); other == first || other == "" {
 		t.Errorf("another sender's key is its own: %q", other)
 	}
@@ -577,15 +588,95 @@ func TestAUserResolvesOnlyWhatIsAddressedToThemAndTheOperatorAnything(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.srv.resolveForPerson("user:8", question, "prod", "done"); statusOf(t, err) != http.StatusBadRequest {
+	if _, _, err := r.srv.resolveForPerson("user:8", question, "prod", "done", ""); statusOf(t, err) != http.StatusBadRequest {
 		t.Errorf("another user answered: %v", err)
 	}
-	if _, err := r.srv.resolveForPerson("user:7", question, "staging", "done"); err != nil {
+	if _, _, err := r.srv.resolveForPerson("user:7", question, "staging", "done", ""); err != nil {
 		t.Errorf("the user it asked: %v", err)
 	}
 	other, _ := r.srv.ask("coder", sent.ID, "and then?", nil)
-	if _, err := r.srv.resolveForPerson("operator", other, "nothing", "done"); err != nil {
+	if _, _, err := r.srv.resolveForPerson("operator", other, "nothing", "done", ""); err != nil {
 		t.Errorf("the operator answers for anyone: %v", err)
+	}
+}
+
+func TestAKeyedAnswerIsResolvedOnceAndASecondAnswerSaysItWasAnsweredAlready(t *testing.T) {
+	r := newRig(t)
+	r.project("coder")
+	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","from":"user:7","text":"deploy","key":"discord-1"}`)
+	var sent struct{ ID string }
+	decode(t, response, &sent)
+	r.srv.fetch("coder", sent.ID)
+	question, err := r.srv.ask("coder", sent.ID, "where?", []string{"staging", "production"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type resolved struct {
+		ID      string
+		Already bool
+	}
+	answer := func(body string) (int, resolved) {
+		response := r.asOperator("POST", "/v1/messages/"+question+"/resolve", body)
+		var got resolved
+		if response.StatusCode == http.StatusOK {
+			decode(t, response, &got)
+		} else {
+			response.Body.Close()
+		}
+		return response.StatusCode, got
+	}
+	code, first := answer(`{"actor":"user:7","text":"staging","key":"click-1"}`)
+	if code != http.StatusOK || first.ID == "" || first.Already {
+		t.Fatalf("answer: %d %+v", code, first)
+	}
+	if code, again := answer(`{"actor":"user:7","text":"staging","key":"click-1"}`); code != http.StatusOK || again != first {
+		t.Errorf("a retry: %d %+v, want %+v", code, again, first)
+	}
+	if code, second := answer(`{"actor":"user:7","text":"production","key":"click-2"}`); code != http.StatusOK || second != (resolved{first.ID, true}) {
+		t.Errorf("a second answer: %d %+v, want the first, already", code, second)
+	}
+	for _, body := range []string{
+		`{"actor":"user:7","text":"production","key":"click-1"}`,                   // the key again, another answer
+		`{"actor":"user:7","text":"staging","outcome":"declined","key":"click-1"}`, // another outcome
+		`{"actor":"user:7","text":"staging","key":"discord-1"}`,                    // the key of what the user sent
+	} {
+		if code, _ := answer(body); code != http.StatusConflict {
+			t.Errorf("%s: %d, want 409", body, code)
+		}
+	}
+	if code, _ := answer(`{"actor":"user:7","text":"staging","key":"with space"}`); code != http.StatusBadRequest {
+		t.Errorf("a key that is not one: %d, want 400", code)
+	}
+	resolutions := r.srv.events.selectMessages(func(m Message) bool { return m.Kind == kindResolution && m.Re == question })
+	if len(resolutions) != 1 || resolutions[0].Text != "staging" {
+		t.Errorf("resolutions = %+v, want one, staging", resolutions)
+	}
+
+	reopened, err := newServer(r.srv.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, already, err := reopened.resolveForPerson("user:7", question, "staging", "done", "click-1"); err != nil || id != first.ID || already {
+		t.Errorf("a retry after a restart: %s, %v, %v", id, already, err)
+	}
+	if id, already, err := reopened.resolveForPerson("user:7", question, "later", "done", ""); err != nil || id != first.ID || !already {
+		t.Errorf("a second answer after a restart: %s, %v, %v", id, already, err)
+	}
+}
+
+func TestAMessageSomeoneElseResolvedIsAConflictForTheNextPerson(t *testing.T) {
+	r := newRig(t)
+	r.project("coder")
+	response := r.asOperator("POST", "/v1/messages", `{"to":"agent:coder","from":"user:7","text":"deploy"}`)
+	var sent struct{ ID string }
+	decode(t, response, &sent)
+	r.srv.fetch("coder", sent.ID)
+	question, _ := r.srv.ask("coder", sent.ID, "where?", nil)
+	if _, _, err := r.srv.resolveForPerson("operator", question, "staging", "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, already, err := r.srv.resolveForPerson("user:7", question, "production", "done", ""); statusOf(t, err) != http.StatusConflict || already {
+		t.Errorf("the operator answered first: %v, %v, want 409", already, err)
 	}
 }
 

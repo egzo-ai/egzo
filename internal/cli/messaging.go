@@ -330,8 +330,15 @@ func newMessageReplyCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 			body, _ := json.Marshal(map[string]string{"actor": operatorActor, "text": strings.Join(args[1:], " "), "outcome": outcome})
-			if _, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/v1/messages/"+url.PathEscape(args[0])+"/resolve", body); err != nil {
+			out, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/v1/messages/"+url.PathEscape(args[0])+"/resolve", body)
+			if err != nil {
 				return err
+			}
+			var resolved struct {
+				Already bool `json:"already"`
+			}
+			if json.Unmarshal(out, &resolved) == nil && resolved.Already {
+				return fmt.Errorf("message %s is already resolved: an answer is final", args[0])
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "answered %s\n", args[0])
 			return nil

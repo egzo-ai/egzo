@@ -72,15 +72,30 @@ type ChatAgent struct {
 // ErrNotLinked is a person whose Discord account is linked to no hub user.
 var ErrNotLinked = errors.New("this Discord account is not linked to the hub")
 
-// ErrNotDelivered is a message the hub refused, or a project that is offline. The hub never says which to a bridge.
-type ErrNotDelivered struct{ Offline bool }
+// ErrNotDelivered is a message the hub refused, or a project that is offline: the hub never says which. Again is a message that may have
+// reached the agent: the hub was not heard from, or did not hear back from the project in time. Sent again with the same key, it is the
+// same message: delivered once.
+type ErrNotDelivered struct {
+	Offline, Again bool
+	Err            error // why the hub was not heard from
+}
 
 func (e ErrNotDelivered) Error() string {
-	if e.Offline {
+	switch {
+	case e.Offline:
 		return "not delivered: the project is offline"
+	case e.Err != nil:
+		return "not confirmed: " + e.Err.Error()
+	case e.Again:
+		return "not confirmed: the project did not answer in time"
 	}
 	return "not delivered"
 }
+
+func (e ErrNotDelivered) Unwrap() error { return e.Err }
+
+// ErrAnsweredAlready is a person answering again what they already answered: nothing changed.
+var ErrAnsweredAlready = errors.New("already answered")
 
 // HubAPI is the hub's bridge API.
 type HubAPI struct {
@@ -90,10 +105,19 @@ type HubAPI struct {
 }
 
 // hubTimeout bounds a call to the hub, the outbox's stream aside: each takes milliseconds, and a hub that hangs must not hold the bridge.
-const hubTimeout = 10 * time.Second
+// deliverTimeout bounds a delivery, which the hub hands to the project: longer than the 30 seconds the hub gives the project, so the hub's
+// own answer, even that the project did not answer, comes back.
+const (
+	hubTimeout     = 10 * time.Second
+	deliverTimeout = 40 * time.Second
+)
 
 func (h *HubAPI) do(ctx context.Context, method, path string, body, out any) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, hubTimeout)
+	return h.doFor(ctx, hubTimeout, method, path, body, out)
+}
+
+func (h *HubAPI) doFor(ctx context.Context, timeout time.Duration, method, path string, body, out any) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var payload io.Reader
 	if body != nil {
@@ -131,15 +155,22 @@ func (h *HubAPI) do(ctx context.Context, method, path string, body, out any) (in
 	return resp.StatusCode, nil
 }
 
-// Deliver hands a person's message to the hub, and returns the id the agent gets.
+// Deliver hands a person's message, or answer, to the hub, and returns the id the agent gets (none for an answer). in.Key is required: it
+// makes trying again safe (ErrNotDelivered.Again).
 func (h *HubAPI) Deliver(ctx context.Context, in Inbound) (string, error) {
 	var out struct{ ID string }
-	status, err := h.do(ctx, http.MethodPost, "/messages", in, &out)
+	status, err := h.doFor(ctx, deliverTimeout, http.MethodPost, "/messages", in, &out)
 	switch {
-	case err != nil:
+	case err != nil && status == http.StatusUnauthorized:
 		return "", err
+	case err != nil: // the hub was not heard from, or its answer was lost: it may have taken it
+		return "", ErrNotDelivered{Again: true, Err: err}
+	case status == http.StatusConflict:
+		return "", ErrAnsweredAlready
 	case status == http.StatusServiceUnavailable:
 		return "", ErrNotDelivered{Offline: true}
+	case status == http.StatusGatewayTimeout:
+		return "", ErrNotDelivered{Again: true}
 	case status != http.StatusOK:
 		return "", ErrNotDelivered{}
 	}

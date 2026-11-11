@@ -121,11 +121,21 @@ func TestTheOperatorVerbs(t *testing.T) {
 		t.Fatalf("messages = %+v", rows)
 	}
 	answer := r.asOperator("POST", "/v1/messages/"+rows[0].ID+"/resolve", `{"text":"the first","outcome":"done"}`)
-	if answer.StatusCode != http.StatusNoContent {
-		t.Errorf("resolve: %d %s", answer.StatusCode, body(t, answer))
+	var first struct {
+		ID      string
+		Already bool
 	}
-	if response := r.asOperator("POST", "/v1/messages/"+rows[0].ID+"/resolve", `{"text":"again"}`); response.StatusCode != http.StatusConflict {
-		t.Errorf("resolving twice: %d", response.StatusCode)
+	if answer.StatusCode != http.StatusOK {
+		t.Errorf("resolve: %d %s", answer.StatusCode, body(t, answer))
+	} else if decode(t, answer, &first); first.ID == "" || first.Already {
+		t.Errorf("resolve answered %+v", first)
+	}
+	var again struct {
+		ID      string
+		Already bool
+	}
+	if decode(t, r.asOperator("POST", "/v1/messages/"+rows[0].ID+"/resolve", `{"text":"again"}`), &again); again.ID != first.ID || !again.Already {
+		t.Errorf("resolving twice: %+v, want the first answer, already", again)
 	}
 	if response := r.asOperator("POST", "/v1/messages/nope/resolve", `{"text":"x"}`); response.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown id: %d", response.StatusCode)

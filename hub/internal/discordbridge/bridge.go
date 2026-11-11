@@ -39,6 +39,9 @@ type Config struct {
 	// RetryFor is how long a post Discord did not take, and may take later, is tried again: inside the few minutes Discord remembers a
 	// nonce. RetryFor by default. RetryBase is the first wait between tries, a second by default.
 	RetryFor, RetryBase time.Duration
+	// DeliverFor is how long what a person says, which may have reached the agent, is tried again with the same key before they are told
+	// it was not confirmed. DeliverFor by default.
+	DeliverFor time.Duration
 }
 
 // The defaults of Config.Retention and Config.SweepEvery.
@@ -46,6 +49,7 @@ const (
 	AgentRetention = 7 * 24 * time.Hour
 	SweepEvery     = 10 * time.Minute
 	RetryFor       = 2 * time.Minute
+	DeliverFor     = time.Minute
 )
 
 // Bridge is egzo-discord.
@@ -104,6 +108,9 @@ func New(cfg Config) *Bridge {
 	}
 	if cfg.RetryBase <= 0 {
 		cfg.RetryBase = time.Second
+	}
+	if cfg.DeliverFor <= 0 {
+		cfg.DeliverFor = DeliverFor
 	}
 	return &Bridge{cfg: cfg, rest: discord.NewREST(cfg.Token, cfg.API, nil), hub: cfg.Hub, state: cfg.State, log: cfg.Log,
 		accounts: map[discord.Snowflake]Account{}, roles: map[discord.Snowflake]map[discord.Snowflake]discord.Role{},
@@ -449,16 +456,17 @@ func (b *Bridge) deliver(ctx context.Context, m discord.Message, place discord.S
 		return
 	}
 	for _, t := range targets {
-		in := Inbound{Project: t.agent.Project, Agent: t.agent.Agent, Account: string(m.Author.ID), Text: text}
-		if t.answer != "" {
-			in.Answer = t.answer
-		} else {
-			in.Key = string(m.ID)
-			if len(targets) > 1 {
-				in.Key += ":" + t.agent.Project + "/" + t.agent.Agent
-			}
+		// The key is the Discord message: with more than one agent, the agent's name tells them apart. Each project keeps its own keys, so
+		// two projects' agents of one name never meet.
+		in := Inbound{Project: t.agent.Project, Agent: t.agent.Agent, Account: string(m.Author.ID), Text: text, Answer: t.answer, Key: string(m.ID)}
+		if len(targets) > 1 {
+			in.Key += ":" + t.agent.Agent
 		}
-		id, err := b.hub.Deliver(ctx, in)
+		id, err := b.toHub(ctx, in)
+		if errors.Is(err, ErrAnsweredAlready) {
+			b.say(ctx, m, "You already answered **"+t.agent.Agent+"**: an answer is final.")
+			continue
+		}
 		if err != nil {
 			b.say(ctx, m, b.notDelivered(ctx, m.GuildID, t.agent.Project, t.agent.Agent, err))
 			continue
@@ -497,6 +505,9 @@ func (b *Bridge) goneNote(ctx context.Context, guild discord.Snowflake, project,
 func (b *Bridge) notDelivered(ctx context.Context, guild discord.Snowflake, project, agent string, err error) string {
 	if note, gone := b.goneNote(ctx, guild, project, agent, err); gone {
 		return note
+	}
+	if hubAgain(err) {
+		return "⚠️ Not confirmed: **" + agent + "**'s project did not answer in time. It may have arrived."
 	}
 	return "⚠️ Not delivered to **" + agent + "**" + offlineNote(err) + "."
 }
@@ -678,7 +689,7 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 			msg.MessageReference = reference
 		}
 		msg.Nonce, msg.EnforceNonce = nonce(e.ID, i), true
-		sent, err := retry(ctx, b.cfg.RetryBase, deadline, func() (discord.Message, error) { return b.rest.CreateMessage(ctx, where.Channel, msg) })
+		sent, err := retry(ctx, b.cfg.RetryBase, deadline, discordAgain, func() (discord.Message, error) { return b.rest.CreateMessage(ctx, where.Channel, msg) })
 		if err != nil {
 			code := failure(err)
 			if where.Guild == "" && refusedDM(err) {
@@ -700,11 +711,11 @@ func nonce(event string, part int) string {
 }
 
 // retry calls f until it succeeds, fails for good, or the deadline passes, waiting more between tries each time.
-func retry[T any](ctx context.Context, base time.Duration, deadline time.Time, f func() (T, error)) (T, error) {
+func retry[T any](ctx context.Context, base time.Duration, deadline time.Time, again func(error) bool, f func() (T, error)) (T, error) {
 	wait := base
 	for {
 		v, err := f()
-		if err == nil || discord.Permanent(err) || errors.Is(err, discord.ErrTooManyInvalid) || ctx.Err() != nil {
+		if err == nil || !again(err) || ctx.Err() != nil {
 			return v, err
 		}
 		left := time.Until(deadline)
@@ -718,6 +729,22 @@ func retry[T any](ctx context.Context, base time.Duration, deadline time.Time, f
 		}
 		wait = min(wait*2, 15*time.Second)
 	}
+}
+
+// discordAgain is an error of Discord's that may pass if tried again.
+func discordAgain(err error) bool {
+	return !discord.Permanent(err) && !errors.Is(err, discord.ErrTooManyInvalid)
+}
+
+// hubAgain is a delivery that may have reached the agent: tried again with the same key, it is the same message.
+func hubAgain(err error) bool {
+	var nd ErrNotDelivered
+	return errors.As(err, &nd) && nd.Again
+}
+
+// toHub hands what a person said, or answered, to the hub, and tries again for DeliverFor what may have passed.
+func (b *Bridge) toHub(ctx context.Context, in Inbound) (string, error) {
+	return retry(ctx, b.cfg.RetryBase, time.Now().Add(b.cfg.DeliverFor), hubAgain, func() (string, error) { return b.hub.Deliver(ctx, in) })
 }
 
 // failure is the code the hub is told for an error Discord gave: refused for good, or not taken in time.
@@ -753,7 +780,7 @@ func (b *Bridge) dm(ctx context.Context, person discord.Snowflake, deadline time
 	if refused {
 		return "", UndeliveredUnreachable, errors.New("discord refused to DM them a moment ago")
 	}
-	c, err := retry(ctx, b.cfg.RetryBase, deadline, func() (discord.Channel, error) { return b.rest.CreateDM(ctx, person) })
+	c, err := retry(ctx, b.cfg.RetryBase, deadline, discordAgain, func() (discord.Channel, error) { return b.rest.CreateDM(ctx, person) })
 	switch {
 	case err == nil:
 		return c.ID, "", nil
@@ -1022,7 +1049,7 @@ func (b *Bridge) command(ctx context.Context, i discord.Interaction) {
 			return
 		}
 		text := str(options["text"])
-		id, err := b.hub.Deliver(ctx, Inbound{Project: project, Agent: agent, Account: string(user.ID), Text: text, Key: string(i.ID), Interrupt: boolean(options["interrupt"])})
+		id, err := b.toHub(ctx, Inbound{Project: project, Agent: agent, Account: string(user.ID), Text: text, Key: string(i.ID), Interrupt: boolean(options["interrupt"])})
 		if err != nil {
 			b.finish(ctx, i, b.notDelivered(ctx, i.GuildID, project, agent, err))
 			return
@@ -1163,12 +1190,13 @@ func (b *Bridge) click(ctx context.Context, i discord.Interaction) {
 		return
 	}
 	choice := p.Choices[index]
-	if _, err := b.hub.Deliver(ctx, Inbound{Project: p.Project, Agent: p.Agent, Account: string(user.ID), Text: choice, Answer: p.Egzo}); err != nil {
-		said, gone := b.goneNote(ctx, i.GuildID, p.Project, p.Agent, err)
-		if !gone {
-			said = "⚠️ Not delivered to **" + p.Agent + "**" + offlineNote(err) + ". It may have been answered already."
-		}
-		b.finish(ctx, i, said)
+	_, err = b.toHub(ctx, Inbound{Project: p.Project, Agent: p.Agent, Account: string(user.ID), Text: choice, Answer: p.Egzo, Key: string(i.ID)})
+	if errors.Is(err, ErrAnsweredAlready) {
+		b.finish(ctx, i, "You already answered **"+p.Agent+"**: an answer is final.")
+		return
+	}
+	if err != nil {
+		b.finish(ctx, i, b.notDelivered(ctx, i.GuildID, p.Project, p.Agent, err))
 		return
 	}
 	b.finish(ctx, i, fmt.Sprintf("You answered **%s**: %s", p.Agent, choice))

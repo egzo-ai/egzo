@@ -548,17 +548,27 @@ func (d *Engine) Send(ctx context.Context, project, agent, actor, text, key stri
 	return hublink.Sent{ID: sent.ID}, nil
 }
 
-// Resolve is one of the hub's users answering a question, or closing a request, addressed to them.
-func (d *Engine) Resolve(ctx context.Context, project, message, actor, text, outcome string) error {
+// Resolve is one of the hub's users answering a question, or closing a request, addressed to them. key makes it idempotent.
+func (d *Engine) Resolve(ctx context.Context, project, message, actor, text, outcome, key string) (hublink.Resolved, error) {
 	if !isUser(actor) {
-		return fmt.Errorf("the hub answers as one of its users, user:<id>, not as %q", actor)
+		return hublink.Resolved{}, fmt.Errorf("the hub answers as one of its users, user:<id>, not as %q", actor)
 	}
 	if outcome == "" {
 		outcome = "done"
 	}
-	body, _ := json.Marshal(map[string]string{"actor": actor, "text": text, "outcome": outcome})
-	_, err := stack.ControlRequest(ctx, d.client, project, "POST", "/v1/messages/"+url.PathEscape(message)+"/resolve", body)
-	return err
+	body, _ := json.Marshal(map[string]string{"actor": actor, "text": text, "outcome": outcome, "key": key})
+	out, err := stack.ControlRequest(ctx, d.client, project, "POST", "/v1/messages/"+url.PathEscape(message)+"/resolve", body)
+	if err != nil {
+		return hublink.Resolved{}, err
+	}
+	var resolved struct {
+		ID      string `json:"id"`
+		Already bool   `json:"already"`
+	}
+	if err := json.Unmarshal(out, &resolved); err != nil {
+		return hublink.Resolved{}, fmt.Errorf("control sidecar: an answer to resolve that is not readable: %w", err)
+	}
+	return hublink.Resolved{ID: resolved.ID, Already: resolved.Already}, nil
 }
 
 // Undelivered is the hub saying that an agent's message to one of its users did not reach them: the agent is told why.

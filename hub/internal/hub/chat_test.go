@@ -6,6 +6,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestAUserChatsWithTheirOwnAgentsAndAnAdministratorWithAnyAndEveryRefusalIsA
 			sends = append(sends, call)
 		}
 	}
-	if want := []string{"send coder-1 user:" + alice.ID + " k1", "send cli-1 user:" + carol.ID + " k4"}; strings.Join(sends, ",") != strings.Join(want, ",") {
+	if want := []string{"send coder-1 user:" + alice.ID + " discord:k1", "send cli-1 user:" + carol.ID + " discord:k4"}; strings.Join(sends, ",") != strings.Join(want, ",") {
 		t.Errorf("sent %v, want %v", sends, want)
 	}
 	entries, _ := r.store.AuditOf(ctx, id, 50)
@@ -110,15 +111,31 @@ func TestAnAnswerGoesToTheProjectUnderTheSameRule(t *testing.T) {
 	r.store.SetRole(ctx, id, alice.ID, rbac.User)
 	r.store.SetRole(ctx, id, bob.ID, rbac.User)
 	web.SetAgent(agent("coder-1", "user:"+alice.ID))
-	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(bob), Text: "yes", Answer: "mq"}); !errors.Is(err, ErrForbidden) {
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(bob), Text: "yes", Answer: "mq", Key: "c1"}); !errors.Is(err, ErrForbidden) {
 		t.Errorf("bob answering for alice's agent: %v", err)
 	}
-	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(alice), Text: "yes", Answer: "mq"}); err != nil {
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(alice), Text: "yes", Answer: "mq", Key: "c2"}); err != nil {
 		t.Errorf("alice: %v", err)
 	}
 	calls := web.Calls()
-	if last := calls[len(calls)-1]; last != "resolve mq user:"+alice.ID+" yes" {
+	if last := calls[len(calls)-1]; last != "resolve mq user:"+alice.ID+" yes discord:c2" {
 		t.Errorf("last call = %q", last)
+	}
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(alice), Text: "yes", Answer: "mq", Key: "c2"}); err != nil {
+		t.Errorf("alice's answer, retried: %v", err)
+	}
+	if _, err := r.hub.Deliver(ctx, id, "coder-1", Inbound{Via: "discord", Account: r.account(alice), Text: "no", Answer: "mq", Key: "c3"}); !errors.Is(err, ErrAnsweredAlready) {
+		t.Errorf("alice answering again: %v, want that she answered already", err)
+	}
+	entries, _ := r.store.AuditOf(ctx, id, 50)
+	var answers []string
+	for _, e := range entries {
+		if e.Action == "agent.answer" {
+			answers = append(answers, fmt.Sprintf("%v %s", e.Allowed, e.Detail))
+		}
+	}
+	if len(answers) != 4 || !strings.Contains(strings.Join(answers, "|"), "already") {
+		t.Errorf("audited %q: want bob refused, alice twice, and her second answer refused as already answered", answers)
 	}
 }
 

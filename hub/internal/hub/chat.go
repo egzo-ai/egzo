@@ -23,15 +23,21 @@ import (
 // Inbound is a message for an agent from a person on a chat platform, as a bridge hands it over. Via names the bridge, and Account
 // the person's chat account there: the hub knows whose it is (bridgeaccounts.go), and a bridge never names a hub user.
 type Inbound struct {
-	Via       string
-	Account   string
-	Text      string
-	Key       string // the platform's id for the message: the same key is the same message
+	Via     string
+	Account string
+	Text    string
+	// Key is the platform's id for the message, or for the answer (a click, a reply): the same key is the same message. The hub puts the
+	// bridge's name before it, so two bridges' ids never meet.
+	Key       string
 	Interrupt bool
 	// Answer is the id of the question, or request, this answers; empty for a new message.
 	Answer  string
 	Outcome string // with Answer: done, declined or failed; "" is done
 }
+
+// ErrAnsweredAlready is Deliver's answer to a person answering again what they already answered: nothing changed. Telling them so
+// says nothing they do not know.
+var ErrAnsweredAlready = errors.New("you already answered that")
 
 // Deliver checks an inbound message and hands it to the agent's project. It returns the id of the message the agent gets; an answer has
 // none.
@@ -68,17 +74,27 @@ func (h *Hub) Deliver(ctx context.Context, project, agent string, in Inbound) (s
 	if !rbac.Can(user.Subject(), role, rbac.Chat, creator) {
 		return refuse(ErrForbidden, fmt.Sprintf("%s needs more than %s", rbac.Chat, role))
 	}
+	key := ""
+	if in.Key != "" {
+		key = in.Via + ":" + in.Key
+	}
 	var id string
+	var already bool
 	err = h.call(ctx, project, func(ctx context.Context, e links.Engine) error {
 		if in.Answer != "" {
-			return e.Resolve(ctx, in.Answer, rbac.Actor(user.ID), in.Text, in.Outcome)
+			resolved, err := e.Resolve(ctx, in.Answer, rbac.Actor(user.ID), in.Text, in.Outcome, key)
+			already = resolved.Already
+			return err
 		}
-		sent, err := e.SendMessage(ctx, agent, rbac.Actor(user.ID), in.Text, in.Key, in.Interrupt)
+		sent, err := e.SendMessage(ctx, agent, rbac.Actor(user.ID), in.Text, key, in.Interrupt)
 		id = sent.ID
 		return err
 	})
 	if err != nil {
 		return refuse(err, err.Error())
+	}
+	if already {
+		return refuse(ErrAnsweredAlready, "answered "+in.Answer+" already")
 	}
 	detail := "via " + in.Via
 	if in.Answer != "" {

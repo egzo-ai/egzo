@@ -435,7 +435,7 @@ func TestPeopleAreProtectedFromAFloodToo(t *testing.T) {
 	if len(answered) == 0 {
 		t.Fatal("no message reached the operator")
 	}
-	r.srv.resolveForPerson("operator", answered[0].ID, "ok", "done")
+	r.srv.resolveForPerson("operator", answered[0].ID, "ok", "done", "")
 	if _, err := r.srv.sendFromAgent("b", "operator", "again", ""); err != nil {
 		t.Errorf("a slot freed by an answer was not reusable: %v", err)
 	}

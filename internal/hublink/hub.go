@@ -336,9 +336,11 @@ func (p *Peer) SendMessage(ctx context.Context, agent, actor, text, key string, 
 	return sent, p.ask(ctx, Request{Verb: VerbSend, Agent: agent, Actor: actor, Text: text, Key: key, Interrupt: interrupt}, nil, &sent)
 }
 
-// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done.
-func (p *Peer) Resolve(ctx context.Context, message, actor, text, outcome string) error {
-	return p.ask(ctx, Request{Verb: VerbResolve, Message: message, Actor: actor, Text: text, Outcome: outcome}, nil, nil)
+// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done. key, the platform's id of the
+// answer, makes it idempotent.
+func (p *Peer) Resolve(ctx context.Context, message, actor, text, outcome, key string) (Resolved, error) {
+	var resolved Resolved
+	return resolved, p.ask(ctx, Request{Verb: VerbResolve, Message: message, Actor: actor, Text: text, Outcome: outcome, Key: key}, nil, &resolved)
 }
 
 // Undelivered tells the agent that its message to one of the hub's users did not reach them, and why.
