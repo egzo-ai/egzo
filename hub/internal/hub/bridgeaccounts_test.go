@@ -93,3 +93,45 @@ func TestBridgesHearOfWhatChangesWhoMayChat(t *testing.T) {
 		t.Errorf("events = %+v", events)
 	}
 }
+
+func TestABridgeHearsWhetherAnAgentIsStillInItsProject(t *testing.T) {
+	r := newRig(t)
+	web := r.link("web", "coder")
+	id := r.id("web")
+	web.SetAgent(agent("coder-1", "operator"))
+	web.SetAgent(agent("coder-2", "operator"))
+	web.RemoveAgent("coder-2")
+	presence := func(h *Hub) []string {
+		got, err := h.AgentsPresent(ctx, []AgentRef{{id, "coder-1"}, {id, "coder-2"}, {"nosuchproject", "coder-1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range got {
+			out = append(out, p.Agent+" "+p.State)
+		}
+		return out
+	}
+	eventually(t, "coder-2 to be gone", func() bool {
+		got := presence(r.hub)
+		return got[0] == "coder-1 present" && got[1] == "coder-2 absent" && got[2] == "coder-1 absent"
+	})
+
+	// a hub that just started has heard nothing from the link yet: it cannot say
+	restarted := New(r.store, nil, flushing)
+	if got := presence(restarted); got[0] != "coder-1 unknown" || got[1] != "coder-2 unknown" || got[2] != "coder-1 absent" {
+		t.Errorf("after a restart: %q", got)
+	}
+
+	// a revoked project never comes back under its id: its agents are gone, and the bridges hear so
+	_, start, _, _ := r.hub.Outbox(ctx, -1, 10)
+	if err := r.hub.Revoke(ctx, r.operator(), id, "stolen"); err != nil {
+		t.Fatal(err)
+	}
+	if events, _, _, _ := r.hub.Outbox(ctx, start, 10); len(events) != 1 || events[0].Type != EventProjectRemoved || events[0].Project != id {
+		t.Errorf("after a revoke, the bridges heard %+v", events)
+	}
+	if got := presence(r.hub); got[0] != "coder-1 absent" || got[1] != "coder-2 absent" {
+		t.Errorf("after a revoke: %q", got)
+	}
+}
