@@ -20,7 +20,7 @@ OPENCODE_VERSION|harness/opencode/Dockerfile|npm:@opencode/cli|OpenCode
 CODEX_VERSION|harness/codex/Dockerfile|npm:@openai/codex|Codex
 PLAYWRIGHT_MCP_VERSION|harness/base/Dockerfile|npm:@playwright/mcp|Playwright MCP (and its Chromium)
 NODE_VERSION|harness/base/Dockerfile|node|Node
-GO_VERSION|Dockerfile hub/Dockerfile|go|Go
+GO_VERSION|Dockerfile hub/Dockerfile go.mod hub/go.mod|go|Go
 '
 
 # The newest stable version of an npm package published before the cutoff.
@@ -114,6 +114,9 @@ while IFS='|' read -r arg files source label; do
 		}
 		edits+=("s/^ARG NODE_SHA256_AMD64=.*/ARG NODE_SHA256_AMD64=$amd64/" "s/^ARG NODE_SHA256_ARM64=.*/ARG NODE_SHA256_ARM64=$arm64/")
 	fi
+	# The CI's setup-go takes its Go from the go directive of go.mod, so the modules move with the images: a Go security release
+	# would otherwise still fail govulncheck in the CI after the images took it.
+	[ "$source" = go ] && edits+=("s/^go [0-9.]*$/go $want/")
 	git switch -q -C "$branch" origin/main
 	for edit in "${edits[@]}"; do sed -i "$edit" "${paths[@]}"; done
 	title="$label $want"
