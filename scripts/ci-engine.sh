@@ -83,8 +83,26 @@ docker-sysbox)
 	sudo systemctl restart docker
 	sysbox-runc --version
 	docker info --format '{{.DefaultRuntime}} {{json .Runtimes}}'
+	# Ubuntu 25.04 and later ship an AppArmor profile for fusermount3 that denies the FUSE mounts sysbox-fs makes under
+	# /var/lib/sysboxfs, so no sysbox container starts (sysbox#947, open; the profile's local file is where its author says
+	# to allow it). The runner is Ubuntu 26.04.
+	if [ -f /etc/apparmor.d/fusermount3 ] && command -v apparmor_parser >/dev/null 2>&1; then
+		sudo mkdir -p /etc/apparmor.d/local
+		cat <<-'RULES' | sudo tee /etc/apparmor.d/local/fusermount3 >/dev/null
+		# allow Sysbox to create fuse mounts (docs/sysbox.md; sysbox#947)
+		mount fstype=@{fuse_types} options=(nosuid,nodev,rw) -> /var/lib/sysboxfs/**/,
+		mount fstype=@{fuse_types} options=(nosuid,nodev,ro) -> /var/lib/sysboxfs/**/,
+		umount /var/lib/sysboxfs/**/,
+		RULES
+		sudo apparmor_parser -r /etc/apparmor.d/fusermount3
+		sudo systemctl restart sysbox
+	fi
 	# a container starts under it, and is in a user namespace: the ids inside are mapped, not the host's
-	started=$(docker run --rm alpine:3 cat /proc/self/uid_map)
+	if ! started=$(docker run --rm alpine:3 cat /proc/self/uid_map); then
+		systemctl status --no-pager sysbox sysbox-fs sysbox-mgr 2>&1 || true
+		journalctl -u sysbox-fs -u sysbox-mgr -n 60 --no-pager 2>&1 || true
+		exit 1
+	fi
 	echo "$started"
 	[ "$(echo "$started" | awk 'NR==1 {print $2}')" != "0" ]
 	;;
