@@ -163,6 +163,10 @@ type Inputs struct {
 	SignIns map[string]map[string]string
 }
 
+// The proxy and link keep their sockets under /run/egzo, on a tmpfs mounted at /run itself, not at /run/egzo: on a
+// read-only root, sysbox mounts its own root-owned /run (mode 755) unless the container has a mount at exactly /run,
+// and that would hide /run/egzo and leave the sidecar unable to create it (sysbox-runc, cfgSyscontMountsReadOnly).
+//
 // The sidecars' tmpfs mounts carry no uid or gid but an explicit mode 1777, which the sidecar's user can write, because Podman refuses the uid option ("unknown mount option uid=...") on rootless hosts. The sidecar user is the only one in the container.
 //
 // The sidecars run as an unprivileged user and are limited in memory and processes: they parse what
@@ -275,7 +279,7 @@ func Desire(project *config.Resolved, dir string, in Inputs) (Desired, error) {
 			Memory:         proxyMemory,
 			MemorySwap:     proxyMemory,
 			PidsLimit:      proxyPids,
-			Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run/egzo": sidecarTmpfsState},
+			Tmpfs:          map[string]string{"/tmp": sidecarTmpfs, "/run": sidecarTmpfsState},
 			Network:        egress.Name,
 			Healthcheck:    []string{"/egzo", "proxy", "healthcheck"},
 			ReadonlyRootfs: true,
