@@ -88,7 +88,7 @@ The stream also carries the changes a bridge acts on, with `type` other than `me
 
 | `type` | Fields | |
 |---|---|---|
-| `agent.removed` | `project`, `agent` | the agent is gone: a bridge drops it from its places |
+| `agent.removed` | `project`, `agent` | the agent left its project: removed, or being re-created under the same name (see `presence`) |
 | `project.removed` | `project` | the project left the hub: all its agents with it |
 | `account.linked`, `account.unlinked` | `user`, `bridge`, `account` | read the accounts again |
 | `user.disabled` | `user` | the hub refuses what that user says from now on |
@@ -109,6 +109,16 @@ The other calls:
 | `GET /bridge/v1/accounts` | the accounts linked through this bridge: who `user:<id>` is on the platform | `[{account, name, user, username}]` |
 | `GET /bridge/v1/agents?account=` | the agents the person may chat with | `[{project, project_name, agent, template, state, admin}]`, 403 for an account nobody linked |
 | `POST /bridge/v1/may-add` `{account, project, agent}` | may the person add the agent to a place: an admin of its project | `{allowed}` |
+| `POST /bridge/v1/presence` `{agents: [{project, agent}]}` | is each agent still in its project, at most 1000 per call | `{agents: [{project, agent, state}]}` |
+
+**Presence.** Re-creating an agent (`egzo agent rm`, then `egzo agent spawn` with the same name) removes it, so `agent.removed` cannot
+tell a removal from a re-creation. A bridge keeps an agent's places for a while after it left, and asks `presence` from time to time:
+- `present`: it is in its project. A re-created agent is the same name in the same project, and gets its places back.
+- `absent`: it is not, or its project is gone from the hub (revoked or unlinked). Also how a bridge finds a removal it never heard of,
+  such as one while the hub was down.
+- `unknown`: the hub has not heard from the project since it started. Ask again later; do not take it as gone.
+
+The hub answers from what each project's link last pushed, and asks no link.
 
 ## Trust
 
@@ -153,7 +163,7 @@ needs no address of its own, and the hub on the bridge API.
   - The bot makes a role for the agent, named after it unless `name` says otherwise. Nobody holds the role, so a mention pings nobody.
   - The first channel an agent is added to is its **home**.
 - **`/egzo agent remove`** takes an agent out of the channel; `everywhere:` takes it out of the server and deletes its role.
-  **`/egzo agent list`** shows the agents of the channel.
+  **`/egzo agent list`** shows the agents of the channel, and when the role of one that left its project goes.
 - **Talk to an agent:** mention its role in a channel it is in, reply to what it posted, or write in a thread started from one of its
   messages. **`/egzo say agent: text: [interrupt:]`** works anywhere. The message is yours: the hub checks it as it would your terminal.
 - **What an agent says to you** comes as a reply where you spoke to it, or in its home channel, mentioning you:
@@ -168,7 +178,14 @@ needs no address of its own, and the hub on the bridge API.
 
 **When things go away**
 - A channel the bot can no longer view (Discord hides it as `___hidden___`) loses its agents.
-- An agent removed on the hub loses its roles.
+- **An agent removed from its project keeps its roles and channels for 7 days.**
+  - Re-creating an agent with the same name in the same project within those 7 days reconnects the existing role: the same mention, the
+    same channels, and its home. Nobody has to `/egzo agent add` it again.
+  - Until then, a message to it is answered that it is not running, and until when its role stays.
+  - After 7 days, its roles are deleted. `/egzo agent remove everywhere:` deletes them at once.
+  - The bot asks the hub every 10 minutes, so it also finds an agent removed while the hub was down. While the hub cannot say (the
+    project is offline, or the hub just started), the roles stay.
+- A project that leaves the hub (revoked or unlinked) takes its agents' roles with it, at once.
 - A role somebody deletes by hand takes its agent out of that server.
 
 A message the hub refuses gets **⚠️ Not delivered**, and never why: the hub's audit log says why. Someone who has not linked an account is

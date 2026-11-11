@@ -231,3 +231,33 @@ func (h *HubAPI) Stream(ctx context.Context, after int64, on func(Event) error) 
 	}
 	return errors.New("the hub's stream ended")
 }
+
+// What the hub says of an agent the bridge keeps a role for.
+const (
+	Present = "present"
+	Absent  = "absent"
+	Unknown = "unknown" // the hub has not heard from the project since it started
+)
+
+// AgentRef names an agent of a project.
+type AgentRef struct {
+	Project string `json:"project"`
+	Agent   string `json:"agent"`
+}
+
+// AgentPresence is whether an agent is still in its project: Present, Absent or Unknown.
+type AgentPresence struct {
+	Project string `json:"project"`
+	Agent   string `json:"agent"`
+	State   string `json:"state"`
+}
+
+// Presence asks the hub whether agents are still in their projects, at most 1000 at a time.
+func (h *HubAPI) Presence(ctx context.Context, agents []AgentRef) ([]AgentPresence, error) {
+	var out struct{ Agents []AgentPresence }
+	status, err := h.do(ctx, http.MethodPost, "/presence", map[string]any{"agents": agents}, &out)
+	if err == nil && status != http.StatusOK {
+		err = fmt.Errorf("the hub answered %d", status)
+	}
+	return out.Agents, err
+}

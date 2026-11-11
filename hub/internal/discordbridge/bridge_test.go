@@ -6,6 +6,7 @@ package discordbridge_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -63,6 +64,8 @@ type setupOptions struct {
 	api func(http.Handler) http.Handler
 	// before runs before the bridge starts.
 	before func(*world)
+	// config changes the bridge's config.
+	config func(*discordbridge.Config)
 }
 
 func setupWith(t *testing.T, o setupOptions) *world {
@@ -107,9 +110,11 @@ func setupWith(t *testing.T, o setupOptions) *world {
 	}
 	run, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() {
-		done <- discordbridge.New(discordbridge.Config{Token: token, API: d.API(), Hub: &discordbridge.HubAPI{URL: api.URL, Secret: secret}, State: state}).Run(run)
-	}()
+	cfg := discordbridge.Config{Token: token, API: d.API(), Hub: &discordbridge.HubAPI{URL: api.URL, Secret: secret}, State: state}
+	if o.config != nil {
+		o.config(&cfg)
+	}
+	go func() { done <- discordbridge.New(cfg).Run(run) }()
 	t.Cleanup(func() { stop(); <-done })
 	w.request("the commands", "PUT /applications/2/guilds/"+guild+"/commands")
 	return w
@@ -248,9 +253,109 @@ func TestAPersonLinksAddsAnAgentTalksToItAndAnswersItsQuestionWithAButton(t *tes
 		t.Errorf("hint %q, sends %v", hint.Content, w.calls("send"))
 	}
 
-	// the agent is removed from its project: its role goes
+	// the agent is removed from its project: its role stays, and a mention of it is told the agent is not running
 	w.web.RemoveAgent("coder-1")
-	w.request("the role deleted", "DELETE /guilds/"+guild+"/roles/"+roleID)
+	w.gone("coder-1", true)
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "102", ChannelID: room, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
+		Content: "<@&" + roleID + "> still there?", MentionRoles: []discord.Snowflake{discord.Snowflake(roleID)}})
+	replies := w.count("the reply", "POST /channels/"+room+"/messages", 3)
+	var reply struct{ Content string }
+	_ = replies[len(replies)-1].JSON(&reply)
+	if !strings.Contains(reply.Content, "**coder-1** is not running") || !strings.Contains(reply.Content, "re-created under the same name") {
+		t.Errorf("a mention of a removed agent got %q", reply.Content)
+	}
+
+	// re-created under the same name, it has its role and channel back: a mention reaches the new one
+	w.web.SetAgent(links.Agent{Name: "coder-1", Template: "coder", State: "running", Actor: "operator", Created: time.Now()})
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "103", ChannelID: room, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
+		Content: "<@&" + roleID + "> welcome back", MentionRoles: []discord.Snowflake{discord.Snowflake(roleID)}})
+	eventually(t, "the message to reach the new agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" 103")) == 1 })
+	w.gone("coder-1", false)
+	if deleted := w.discord.Requests("DELETE /guilds/" + guild + "/roles/"); len(deleted) != 0 {
+		t.Errorf("a role was deleted: %v", deleted)
+	}
+}
+
+// gone waits until the bridge knows whether an agent left its project.
+func (w *world) gone(agent string, gone bool) {
+	w.t.Helper()
+	eventually(w.t, fmt.Sprintf("%s gone=%v", agent, gone), func() bool {
+		a, ok, _ := w.state.AgentInGuild(ctx, guild, w.project, agent)
+		return ok && a.Gone.IsZero() != gone
+	})
+}
+
+// quick is a bridge that sweeps often and keeps a removed agent's role a moment.
+func quick(retention time.Duration) setupOptions {
+	return setupOptions{config: func(c *discordbridge.Config) { c.Retention, c.SweepEvery = retention, 20*time.Millisecond }}
+}
+
+func TestARemovedAgentLosesItsRoleOnceTheRetentionIsOver(t *testing.T) {
+	w := setupWith(t, quick(300*time.Millisecond))
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.web.RemoveAgent("coder-1")
+	w.gone("coder-1", true)
+	w.request("the role deleted", "DELETE /guilds/"+guild+"/roles/"+role)
+	eventually(t, "the agent forgotten", func() bool {
+		_, ok, _ := w.state.AgentInGuild(ctx, guild, w.project, "coder-1")
+		return !ok
+	})
+}
+
+func TestAnAgentTheHubStillHasKeepsItsRoleWhateverTheBridgeThought(t *testing.T) {
+	w := setupWith(t, quick(time.Millisecond))
+	w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	// a removal long ago, and the agent re-created while the bridge was away: the hub says it is there
+	if err := w.state.MarkGone(ctx, w.project, "coder-1", time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	w.gone("coder-1", false)
+	time.Sleep(100 * time.Millisecond)
+	if deleted := w.discord.Requests("DELETE /guilds/" + guild + "/roles/"); len(deleted) != 0 {
+		t.Errorf("the role of an agent that is there was deleted: %v", deleted)
+	}
+}
+
+// withoutRemovals is a hub whose stream never says an agent was removed: as one that restarted while the agent went.
+type withoutRemovals struct {
+	http.ResponseWriter
+	partial []byte
+}
+
+func (w *withoutRemovals) Write(p []byte) (int, error) {
+	w.partial = append(w.partial, p...)
+	for {
+		i := strings.IndexByte(string(w.partial), '\n')
+		if i < 0 {
+			return len(p), nil
+		}
+		line := w.partial[:i+1]
+		w.partial = w.partial[i+1:]
+		if !strings.Contains(string(line), `"agent.removed"`) {
+			if _, err := w.ResponseWriter.Write(line); err != nil {
+				return 0, err
+			}
+		}
+	}
+}
+
+func (w *withoutRemovals) Flush() { w.ResponseWriter.(http.Flusher).Flush() }
+
+func TestAnAgentRemovedThatTheHubNeverToldIsFoundBySweeping(t *testing.T) {
+	o := quick(300 * time.Millisecond)
+	o.api = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/messages") {
+				w = &withoutRemovals{ResponseWriter: w}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	w := setupWith(t, o)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.web.RemoveAgent("coder-1")
+	w.gone("coder-1", true)
+	w.request("the role deleted", "DELETE /guilds/"+guild+"/roles/"+role)
 }
 
 // linked is joe, registered and with coder-1 added to the channel: the role's id.

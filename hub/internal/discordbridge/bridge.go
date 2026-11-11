@@ -29,7 +29,18 @@ type Config struct {
 	Log    *slog.Logger
 	API    string // Discord's API; a fake's in tests
 	Bridge string // the bridge's name on the hub: discord
+	// Retention is how long an agent that left its project keeps its roles and channels: re-creating an agent removes it and starts it
+	// again under the same name, and it gets them back. AgentRetention by default.
+	Retention time.Duration
+	// SweepEvery is how often the bridge asks the hub which agents are still in their projects. SweepEvery by default.
+	SweepEvery time.Duration
 }
+
+// The defaults of Config.Retention and Config.SweepEvery.
+const (
+	AgentRetention = 7 * 24 * time.Hour
+	SweepEvery     = 10 * time.Minute
+)
 
 // Bridge is egzo-discord.
 type Bridge struct {
@@ -75,6 +86,12 @@ func New(cfg Config) *Bridge {
 	if cfg.Bridge == "" {
 		cfg.Bridge = "discord"
 	}
+	if cfg.Retention <= 0 {
+		cfg.Retention = AgentRetention
+	}
+	if cfg.SweepEvery <= 0 {
+		cfg.SweepEvery = SweepEvery
+	}
 	return &Bridge{cfg: cfg, rest: discord.NewREST(cfg.Token, cfg.API, nil), hub: cfg.Hub, state: cfg.State, log: cfg.Log,
 		accounts: map[discord.Snowflake]Account{}, byUser: map[string]Account{}, roles: map[discord.Snowflake]map[discord.Snowflake]discord.Role{},
 		channels: map[discord.Snowflake]discord.Channel{}, hinted: map[discord.Snowflake]time.Time{}, asked: map[discord.Snowflake]time.Time{},
@@ -119,6 +136,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	go func() { failed <- gateway.Run(ctx) }()
 	go b.outbound(ctx)
 	go b.tidy(ctx)
+	go b.keep(ctx)
 	b.log.Info("egzo-discord is up", "application", app.Name)
 	for {
 		select {
@@ -144,6 +162,76 @@ func (b *Bridge) tidy(ctx context.Context) {
 		case <-tick.C:
 		}
 	}
+}
+
+// keep asks the hub, every SweepEvery, which agents with a role are still in their projects. One that is back gets its roles again at
+// once; one that is gone is marked, which covers a removal the hub never told (it was down, or the project's link was); and one gone for
+// longer than Retention loses its roles. An agent the hub cannot say about keeps them: its project is offline, or the hub just started.
+func (b *Bridge) keep(ctx context.Context) {
+	tick := time.NewTicker(b.cfg.SweepEvery)
+	defer tick.Stop()
+	for {
+		if err := b.sweep(ctx); err != nil && ctx.Err() == nil {
+			b.log.Warn("ask the hub which agents are still in their projects", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+// presenceBatch is how many agents one call asks the hub about.
+const presenceBatch = 1000
+
+func (b *Bridge) sweep(ctx context.Context) error {
+	kept, err := b.state.KeptAgents(ctx)
+	if err != nil {
+		return err
+	}
+	absent := map[[2]string]bool{}
+	for len(kept) > 0 {
+		n := min(len(kept), presenceBatch)
+		refs := make([]AgentRef, n)
+		for i, pa := range kept[:n] {
+			refs[i] = AgentRef{Project: pa[0], Agent: pa[1]}
+		}
+		kept = kept[n:]
+		list, err := b.hub.Presence(ctx, refs)
+		if err != nil {
+			return err
+		}
+		for _, p := range list {
+			switch p.State {
+			case Present:
+				_ = b.state.MarkBack(ctx, p.Project, p.Agent)
+			case Absent:
+				absent[[2]string{p.Project, p.Agent}] = true
+				_ = b.state.MarkGone(ctx, p.Project, p.Agent, time.Now())
+			}
+		}
+	}
+	b.agentMu.Lock() // an add marks an agent back: not between reading what expired and deleting it
+	defer b.agentMu.Unlock()
+	expired, err := b.state.GoneBefore(ctx, time.Now().Add(-b.cfg.Retention))
+	if err != nil {
+		return err
+	}
+	for _, a := range expired {
+		if absent[[2]string{a.Project, a.Agent}] { // the hub said so just now: an agent back since keeps its role
+			b.dropRole(ctx, a, "egzo: the agent left its project more than "+days(b.cfg.Retention)+" ago")
+		}
+	}
+	return nil
+}
+
+// days writes a retention: in days when it is whole days.
+func days(d time.Duration) string {
+	if d >= 24*time.Hour && d%(24*time.Hour) == 0 {
+		return strconv.Itoa(int(d/(24*time.Hour))) + " days"
+	}
+	return d.String()
 }
 
 func (b *Bridge) refreshAccounts(ctx context.Context) error {
@@ -323,9 +411,10 @@ func (b *Bridge) onMessage(ctx context.Context, m discord.Message) {
 		}
 		id, err := b.hub.Deliver(ctx, in)
 		if err != nil {
-			b.say(ctx, m, "⚠️ Not delivered to **"+t.agent.Agent+"**"+offlineNote(err)+".")
+			b.say(ctx, m, b.notDelivered(ctx, m.GuildID, t.agent.Project, t.agent.Agent, err))
 			continue
 		}
+		_ = b.state.MarkBack(ctx, t.agent.Project, t.agent.Agent)
 		if id != "" {
 			_ = b.state.AddPost(ctx, Post{Message: m.ID, Channel: m.ChannelID, Guild: m.GuildID, Project: t.agent.Project, Agent: t.agent.Agent, Egzo: id, Kind: "said"})
 		}
@@ -338,6 +427,28 @@ func offlineNote(err error) string {
 		return ": its project is offline"
 	}
 	return ""
+}
+
+// goneNote says that an agent left its project, when the bridge knows it did: until when its role stays.
+func (b *Bridge) goneNote(ctx context.Context, guild discord.Snowflake, project, agent string, err error) (string, bool) {
+	if offlineNote(err) != "" {
+		return "", false
+	}
+	a, ok, _ := b.state.AgentInGuild(ctx, guild, project, agent)
+	if !ok || a.Gone.IsZero() {
+		return "", false
+	}
+	return fmt.Sprintf("⚠️ **%s** is not running: it left its project. Its role stays until <t:%d:f>, for an agent re-created under the same name.",
+		agent, a.Gone.Add(b.cfg.Retention).Unix()), true
+}
+
+// notDelivered is what a person is told of a message the hub did not deliver: that the agent left its project, when the bridge knows,
+// that the project is offline, or nothing of why.
+func (b *Bridge) notDelivered(ctx context.Context, guild discord.Snowflake, project, agent string, err error) string {
+	if note, gone := b.goneNote(ctx, guild, project, agent, err); gone {
+		return note
+	}
+	return "⚠️ Not delivered to **" + agent + "**" + offlineNote(err) + "."
 }
 
 // stripRoles takes the role mentions out of a text: the agent reads what the person said to it, not its own address.
@@ -436,13 +547,18 @@ func (b *Bridge) follow(ctx context.Context) error {
 func (b *Bridge) outgoing(ctx context.Context, e Event) {
 	switch e.Type {
 	case "message":
+		if strings.HasPrefix(e.From, "agent:") {
+			_ = b.state.MarkBack(ctx, e.Project, e.Agent) // it speaks: it is there
+		}
 		if strings.HasPrefix(e.To, "user:") {
 			b.post(ctx, e)
 		}
-	case "agent.removed":
-		b.dropAgents(ctx, e.Project, e.Agent, "the agent was removed")
+	case "agent.removed": // or re-created: it keeps its roles for a while, in case it comes back under its name
+		if err := b.state.MarkGone(ctx, e.Project, e.Agent, time.Now()); err != nil {
+			b.log.Warn("mark an agent gone", "agent", e.Agent, "err", err)
+		}
 	case "project.removed":
-		b.dropAgents(ctx, e.Project, "", "its project left the hub")
+		b.dropAgents(ctx, e.Project, "its project left the hub")
 	case "account.linked", "account.unlinked":
 		if err := b.refreshAccounts(ctx); err != nil {
 			b.log.Warn("read the linked accounts", "err", err)
@@ -450,18 +566,26 @@ func (b *Bridge) outgoing(ctx context.Context, e Event) {
 	}
 }
 
-// dropAgents deletes the roles of agents that are gone, everywhere.
-func (b *Bridge) dropAgents(ctx context.Context, project, agent, why string) {
-	list, err := b.state.AgentEverywhere(ctx, project, agent)
+// dropAgents deletes the roles of a project's agents, everywhere: the project left the hub, and its agents never come back.
+func (b *Bridge) dropAgents(ctx context.Context, project, why string) {
+	list, err := b.state.AgentEverywhere(ctx, project, "")
 	if err != nil {
 		return
 	}
+	b.agentMu.Lock()
+	defer b.agentMu.Unlock()
 	for _, a := range list {
-		if err := b.rest.DeleteRole(ctx, a.Guild, a.Role, "egzo: "+why); err != nil {
-			b.log.Warn("delete an agent's role", "agent", a.Agent, "err", err)
-		}
-		_ = b.state.RemoveAgent(ctx, a.Guild, a.Role)
+		b.dropRole(ctx, a, "egzo: "+why)
 	}
+}
+
+// dropRole deletes an agent's role in a guild, and forgets it there. why is for Discord's audit log.
+func (b *Bridge) dropRole(ctx context.Context, a Agent, why string) {
+	if err := b.rest.DeleteRole(ctx, a.Guild, a.Role, why); err != nil {
+		b.log.Warn("delete an agent's role", "agent", a.Agent, "err", err)
+	}
+	_ = b.state.RemoveAgent(ctx, a.Guild, a.Role)
+	b.log.Info("an agent's role is deleted", "guild", a.Guild, "project", a.Project, "agent", a.Agent, "why", why)
 }
 
 // post shows what an agent says to a person: as a reply where the person spoke to it, or in the agent's home channel.
@@ -730,7 +854,11 @@ func (b *Bridge) command(ctx context.Context, i discord.Interaction) {
 		}
 		var lines []string
 		for _, a := range list {
-			lines = append(lines, fmt.Sprintf("<@&%s> is **%s**", a.Role, a.Agent))
+			line := fmt.Sprintf("<@&%s> is **%s**", a.Role, a.Agent)
+			if !a.Gone.IsZero() {
+				line += fmt.Sprintf(", which left its project: its role goes <t:%d:R> unless it is re-created", a.Gone.Add(b.cfg.Retention).Unix())
+			}
+			lines = append(lines, line)
 		}
 		b.finish(ctx, i, "In this channel:\n"+strings.Join(lines, "\n"))
 	case "say":
@@ -742,9 +870,10 @@ func (b *Bridge) command(ctx context.Context, i discord.Interaction) {
 		text := str(options["text"])
 		id, err := b.hub.Deliver(ctx, Inbound{Project: project, Agent: agent, Account: string(user.ID), Text: text, Key: string(i.ID), Interrupt: boolean(options["interrupt"])})
 		if err != nil {
-			b.finish(ctx, i, "⚠️ Not delivered to **"+agent+"**"+offlineNote(err)+".")
+			b.finish(ctx, i, b.notDelivered(ctx, i.GuildID, project, agent, err))
 			return
 		}
+		_ = b.state.MarkBack(ctx, project, agent)
 		m, err := b.finish(ctx, i, fmt.Sprintf("💬 <@%s> to **%s**: %s", user.ID, agent, text))
 		if err == nil && m.ID != "" { // what the agent answers comes back as a reply to this
 			_ = b.state.AddPost(ctx, Post{Message: m.ID, Channel: i.ChannelID, Guild: i.GuildID, Project: project, Agent: agent, Egzo: id, Kind: "said"})
@@ -801,6 +930,10 @@ func (b *Bridge) addAgent(ctx context.Context, i discord.Interaction, value, nam
 			return
 		}
 	}
+	if err := b.state.MarkBack(ctx, project, agent); err != nil { // the hub just found it in its project
+		b.finish(ctx, i, "⚠️ Something went wrong.")
+		return
+	}
 	if err := b.state.AddPlace(ctx, i.GuildID, a.Role, place); err != nil {
 		b.finish(ctx, i, "⚠️ Something went wrong.")
 		return
@@ -842,10 +975,7 @@ func (b *Bridge) removeAgent(ctx context.Context, i discord.Interaction, value s
 		left, _ = b.state.RemovePlace(ctx, i.GuildID, a.Role, place)
 	}
 	if everywhere || left == 0 {
-		if err := b.rest.DeleteRole(ctx, i.GuildID, a.Role, "egzo agent remove by "+i.Member.User.Username); err != nil {
-			b.log.Warn("delete an agent's role", "err", err)
-		}
-		_ = b.state.RemoveAgent(ctx, i.GuildID, a.Role)
+		b.dropRole(ctx, a, "egzo agent remove by "+i.Member.User.Username)
 		b.finish(ctx, i, fmt.Sprintf("**%s** left this server, and its role is deleted.", agent))
 		return
 	}
@@ -873,7 +1003,11 @@ func (b *Bridge) click(ctx context.Context, i discord.Interaction) {
 	}
 	choice := p.Choices[index]
 	if _, err := b.hub.Deliver(ctx, Inbound{Project: p.Project, Agent: p.Agent, Account: string(i.Member.User.ID), Text: choice, Answer: p.Egzo}); err != nil {
-		b.finish(ctx, i, "⚠️ Not delivered to **"+p.Agent+"**"+offlineNote(err)+". It may have been answered already.")
+		said, gone := b.goneNote(ctx, i.GuildID, p.Project, p.Agent, err)
+		if !gone {
+			said = "⚠️ Not delivered to **" + p.Agent + "**" + offlineNote(err) + ". It may have been answered already."
+		}
+		b.finish(ctx, i, said)
 		return
 	}
 	b.finish(ctx, i, fmt.Sprintf("You answered **%s**: %s", p.Agent, choice))
