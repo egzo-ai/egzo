@@ -304,6 +304,9 @@ func attachTo(ctx context.Context, s *session, name, detachKeys string, readOnly
 	if err != nil {
 		return err
 	}
+	if err := sessionHolderIn(ctx, s.engine, target.ID, name); err != nil {
+		return err
+	}
 	command := []string{"egzo", "agent", "attach", "--detach-keys", detachKeys} // no instance: the container's own session
 	if readOnly {
 		command = append(command, "--read-only")
@@ -317,6 +320,23 @@ func attachTo(ctx context.Context, s *session, name, detachKeys string, readOnly
 		return fmt.Errorf("agent %q has no session to attach to: its image does not contain egzo (the session holder)", name)
 	}
 	return err
+}
+
+// sessionHolderIn says, before a terminal is attached, when the agent's image has no egzo to hold a session. Asked
+// without a terminal so that the answer can be read on every runtime: runc fails the exec of a missing program with
+// 126 or 127, but sysbox-runc starts it, writes runc's message to the exec's output and exits 1, which an attached
+// terminal would only show raw.
+func sessionHolderIn(ctx context.Context, c *engine.Client, id, name string) error {
+	result, err := c.Exec(ctx, id, []string{"egzo", "version"}, nil)
+	missing := result.ExitCode == 126 || result.ExitCode == 127
+	for _, said := range []string{string(result.Stdout), string(result.Stderr), fmt.Sprint(err)} {
+		missing = missing || strings.Contains(said, "executable file not found") || strings.Contains(said, "no such file or directory")
+	}
+	if missing {
+		return fmt.Errorf("agent %q has no session to attach to: its image does not contain the egzo session holder "+
+			"(egzo harness images do; for a custom image run your program with `egzo agent run -- PROGRAM`)", name)
+	}
+	return nil
 }
 
 func envOr(name, fallback string) string {
