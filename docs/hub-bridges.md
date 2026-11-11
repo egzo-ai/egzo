@@ -161,14 +161,16 @@ needs no address of its own, and the hub on the bridge API.
 - **`/egzo agent add agent:<project/agent> [name:]`**, in a channel, adds an agent there.
   - It needs Discord's Manage Roles, and admin on the agent's project on the hub.
   - The bot makes a role for the agent, named after it unless `name` says otherwise. Nobody holds the role, so a mention pings nobody.
-  - The first channel an agent is added to is its **home**.
 - **`/egzo agent remove`** takes an agent out of the channel; `everywhere:` takes it out of the server and deletes its role.
   **`/egzo agent list`** shows the agents of the channel, and when the role of one that left its project goes.
 - **Talk to an agent:** mention its role in a channel it is in, reply to what it posted, or write in a thread started from one of its
   messages. **`/egzo say agent: text: [interrupt:]`** works anywhere. The message is yours: the hub checks it as it would your terminal.
-- **What an agent says to you** comes as a reply where you spoke to it, or in its home channel, mentioning you:
-  - a question shows its choices as buttons;
-  - a reply to it answers it.
+- **What an agent says to you** mentions you, and comes:
+  - as a reply to the message it is about, when you were part of it: one you wrote, or one the bot posted to you;
+  - otherwise (it is about a message from elsewhere, such as the task an agent was started with) in the channel where you last talked to
+    that agent, among those it is still in. It never goes to another server just because the agent is there too;
+  - otherwise nowhere yet: the bot does not post it. A question shows its choices as buttons, and only you can click them; a reply to it
+    answers it.
 
 **What the bot posts**
 - Discord's Components V2 messages, a colour for each kind.
@@ -180,7 +182,7 @@ needs no address of its own, and the hub on the bridge API.
 - A channel the bot can no longer view (Discord hides it as `___hidden___`) loses its agents.
 - **An agent removed from its project keeps its roles and channels for 7 days.**
   - Re-creating an agent with the same name in the same project within those 7 days reconnects the existing role: the same mention, the
-    same channels, and its home. Nobody has to `/egzo agent add` it again.
+    same channels. Nobody has to `/egzo agent add` it again.
   - Until then, a message to it is answered that it is not running, and until when its role stays.
   - After 7 days, its roles are deleted. `/egzo agent remove everywhere:` deletes them at once.
   - The bot asks the hub every 10 minutes, so it also finds an agent removed while the hub was down. While the hub cannot say (the

@@ -375,26 +375,113 @@ func (w *world) linked(joe discord.Member) string {
 	return regexp.MustCompile(`<@&(\d+)>`).FindStringSubmatch(said.Content)[1]
 }
 
-func TestWhatAnAgentStartsGoesToItsHomeChannelAndAReplyToItAnswersIt(t *testing.T) {
-	w := setup(t)
-	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"} // an administrator
-	w.linked(joe)
-	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "may I merge?", ID: "mr"})
-	posted := w.request("the request", "POST /channels/"+room+"/messages")
-	var body struct {
-		Components json.RawMessage
-		Reference  *discord.MessageReference `json:"message_reference"`
-	}
-	_ = posted.JSON(&body)
-	if body.Reference != nil || !strings.Contains(string(body.Components), "<@7>") || !strings.Contains(string(body.Components), "may I merge?") {
-		t.Errorf("posted %s, reference %+v", body.Components, body.Reference)
-	}
+const room2 = "21"
+
+// talks is joe mentioning the agent's role in a channel, and the agent getting it.
+func (w *world) talks(id, channel, role string) {
+	w.t.Helper()
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: discord.Snowflake(id), ChannelID: discord.Snowflake(channel), GuildID: guild,
+		Author: discord.User{ID: "7", Username: "joe"}, Content: "<@&" + role + "> hi", MentionRoles: []discord.Snowflake{discord.Snowflake(role)}})
+	eventually(w.t, "the message to reach the agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" "+id)) == 1 })
+	w.recorded(id)
+}
+
+// says is the agent sending joe a request about a message re: what the bridge posts, once it did.
+func (w *world) says(text, re, id string) (discordtest.Request, string) {
+	w.t.Helper()
+	before := len(w.discord.Requests("POST /channels/"))
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: text, Re: re, ID: id})
+	posted := w.count("the post", "POST /channels/", before+1)[before]
 	var sent struct{ ID string }
 	_ = json.Unmarshal(posted.Response, &sent)
 	w.recorded(sent.ID)
-	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "300", ChannelID: room, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
-		Content: "yes, merge", MessageReference: &discord.MessageReference{MessageID: discord.Snowflake(sent.ID)}})
+	return posted, sent.ID
+}
+
+func reference(t *testing.T, r discordtest.Request) *discord.MessageReference {
+	var body struct {
+		Reference *discord.MessageReference `json:"message_reference"`
+	}
+	_ = r.JSON(&body)
+	return body.Reference
+}
+
+func TestWhatAnAgentSaysAboutAMessageFromElsewhereGoesWhereThePersonLastTalkedToIt(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	if err := w.state.AddPlace(ctx, guild, discord.Snowflake(role), room2); err != nil { // coder-1 is in a second channel
+		t.Fatal(err)
+	}
+	w.talks("300", room2, role)
+	// a request about a message the bridge never saw, such as an unattended agent's task: where joe last talked to it, not a reply
+	posted, sent := w.says("may I merge?", "m-from-the-hub", "mr")
+	if posted.Path != "/channels/"+room2+"/messages" || reference(t, posted) != nil || !strings.Contains(string(posted.Body), "<@7>") {
+		t.Errorf("posted %s %s, reference %+v", posted.Path, posted.Body, reference(t, posted))
+	}
+	// a reply to it answers it
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "301", ChannelID: room2, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
+		Content: "yes, merge", MessageReference: &discord.MessageReference{MessageID: discord.Snowflake(sent)}})
 	eventually(t, "the answer", func() bool { return len(w.calls("resolve mr user:"+w.admin.ID+" yes, merge")) == 1 })
+	// joe talks to it in the first channel: that is where it reaches him now
+	w.talks("302", room, role)
+	if posted, _ := w.says("and deploy?", "m-from-the-hub-2", "md"); posted.Path != "/channels/"+room+"/messages" {
+		t.Errorf("posted in %s", posted.Path)
+	}
+	// taken out of that channel, it is back to the one it is still in
+	if _, err := w.state.RemovePlace(ctx, guild, discord.Snowflake(role), room); err != nil {
+		t.Fatal(err)
+	}
+	if posted, _ := w.says("done", "m-from-the-hub-3", "mx"); posted.Path != "/channels/"+room2+"/messages" {
+		t.Errorf("posted in %s", posted.Path)
+	}
+}
+
+func TestAnAgentThatAnswersSomeoneElsesMessageDoesNotPostThere(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	if err := w.state.AddPlace(ctx, guild, discord.Snowflake(role), room2); err != nil {
+		t.Fatal(err)
+	}
+	// ann said something to coder-1 in the second channel, where joe never was
+	if err := w.state.AddPost(ctx, discordbridge.Post{Message: "400", Channel: room2, Place: room2, Guild: guild, Project: w.project, Agent: "coder-1",
+		Egzo: "m-ann", Person: "8", Kind: "said"}); err != nil {
+		t.Fatal(err)
+	}
+	w.talks("401", room, role)
+	posted, _ := w.says("ann asked for this, ok?", "m-ann", "mq")
+	if posted.Path != "/channels/"+room+"/messages" || reference(t, posted) != nil {
+		t.Errorf("posted in %s, reference %+v", posted.Path, reference(t, posted))
+	}
+}
+
+func TestWhatAnAgentSaysToSomeoneWhoNeverTalkedToItIsNotPosted(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "nowhere", ID: "m1"})
+	w.talks("500", room, role) // after the first event: the outbox is in order
+	w.says("here", "", "m2")
+	if posts := w.discord.Requests("POST /channels/"); len(posts) != 1 || strings.Contains(string(posts[0].Body), "nowhere") {
+		t.Errorf("posts %v", posts)
+	}
+}
+
+func TestOnlyThePersonAskedAnswersAQuestion(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.talks("600", room, role)
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "question",
+		Text: "staging or production?", Re: "m00000000000000000000000000000001", ID: "mq", Choices: []string{"staging", "production"}})
+	posted := w.request("the question", "POST /channels/"+room+"/messages")
+	var sent struct{ ID string }
+	_ = json.Unmarshal(posted.Response, &sent)
+	w.recorded(sent.ID)
+	ann := discord.Member{User: &discord.User{ID: "8", Username: "ann"}}
+	w.interaction("601", discord.InteractionComponent, map[string]any{"custom_id": "egzo:c:1", "component_type": 2}, ann, &discord.Message{ID: discord.Snowflake(sent.ID)})
+	var said struct{ Content string }
+	_ = w.request("the click answer", "PATCH /webhooks/2/tok-601/messages/@original").JSON(&said)
+	if said.Content != "This question is for <@7>." || len(w.calls("resolve")) != 0 {
+		t.Errorf("ann's click said %q, resolves %v", said.Content, w.calls("resolve"))
+	}
 }
 
 func TestSayIsAPublicMessageWhatTheAgentAnswersRepliesToIt(t *testing.T) {
@@ -461,7 +548,7 @@ func TestABridgeThatStartsBeforeTheHubStillPostsToPeopleLinkedBefore(t *testing.
 				next.ServeHTTP(rw, r)
 			})
 		},
-		before: func(w *world) { // joe linked his account, and coder-1 is in the channel, from an earlier run of the bridge
+		before: func(w *world) { // joe linked his account, coder-1 is in the channel, and joe talked to it, from an earlier run of the bridge
 			code, _, err := w.hub.BridgeCode(ctx, "discord", "7", "joe")
 			if err != nil {
 				t.Fatal(err)
@@ -469,11 +556,15 @@ func TestABridgeThatStartsBeforeTheHubStillPostsToPeopleLinkedBefore(t *testing.
 			if _, err := w.hub.ConfirmBridgeCode(ctx, w.admin, code); err != nil {
 				t.Fatal(err)
 			}
-			a := discordbridge.Agent{Guild: guild, Role: "900", Project: w.project, Agent: "coder-1", Name: "coder-1", Home: room}
+			a := discordbridge.Agent{Guild: guild, Role: "900", Project: w.project, Agent: "coder-1", Name: "coder-1"}
 			if err := w.state.AddAgent(ctx, a); err != nil {
 				t.Fatal(err)
 			}
 			if err := w.state.AddPlace(ctx, guild, "900", room); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.state.AddPost(ctx, discordbridge.Post{Message: "90", Channel: room, Place: room, Guild: guild, Project: w.project, Agent: "coder-1",
+				Egzo: "m-earlier", Person: "7", Kind: "said"}); err != nil { // and he talked to it
 				t.Fatal(err)
 			}
 		},
