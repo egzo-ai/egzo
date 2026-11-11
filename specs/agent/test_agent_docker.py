@@ -38,7 +38,10 @@ def test_an_agent_that_keeps_its_capabilities_runs_docker_in_its_own_sandbox(san
 
     deadline = time.monotonic() + 60
     while (answer := in_agent(engine, p, name, "docker version --format '{{.Server.Version}}'")).returncode != 0:
-        assert time.monotonic() < deadline, "the daemon did not start:\n" + answer.stderr + in_agent(engine, p, name, "cat /var/log/dockerd.log").stdout[-3000:]
+        if time.monotonic() > deadline:
+            seen = in_agent(engine, p, name, "id; grep -E 'NoNewPrivs|Cap' /proc/self/status; ls -l /usr/bin/sudo; sudo -n true; "
+                            "cat /tmp/egzo-docker.log; sudo -n tail -n 40 /var/log/dockerd.log")
+            pytest.fail(f"the daemon did not start: {answer.stderr}\n{seen.stdout[-4000:]}{seen.stderr[-2000:]}")
         time.sleep(1)
 
     # an image made of the egzo binary alone: nothing to pull, so it does not depend on the proxy
