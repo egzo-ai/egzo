@@ -940,7 +940,8 @@ Decisions taken while building (reversible; each is covered by specs):
   `POST /v1/claim` when the TUI is ready and nobody has typed (read-write clients only) for `inject.human_quiet`;
   control hands over an interrupt first, otherwise the announcement line for what is queued, but only to an idle
   agent with no announcement still awaiting its fetch. The line is composed in control from fixed words and ids and
-  typed as one paste; fetching is the acknowledgement; no fetch by `inject.ack_timeout` announces again, three
+  typed as one paste (the one free text is a spawn's task, typed once as the first prompt before any announcement, kept outside the
+  event log); fetching is the acknowledgement; no fetch by `inject.ack_timeout` announces again, three
   times in all, then `unconfirmed`. Harnesses that report no state (`inject.idle_signal: quiescence`, the default for
   `custom`) are idle when their output has been quiet for `inject.quiescence`. `egzo ps` shows ACTIVITY, OPEN
   and WAITING next to the reported status.

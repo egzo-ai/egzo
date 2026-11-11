@@ -8,13 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 	corenames "github.com/egzo-ai/egzo/internal/names"
+	"github.com/egzo-ai/egzo/internal/termsafe"
 )
 
 // Every action of the hub on a project (a spawn, a start, a stop, a removal) can take from a second to a minute, longer than a
@@ -50,7 +53,25 @@ var (
 	ErrBadName = errors.New("a name is " + corenames.IdentifierRule)
 	// ErrTaskRunning is returned for a task that cannot be dismissed because it has not ended.
 	ErrTaskRunning = errors.New("the task has not ended")
+	// ErrTaskRequired is returned for an unattended spawn without a task: nobody would type one.
+	ErrTaskRequired = errors.New("an unattended agent needs a task")
+	// ErrTaskTooLong is returned for a task longer than a message carries.
+	ErrTaskTooLong = errors.New("a task is at most 16 KB")
+	// ErrNoChatAccount is returned for an unattended spawn by a user with no chat account linked: the agent would have nobody to report
+	// to.
+	ErrNoChatAccount = errors.New("link a chat account first: an unattended agent reports to you there")
 )
+
+// maxTask is the longest task: the most text a message carries.
+const maxTask = 16 << 10
+
+// Spawning is what a user asks of a spawn: the template, the agent's name, and the task it starts on, if any. A task is typed as the
+// agent's first prompt, as if the user had typed it; an unattended agent gets it as a request from them instead, and nobody reads its
+// terminal, so it needs a task and a chat account to reach them.
+type Spawning struct {
+	Template, Name, Task string
+	Unattended           bool
+}
 
 // BusyError is returned for an action on an agent that a task works on already: one at a time.
 type BusyError struct{ Task Task }
@@ -112,12 +133,19 @@ func (h *Hub) RecoverTasks(ctx context.Context) error {
 
 // StartSpawn checks that the user may spawn from the project and starts a task that makes the agent, which belongs to the user. It
 // returns before the agent exists; the task goes on if the request that asked for it goes away.
-func (h *Hub) StartSpawn(ctx context.Context, user store.User, project, template, name string) (Task, error) {
+func (h *Hub) StartSpawn(ctx context.Context, user store.User, project string, s Spawning) (Task, error) {
+	template, name := s.Template, s.Name
 	if name == "" {
 		return Task{}, ErrNameRequired
 	}
 	if !corenames.Instance(name) {
 		return Task{}, ErrBadName
+	}
+	if s.Unattended && strings.TrimSpace(s.Task) == "" {
+		return Task{}, ErrTaskRequired
+	}
+	if len(s.Task) > maxTask {
+		return Task{}, ErrTaskTooLong
 	}
 	if _, err := h.access(ctx, user, project); err != nil {
 		return Task{}, err
@@ -138,12 +166,32 @@ func (h *Hub) StartSpawn(ctx context.Context, user store.User, project, template
 	if _, err := h.authorize(ctx, user, project, name, rbac.Spawn, "", "agent.spawn"); err != nil {
 		return Task{}, err
 	}
+	if s.Unattended {
+		if _, err := h.store.LatestBridgeAccount(ctx, user.ID); err != nil {
+			return Task{}, ErrNoChatAccount
+		}
+	}
 	t := Task{Verb: VerbSpawn, Project: project, Agent: name, Template: template, Actor: rbac.Actor(user.ID)}
+	// The task's text goes to the project only: the hub's task list keeps what was done, never what the agent was asked.
+	req := links.SpawnRequest{Template: template, Name: name, Actor: t.Actor, StarterName: displayName(user), Task: s.Task, Unattended: s.Unattended}
 	// one at a time per project, in order: the engine's project lock would make them wait for each other anyway, and not in order
 	return h.startTask(ctx, t, true, func(ctx context.Context, e links.Engine, progress func(string)) error {
-		_, err := e.Spawn(ctx, template, name, t.Actor, progress)
+		_, err := e.Spawn(ctx, req, progress)
 		return err
 	})
+}
+
+// displayName is what an agent calls a user: their name, else their username, on one line of at most 100 bytes, as a project takes it.
+func displayName(user store.User) string {
+	name := termsafe.Line(user.Name)
+	if name == "" {
+		name = termsafe.Line(user.Username)
+	}
+	for len(name) > 100 {
+		_, size := utf8.DecodeLastRuneInString(name)
+		name = strings.TrimSpace(name[:len(name)-size])
+	}
+	return name
 }
 
 // StartOperation checks that the user may start, stop or remove the agent, and starts a task that does it.
@@ -276,7 +324,7 @@ func (h *Hub) endTask(task *Task, done chan struct{}, err error) {
 
 // Spawn spawns an agent and waits until it exists or the task has failed: StartSpawn, for a caller that has the time.
 func (h *Hub) Spawn(ctx context.Context, user store.User, project, template, name string) error {
-	t, err := h.StartSpawn(ctx, user, project, template, name)
+	t, err := h.StartSpawn(ctx, user, project, Spawning{Template: template, Name: name})
 	if err != nil {
 		return err
 	}

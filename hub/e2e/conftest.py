@@ -31,6 +31,10 @@ class Hub:
     def calls(self, project="web", machine="local"):
         return self.world("calls", project=project, machine=machine)
 
+    def spawns(self, project="web", machine="local"):
+        """What each spawn asked of the project: Template, Name, Actor, StarterName, Task, Unattended."""
+        return self.world("spawns", project=project, machine=machine)
+
     def p(self, project, machine="local"):
         """The address of a project: it goes by the id the hub gave it."""
         return "/p/" + self.world("id", project=project, machine=machine)

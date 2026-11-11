@@ -511,3 +511,35 @@ func TestAnAgentIsToldItsNameTemplateAndHarness(t *testing.T) {
 		t.Errorf("an agent whose template is not known is told a partial identity:\n%s", told)
 	}
 }
+
+func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
+	text := func(o Options) string { return string(InstructionsFor(o)) }
+	if !strings.Contains(PlatformInstructions, "set it to what you are waiting for") {
+		t.Error("every agent is told to say on its status line what it is waiting for")
+	}
+	operator := text(Options{Starter: "operator"})
+	if !strings.Contains(operator, `started by the operator: message "operator"`) || strings.Contains(operator, "reached now") {
+		t.Errorf("an agent the operator started is told %q", operator)
+	}
+	joe := text(Options{Starter: "user:u7", StarterName: "Joe"})
+	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "may be a task from them"} {
+		if !strings.Contains(joe, needed) {
+			t.Errorf("an agent Joe started is not told %q", needed)
+		}
+	}
+	if strings.Contains(joe, "unattended session") {
+		t.Error("an attended agent is told it is unattended")
+	}
+	alone := text(Options{Starter: "user:u7", Unattended: true})
+	for _, needed := range []string{"started by user:u7", "unattended session", "arrives as a request", "resolve the request"} {
+		if !strings.Contains(alone, needed) {
+			t.Errorf("an unattended agent is not told %q", needed)
+		}
+	}
+	if strings.Contains(alone, "may be a task from them") {
+		t.Error("an unattended agent is told its task is typed")
+	}
+	if strings.Contains(text(Options{}), "You were started by") {
+		t.Error("an agent nobody said who started is told someone did")
+	}
+}

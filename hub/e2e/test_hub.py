@@ -365,6 +365,28 @@ def test_the_spawn_dialog_suggests_a_name_that_is_not_a_number(single_hub, page)
     expect(page.get_by_role("dialog").get_by_role("alert")).to_contain_text("There is already an agent named coder-1")
 
 
+def test_an_agent_can_start_on_a_task_and_an_unattended_one_needs_a_task_and_a_chat_account(single_hub, page):
+    sign_in(page, single_hub, "admin")
+    page.goto(single_hub.url + single_hub.p("web"))
+    page.get_by_role("button", name="Spawn agent").click()
+    dialog = page.get_by_role("dialog")
+    dialog.get_by_label("Name").fill("alone")
+    dialog.get_by_test_id("unattended").check()
+    expect(dialog.get_by_label(re.compile("^Task"))).to_have_attribute("required", "")
+    dialog.get_by_label(re.compile("^Task")).fill("deploy to staging")
+    dialog.get_by_role("button", name="Spawn", exact=True).click()
+    expect(dialog.get_by_role("alert")).to_contain_text("Link a chat account first")
+    assert not single_hub.spawns(), "a refused spawn reaches no project"
+
+    dialog.get_by_test_id("unattended").uncheck()
+    dialog.get_by_label("Name").fill("tasked")
+    dialog.get_by_role("button", name="Spawn", exact=True).click()
+    expect(page.get_by_role("heading", name="tasked")).to_be_visible()
+    asked = single_hub.spawns()
+    assert len(asked) == 1 and (asked[0]["Name"], asked[0]["Task"], asked[0]["Unattended"], asked[0]["StarterName"]) == \
+        ("tasked", "deploy to staging", False, "admin")
+
+
 def test_a_slow_spawn_is_one_agent_from_the_start_and_its_page_shows_the_steps(single_hub, page):
     sign_in(page, single_hub, "admin")
     projects_table(page).get_by_role("link", name="web").click()

@@ -20,7 +20,9 @@ from support import SECRET_KEY_VARIABLE, agent, spec, table
 
 def document(engine, egzo, hub):
     image = engine.session_image(egzo.binary)
-    return spec(hub={"url": hub.url, "ca": str(hub.ca)}, agents={"web": agent(harness="custom", image=image, env={"FAKE_TUI": "cat"})})
+    # typed reports each prompt it is typed (fixtures/fake-tui.sh, mode reporting), and fetches and resolves the messages a line names
+    typed = agent(harness="custom", image=image, env={"FAKE_TUI": "reporting"}, inject={"human_quiet": "1s", "ack_timeout": "20s", "idle_signal": "state"})
+    return spec(hub={"url": hub.url, "ca": str(hub.ca)}, agents={"web": agent(harness="custom", image=image, env={"FAKE_TUI": "cat"}), "typed": typed})
 
 
 @pytest.fixture(scope="module")
@@ -172,7 +174,7 @@ def test_the_code_is_in_no_setting_no_log_and_no_status(linked, fake_hub, engine
 
 def test_the_hub_asks_and_the_link_does_every_verb(linked, fake_hub, engine):
     p, hub = linked.name, fake_hub
-    assert hub.must(p, "published")["Templates"].keys() == {"web"}
+    assert hub.must(p, "published")["Templates"].keys() == {"web", "typed"}
     answer = hub.verb(p, "spawn", Template="web", Name="fromhub", Actor="user:7")
     assert answer["result"] == "fromhub" and answer["steps"], "progress comes as `egzo spawn` prints it"
     assert any(r["name"] == "fromhub" and r["actor"] == "user:7" for r in json.loads(linked.ok("ps --json").stdout))
@@ -526,3 +528,92 @@ def test_a_link_that_restarted_alone_is_locked_and_says_what_opens_it(live_proje
     assert result.returncode != 0 and "locked" in result.stderr, "the link holds no key to present a code with"
     p.ok("project up")
     assert eventually(lambda: "not registered" in row(p, "link")["status"])
+
+
+def env_of(engine, project, name):
+    return dict(e.split("=", 1) for e in engine.instance(project.name, name).raw["Config"]["Env"])
+
+
+def you(agent):
+    """What the agents tool says of the agent itself."""
+    return agent.tool("agents")["structuredContent"]["you"]
+
+
+def prompts(project, name):
+    """What was typed into an agent's terminal, as the reporting stand-in says it received it, in order."""
+    events = [json.loads(line) for line in project.run("events").stdout.splitlines() if line.startswith("{")]
+    return [e["data"]["prompt"] for e in events if e["type"] == "state" and e.get("agent") == name and e.get("data", {}).get("prompt")]
+
+
+def starter_notices(project, agent):
+    return [e for e in from_egzo(project, agent) if "reached" in e["text"]]
+
+
+def test_an_agent_knows_who_started_it_and_is_told_when_they_can_and_cannot_be_reached(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    hub.must(p, "spawn", Template="web", Name="started", Actor="user:7", StarterName="Joe")
+    env = env_of(engine, linked, "started")
+    assert (env["EGZO_STARTER"], env["EGZO_STARTER_NAME"]) == ("user:7", "Joe"), "its instructions say who started it"
+    assert "EGZO_UNATTENDED" not in env and "EGZO_TASK" not in env
+    agent = Agent(engine, linked, "started")
+    assert you(agent)["started_by"] == {"id": "user:7", "name": "Joe"}, "whether Joe can be reached is not known until the hub says"
+
+    hub.must(p, "people", People={"user:7": {"Name": "Joe", "Reachable": True}})
+    assert eventually(lambda: you(agent)["started_by"].get("reachable") is True)
+    hub.must(p, "people", People={"user:7": {"Name": "Joe", "Reachable": True}})
+    assert not starter_notices(linked, "started"), "the first word on a person, and the same again, are no news"
+
+    hub.must(p, "people", People={"user:7": {"Name": "Joe", "Reachable": False}})
+    gone = eventually(lambda: starter_notices(linked, "started"))
+    assert len(gone) == 1 and "Joe" in gone[0]["text"] and "can't be reached" in gone[0]["text"]
+    assert you(agent)["started_by"] == {"id": "user:7", "name": "Joe", "reachable": False}
+    hub.must(p, "people", People={"user:7": {"Name": "Joe", "Reachable": False}})
+    hub.must(p, "people", People={"user:7": {"Name": "Joe", "Reachable": True}})
+    back = eventually(lambda: len(starter_notices(linked, "started")) == 2 and starter_notices(linked, "started"))
+    assert "can be reached again" in back[1]["text"]
+    assert len([e for e in starter_notices(linked, "started")]) == 2, "told once each way"
+
+    hub.must(p, "people", People={"user:7": {"Name": "Joe Smith", "Reachable": True}})
+    assert eventually(lambda: you(agent)["started_by"]["name"] == "Joe Smith"), "the name the hub says now"
+    assert hub.verb(p, "people", People={"operator": {"Name": "x", "Reachable": True}})["error"], "the hub speaks of its users only"
+    hub.must(p, "remove", Agent="started")
+
+
+def test_an_agent_started_at_the_cli_was_started_by_the_operator(linked, engine):
+    linked.ok("agent spawn web by-hand")
+    env = env_of(engine, linked, "by-hand")
+    assert env["EGZO_STARTER"] == "operator" and "EGZO_STARTER_NAME" not in env
+    assert you(Agent(engine, linked, "by-hand"))["started_by"] == {"id": "operator"}
+    linked.ok("agent rm --force by-hand")
+
+
+def test_a_task_is_typed_once_as_the_first_prompt_and_sends_no_message(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    hub.must(p, "spawn", Template="typed", Name="tasked", Actor="user:7", StarterName="Joe", Task="list the open issues")
+    env = env_of(engine, linked, "tasked")
+    assert "EGZO_UNATTENDED" not in env and "list the open issues" not in json.dumps(env), "the task is typed, never in the settings"
+    assert eventually(lambda: prompts(linked, "tasked") == ["list the open issues"], seconds=60), prompts(linked, "tasked")
+    assert not [e for e in message_events(hub, p) if e["Agent"] == "tasked" and e["Kind"] == "request"], "nothing goes to chat"
+
+    linked.ok("stop tasked")
+    linked.ok("start tasked")
+    time.sleep(5)
+    assert prompts(linked, "tasked") == ["list the open issues"], "typed once, not again after a restart"
+    hub.must(p, "remove", Agent="tasked")
+
+
+def test_an_unattended_agent_gets_its_task_as_a_request_from_who_started_it_and_answers_them(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    hub.must(p, "spawn", Template="typed", Name="alone", Actor="user:7", StarterName="Joe", Task="list the open issues", Unattended=True)
+    assert env_of(engine, linked, "alone")["EGZO_UNATTENDED"] == "1", "its instructions say nobody reads its terminal"
+    task = eventually(lambda: [e for e in message_events(hub, p) if e["Agent"] == "alone" and e["Kind"] == "request"])
+    assert len(task) == 1 and (task[0]["Actor"], task[0]["To"], task[0]["Text"]) == ("user:7", "agent:alone", "list the open issues")
+    answer = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == task[0]["ID"]], seconds=60)
+    assert answer and answer[0]["To"] == "user:7", "the agent answers the person, who reads it on a chat platform"
+    assert not [t for t in prompts(linked, "alone") if "list the open issues" in t], "the task is never typed: the agent fetches it"
+
+    assert hub.verb(p, "spawn", Template="typed", Name="no-task", Actor="user:7", Unattended=True)["error"], "unattended needs a task"
+    assert hub.verb(p, "spawn", Template="typed", Name="no-user", Actor="operator", Task="x", Unattended=True)["error"], \
+        "an unattended agent answers a hub user"
+    assert not [n for n in linked.instance_names() if n in ("no-task", "no-user")], "a refused spawn spawns nothing"
+    hub.must(p, "remove", Agent="alone")

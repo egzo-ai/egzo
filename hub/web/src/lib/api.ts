@@ -92,8 +92,9 @@ export const api = {
 
   project: (id: string) => request<Project>("GET", project(id)),
   /** Answered at once: the hub runs the spawn as a task, and the agent is in the project from then on. */
-  spawn: (id: string, template: string, agentName: string) =>
-    request<{ task: Task }>("POST", `${project(id)}/spawn`, { template, name: agentName }).then((r) => r.task),
+  /** task is what the agent starts on: typed as its first prompt, or, unattended, sent to it as a request from the user. */
+  spawn: (id: string, template: string, agentName: string, task = "", unattended = false) =>
+    request<{ task: Task }>("POST", `${project(id)}/spawn`, { template, name: agentName, task, unattended }).then((r) => r.task),
   /** The project's activity, or one agent's: the latest tasks, newest first. */
   tasks: (id: string, agentName = "") =>
     request<{ tasks: Task[] }>("GET", `${project(id)}/tasks${agentName ? "?agent=" + enc(agentName) : ""}`).then((r) => r.tasks),

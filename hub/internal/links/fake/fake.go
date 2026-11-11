@@ -9,8 +9,10 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -41,12 +43,14 @@ type Engine struct {
 	exposed    map[string][]links.Exposure
 	servers    map[string]*server // what listens in an agent, by "agent:port"
 	workspaces []links.Workspace
-	files      map[string]*server   // the file server of a workspace, by "workspace/instance"
-	keys       map[string]string    // the messages sent, and the answers, by actor and key
-	answers    map[string][2]string // message -> who answered it and their answer's id
-	lose       int                  // how many sends and answers to come are made and their reply lost: LoseReplies
-	seq        int                  // the last event's sequence number
-	afters     []int                // the after of every events feed that was opened
+	files      map[string]*server        // the file server of a workspace, by "workspace/instance"
+	keys       map[string]string         // the messages sent, and the answers, by actor and key
+	answers    map[string][2]string      // message -> who answered it and their answer's id
+	lose       int                       // how many sends and answers to come are made and their reply lost: LoseReplies
+	spawns     []links.SpawnRequest      // every spawn asked, in order: Spawns
+	people     []map[string]links.Person // what the hub said of the project's starters, each time: PeopleSaid
+	seq        int                       // the last event's sequence number
+	afters     []int                     // the after of every events feed that was opened
 
 	// the connection
 	current  *Connection
@@ -303,6 +307,31 @@ func (e *Engine) lost() error {
 	}
 	e.lose--
 	return fmt.Errorf("the project did not answer: %w", context.DeadlineExceeded)
+}
+
+// Spawns lists what every spawn asked, in order.
+func (e *Engine) Spawns() []links.SpawnRequest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.spawns)
+}
+
+// People records what the hub says of the project's starters.
+func (e *Engine) People(ctx context.Context, people map[string]links.Person) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.dropped(); err != nil {
+		return err
+	}
+	e.people = append(e.people, maps.Clone(people))
+	return nil
+}
+
+// PeopleSaid lists what the hub said of the project's starters, each time it did.
+func (e *Engine) PeopleSaid() []map[string]links.Person {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.people)
 }
 
 // Resolve is one of the hub's users answering a message. As control: the same actor and key are the same answer, and a second answer
@@ -587,7 +616,8 @@ func newInstanceID() string {
 }
 
 // Spawn says it creates the network, waits while the project is held, then makes the agent.
-func (e *Engine) Spawn(ctx context.Context, template, name, actor string, progress func(string)) (string, error) {
+func (e *Engine) Spawn(ctx context.Context, s links.SpawnRequest, progress func(string)) (string, error) {
+	template, name, actor := s.Template, s.Name, s.Actor
 	project := e.project.Name
 	progress(fmt.Sprintf("create network %s-%s", project, name))
 	if err := e.wait(ctx); err != nil {
@@ -618,6 +648,7 @@ func (e *Engine) Spawn(ctx context.Context, template, name, actor string, progre
 		return "", fmt.Errorf("instance %q already exists", name)
 	}
 	e.record("spawn %s %s", name, actor)
+	e.spawns = append(e.spawns, s)
 	e.project.Agents = append(e.project.Agents, links.Agent{Name: name, ID: newInstanceID(), Template: template, State: "running", Activity: "idle", Actor: actor,
 		Created: time.Now()})
 	return name, nil

@@ -10,7 +10,9 @@ What the hub does on a project (a spawn, a start, a stop, a removal) can take fr
 answers at once and runs it in the background, and the agent shows it while it runs (`spawning`, `stopping`, with the step it is
 at), next to what the project says, for everyone who sees the project. One task at a time runs on an agent. A spawn needs a name,
 and the dialog suggests one such as `coder-sunnycar2332`; the agent is in the list from then on, and its page shows the steps and
-opens its terminal when it is ready. A task that failed stays on its agent with why (a git branch left by an earlier agent of that
+opens its terminal when it is ready. A **task** is optional: it is typed as the agent's first prompt, as if you typed it. **Unattended**
+needs one, and a chat account linked to yours: the agent gets the task as a request from you, answers you there, and says on its status
+line what it waits for ([who started an agent](messaging.md#who-started-an-agent)). A task that failed stays on its agent with why (a git branch left by an earlier agent of that
 name, for instance) until whoever may operate the agent dismisses it, and the project's **Activity** tab lists every task, who
 asked and how it went. Whoever asked gets a toast when the agent is not on their screen, or when the task failed.
 

@@ -4,7 +4,8 @@ See [managing projects](managing-projects.md) for the rest of the CLI.
 
 Everything people and agents say to each other is a **message**, kept by the control sidecar. The terminal only
 ever gets a short fixed line that announces a message; the agent fetches the text with a tool. Nothing a message
-contains can be typed into the terminal, so a message cannot pretend to be you.
+contains can be typed into the terminal, so a message cannot pretend to be you. The one exception is not a message: the
+[task](#who-started-an-agent) the person who spawned an agent gave it, typed once as its first prompt.
 
 ## Sending a task
 
@@ -35,8 +36,8 @@ Agents get an `egzo` MCP server with these tools:
 | `update` | a progress note for whoever asked |
 | `ask` | ask the sender a question; the answer comes back as a reply |
 | `message` | send a new request to the operator, a person or another agent |
-| `status` | one line on what it is doing, shown by `egzo ps` |
-| `agents` | the other agents, with their template, harness and activity |
+| `status` | one line on what it is doing, shown by `egzo ps` and in the hub; also how it says it is stuck (below) |
+| `agents` | the other agents, with their template, harness and activity; under `you`, who started it and whether they can be reached |
 | `access` | what it may reach: its egress profile, the hosts it allows, each service and how to use its credential, the ssh servers (`egzo agent access` says the same) |
 | `expose` | open one of its declared ports for the hub or for the local machine, and get the address |
 | `unexpose` | close it |
@@ -45,6 +46,24 @@ When `egzo project up` changes what a running agent may reach (a host allowed or
 agent gets a request from `egzo` that says what changed, and `access` answers the new state at once. An agent whose access did
 not change gets nothing; a new agent gets its access without a message. An agent has at most one such request open: a later
 change closes the one it has not resolved and says everything that changed since. Nobody can send a message to `egzo`.
+
+## Who started an agent
+
+Every agent is told who started it, the person to turn to: `operator` for an agent spawned with the CLI, a hub user (`user:<id>`, by
+name) for one spawned in the hub. `agents` shows it under `you.started_by`.
+
+For a hub user, the hub also says whether a chat bridge can reach them now: they are enabled, may chat with the agents they started,
+and have a chat account linked ([bridges](hub-bridges.md)). It says so again when that changes, and the agent gets a request from `egzo`
+that says only that they can, or can no longer, be reached, never why. As with access, an agent has at most one such request open.
+
+An agent that cannot go on without an answer says what it is waiting for on its status line, for example `Waiting for decision on
+what branch name to push. Joe is unreachable.`, so the people who watch the project see it in `egzo ps` and in the hub.
+
+**A task to start on.** Spawning in the hub can give the agent a task:
+- Typed as its first prompt, once, at the agent's first idle, as if the person had typed it in its terminal; they may attach later.
+  It is the one free text egzo ever types, kept apart from the event log; nothing goes to chat.
+- **Unattended:** sent as a request from the person, and the agent is told that nobody reads its terminal: it answers them with its
+  egzo tools, on their chat account. An unattended agent needs a task, and the person a linked chat account.
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only

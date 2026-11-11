@@ -614,7 +614,10 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 	case hublink.VerbPublished:
 		result, err = engine.Published(ctx, project)
 	case hublink.VerbSpawn:
-		result, err = engine.Spawn(ctx, project, request.Template, request.Name, request.Actor, progress)
+		result, err = engine.Spawn(ctx, project, hublink.SpawnRequest{Template: request.Template, Name: request.Name, Actor: request.Actor,
+			StarterName: request.StarterName, Task: request.Task, Unattended: request.Unattended}, progress)
+	case hublink.VerbPeople:
+		err = engine.People(ctx, project, request.People)
 	case hublink.VerbStart:
 		err = engine.Start(ctx, project, request.Agent)
 	case hublink.VerbStop:

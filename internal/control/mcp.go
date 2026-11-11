@@ -105,6 +105,16 @@ type listResult struct {
 
 type agentsResult struct {
 	Agents []AgentStatus `json:"agents"`
+	// You is the agent itself: who started it, and whether they can be reached.
+	You Self `json:"you"`
+}
+
+// Self is what an agent is told of itself in `agents`.
+type Self struct {
+	Agent     string     `json:"agent"`
+	Template  string     `json:"template,omitempty"`
+	Harness   string     `json:"harness,omitempty"`
+	StartedBy *StartedBy `json:"started_by,omitempty"`
 }
 
 // textLimit ends the description of every tool that sends a text: an agent knows the limit before it meets it.
@@ -213,14 +223,19 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "agents",
-		Description: "List the other agents of this project with what each is doing and how many requests it has open, to know whom you can message.",
+		Name: "agents",
+		Description: "List the other agents of this project with what each is doing and how many requests it has open, to know whom you can message. " +
+			"Under you: who started you, and whether they can be reached now.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, agentsResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {
 			return nil, agentsResult{}, err
 		}
-		return nil, agentsResult{Agents: a.server.othersOf(agent)}, nil
+		self := Self{Agent: agent, StartedBy: a.server.startedBy(agent)}
+		if id, ok := a.server.readIdentity(agent); ok {
+			self.Template, self.Harness = id.Template, id.Harness
+		}
+		return nil, agentsResult{Agents: a.server.othersOf(agent), You: self}, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

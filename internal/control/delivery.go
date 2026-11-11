@@ -127,6 +127,10 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 	if s.events.activity(agent) != activityIdle {
 		return result, nil
 	}
+	if task, ok := s.takeTask(agent); ok { // the first prompt, before any announcement: what the agent was started to do
+		result.Line = task
+		return result, nil
+	}
 	if ackTimeout <= 0 {
 		ackTimeout = time.Minute
 	}

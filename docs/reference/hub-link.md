@@ -143,6 +143,13 @@ The hub relays what its users say to agents, and what agents say to them, for th
   anything. It answers `{ID, Already}`: the resolution's id, the same for a retry with the same key. An answer is final: a user who
   answers again what they resolved changes nothing, and gets their first resolution with `Already` true. The same key with another answer
   is an error, and so is answering what someone else resolved.
+- **`spawn`** takes, besides `Template` and `Name`, `Actor`, who the agent is told started it, `StarterName`, their name, and `Task`, what
+  it starts on: typed once as its first prompt, or with `Unattended` sent as a request from the actor, and the agent told that nobody
+  reads its terminal. `Unattended` needs a `Task` and a `user:` actor. The task's text goes to the project only.
+- **`people`** is the hub saying what it knows now of the users who started the project's agents: `People`, by `user:<id>`, each with a
+  `Name`, and `Reachable`: whether a bridge can reach them now. It is the whole list each time. An agent whose starter became reachable, or
+  unreachable, gets a notice from `egzo`; the first word on a person, and the same again, are no news. The hub sends it when the project's
+  agents change, and when one of those users links or unlinks a chat account, is disabled or enabled, or has their role changed.
 - **`undelivered`** is the hub saying that an agent's message to one of its users did not reach them: `Message`, and `Text`, why, in words
   the hub chose for the agent. The agent gets a notice from `egzo` that names the message, its start and the reason, and says how to send
   it again. A question or request is closed as `failed`; a result stays as the agent closed the request; an update gets no notice. Told

@@ -353,7 +353,7 @@ func TestAVerbGivesItsStepsAndItsResultAndItsError(t *testing.T) {
 		_ = lines.Write(Reply{Done: true, Result: []byte(`"coder-1"`)})
 	})
 	var steps []string
-	agent, err := peer.Spawn(context.Background(), "coder", "", "user:7", func(s string) { steps = append(steps, s) })
+	agent, err := peer.Spawn(context.Background(), SpawnRequest{Template: "coder", Actor: "user:7"}, func(s string) { steps = append(steps, s) })
 	if err != nil || agent != "coder-1" || len(steps) != 1 {
 		t.Fatalf("agent %q, steps %q, err %v", agent, steps, err)
 	}

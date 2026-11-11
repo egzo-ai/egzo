@@ -324,9 +324,15 @@ func (p *Peer) Published(ctx context.Context) (Published, error) {
 }
 
 // Spawn makes an instance of a template and returns its name.
-func (p *Peer) Spawn(ctx context.Context, template, name, actor string, progress func(string)) (string, error) {
+func (p *Peer) Spawn(ctx context.Context, s SpawnRequest, progress func(string)) (string, error) {
 	var agent string
-	return agent, p.ask(ctx, Request{Verb: VerbSpawn, Template: template, Name: name, Actor: actor}, progress, &agent)
+	return agent, p.ask(ctx, Request{Verb: VerbSpawn, Template: s.Template, Name: s.Name, Actor: s.Actor, StarterName: s.StarterName, Task: s.Task,
+		Unattended: s.Unattended}, progress, &agent)
+}
+
+// People tells the project what the hub knows now of the users who started its agents, all of them.
+func (p *Peer) People(ctx context.Context, people map[string]Person) error {
+	return p.ask(ctx, Request{Verb: VerbPeople, People: people}, nil, nil)
 }
 
 // SendMessage sends what one of the hub's users said to an agent. actor is user:<id>; key is the platform's id of the message, and the

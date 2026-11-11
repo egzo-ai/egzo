@@ -121,6 +121,9 @@ const (
 	// VerbUndelivered is the hub saying that a message an agent sent one of its users did not reach them: Message, and Text, why, in words
 	// for the agent.
 	VerbUndelivered = "undelivered"
+	// VerbPeople is the hub saying what it knows now of the users who started the project's agents: People, every one of them. An agent
+	// whose starter became reachable, or unreachable, is told.
+	VerbPeople = "people"
 )
 
 // The feeds a link pushes.
@@ -192,23 +195,44 @@ type Unlink struct {
 
 // Request is the first line of a stream the hub opens.
 type Request struct {
-	Verb      string
-	Template  string `json:",omitempty"` // spawn
-	Name      string `json:",omitempty"` // spawn: the instance's name, "" lets the project choose
-	Actor     string `json:",omitempty"` // spawn: the `actor` label
-	Agent     string `json:",omitempty"`
-	Container string `json:",omitempty"` // logs
-	Tail      int    `json:",omitempty"` // logs
-	Limit     int    `json:",omitempty"` // events
-	Size      Size   `json:",omitempty"` // attach
-	Port      int    `json:",omitempty"` // forward
-	Workspace string `json:",omitempty"` // files
-	Instance  string `json:",omitempty"` // files: the instance whose worktree, for a git workspace
-	Text      string `json:",omitempty"` // send, resolve; undelivered: why
-	Key       string `json:",omitempty"` // send, resolve: makes it idempotent, the platform's id of the message or the click
-	Interrupt bool   `json:",omitempty"` // send
-	Message   string `json:",omitempty"` // resolve: the id of the question or request; undelivered: of the agent's message
-	Outcome   string `json:",omitempty"` // resolve: done, declined or failed; "" is done
+	Verb     string
+	Template string `json:",omitempty"` // spawn
+	Name     string `json:",omitempty"` // spawn: the instance's name, "" lets the project choose
+	Actor    string `json:",omitempty"` // spawn: the `actor` label, who the agent is told started it
+	// spawn: the starter's name, the task the agent starts on, and whether nobody reads its terminal (see SpawnRequest)
+	StarterName string `json:",omitempty"`
+	Task        string `json:",omitempty"`
+	Unattended  bool   `json:",omitempty"`
+	// people: by user:<id>
+	People    map[string]Person `json:",omitempty"`
+	Agent     string            `json:",omitempty"`
+	Container string            `json:",omitempty"` // logs
+	Tail      int               `json:",omitempty"` // logs
+	Limit     int               `json:",omitempty"` // events
+	Size      Size              `json:",omitempty"` // attach
+	Port      int               `json:",omitempty"` // forward
+	Workspace string            `json:",omitempty"` // files
+	Instance  string            `json:",omitempty"` // files: the instance whose worktree, for a git workspace
+	Text      string            `json:",omitempty"` // send, resolve; undelivered: why
+	Key       string            `json:",omitempty"` // send, resolve: makes it idempotent, the platform's id of the message or the click
+	Interrupt bool              `json:",omitempty"` // send
+	Message   string            `json:",omitempty"` // resolve: the id of the question or request; undelivered: of the agent's message
+	Outcome   string            `json:",omitempty"` // resolve: done, declined or failed; "" is done
+}
+
+// SpawnRequest is what the hub asks of a spawn. Actor is who starts the agent, and StarterName their name. Task is what the agent starts
+// on: typed as its first prompt, as if they had typed it; or, Unattended, a request from them, and nobody reads its terminal. Unattended
+// needs a task and a user:<id> actor.
+type SpawnRequest struct {
+	Template, Name, Actor, StarterName, Task string
+	Unattended                               bool
+}
+
+// Person is what the hub says of one of its users who started agents of a project: their name, and whether a chat bridge can reach them
+// now. Never which platform, nor why not.
+type Person struct {
+	Name      string
+	Reachable bool
 }
 
 // Sent is what send answers: the message's id, the same however often the same key is sent.
