@@ -164,3 +164,41 @@ func TestAServerErrorIsTriedAgainButAMessageIsNotPostedTwiceWhenDiscordMayHaveTa
 		t.Errorf("a message after a 500 is not posted again: %v, %d calls", err, calls["POST /channels/30/messages"])
 	}
 }
+
+func TestAMessageWithANonceIsPostedAgainAfterAServerErrorOrALostConnection(t *testing.T) {
+	retryBase = 10 * time.Millisecond
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			w.WriteHeader(http.StatusGatewayTimeout)
+		case 2: // the connection drops before an answer
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close()
+		default:
+			w.Write([]byte(`{"id": "9"}`))
+		}
+	}))
+	defer srv.Close()
+	c := NewREST("t", srv.URL, nil)
+	m, err := c.CreateMessage(context.Background(), "20", MessageCreate{Content: "hi", Nonce: "n1", EnforceNonce: true})
+	if err != nil || m.ID != "9" || calls.Load() != 3 {
+		t.Errorf("posted %+v, %v, after %d calls", m, err, calls.Load())
+	}
+}
+
+func TestOnlyARefusalThatCannotPassLaterIsPermanent(t *testing.T) {
+	for err, want := range map[error]bool{
+		&Error{Status: 400}:      true,
+		&Error{Status: 403}:      true,
+		&Error{Status: 404}:      true,
+		&Error{Status: 429}:      false,
+		&Error{Status: 500}:      false,
+		ErrTooManyInvalid:        false,
+		errors.New("connection"): false,
+	} {
+		if Permanent(err) != want {
+			t.Errorf("%v: permanent = %v", err, !want)
+		}
+	}
+}

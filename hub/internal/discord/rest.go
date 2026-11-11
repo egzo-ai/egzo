@@ -176,10 +176,23 @@ func (c *REST) Do(ctx context.Context, method, path string, body, out any) error
 	return c.do(ctx, method, path, body, out, "")
 }
 
+// idempotent reports whether a request can be sent again when Discord may have taken it: anything but a POST, and a message posted with a
+// nonce Discord enforces.
+func idempotent(method string, body any) bool {
+	switch b := body.(type) {
+	case MessageCreate:
+		return b.EnforceNonce && b.Nonce != ""
+	case *multipartBody:
+		return b.idempotent
+	}
+	return method != http.MethodPost
+}
+
 // do is Do with a reason for the guild's audit log.
 func (c *REST) do(ctx context.Context, method, path string, body, out any, reason string) error {
 	var payload []byte
 	contentType := ""
+	again := idempotent(method, body)
 	switch b := body.(type) {
 	case nil:
 	case *multipartBody:
@@ -212,7 +225,7 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			if method == http.MethodGet && attempt < retries && ctx.Err() == nil {
+			if again && attempt < retries && ctx.Err() == nil {
 				if err := c.sleep(ctx, backoff(attempt)); err != nil {
 					return err
 				}
@@ -227,7 +240,7 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 		}
 		c.learn(method, path, key, resp.Header)
 		switch {
-		case retryable(method, resp.StatusCode) && attempt < retries:
+		case retryable(again, resp.StatusCode) && attempt < retries:
 			if err := c.sleep(ctx, backoff(attempt)); err != nil {
 				return err
 			}
@@ -378,16 +391,24 @@ func (c *REST) learn(method, path, key string, h http.Header) {
 	b.mu.Unlock()
 }
 
-// retryable is a server error worth trying again: a gateway or an overloaded Discord. A message is posted again only when Discord
-// cannot have taken it (502, 503): after a 500 or a 504 it may have, and a person would see it twice.
-func retryable(method string, status int) bool {
+// retryable is a server error worth trying again: a gateway or an overloaded Discord. A post is sent again after a 500 or a 504, when
+// Discord may have taken it, only if it is idempotent: otherwise a person would see it twice.
+func retryable(idempotent bool, status int) bool {
 	switch status {
 	case http.StatusBadGateway, http.StatusServiceUnavailable:
 		return true
 	case http.StatusInternalServerError, http.StatusGatewayTimeout:
-		return method != http.MethodPost
+		return idempotent
 	}
 	return false
+}
+
+// Permanent reports whether an error is Discord refusing a request for good: a 4xx other than 429, such as a bad body (400), no access
+// (403) or an unknown channel (404). Trying again cannot help, and a 401 or 403 counts toward the invalid requests that get the IP banned.
+// Anything else (the network, Discord's own errors, a client holding back) may pass later.
+func Permanent(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Status >= 400 && e.Status < 500 && e.Status != http.StatusTooManyRequests
 }
 
 // backoff is the wait before the next try of a request that failed on Discord's side.
@@ -409,6 +430,7 @@ func (c *REST) noteInvalid(counts bool) {
 type multipartBody struct {
 	data        []byte
 	contentType string
+	idempotent  bool // it carries a nonce Discord enforces
 }
 
 func multipartMessage(m MessageCreate) (*multipartBody, error) {
@@ -439,7 +461,7 @@ func multipartMessage(m MessageCreate) (*multipartBody, error) {
 	if err := w.Close(); err != nil {
 		return nil, err
 	}
-	return &multipartBody{data: buf.Bytes(), contentType: w.FormDataContentType()}, nil
+	return &multipartBody{data: buf.Bytes(), contentType: w.FormDataContentType(), idempotent: m.EnforceNonce && m.Nonce != ""}, nil
 }
 
 // --- the endpoints the bridge uses -------------------------------------------------------------------------------------------------

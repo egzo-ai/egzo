@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -531,6 +532,12 @@ func TestSomeoneWhoRefusesDMsIsNotAskedAgainAtOnce(t *testing.T) {
 	if refused := w.discord.Requests("POST /channels/" + dm + "/messages"); len(refused) != 1 {
 		t.Errorf("tried the DM %d times", len(refused))
 	}
+	eventually(t, "the agent told", func() bool {
+		return slices.Contains(w.calls("undelivered m1"), "undelivered m1 "+w.admin.Username+" cannot be reached on Discord")
+	})
+	if told := w.calls("undelivered m2"); len(told) != 1 || !strings.HasSuffix(told[0], "cannot be reached on Discord") {
+		t.Errorf("the second, not tried, is told too: %v", told)
+	}
 	w.talks("720", room, role) // a channel still reaches him
 	w.says("three", "m-c", "m3")
 }
@@ -763,5 +770,53 @@ func TestAnAutocompleteTheHubDoesNotAnswerInTimeSaysSo(t *testing.T) {
 	}
 	if took := time.Since(start); took > 3*time.Second {
 		t.Errorf("answered after %s: Discord gives up at 3 s", took)
+	}
+}
+
+func TestAPostDiscordMayHaveTakenIsSentAgainWithItsNonceAndShownOnce(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.talks("900", room, role)
+	w.discord.Fail("/channels/"+room+"/messages", 1, http.StatusInternalServerError, 0, true) // taken, and the answer lost
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "may I?", Re: "m-x", ID: "mr"})
+	posts := w.count("the post and its retry", "POST /channels/"+room+"/messages", 2)
+	var first, second struct{ Nonce string }
+	_ = posts[0].JSON(&first)
+	_ = posts[1].JSON(&second)
+	if first.Nonce == "" || first.Nonce != second.Nonce || len(first.Nonce) > 25 || string(posts[0].Response) != string(posts[1].Response) {
+		t.Errorf("tried with nonces %q and %q, answered %s and %s", first.Nonce, second.Nonce, posts[0].Response, posts[1].Response)
+	}
+	var sent struct{ ID string }
+	_ = json.Unmarshal(posts[1].Response, &sent)
+	w.recorded(sent.ID)
+	if told := w.calls("undelivered"); len(told) != 0 {
+		t.Errorf("delivered, and told %v", told)
+	}
+}
+
+func TestAPostDiscordRefusesForGoodIsToldToTheAgentAtOnce(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.talks("910", room, role)
+	w.discord.Fail("/channels/"+room+"/messages", 1, http.StatusForbidden, 50013, false) // Missing Permissions
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "may I?", Re: "m-x", ID: "mr"})
+	eventually(t, "the agent told", func() bool { return slices.Contains(w.calls("undelivered"), "undelivered mr Discord refused it") })
+	if tries := w.discord.Requests("POST /channels/" + room + "/messages"); len(tries) != 1 {
+		t.Errorf("a refusal is never tried again: %d tries", len(tries))
+	}
+}
+
+func TestAPostDiscordDoesNotTakeInTimeIsToldToTheAgent(t *testing.T) {
+	w := setupWith(t, setupOptions{config: func(c *discordbridge.Config) { c.RetryFor, c.RetryBase = 200*time.Millisecond, 20*time.Millisecond }})
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.talks("920", room, role)
+	w.discord.Fail("/channels/"+room+"/messages", 100, http.StatusServiceUnavailable, 0, false)
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "may I?", Re: "m-x", ID: "mr"})
+	deadline := time.Now().Add(15 * time.Second)
+	for !slices.Contains(w.calls("undelivered"), "undelivered mr Discord did not take it in time") {
+		if time.Now().After(deadline) {
+			t.Fatalf("told %v", w.calls("undelivered"))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

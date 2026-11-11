@@ -9,6 +9,8 @@ package discordbridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,12 +36,16 @@ type Config struct {
 	Retention time.Duration
 	// SweepEvery is how often the bridge asks the hub which agents are still in their projects. SweepEvery by default.
 	SweepEvery time.Duration
+	// RetryFor is how long a post Discord did not take, and may take later, is tried again: inside the few minutes Discord remembers a
+	// nonce. RetryFor by default. RetryBase is the first wait between tries, a second by default.
+	RetryFor, RetryBase time.Duration
 }
 
 // The defaults of Config.Retention and Config.SweepEvery.
 const (
 	AgentRetention = 7 * 24 * time.Hour
 	SweepEvery     = 10 * time.Minute
+	RetryFor       = 2 * time.Minute
 )
 
 // Bridge is egzo-discord.
@@ -53,7 +59,6 @@ type Bridge struct {
 	mu       sync.Mutex
 	app      discord.Snowflake
 	accounts map[discord.Snowflake]Account // by Discord id
-	byUser   map[string]Account            // by hub user id
 	roles    map[discord.Snowflake]map[discord.Snowflake]discord.Role
 	channels map[discord.Snowflake]discord.Channel
 	hinted   map[discord.Snowflake]time.Time // people told to link their account, and when
@@ -94,8 +99,14 @@ func New(cfg Config) *Bridge {
 	if cfg.SweepEvery <= 0 {
 		cfg.SweepEvery = SweepEvery
 	}
+	if cfg.RetryFor <= 0 {
+		cfg.RetryFor = RetryFor
+	}
+	if cfg.RetryBase <= 0 {
+		cfg.RetryBase = time.Second
+	}
 	return &Bridge{cfg: cfg, rest: discord.NewREST(cfg.Token, cfg.API, nil), hub: cfg.Hub, state: cfg.State, log: cfg.Log,
-		accounts: map[discord.Snowflake]Account{}, byUser: map[string]Account{}, roles: map[discord.Snowflake]map[discord.Snowflake]discord.Role{},
+		accounts: map[discord.Snowflake]Account{}, roles: map[discord.Snowflake]map[discord.Snowflake]discord.Role{},
 		channels: map[discord.Snowflake]discord.Channel{}, hinted: map[discord.Snowflake]time.Time{}, asked: map[discord.Snowflake]time.Time{},
 		noted: map[discord.Snowflake]time.Time{}, noDMs: map[discord.Snowflake]time.Time{},
 		runs: map[discord.Snowflake]int{}}
@@ -244,10 +255,9 @@ func (b *Bridge) refreshAccounts(ctx context.Context) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.accounts, b.byUser = map[discord.Snowflake]Account{}, map[string]Account{}
+	b.accounts = map[discord.Snowflake]Account{}
 	for _, a := range list {
 		b.accounts[discord.Snowflake(a.Account)] = a
-		b.byUser[a.User] = a
 	}
 	return nil
 }
@@ -566,9 +576,9 @@ func (b *Bridge) outbound(ctx context.Context) {
 	}
 }
 
-// follow reads the linked accounts, then the outbox from the cursor. What an agent says to a person goes to their Discord account, so
-// the outbox is never read without the accounts: a message to someone the bridge does not know is dropped. Reading them at every
-// connection covers a hub that was not up yet when the bridge started, and one that comes back with accounts linked while it was away.
+// follow reads the linked accounts, then the outbox from the cursor. The hub names the account of each message it gives the bridge; the
+// accounts are what the bridge checks people against when they talk. Reading them at every connection covers a hub that was not up yet
+// when the bridge started, and one that comes back with accounts linked while it was away.
 func (b *Bridge) follow(ctx context.Context) error {
 	if err := b.refreshAccounts(ctx); err != nil {
 		return fmt.Errorf("read the linked accounts: %w", err)
@@ -628,19 +638,21 @@ func (b *Bridge) dropRole(ctx context.Context, a Agent, why string) {
 	b.log.Info("an agent's role is deleted", "guild", a.Guild, "project", a.Project, "agent", a.Agent, "why", why)
 }
 
-// post shows what an agent says to a person, mentioning them. Agents only answer: what they say is about a message, which is either one the
-// bridge posted or the person wrote, or one from elsewhere (another bridge, the hub, an unattended agent's task). It goes as a reply to that
-// message when the person was part of it; otherwise where the person last talked to the agent; otherwise by DM. Never in another channel
-// the agent is in: an agent can be in several servers, and the person in none of the others. A person who does not take DMs from the bot
-// does not get it.
+// post shows what an agent says to a person, mentioning them. The hub gives the bridge only the messages it carries, with the person's
+// account. Agents only answer: what they say is about a message, which is either one the bridge posted or the person wrote, or one from
+// elsewhere (the hub, an unattended agent's task). It goes as a reply to that message when the person was part of it; otherwise where the
+// person last talked to the agent; otherwise by DM. Never in another channel the agent is in: an agent can be in several servers, and the
+// person in none of the others.
+//
+// Each part is posted with a nonce from the event's id, so a post Discord may have taken (a lost connection, a 500, a 504) is sent again
+// without showing twice. What may pass later is tried again for RetryFor, holding the outbox where it is; what cannot, or does not pass in
+// time, is reported to the hub, which tells the agent.
 func (b *Bridge) post(ctx context.Context, e Event) {
-	b.mu.Lock()
-	account, ok := b.byUser[strings.TrimPrefix(e.To, "user:")]
-	b.mu.Unlock()
-	if !ok {
-		return // not a person on Discord
+	if e.Account == "" {
+		return // the hub names the account of every message it gives a bridge
 	}
-	person := discord.Snowflake(account.Account)
+	person := discord.Snowflake(e.Account)
+	deadline := time.Now().Add(b.cfg.RetryFor)
 	var where Post
 	var found bool
 	var reference *discord.MessageReference
@@ -654,9 +666,9 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 		where, found, _ = b.state.LastPost(ctx, person, e.Project, e.Agent)
 	}
 	if !found {
-		dm, ok := b.dm(ctx, person)
-		if !ok {
-			b.log.Info("an agent spoke to a person who has not talked to it here, and does not take DMs: not posted", "agent", e.Agent, "to", e.To)
+		dm, code, err := b.dm(ctx, person, deadline)
+		if code != "" {
+			b.undelivered(ctx, e, code, err)
 			return
 		}
 		where = Post{Channel: dm, Place: dm}
@@ -665,12 +677,15 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 		if i == 0 {
 			msg.MessageReference = reference
 		}
-		sent, err := b.rest.CreateMessage(ctx, where.Channel, msg)
+		msg.Nonce, msg.EnforceNonce = nonce(e.ID, i), true
+		sent, err := retry(ctx, b.cfg.RetryBase, deadline, func() (discord.Message, error) { return b.rest.CreateMessage(ctx, where.Channel, msg) })
 		if err != nil {
+			code := failure(err)
 			if where.Guild == "" && refusedDM(err) {
 				b.refuseDMs(person)
+				code = UndeliveredUnreachable
 			}
-			b.log.Warn("post what an agent said", "agent", e.Agent, "err", err)
+			b.undelivered(ctx, e, code, err)
 			return
 		}
 		_ = b.state.AddPost(ctx, Post{Message: sent.ID, Channel: where.Channel, Place: where.Place, Guild: where.Guild, Project: e.Project, Agent: e.Agent,
@@ -678,27 +693,78 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 	}
 }
 
+// nonce is the nonce of one part of what an agent said: the same for every try, and 25 characters, Discord's most.
+func nonce(event string, part int) string {
+	sum := sha256.Sum256([]byte(event + ":" + strconv.Itoa(part)))
+	return hex.EncodeToString(sum[:])[:25]
+}
+
+// retry calls f until it succeeds, fails for good, or the deadline passes, waiting more between tries each time.
+func retry[T any](ctx context.Context, base time.Duration, deadline time.Time, f func() (T, error)) (T, error) {
+	wait := base
+	for {
+		v, err := f()
+		if err == nil || discord.Permanent(err) || errors.Is(err, discord.ErrTooManyInvalid) || ctx.Err() != nil {
+			return v, err
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			return v, err
+		}
+		select {
+		case <-ctx.Done():
+			return v, err
+		case <-time.After(min(wait, left)):
+		}
+		wait = min(wait*2, 15*time.Second)
+	}
+}
+
+// failure is the code the hub is told for an error Discord gave: refused for good, or not taken in time.
+func failure(err error) string {
+	if discord.Permanent(err) {
+		return UndeliveredRefused
+	}
+	return UndeliveredUnavailable
+}
+
+// undelivered tells the hub that a message it gave the bridge did not reach the person, and the hub tells the agent. What Discord said
+// goes as the detail, for the audit log. A hub that cannot be told is logged: the outbox goes on.
+func (b *Bridge) undelivered(ctx context.Context, e Event, code string, err error) {
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+	b.log.Warn("what an agent said was not delivered", "agent", e.Agent, "message", e.ID, "code", code, "err", err)
+	if err := b.hub.Undelivered(ctx, e.ID, e.Account, code, detail); err != nil {
+		b.log.Warn("tell the hub a message was not delivered", "message", e.ID, "err", err)
+	}
+}
+
 // dmRefusal is how long the bridge does not try again to DM someone Discord refused it: a refusal counts toward Discord's invalid
 // requests, past which it bans the bot's IP.
 const dmRefusal = 10 * time.Minute
 
-// dm is the bot's DM channel with a person, unless Discord refused to DM them a moment ago.
-func (b *Bridge) dm(ctx context.Context, person discord.Snowflake) (discord.Snowflake, bool) {
+// dm is the bot's DM channel with a person, or the code of why there is none: Discord refused to DM them a moment ago, or now.
+func (b *Bridge) dm(ctx context.Context, person discord.Snowflake, deadline time.Time) (discord.Snowflake, string, error) {
 	b.mu.Lock()
 	refused := time.Since(b.noDMs[person]) < dmRefusal
 	b.mu.Unlock()
 	if refused {
-		return "", false
+		return "", UndeliveredUnreachable, errors.New("discord refused to DM them a moment ago")
 	}
-	c, err := b.rest.CreateDM(ctx, person)
-	if err != nil {
-		if refusedDM(err) {
-			b.refuseDMs(person)
-		}
-		b.log.Warn("open a DM", "err", err)
-		return "", false
+	c, err := retry(ctx, b.cfg.RetryBase, deadline, func() (discord.Channel, error) { return b.rest.CreateDM(ctx, person) })
+	switch {
+	case err == nil:
+		return c.ID, "", nil
+	case refusedDM(err):
+		b.refuseDMs(person)
+		return "", UndeliveredUnreachable, err
+	case discord.Permanent(err):
+		return "", UndeliveredNoPlace, err
+	default:
+		return "", UndeliveredUnavailable, err
 	}
-	return c.ID, true
 }
 
 func (b *Bridge) refuseDMs(person discord.Snowflake) {

@@ -231,5 +231,12 @@ needs no address of its own, and the hub on the bridge API.
 - A project that leaves the hub (revoked or unlinked) takes its agents' roles with it, at once.
 - A role somebody deletes by hand takes its agent out of that server.
 
+**When Discord does not take a post**
+- Every post carries a nonce from the message's id: a post Discord may have taken (a lost connection, a 500, a 504) is sent again and
+  shows once.
+- What may pass later is tried again for 2 minutes, inside the few minutes Discord remembers a nonce. Messages after it wait.
+- What Discord refuses for good (no access, a deleted channel, a person who does not take DMs) is never tried again: those refusals count
+  toward the invalid requests Discord bans an IP for. The bridge tells the hub, which tells the agent ([not delivered](#not-delivered)).
+
 A message the hub refuses gets **⚠️ Not delivered**, and never why: the hub's audit log says why. Someone who has not linked an account is
 told to run `/egzo register`.

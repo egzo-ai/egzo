@@ -65,6 +65,23 @@ type Server struct {
 	starts     int           // session starts left; negative: plenty
 	resetAfter time.Duration // when they renew
 	noDMs      map[string]bool
+	failing    map[string]*failure // path prefix -> how the next requests fail
+	nonces     map[string][]byte   // a message posted with an enforced nonce -> what the fake answered
+}
+
+// failure is how the next requests to a path fail: n of them, with an HTTP status and Discord's code. taken is a post Discord took
+// before it failed to answer: the message exists, and a retry with its nonce returns it.
+type failure struct {
+	n, status, code int
+	taken           bool
+}
+
+// Fail makes the next n requests whose path starts with prefix fail with status and Discord's code. taken: Discord took a post before
+// failing to answer, as after a 500 or a 504.
+func (s *Server) Fail(prefix string, n, status, code int, taken bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failing[prefix] = &failure{n: n, status: status, code: code, taken: taken}
 }
 
 // RefuseDMs makes a message to a user's DM channel fail as Discord does when they turned off DMs: 403, code 50007.
@@ -87,7 +104,7 @@ func (s *Server) SessionStarts(left int, resetAfter time.Duration) {
 // New starts a fake Discord for a bot token.
 func New(token string) *Server {
 	s := &Server{Token: token, Heartbeat: time.Second, sessions: map[string]*session{}, limited: map[string]int{}, connected: make(chan struct{}), starts: -1,
-		noDMs: map[string]bool{}}
+		noDMs: map[string]bool{}, failing: map[string]*failure{}, nonces: map[string][]byte{}}
 	s.nextID.Store(1000)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/gateway/", s.gateway)
@@ -359,6 +376,13 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 			limited = true
 		}
 	}
+	var failed *failure
+	for prefix, f := range s.failing {
+		if f.n > 0 && strings.HasPrefix(path, prefix) {
+			f.n--
+			failed = &failure{status: f.status, code: f.code, taken: f.taken}
+		}
+	}
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	if !strings.HasPrefix(path, "/interactions/") && !strings.HasPrefix(path, "/webhooks/") && r.Header.Get("Authorization") != "Bot "+s.Token {
@@ -403,17 +427,37 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"message": "Cannot send messages to this user", "code": 50007}`)
 	case r.Method == http.MethodDelete || strings.HasSuffix(path, "/callback") || r.Method == http.MethodPut:
 		w.WriteHeader(http.StatusNoContent)
+	case failed != nil && !failed.taken:
+		w.WriteHeader(failed.status)
+		fmt.Fprintf(w, `{"message": "failed", "code": %d}`, failed.code)
 	default:
 		out := map[string]any{}
 		_ = json.Unmarshal(body, &out)
-		out["id"] = s.ID()
-		if strings.HasPrefix(path, "/channels/") {
-			out["channel_id"] = strings.Split(path, "/")[2]
+		nonce := ""
+		if n, ok := out["nonce"].(string); ok && out["enforce_nonce"] == true && r.Method == http.MethodPost {
+			nonce = path + " " + n
 		}
-		data, _ := json.Marshal(out)
 		s.mu.Lock()
+		data, seen := s.nonces[nonce]
+		s.mu.Unlock()
+		if !seen || nonce == "" { // a nonce Discord saw a moment ago returns the message it posted then
+			out["id"] = s.ID()
+			if strings.HasPrefix(path, "/channels/") {
+				out["channel_id"] = strings.Split(path, "/")[2]
+			}
+			data, _ = json.Marshal(out)
+		}
+		s.mu.Lock()
+		if nonce != "" {
+			s.nonces[nonce] = data
+		}
 		s.requests[index].Response = data
 		s.mu.Unlock()
+		if failed != nil { // taken, and the answer lost
+			w.WriteHeader(failed.status)
+			fmt.Fprintf(w, `{"message": "failed", "code": %d}`, failed.code)
+			return
+		}
 		w.Write(data)
 	}
 }
