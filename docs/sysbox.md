@@ -33,14 +33,22 @@ one default runtime.
 
 ## What an egzo agent gets, and what it does not
 
-egzo runs agents as your uid and gid, not as root, and drops every capability: with sysbox, a container whose init is a
-non-root user starts with **no capabilities** (its capability sets are zero, though the bounding set stays full). So the
-system-container features sysbox is known for are out of reach in an egzo agent:
+egzo runs agents as your uid and gid, not as root. Sysbox decides a container's capabilities itself and ignores the ones the
+engine asks for: a container whose init is a non-root user starts with **no capabilities**, but its bounding set, what a
+process that becomes root could reach, stays **full**, whatever egzo drops. What keeps an egzo agent from becoming root in
+its sandbox under sysbox is `no-new-privileges`, which egzo sets on every agent that keeps no capability.
 
-- **No Docker or systemd inside the agent.** Both need root in the container. A nested Docker daemon would also need a
-  nested user namespace (rootless Docker), which sysbox does not support (`unshare -U` fails inside a sysbox container).
-  What you get from sysbox in egzo is the id boundary above, not Docker-in-Docker: what that would take is
-  [#201](https://github.com/egzo-ai/egzo/issues/201).
+**Docker inside an agent.** A template that keeps its capabilities (`capabilities: [ALL]`, [the project file](project-file.md#agents))
+is started without `no-new-privileges`, so a setuid `sudo` in its image makes it root in its own sandbox: root that sysbox maps
+to an unprivileged host uid, with the mounts and namespaces a Docker daemon needs, and no host socket or `--privileged`. The
+harness images with Docker inside, `egzo-harness-<harness>-docker` ([images](images.md#docker-inside-an-agent)), start the daemon
+that way before the harness. Because sysbox gives such an agent every capability whatever the list says, `up` refuses any
+list but `[ALL]` on a sysbox engine. What the agent can do as root in its sandbox is in [the security model](security.md).
+
+The rest of what sysbox is known for stays out of reach:
+
+- **No rootless Docker.** A nested daemon as the agent's own user would need a nested user namespace, which sysbox does not
+  support (`unshare -U` fails inside a sysbox container).
 - **No nested user namespaces**, so rootless tools, `bwrap`-style sandboxes (Flatpak, some test sandboxes), rootless
   Podman and similar do not start inside an agent. egzo's browser is not affected: the harness images already run Chromium
   without its own sandbox (`chromiumSandbox: false`), because the container is the boundary.

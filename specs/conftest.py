@@ -403,6 +403,10 @@ class Engine:
         base = self._build_harness_dir("base", "EGZO_IMAGE", self.image_for(binary), binary)
         return self._build_harness_dir(name, "BASE_IMAGE", base, binary)
 
+    def docker_harness_image(self, name, binary):
+        """The real harness image with Docker inside (harness/docker), on the real harness image `name`."""
+        return self._build_harness_dir("docker", "BASE_IMAGE", self.harness_image(name, binary), binary)
+
     def _build_harness_dir(self, name, argument, image, binary):
         root = Path(__file__).parent.parent / "harness" / name
         assert (root / "Dockerfile").exists(), f"there is no harness image for {name}: harness/{name}/Dockerfile"

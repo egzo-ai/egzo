@@ -60,6 +60,9 @@ func Up(ctx context.Context, c *engine.Client, project *config.Resolved, dir str
 	if err := CheckOwnership(observed, project.Name, dir); err != nil {
 		return err
 	}
+	if err := checkCapabilitiesFor(ctx, c, project); err != nil {
+		return err
+	}
 	// What the placeholders are so far: a dry run, and the staleness check before anything is changed,
 	// use the stand-in for one that is not made yet.
 	placeholders := ReadPlaceholders(ctx, c, project)
@@ -465,4 +468,33 @@ func markFresh(fresh map[string]bool, plan []Action) {
 			fresh[action.Name] = true
 		}
 	}
+}
+
+// checkCapabilitiesFor refuses a list of capabilities that the engine's runtime would not honour. sysbox-runc gives a
+// container whose first process is not root the full set as the ceiling, whatever the engine asks (docs/sysbox.md), so on
+// sysbox an agent with any capability can reach all of them: only ALL says so. The engine is asked only when an agent
+// keeps one.
+func checkCapabilitiesFor(ctx context.Context, c *engine.Client, project *config.Resolved) error {
+	var partial []string
+	for _, name := range sortedKeys(project.Agents) {
+		if keep := project.Agents[name].Capabilities; len(keep) > 0 && !(len(keep) == 1 && keep[0] == "ALL") {
+			partial = append(partial, name)
+		}
+	}
+	if len(partial) == 0 {
+		return nil
+	}
+	info, err := c.API.Info(ctx)
+	if err != nil {
+		return err
+	}
+	return capabilitiesOnRuntime(info.DefaultRuntime, partial)
+}
+
+func capabilitiesOnRuntime(runtime string, partial []string) error {
+	if runtime != "sysbox-runc" || len(partial) == 0 {
+		return nil
+	}
+	return fmt.Errorf("agent %s: the engine runs sysbox, which gives an agent that keeps any capability all of them; "+
+		"write capabilities: [ALL] (docs/sysbox.md)", strings.Join(partial, ", "))
 }

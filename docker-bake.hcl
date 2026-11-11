@@ -1,5 +1,5 @@
-# The images, as one build graph: `docker buildx bake` builds the egzo image, the harness base on it and the harness images on
-# that, without pushing anything in between (each one takes the one before it as a named context). CI and the release build it once
+# The images, as one build graph: `docker buildx bake` builds the egzo image, the harness base on it, the harness images on
+# that and a Docker variant of each harness image on top, without pushing anything in between (each one takes the one before it as a named context). CI and the release build it once
 # per architecture, each on a runner of that architecture; the Makefile's `docker build` targets do the same without buildx.
 #   docker buildx bake                     # every image, for this machine's architecture, loaded into the engine
 #   docker buildx bake hub                 # one of them
@@ -17,7 +17,7 @@ variable "CACHE_WRITE" { default = false }
 variable "PUSH_BY_DIGEST" { default = false }
 
 group "default" {
-  targets = ["egzo", "hub", "harness-base", "harness"]
+  targets = ["egzo", "hub", "harness-base", "harness", "harness-docker"]
 }
 
 function "tags" {
@@ -83,4 +83,17 @@ target "harness" {
   tags       = tags("egzo-harness-${h}")
   cache-from = cache_from("egzo-harness-${h}")
   cache-to   = cache_to("egzo-harness-${h}")
+}
+
+# Each harness image with Docker inside (harness/docker): egzo-harness-<harness>-docker.
+target "harness-docker" {
+  name       = "harness-${h}-docker"
+  matrix     = { h = HARNESSES }
+  inherits   = ["_common"]
+  context    = "harness/docker"
+  contexts   = { base-image = "target:harness-${h}" }
+  args       = { BASE_IMAGE = "base-image" }
+  tags       = tags("egzo-harness-${h}-docker")
+  cache-from = cache_from("egzo-harness-${h}-docker")
+  cache-to   = cache_to("egzo-harness-${h}-docker")
 }

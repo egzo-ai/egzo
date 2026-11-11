@@ -92,6 +92,9 @@ type ResolvedAgent struct {
 	Inject      ResolvedInject    `yaml:"inject"`
 	// Ports are the declared ports by name; nil when the template declares none.
 	Ports map[string]ResolvedPort `yaml:"ports,omitempty" json:",omitempty"`
+	// Capabilities are the capabilities the container keeps, upper case without CAP_, sorted; ["ALL"] for all of them;
+	// nil for none, which also forbids gaining privileges (no-new-privileges).
+	Capabilities []string `yaml:"capabilities,omitempty" json:",omitempty"`
 }
 
 // ResolvedPort is a declared port: its number and its protocol (http, tcp or udp).
@@ -290,6 +293,44 @@ func resolveInject(name string, agent Agent, p *problems) ResolvedInject {
 	return inject
 }
 
+// knownCapabilities are the Linux capabilities, by the names Docker and Compose use for --cap-add.
+var knownCapabilities = map[string]bool{
+	"AUDIT_CONTROL": true, "AUDIT_READ": true, "AUDIT_WRITE": true, "BLOCK_SUSPEND": true, "BPF": true,
+	"CHECKPOINT_RESTORE": true, "CHOWN": true, "DAC_OVERRIDE": true, "DAC_READ_SEARCH": true, "FOWNER": true,
+	"FSETID": true, "IPC_LOCK": true, "IPC_OWNER": true, "KILL": true, "LEASE": true, "LINUX_IMMUTABLE": true,
+	"MAC_ADMIN": true, "MAC_OVERRIDE": true, "MKNOD": true, "NET_ADMIN": true, "NET_BIND_SERVICE": true,
+	"NET_BROADCAST": true, "NET_RAW": true, "PERFMON": true, "SETFCAP": true, "SETGID": true, "SETPCAP": true,
+	"SETUID": true, "SYSLOG": true, "SYS_ADMIN": true, "SYS_BOOT": true, "SYS_CHROOT": true, "SYS_MODULE": true,
+	"SYS_NICE": true, "SYS_PACCT": true, "SYS_PTRACE": true, "SYS_RAWIO": true, "SYS_RESOURCE": true, "SYS_TIME": true,
+	"SYS_TTY_CONFIG": true, "WAKE_ALARM": true,
+}
+
+// resolveCapabilities spells the capabilities an agent keeps as Docker does, without CAP_, and refuses a name that is
+// not one. ALL stands alone: it already means every other.
+func resolveCapabilities(agent string, names []string, p *problems) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range names {
+		capability := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(name)), "CAP_")
+		if capability != "ALL" && !knownCapabilities[capability] {
+			p.addf("agent %q: capabilities: %q is not a Linux capability (Docker's names, like SYS_ADMIN, or ALL)", agent, name)
+			continue
+		}
+		if !seen[capability] {
+			seen[capability] = true
+			out = append(out, capability)
+		}
+	}
+	if seen["ALL"] && len(out) > 1 {
+		p.addf("agent %q: capabilities: ALL already keeps every capability, list it alone", agent)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func checkResources(agent string, r Resources, p *problems) {
 	if r.CPUs < 0 {
 		p.addf("agent %q: resources.cpus must not be negative", agent)
@@ -453,19 +494,20 @@ func resolveAgent(
 		permissions = "bypass"
 	}
 	return ResolvedAgent{
-		Harness:     agent.Harness,
-		Image:       agent.Image,
-		Build:       build,
-		Workdir:     workdir,
-		Egress:      profileName,
-		Workspaces:  mounts,
-		Model:       agent.Model,
-		Prompt:      agent.Prompt,
-		Resources:   agent.Resources,
-		Permissions: permissions,
-		Env:         agent.Env,
-		Inject:      resolveInject(name, agent, p),
-		Ports:       resolvePorts(name, agent.Ports, resolved, p),
+		Harness:      agent.Harness,
+		Image:        agent.Image,
+		Build:        build,
+		Workdir:      workdir,
+		Egress:       profileName,
+		Workspaces:   mounts,
+		Model:        agent.Model,
+		Prompt:       agent.Prompt,
+		Resources:    agent.Resources,
+		Permissions:  permissions,
+		Env:          agent.Env,
+		Inject:       resolveInject(name, agent, p),
+		Ports:        resolvePorts(name, agent.Ports, resolved, p),
+		Capabilities: resolveCapabilities(name, agent.Capabilities, p),
 	}, warnings
 }
 

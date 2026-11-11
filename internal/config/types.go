@@ -222,6 +222,9 @@ type Agent struct {
 	Inject      *AgentInject      `yaml:"inject,omitempty"`
 	// Ports are the ports the agent may serve, by name: "5173/http", "5432/tcp" or "5432/udp".
 	Ports map[string]string `yaml:"ports,omitempty"`
+	// Capabilities are the Linux capabilities the agent's container keeps, by Docker's names (SYS_ADMIN, NET_ADMIN, or ALL).
+	// Empty, the default, drops them all and forbids gaining privileges.
+	Capabilities []string `yaml:"capabilities,omitempty"`
 }
 
 // Build is an image `up` builds from a Dockerfile, in Compose's terms. The context is relative to the project
