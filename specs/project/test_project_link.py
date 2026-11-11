@@ -355,10 +355,17 @@ def you(agent):
     return agent.tool("agents")["structuredContent"]["you"]
 
 
-def prompts(project, name):
-    """What was typed into an agent's terminal, as the reporting stand-in says it received it, in order."""
-    events = [json.loads(line) for line in project.run("events").stdout.splitlines() if line.startswith("{")]
-    return [e["data"]["prompt"] for e in events if e["type"] == "state" and e.get("agent") == name and e.get("data", {}).get("prompt")]
+def screen(project, name, seconds=5):
+    """An agent's terminal as `agent attach --read-only` shows it, read for a few seconds. The reporting stand-in prints `got:` and
+    each line typed into it. Control keeps no prompt in the event log but its own announcements: a task is free text."""
+    import pexpect
+
+    client = project.pty("agent attach --read-only", name)
+    try:
+        client.expect(pexpect.TIMEOUT, timeout=seconds)
+        return client.before
+    finally:
+        client.close(force=True)
 
 
 def starter_notices(project, agent):
@@ -408,13 +415,12 @@ def test_a_task_is_typed_once_as_the_first_prompt_and_sends_no_message(linked, f
     hub.must(p, "spawn", Template="typed", Name="tasked", Actor="user:7", StarterName="Joe", Task="list the open issues")
     env = env_of(engine, linked, "tasked")
     assert "EGZO_UNATTENDED" not in env and "list the open issues" not in json.dumps(env), "the task is typed, never in the settings"
-    assert eventually(lambda: prompts(linked, "tasked") == ["list the open issues"], seconds=60), prompts(linked, "tasked")
+    assert eventually(lambda: screen(linked, "tasked").count(b"got:list the open issues") == 1, seconds=60), screen(linked, "tasked")
     assert not [e for e in message_events(hub, p) if e["Agent"] == "tasked" and e["Kind"] == "request"], "nothing goes to chat"
 
     linked.ok("stop tasked")
     linked.ok("start tasked")
-    time.sleep(5)
-    assert prompts(linked, "tasked") == ["list the open issues"], "typed once, not again after a restart"
+    assert b"got:list the open issues" not in screen(linked, "tasked", 10), "typed once, not again after a restart"
     hub.must(p, "remove", Agent="tasked")
 
 
@@ -426,7 +432,7 @@ def test_an_unattended_agent_gets_its_task_as_a_request_from_who_started_it_and_
     assert len(task) == 1 and (task[0]["Actor"], task[0]["To"], task[0]["Text"]) == ("user:7", "agent:alone", "list the open issues")
     answer = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == task[0]["ID"]], seconds=60)
     assert answer and answer[0]["To"] == "user:7", "the agent answers the person, who reads it on a chat platform"
-    assert not [t for t in prompts(linked, "alone") if "list the open issues" in t], "the task is never typed: the agent fetches it"
+    assert b"got:list the open issues" not in screen(linked, "alone"), "the task is never typed: the agent fetches it"
 
     assert hub.verb(p, "spawn", Template="typed", Name="no-task", Actor="user:7", Unattended=True)["error"], "unattended needs a task"
     assert hub.verb(p, "spawn", Template="typed", Name="no-user", Actor="operator", Task="x", Unattended=True)["error"], \
