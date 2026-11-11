@@ -19,7 +19,9 @@ and [messaging](messaging.md).
 - **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits,
   sidecars as a non-root uid with a read-only root. Agents run as your uid and gid, not as root. The engine socket is
   never mounted into an agent.
-- **Optional gVisor** as a stronger kernel boundary: egzo runs containers under the engine's default runtime, so make `runsc` the engine's default.
+- **Optional gVisor or sysbox** for the engine: egzo runs containers under the engine's default runtime. gVisor is a stronger kernel
+  boundary, so make `runsc` the engine's default ([gVisor](gvisor.md)); sysbox puts every container in a user namespace, so root in a
+  container is not root on the host ([sysbox](sysbox.md)). A rootless engine maps ids the same way and needs neither.
 - **Per-agent identity.** Each instance has its own token, used for the proxy and the control sidecar. A token only
   lets an agent act as itself, and the proxy applies that agent's profile, not another's.
 - **Nothing from your host is mounted.** Workspaces are engine volumes, so no directory of yours is exposed to an agent;
@@ -64,7 +66,9 @@ Be clear about these before running agents on something you care about.
   hand ([images](images.md#let-egzo-build-it)).
 - **Agents that share a git workspace trust each other.** Each has the base clone's `.git` mounted read-write, so one can damage the
   others' history or plant a git setting that runs in the next spawn: see [below](#the-base-clone-of-a-git-workspace).
-- **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it.
+- **A kernel escape** from a normal container is possible in principle; gVisor reduces that risk, it does not remove it. Sysbox does not
+  address it either: a sysbox container still uses the host's kernel, but an escape lands as an unprivileged user id rather than root
+  ([sysbox](sysbox.md)).
 
 ## The base clone of a git workspace
 

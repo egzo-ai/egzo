@@ -7,9 +7,10 @@ detail, and the executable specs in `specs/` are the status report.
 ## Start here
 
 1. [Introduction](intro.md): what egzo is, how it is built, a first run
-2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, `egzo system check`
+2. [Installing and choosing an engine](install.md): build, Docker, Podman, gVisor, sysbox, `egzo system check`
    - [Using Podman](podman.md): rootless Podman, and why rootful Podman is not supported yet
    - [Using gVisor](gvisor.md): why, the cost, the two flags, terminal quirks
+   - [Using sysbox](sysbox.md): what a user namespace per container gives an agent, and what it does not
 
 ## Using egzo
 

@@ -2,7 +2,8 @@
 
 [gVisor](https://gvisor.dev) is an optional layer under egzo. egzo does not choose a container runtime: everything the engine
 starts, agents and sidecars alike, runs under the engine's default runtime. Making that runtime gVisor's `runsc` is a decision
-for the host, and `egzo system check` reports which runtime is in use.
+for the host, and `egzo system check` reports which runtime is in use. ([Using sysbox](sysbox.md) covers the other sandboxed
+runtime egzo supports.)
 
 gVisor is supported on Docker. On Podman it is untested.
 

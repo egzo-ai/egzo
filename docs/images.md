@@ -130,7 +130,7 @@ agents:
 ```
 
 The sandbox still applies in full: the agent has its own network with the proxy as its only way out, no secrets, your uid and the
-resource limits, and it runs under whatever runtime the engine defaults to (gVisor, if that is what you set).
+resource limits, and it runs under whatever runtime the engine defaults to (gVisor or sysbox, if that is what you set).
 
 What you do not get is the harness integration. There are no hooks, no MCP tools and no home volume, so egzo judges activity from
 how quiet the output is. Use `custom` to run a script, or a tool egzo has no integration for yet, such as `pi`.

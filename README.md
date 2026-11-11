@@ -28,7 +28,7 @@ does the rest.
 - **[Templates and instances](docs/project-file.md).** Declare an agent once, spawn as many instances as you need, each with its
   own container, network and workspace.
 - **[Isolation by default](docs/security.md).** List the files your agents can reach.
-- **[gVisor and rootless Podman](docs/install.md#pick-an-engine).** Supported and tested, for additional security.
+- **[gVisor, sysbox and rootless Podman](docs/install.md#pick-an-engine).** Supported, for additional security.
 - **[Built-in HTTPS and SSH proxy](docs/sandboxing.md).** List the services your agents can reach, everything else is denied by default.
 - **[Credential injection](docs/security.md#how-secret-injection-works).** Agents can't leak passwords and tokens they don't have access to.
 - **[Secrets](docs/project-file.md#vaults-and-secrets).** Read from `pass`, environment variables or a `.env` file. More password managers planned.
@@ -123,6 +123,7 @@ The following platforms are tested for each new release and using nightly GitHub
 - Docker engine on Linux (amd64 and arm64)
 - Rootless Podman on Linux
 - Docker with [gVisor](docs/install.md#using-gvisor)
+- Docker with [sysbox](docs/install.md#using-sysbox)
 
 Work in progress:
 

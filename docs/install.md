@@ -41,6 +41,7 @@ configured are used without complaint. A few configurations are tested and offic
 |---|---|
 | Docker (rootful) | the engine the specs run against; use this first |
 | Docker with gVisor | supported, with a tradeoff; see [Using gVisor](#using-gvisor) |
+| Docker with sysbox | supported, with a tradeoff; see [Using sysbox](#using-sysbox) |
 | Rootless Podman | supported; see [Using Podman](podman.md) |
 | Rootful Podman | not supported for now; to be decided for 1.0.0 ([Using Podman](podman.md)) |
 
@@ -58,16 +59,22 @@ Start Podman's user socket and point `DOCKER_HOST` at it: see [Using Podman](pod
 gVisor is a choice for the engine, not for egzo: egzo never picks a container runtime, and everything the engine starts runs under
 its default runtime. [Using gVisor](gvisor.md) covers why you would, what it costs, the two `runsc` flags egzo needs, and why.
 
+### Using sysbox
+
+The same choice, with a different trade: sysbox puts every container in a Linux user namespace, so root in a container is not
+root on the host, and it virtualizes `/proc` and `/sys`. It is rootful Docker only. [Using sysbox](sysbox.md) covers what that
+gives an egzo agent (and what it does not), the install, and the kernel the link sidecar needs.
+
 ## Check the setup
 
 (When something fails, [troubleshooting](troubleshooting.md) is the next page; [the security model](security.md) explains
-why a rootless engine and gVisor matter.)
+why a rootless engine, or a sandboxed runtime such as gVisor or sysbox, matters.)
 
 ```console
 $ egzo system check
 ```
 
-It tells you whether the engine answers, whether it is rootless, which OCI runtime the engine's containers run under (`runsc` is gVisor), whether the engine
+It tells you whether the engine answers, whether it is rootless, which OCI runtime the engine's containers run under (`runsc` is gVisor, `sysbox-runc` is sysbox), whether the engine
 creates internal networks (the sandbox depends on it), whether the engine's default log driver can be read back and
 followed, and whether the egzo image can run git. Each line is ok, warn or fail, and the exit code is non-zero if any check fails.
 

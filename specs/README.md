@@ -19,21 +19,24 @@ the host is like; it does not ask egzo for anything:
 |---|---|---|
 | `docker` | a rootful Docker host | `/var/run/docker.sock` |
 | `docker-gvisor` | the same, with `runsc` (gVisor) as the engine's default runtime | `/var/run/docker.sock` |
+| `docker-sysbox` | the same, with `sysbox-runc` (sysbox) as the engine's default runtime | `/var/run/docker.sock` |
 | `podman` | a rootful Podman host | `/run/podman/podman.sock` (this user needs access to it) |
 | `podman-rootless` | a rootless Podman host | `$XDG_RUNTIME_DIR/podman/podman.sock` |
 
-egzo never chooses a runtime: containers run under the engine's default one, so gVisor is a property of the host, which
-`docker-gvisor` makes true. A `podman-gvisor` platform would be Podman with `runsc` as its default in `containers.conf`; there is none yet.
+egzo never chooses a runtime: containers run under the engine's default one, so gVisor and sysbox are properties of the host,
+which `docker-gvisor` and `docker-sysbox` make true. A `podman-gvisor` or `podman-sysbox` platform would be Podman with that
+runtime as its default in `containers.conf`; there is none yet (sysbox needs rootful Docker and systemd on the host).
 
 Name the platform with `--engine NAME` (or `EGZO_ENGINE`), as CI does, one machine per platform. With none
-named, `select_platform.py` picks the first one this machine can be, in the order `docker-gvisor`,
+named, `select_platform.py` picks the first one this machine can be, in the order `docker-gvisor`, `docker-sysbox`,
 `podman-rootless`, `docker`, `podman`, and the run prints what it found, what it chose and how to override
 (`python specs/select_platform.py` prints just that). A platform that is named but missing fails the engine
 specs with what to set up.
 
 A spec that needs a feature a platform lacks is marked to fail there (strict xfail), so it shows as unsupported on
-that platform. Today none does: the one gVisor spec checks, from inside an agent, that it runs under gVisor exactly
-when the platform says so. Nothing is probed or skipped: egzo is asked, and the outcome is the result. CI runs them on every platform: see [In CI](#in-ci).
+that platform. Today none does: one spec checks, from inside an agent, that it runs under gVisor exactly when the platform
+says so, and that its ids are mapped when the platform is sysbox or a rootless engine. Nothing is probed or skipped: egzo is
+asked, and the outcome is the result. CI runs them on every platform: see [In CI](#in-ci).
 
 Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootstrap pip with
 `get-pip.py`.
@@ -47,6 +50,7 @@ The specs run on GitHub Actions, one fresh VM per reference platform (`.github/w
 | `docker` | a typical rootful Docker host, no gVisor | required |
 | `docker-arm64` | the same, on arm64 | experimental |
 | `docker-gvisor` | Docker with `runsc` as the engine's default runtime | experimental |
+| `docker-sysbox` | Docker with `sysbox-runc` as the engine's default runtime | experimental |
 | `podman-rootless` | a rootless Podman host, no gVisor | experimental |
 | `podman` | a rootful Podman host, no gVisor | experimental, and not a supported platform |
 
@@ -58,7 +62,7 @@ for other distributions). Still open: red specs for unbuilt features against the
 
 - **GitHub Actions, hosted runners.** A matrix cell is a job, a job is a fresh VM, so a cell never shares a kernel, a daemon or
   a network pool with another: Docker and Podman are never on the same machine. `ubuntu-26.04` carries Docker and Podman
-  already (the runner image README lists Docker 29.4.2 and Podman 5.7.0); gVisor and the Podman API sockets are set up by
+  already (the runner image README lists Docker 29.4.2 and Podman 5.7.0); gVisor, sysbox and the Podman API sockets are set up by
   `scripts/ci-engine.sh`.
 - **When it runs** (`.github/workflows/specs.yml`):
 
@@ -75,7 +79,7 @@ for other distributions). Still open: red specs for unbuilt features against the
   shows there. The nightly run catches what no push touched: a new runner image
   (an engine version), a new engine release, an online service the specs reach going away.
 - **Cells that are not proven are `experimental`**: they run and show, and cannot fail the run. `docker` is required from the
-  start. `docker-gvisor`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history ([#136](https://github.com/egzo-ai/egzo/issues/136)), by
+  start. `docker-gvisor`, `docker-sysbox`, `podman-rootless` and `docker-arm64` become required, one by one, after a clean history ([#136](https://github.com/egzo-ai/egzo/issues/136)), by
   removing the flag in `specs.yml` and adding the check to the branch rules. Docker and rootless Podman are supported platforms.
   Rootful Podman (`podman`) is not supported for now: it has a diagnosed intermittent failure
   ([docs/podman.md](../docs/podman.md), netavark leaves a stale per-bridge sysctl file that switches forwarding off
@@ -93,7 +97,8 @@ for other distributions). Still open: red specs for unbuilt features against the
   root-only); the test registry on `localhost:5000` is declared insecure (Podman does not trust localhost for plain HTTP as Docker
   does); and the rootful cell runs without Ubuntu's AppArmor container profile
   ([docs/podman.md](../docs/podman.md#rootful-podman-on-apparmor-hosts-exec-cannot-reach-the-containers-processes)). gVisor comes from its release archive (`gvisor.tar.bz2`), as the separate
-  `runsc` files are gone. Podman 5.7 refuses the `uid=` option of a tmpfs mount, so egzo's sidecar tmpfs use `mode=1777`.
+  `runsc` files are gone; sysbox from its release package (`sysbox-ce_<version>.linux_<arch>.deb`), checked against the
+  digest GitHub publishes, then made the default runtime in `daemon.json`. Podman 5.7 refuses the `uid=` option of a tmpfs mount, so egzo's sidecar tmpfs use `mode=1777`.
 - **Artifacts.** Each cell uploads the log of its run (the summary per area is its last lines) and a JUnit file.
 
 ### What a cell must show
@@ -103,8 +108,9 @@ for other distributions). Still open: red specs for unbuilt features against the
   not noise.
 - The summary per area (one area per `test_<area>.py`) is kept as an artifact, so a regression on one platform shows as
   a change in a column.
-- gVisor is checked on a pair of platforms: an agent really runs under gVisor where it is the engine's default runtime,
-  and does not where it is not (`test_agents_run_under_the_engines_default_runtime…`).
+- A sandboxed runtime is checked on a pair of platforms: an agent really runs under gVisor where it is the engine's default
+  runtime, and does not where it is not (`test_agents_run_under_the_engines_default_runtime…`); the same spec says an agent
+  is in a user namespace on a sysbox platform.
 - Known host-level problems stay visible: the rootful Podman intermittent egress failure
   ([docs/podman.md](../docs/podman.md)) should show up as a flaky cell and not be hidden by retries.
 
@@ -217,7 +223,7 @@ it covers and how the project it runs on is shared.
 | `agent/test_agent_spawn.py` | `agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
 | `agent/test_agent_lifecycle.py` | `ps`, `agent ls`, `agent rm` and its filters, `start`, `stop`, what a removed container leaves |
 | `agent/test_agent_stale.py` | stale instances, the `up` refusal, `down` and a name that was an instance |
-| `agent/test_agent_containers.py` | the network, who an agent runs as, limits, whether it runs under gVisor on a gVisor platform, and the workspace volumes it mounts |
+| `agent/test_agent_containers.py` | the network, who an agent runs as, limits, whether it runs under gVisor or sysbox on those platforms, and the workspace volumes it mounts |
 | `service/test_service_commands.py` | `logs`, `exec` (with and without a terminal), `start`, `stop`, `restart` on an instance or a sidecar |
 | `message/test_message_cli.py` | `message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
 | `message/test_agent_api.py` | what an agent does to the control sidecar: the HTTP tools, MCP, state reports, and the limits |

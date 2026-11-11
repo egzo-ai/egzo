@@ -220,7 +220,7 @@ Commands are grouped by what they act on. There are no aliases for names that mo
     egzo workspace get NAME[/INSTANCE] [SRC] DEST  # copy a path of a workspace (or an instance's worktree) out
     egzo workspace fetch [NAME...]                 # clone or refresh git bases through the proxy
     egzo workspace rm NAME... | --all              # delete workspace volumes (`project down` keeps them)
-    egzo system check                              # engine, rootless, default runtime (gVisor?), network, git: no project file needed
+    egzo system check                              # engine, rootless, default runtime (gVisor? sysbox?), network, git: no project file needed
     egzo ps                                        # engine state + status from control sidecar
     egzo start|stop|restart <svc>                  # operate on existing containers (no reconcile)
     egzo logs [-f] <svc>
@@ -233,9 +233,9 @@ Commands are grouped by what they act on. There are no aliases for names that mo
 - Engine access: Docker Engine API (Go docker client). The engine is whatever `DOCKER_HOST` points at
   (default `/var/run/docker.sock`), like the docker CLI: no probing, no engine setting in egzo.yaml.
   Podman works through its Docker-compat socket (`podman.socket`). egzo never chooses an OCI runtime
-  (no `runtime:` key): containers run under the engine's own default, so gVisor is a host setting (`default-runtime` in
-  Docker's `daemon.json`), and the `docker-gvisor` platform of the specs is that host. Never mount the socket into agent
-  containers. Engine matrix in specs.
+  (no `runtime:` key): containers run under the engine's own default, so gVisor or sysbox is a host setting (`default-runtime` in
+  Docker's `daemon.json`), and the `docker-gvisor` and `docker-sysbox` platforms of the specs are those hosts. Never mount the
+  socket into agent containers. Engine matrix in specs.
 - No daemon. Everything runs in containers except the `egzo` CLI.
 - Harness control is TUI-first (Scion-style). The native TUI always runs in the agent container
   behind a pty layer (the `Session` backend, see Session backend below); there is never a mode
@@ -813,8 +813,9 @@ Claude Code `SessionStart` arrives before its first-run dialogs are answered.
 ## specs/ (pytest)
 
 The suite is the status report: `specs/README.md` explains the done / broken / unsupported model.
-A run tests egzo on one reference platform (docker, docker-gvisor, podman, podman-rootless: what the host is like, not
-what egzo is asked; docker-gvisor is Docker with `runsc` as its default runtime), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
+A run tests egzo on one reference platform (docker, docker-gvisor, docker-sysbox, podman, podman-rootless: what the host is
+like, not what egzo is asked; docker-gvisor is Docker with `runsc` as its default runtime and docker-sysbox Docker with
+`sysbox-runc`), named with `--engine` or chosen from the machine by `select_platform.py`; CI runs one machine
 per platform (specs/README.md, "In CI"). It builds its own sidecar and agent images, and needs the internet for the specs that
 talk to real hosts (they fail when offline) and a registry for the image-name spec (`EGZO_SPEC_REGISTRY`).
 
@@ -911,7 +912,7 @@ Decisions taken while building (reversible; each is covered by specs):
   decision and a reason code from a fixed list ([docs/sandboxing.md](docs/sandboxing.md), [the reason codes](docs/sandboxing.md#reason-codes)).
 - **Hardening defaults.** Sidecars: read-only root filesystem, all capabilities dropped,
   `no-new-privileges`, tmpfs for `/tmp`. Agents: all capabilities dropped, `no-new-privileges`, an
-  init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. There is no runtime setting: containers run under the engine's default runtime, which is the host administrator's choice (gVisor included).
+  init process, writable root filesystem. Agents are always on an internal-only network, with egress only via the proxy. There is no runtime setting: containers run under the engine's default runtime, which is the host administrator's choice (gVisor or sysbox included).
 - **Agents run as the invoking user** (`uid:gid` of whoever runs egzo, on Docker; Podman maps users itself), so
   what they write on the host belongs to that user. Volumes are created by the engine owned by root, so a prep
   container hands each volume an agent writes to (workspaces, its home) to that user after the agent's container
@@ -990,7 +991,7 @@ Decisions taken while building (reversible; each is covered by specs):
 
 Open, in the order they matter:
 1. **pi** is accepted as a harness name but has no image or integration. `custom` covers it for now.
-2. The engine matrix beyond Docker (rootless and rootful Podman, gVisor) is not part of the current spec run;
+2. The engine matrix beyond Docker (rootless and rootful Podman, gVisor, sysbox) is not part of the current spec run;
    the specs were written for it and need a pass on those hosts. Rootful Podman loses outbound connectivity
    intermittently ([docs/podman.md](docs/podman.md)).
 3. `request_secret_access`, the optional mount of the user's own `~/.claude` settings.

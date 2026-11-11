@@ -2,10 +2,10 @@
 # Prepare a fresh CI runner to be one reference platform of the specs (specs/README.md). The runner is a throwaway VM, so it
 # is changed freely: nothing here is meant for a developer machine.
 #
-#   scripts/ci-engine.sh docker | docker-gvisor | podman | podman-rootless
+#   scripts/ci-engine.sh docker | docker-gvisor | docker-sysbox | podman | podman-rootless
 #
-# Docker and Podman come with the runner image; this installs gVisor as Docker's default runtime and starts the
-# Podman API socket the platform names. For podman-rootless the socket's directory is exported through $GITHUB_ENV, as the specs look for it there.
+# Docker and Podman come with the runner image; this installs gVisor or sysbox as Docker's default runtime and starts
+# the Podman API socket the platform names. For podman-rootless the socket's directory is exported through $GITHUB_ENV, as the specs look for it there.
 set -eu
 
 # The specs' test registry on localhost:5000 speaks plain HTTP. Docker trusts localhost for that, Podman does not.
@@ -14,7 +14,7 @@ insecure_test_registry() {
 	printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-spec-registry.conf
 }
 
-platform=${1:?usage: ci-engine.sh docker|docker-gvisor|podman|podman-rootless}
+platform=${1:?usage: ci-engine.sh docker|docker-gvisor|docker-sysbox|podman|podman-rootless}
 
 case "$platform" in
 docker)
@@ -54,6 +54,39 @@ docker-gvisor)
 	# not piped straight into head: a container that does not start must fail this step
 	started=$(docker run --rm alpine:3 dmesg)
 	echo "$started" | head -3
+	;;
+docker-sysbox)
+	# sysbox from its published package: an OCI runtime, a fork of runc, that puts every container in a Linux user
+	# namespace (and virtualizes procfs and sysfs). Rootful Docker only, on a host with systemd, which the runner is.
+	# The digests are the ones GitHub publishes for the release's assets.
+	version=0.7.1
+	case $(uname -m) in aarch64 | arm64) arch=arm64 ;; *) arch=amd64 ;; esac
+	deb=sysbox-ce_${version}.linux_${arch}.deb
+	case "$arch" in
+	amd64) sum=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5 ;;
+	arm64) sum=04ca894ae0b53f0fa54eaacc173ce40363c9a95ea5450f773716a84ef650a69b ;;
+	esac
+	tmp=$(mktemp -d)
+	(
+		cd "$tmp"
+		curl -fsSL -o "$deb" "https://github.com/nestybox/sysbox/releases/download/v${version}/${deb}"
+		echo "$sum  $deb" | sha256sum -c
+		# the package's postinst edits /etc/docker/daemon.json and its network settings with jq
+		sudo apt-get install -y jq
+		sudo apt-get install -y "./$deb"
+	)
+	rm -rf "$tmp"
+	# makes it the engine's default: egzo never chooses a runtime, so sysbox is what the host is, and every container
+	# the engine starts runs under it (docs/sysbox.md)
+	sudo jq '. + {"default-runtime": "sysbox-runc"}' /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new
+	sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+	sudo systemctl restart docker
+	sysbox-runc --version
+	docker info --format '{{.DefaultRuntime}} {{json .Runtimes}}'
+	# a container starts under it, and is in a user namespace: the ids inside are mapped, not the host's
+	started=$(docker run --rm alpine:3 cat /proc/self/uid_map)
+	echo "$started"
+	[ "$(echo "$started" | awk 'NR==1 {print $2}')" != "0" ]
 	;;
 podman)
 	insecure_test_registry

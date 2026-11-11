@@ -110,6 +110,9 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
   plane", to verify). egzo refuses nothing in advance: `up` starts the link as anywhere else, and if the engine stops it, the
   link fails with the engine's own error and `egzo ps` shows it. The specs run on gVisor like on every reference platform, and
   the docs say what works there. The hub is optional: a project that needs gVisor's isolation and cannot link runs unlinked.
+  **sysbox** needs the same check, from the other side: it idmapped-mounts the socket so it keeps the host's owner and group
+  inside the container, which is what the link's `65532:<socket group>` needs, but only on a kernel with idmapped mounts
+  ([docs/sysbox.md](../sysbox.md#requirements)); through shiftfs the mount is refused and the link says so.
 - One link per project, created and removed with it, recreated by `up` when its image changes.
 
 ## The connection
