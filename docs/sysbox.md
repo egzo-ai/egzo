@@ -39,7 +39,8 @@ system-container features sysbox is known for are out of reach in an egzo agent:
 
 - **No Docker or systemd inside the agent.** Both need root in the container. A nested Docker daemon would also need a
   nested user namespace (rootless Docker), which sysbox does not support (`unshare -U` fails inside a sysbox container).
-  What you get from sysbox in egzo is the id boundary above, not Docker-in-Docker.
+  What you get from sysbox in egzo is the id boundary above, not Docker-in-Docker: what that would take is
+  [#201](https://github.com/egzo-ai/egzo/issues/201).
 - **No nested user namespaces**, so rootless tools, `bwrap`-style sandboxes (Flatpak, some test sandboxes), rootless
   Podman and similar do not start inside an agent. egzo's browser is not affected: the harness images already run Chromium
   without its own sandbox (`chromiumSandbox: false`), because the container is the boundary.
