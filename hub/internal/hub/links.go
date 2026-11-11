@@ -476,6 +476,7 @@ func (h *Hub) Revoke(ctx context.Context, user store.User, id, why string) error
 	delete(h.held, reg.ID)
 	h.mu.Unlock()
 	h.feeds.forgetExposed(reg.ID)
+	h.change(ctx, BridgeEvent{Type: EventProjectRemoved, Project: reg.ID}) // it never comes back under this id: its agents with it
 	return nil
 }
 

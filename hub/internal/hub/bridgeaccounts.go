@@ -12,6 +12,7 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
 	"github.com/egzo-ai/egzo/hub/internal/store"
+	"github.com/egzo-ai/egzo/internal/hublink"
 )
 
 // A person links their chat account to their hub user once: the bridge asks for a code, the person opens the hub's address with it,
@@ -141,5 +142,65 @@ func (h *Hub) ChatAgents(ctx context.Context, bridge, account string) ([]ChatAge
 		}
 		return out[i].Agent < out[j].Agent
 	})
+	return out, nil
+}
+
+// What the hub knows of an agent a bridge keeps a place for (AgentsPresent).
+const (
+	PresencePresent = "present" // in its project, as the project's link last said
+	PresenceAbsent  = "absent"  // not in its project, or the project is gone from the hub
+	PresenceUnknown = "unknown" // the project's link has not said since the hub started: ask again later
+)
+
+// AgentRef names an agent of a project.
+type AgentRef struct {
+	Project string `json:"project"`
+	Agent   string `json:"agent"`
+}
+
+// AgentPresence is whether an agent is still in its project.
+type AgentPresence struct {
+	Project string `json:"project"`
+	Agent   string `json:"agent"`
+	State   string `json:"state"` // PresencePresent, PresenceAbsent or PresenceUnknown
+}
+
+// AgentsPresent says, for each agent, whether its project still has it. A bridge keeps an agent's places for a while after the agent
+// leaves, since re-creating an agent removes it and starts it again under the same name, and asks this to know when to let them go. It
+// answers from what the links last pushed, and never asks a link: absent is only what the hub knows, unknown is a project it has not
+// heard from since it started. A revoked or forgotten project is absent: it never comes back under the same id.
+func (h *Hub) AgentsPresent(ctx context.Context, refs []AgentRef) ([]AgentPresence, error) {
+	projects := map[string]map[string]bool{} // project -> its agents; nil when unknown
+	gone := map[string]bool{}
+	out := make([]AgentPresence, 0, len(refs))
+	for _, r := range refs {
+		if _, seen := projects[r.Project]; !seen && !gone[r.Project] {
+			reg, err := h.store.Registration(ctx, r.Project)
+			switch {
+			case errors.Is(err, store.ErrNotFound) || err == nil && reg.State != hublink.StateApproved:
+				gone[r.Project] = true
+			case err != nil:
+				return nil, err
+			default:
+				var agents map[string]bool
+				if p, known := h.knownProject(r.Project); known {
+					agents = map[string]bool{}
+					for _, a := range p.Agents {
+						agents[a.Name] = true
+					}
+				}
+				projects[r.Project] = agents
+			}
+		}
+		state := PresenceAbsent
+		switch agents := projects[r.Project]; {
+		case gone[r.Project]:
+		case agents == nil:
+			state = PresenceUnknown
+		case agents[r.Agent]:
+			state = PresencePresent
+		}
+		out = append(out, AgentPresence{Project: r.Project, Agent: r.Agent, State: state})
+	}
 	return out, nil
 }

@@ -286,3 +286,23 @@ func TestABridgeAsksWhichAgentsAPersonMayChatWithAndWhetherTheyMayAddOne(t *test
 		t.Errorf("nobody = %d %+v", code, may)
 	}
 }
+
+func TestABridgeAsksWhetherAgentsAreStillInTheirProjects(t *testing.T) {
+	r := newRig(t)
+	var out struct{ Agents []hub.AgentPresence }
+	body := map[string]any{"agents": []hub.AgentRef{{Project: r.project, Agent: "coder-1"}, {Project: r.project, Agent: "coder-9"}}}
+	if code := r.call("POST", "/presence", body, &out); code != 200 || len(out.Agents) != 2 ||
+		out.Agents[0].State != hub.PresencePresent || out.Agents[1].State != hub.PresenceAbsent || out.Agents[1].Agent != "coder-9" {
+		t.Errorf("presence = %d %+v", code, out)
+	}
+	if code := r.call("POST", "/presence", map[string]any{"agents": []hub.AgentRef{{Project: r.project, Agent: "../x"}}}, nil); code != http.StatusBadRequest {
+		t.Errorf("a bad name = %d", code)
+	}
+	many := make([]hub.AgentRef, 1001)
+	for i := range many {
+		many[i] = hub.AgentRef{Project: r.project, Agent: "coder-1"}
+	}
+	if code := r.call("POST", "/presence", map[string]any{"agents": many}, nil); code != http.StatusBadRequest {
+		t.Errorf("too many = %d", code)
+	}
+}

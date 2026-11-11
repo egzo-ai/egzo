@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET "+Prefix+"/accounts", s.authed(s.accounts))
 	mux.HandleFunc("GET "+Prefix+"/agents", s.authed(s.agents))
 	mux.HandleFunc("POST "+Prefix+"/may-add", s.authed(s.mayAdd))
+	mux.HandleFunc("POST "+Prefix+"/presence", s.authed(s.presence))
 	return mux
 }
 
@@ -283,6 +284,34 @@ func (s *Server) mayAdd(w http.ResponseWriter, r *http.Request, bridge string) {
 		return
 	}
 	answer(w, http.StatusOK, map[string]bool{"allowed": ok})
+}
+
+// maxPresence is how many agents one presence call asks about: 256 KB of names at most.
+const maxPresence = 1000
+
+// presence says whether agents are still in their projects: a bridge keeps the places of an agent that left for a while, in case it comes
+// back under the same name, and asks this to know when to let them go.
+func (s *Server) presence(w http.ResponseWriter, r *http.Request, bridge string) {
+	var in struct {
+		Agents []hub.AgentRef `json:"agents"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 256<<10)).Decode(&in); err != nil || len(in.Agents) > maxPresence {
+		answer(w, http.StatusBadRequest, map[string]string{"error": "expected {agents: [{project, agent}]}, at most 1000"})
+		return
+	}
+	for _, a := range in.Agents {
+		if !projectID.MatchString(a.Project) || !corenames.Instance(a.Agent) {
+			answer(w, http.StatusBadRequest, map[string]string{"error": "expected {agents: [{project, agent}]}, at most 1000"})
+			return
+		}
+	}
+	list, err := s.hub.AgentsPresent(r.Context(), in.Agents)
+	if err != nil {
+		s.log.Warn("say whether agents are present", "bridge", bridge, "err", err)
+		answer(w, http.StatusInternalServerError, map[string]string{"error": "cannot say"})
+		return
+	}
+	answer(w, http.StatusOK, map[string]any{"agents": list})
 }
 
 func answer(w http.ResponseWriter, status int, body any) {
