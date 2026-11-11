@@ -100,6 +100,20 @@ func (s *Store) OutboxAfter(ctx context.Context, after int64, limit int) ([]Outg
 	return out, rows.Err()
 }
 
+// OutboxMessage is the outbox entry of a project's message, by the message's id; ErrNotFound when the outbox has none, or no longer.
+func (s *Store) OutboxMessage(ctx context.Context, id string) (Outgoing, error) {
+	var o Outgoing
+	var at int64
+	var body string
+	err := s.db.QueryRowContext(ctx, `SELECT seq, at, project, agent, body FROM outbox WHERE json_extract(body, '$.id') = ? AND project IS NOT NULL
+		ORDER BY seq LIMIT 1`, id).Scan(&o.Seq, &at, &o.Project, &o.Agent, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return o, ErrNotFound
+	}
+	o.At, o.Body = time.UnixMilli(at).UTC(), []byte(body)
+	return o, err
+}
+
 // OutboxLast is the seq of the newest entry the outbox ever had; zero when it never had one.
 func (s *Store) OutboxLast(ctx context.Context) (int64, error) {
 	var seq sql.NullInt64

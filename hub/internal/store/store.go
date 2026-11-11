@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS outbox (
 	agent TEXT NOT NULL,
 	body TEXT NOT NULL                   -- the event as bridges read it, JSON
 );
+CREATE INDEX IF NOT EXISTS outbox_message ON outbox (json_extract(body, '$.id')); -- a message a bridge says it could not deliver
 -- The chat accounts people linked to their hub user, one bridge each (bridgeaccounts.go). An account is one user's; a user may have
 -- several.
 CREATE TABLE IF NOT EXISTS bridge_accounts (
