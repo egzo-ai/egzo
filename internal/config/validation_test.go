@@ -254,5 +254,8 @@ func TestCapabilitiesAreSpelledAsDockerDoesAndAnUnknownOneIsRefused(t *testing.T
 		t.Errorf("an agent that lists none keeps %v", got)
 	}
 	wantProblems(t, t.TempDir(), yaml("[SYS_WIZARD]"), "SYS_WIZARD")
-	wantProblems(t, t.TempDir(), yaml("[ALL, NET_ADMIN]"), "ALL")
+	resolved, _ = mustResolve(t, t.TempDir(), yaml("[NET_ADMIN, all]"))
+	if got := resolved.Agents["a"].Capabilities; !slices.Equal(got, []string{"ALL"}) {
+		t.Errorf("a list with ALL keeps %v", got)
+	}
 }

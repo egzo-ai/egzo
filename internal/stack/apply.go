@@ -543,15 +543,13 @@ func Age(d time.Duration) string {
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
-// capabilityOptions are the engine's options for the capabilities a container keeps. None: drop them all and forbid gaining
-// privileges. Some: drop all, add those, and allow gaining them, since an agent starts as its user and reaches them only
-// through a setuid program such as sudo. ALL is added alone, without the drop, which engines read differently.
+// capabilityOptions are the engine's options for the capabilities a container keeps: drop them all, add back those listed,
+// and forbid gaining privileges, unless the list is ALL. ALL is the one case without no-new-privileges, so that a setuid
+// program such as sudo can make an agent that starts as its user root in its container; it is added without the drop, which
+// engines read differently.
 func capabilityOptions(keep []string) (drop, add strslice.StrSlice, security []string) {
-	switch {
-	case len(keep) == 0:
-		return strslice.StrSlice{"ALL"}, nil, []string{"no-new-privileges"}
-	case len(keep) == 1 && keep[0] == "ALL":
+	if len(keep) == 1 && keep[0] == "ALL" {
 		return nil, strslice.StrSlice{"ALL"}, nil
 	}
-	return strslice.StrSlice{"ALL"}, strslice.StrSlice(keep), nil
+	return strslice.StrSlice{"ALL"}, strslice.StrSlice(keep), []string{"no-new-privileges"}
 }

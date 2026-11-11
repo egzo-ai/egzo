@@ -92,8 +92,8 @@ type ResolvedAgent struct {
 	Inject      ResolvedInject    `yaml:"inject"`
 	// Ports are the declared ports by name; nil when the template declares none.
 	Ports map[string]ResolvedPort `yaml:"ports,omitempty" json:",omitempty"`
-	// Capabilities are the capabilities the container keeps, upper case without CAP_, sorted; ["ALL"] for all of them;
-	// nil for none, which also forbids gaining privileges (no-new-privileges).
+	// Capabilities are the capabilities the container keeps, upper case without CAP_, sorted; ["ALL"] for all of them (the
+	// only list without no-new-privileges); nil for none.
 	Capabilities []string `yaml:"capabilities,omitempty" json:",omitempty"`
 }
 
@@ -306,7 +306,7 @@ var knownCapabilities = map[string]bool{
 }
 
 // resolveCapabilities spells the capabilities an agent keeps as Docker does, without CAP_, and refuses a name that is
-// not one. ALL stands alone: it already means every other.
+// not one. A list with ALL is ALL.
 func resolveCapabilities(agent string, names []string, p *problems) []string {
 	if len(names) == 0 {
 		return nil
@@ -324,8 +324,8 @@ func resolveCapabilities(agent string, names []string, p *problems) []string {
 			out = append(out, capability)
 		}
 	}
-	if seen["ALL"] && len(out) > 1 {
-		p.addf("agent %q: capabilities: ALL already keeps every capability, list it alone", agent)
+	if seen["ALL"] {
+		return []string{"ALL"}
 	}
 	sort.Strings(out)
 	return out

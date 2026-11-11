@@ -226,10 +226,10 @@ agents:
 ### Capabilities
 
 `capabilities:` lists the Linux capabilities the agent's container keeps, by Docker's names (`SYS_ADMIN`, `NET_ADMIN`, with or
-without `CAP_`), or `[ALL]`. Without it, the default, the container drops them all and runs with `no-new-privileges`. With it, the
-container keeps those and runs without `no-new-privileges`: the agent still starts as your uid, and reaches them through a setuid
-program of its image such as `sudo`. It is what lets an agent run Docker inside its own sandbox on a sysbox engine
-([images](images.md#docker-inside-an-agent)); on sysbox only `[ALL]` is accepted, since sysbox gives such an agent all of them anyway.
+without `CAP_`), or `[ALL]`. Without it, the default, the container keeps none. The container runs with `no-new-privileges`
+unless the list is `[ALL]`: an agent starts as your uid, so with `[ALL]` a setuid program of its image such as `sudo` makes it
+root in its container, and with any other list the capabilities are only there for a process that already runs as root. With
+sysbox and a harness image with Docker inside, `[ALL]` gives an agent Docker in its own sandbox ([images](images.md#docker-inside-an-agent)).
 Read [the security model](security.md) first: on a rootful engine without sysbox, root in the container is root on the host.
 
 ### Ports

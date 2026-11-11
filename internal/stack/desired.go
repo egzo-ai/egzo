@@ -100,8 +100,8 @@ type ContainerSpec struct {
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
 	ReadonlyRootfs bool
-	// Capabilities are the capabilities the container keeps (config.ResolvedAgent.Capabilities). Empty drops them all and
-	// sets no-new-privileges; with any, the container may gain privileges, so a setuid program such as sudo can reach them.
+	// Capabilities are the capabilities the container keeps (config.ResolvedAgent.Capabilities). Only ALL lifts
+	// no-new-privileges (capabilityOptions).
 	Capabilities []string        `json:",omitempty"`
 	Identity     engine.Identity `json:"-"`
 }

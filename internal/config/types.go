@@ -223,7 +223,7 @@ type Agent struct {
 	// Ports are the ports the agent may serve, by name: "5173/http", "5432/tcp" or "5432/udp".
 	Ports map[string]string `yaml:"ports,omitempty"`
 	// Capabilities are the Linux capabilities the agent's container keeps, by Docker's names (SYS_ADMIN, NET_ADMIN, or ALL).
-	// Empty, the default, drops them all and forbids gaining privileges.
+	// Empty, the default, keeps none. Only ALL lifts no-new-privileges.
 	Capabilities []string `yaml:"capabilities,omitempty"`
 }
 
