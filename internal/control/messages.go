@@ -111,6 +111,7 @@ type Message struct {
 	Choices  []string  `json:"choices,omitempty"`
 	Time     time.Time `json:"time"`
 	Hops     int       `json:"-"`
+	Notice   string    `json:"-"` // which notice from egzo it is: noticeAccess or noticeUndelivered
 	Attempts int       `json:"-"`
 	Deadline time.Time `json:"-"`
 }
@@ -124,6 +125,7 @@ type messageData struct {
 	Outcome string   `json:"outcome,omitempty"`
 	Choices []string `json:"choices,omitempty"`
 	Key     string   `json:"key,omitempty"` // the sender's id for it: the same key from the same sender is the same message
+	Notice  string   `json:"notice,omitempty"`
 }
 
 // keyed is the index of what senders gave a key: sender and key -> message id.
@@ -163,7 +165,7 @@ func (s *store) index(event Event) {
 		}
 		m := &Message{
 			ID: event.ID, From: event.Actor, To: data.To, Kind: data.Kind, Text: event.Text, Re: data.Re,
-			State: stateQueued, Outcome: data.Outcome, Choices: data.Choices, Time: event.Time, Hops: data.Hops,
+			State: stateQueued, Outcome: data.Outcome, Choices: data.Choices, Time: event.Time, Hops: data.Hops, Notice: data.Notice,
 		}
 		if closed := s.messages[data.Re]; data.Kind == kindResolution && closed != nil {
 			m.ReKind = closed.Kind
@@ -392,6 +394,7 @@ type sendRequest struct {
 	Key                      string // a person's: a message with the same sender and key is not sent again
 	Choices                  []string
 	Interrupt                bool
+	Notice                   string // egzo's: which notice it is
 }
 
 // send creates a message after checking who it is for, its thread and the limits. It is the one way a
@@ -499,7 +502,7 @@ func (s *server) write(req sendRequest, hops int) (Message, Event, error) {
 	if kind == "" {
 		kind = kindRequest
 	}
-	data, _ := json.Marshal(messageData{To: req.To, Kind: kind, Re: req.Re, Hops: hops, Choices: req.Choices, Key: req.Key})
+	data, _ := json.Marshal(messageData{To: req.To, Kind: kind, Re: req.Re, Hops: hops, Choices: req.Choices, Key: req.Key, Notice: req.Notice})
 	id := newMessageID()
 	event, err := s.events.append(Event{Type: "message", Agent: involved(req.From, req.To), Actor: req.From, ID: id, Text: req.Text, Data: data})
 	if err != nil {

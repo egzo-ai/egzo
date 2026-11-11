@@ -253,6 +253,60 @@ def test_the_events_feed_carries_what_an_agent_says_to_a_user_and_the_user_answe
     assert result and (result[0]["To"], result[0]["Text"], result[0]["Outcome"]) == ("user:7", "deployed to staging", "done")
 
 
+def from_egzo(project, agent):
+    """The notices egzo sent an agent, oldest first: read from the project's events."""
+    events = [json.loads(line) for line in project.run("events").stdout.splitlines() if line.startswith("{")]
+    return [e for e in events if e["type"] == "message" and e.get("actor") == "egzo" and e["data"]["to"] == f"agent:{agent}"]
+
+
+def closed_by_egzo(project):
+    events = [json.loads(line) for line in project.run("events").stdout.splitlines() if line.startswith("{")]
+    return {e["id"]: e["data"]["outcome"] for e in events if e["type"] == "resolved" and e.get("actor") == "egzo"}
+
+
+def test_a_message_the_hub_could_not_deliver_is_told_to_the_agent_by_a_notice(linked, fake_hub, engine):
+    p, hub = linked.name, fake_hub
+    agent = Agent(engine, linked, "fromhub")
+    request = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="deploy it?", Key="chat-40")["ID"]
+    agent.get(request)
+    before = len(from_egzo(linked, "fromhub"))
+
+    # an update is a progress line: the question or the result that ends the request tells
+    code, body = agent.call("POST", f"/v1/messages/{request}/update", {"text": "building"})
+    assert code == 201, body
+    hub.must(p, "undelivered", Message=body["id"], Text="user 7 cannot be reached on Discord")
+    assert len(from_egzo(linked, "fromhub")) == before, "an update gets no notice"
+
+    # a question nobody will see is closed, and the agent is told
+    code, body = agent.call("POST", f"/v1/messages/{request}/ask", {"text": "to staging or production?", "choices": ["staging", "production"]})
+    assert code == 201, body
+    question = body["id"]
+    hub.must(p, "undelivered", Message=question, Text="user 7 cannot be reached on Discord")
+    (notice,) = from_egzo(linked, "fromhub")[before:]
+    text = notice["text"]
+    assert notice["data"]["kind"] == "request", "a notice is a request the agent resolves once read"
+    for said in (question, "user:7", "user 7 cannot be reached on Discord", "to staging or production?", "message"):
+        assert said in text, f"{said!r} not in {text!r}"
+    assert closed_by_egzo(linked).get(question) == "failed", "the agent does not wait for an answer that cannot come"
+    hub.must(p, "undelivered", Message=question, Text="user 7 cannot be reached on Discord")
+    assert len(from_egzo(linked, "fromhub")) == before + 1, "told twice, it is one notice"
+
+    # a result nobody saw stays the result: the agent is told, and sends it again if it matters
+    assert agent.resolve(request, "deployed to staging")[0] == 204
+    result = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == request])[0]["ID"]
+    hub.must(p, "undelivered", Message=result, Text="user 7 cannot be reached on Discord")
+    assert result in from_egzo(linked, "fromhub")[-1]["text"]
+    assert result not in closed_by_egzo(linked) and request not in closed_by_egzo(linked), "the request stays resolved, as the agent closed it"
+
+    # only an agent's message to a user, that exists, with a reason
+    assert hub.verb(p, "undelivered", Message=request, Text="x")["error"], "what a user said is not the agent's to resend"
+    assert hub.verb(p, "undelivered", Message="m" + "0" * 32, Text="x")["error"]
+    assert hub.verb(p, "undelivered", Message=question, Text="")["error"], "a notice says why"
+    code, body = agent.send("operator", "a word for the operator")
+    assert code == 201, body
+    assert hub.verb(p, "undelivered", Message=body["id"], Text="x")["error"], "the hub delivers to its users only"
+
+
 def test_the_events_feed_never_carries_what_agents_say_to_each_other_or_the_operator(linked, fake_hub, engine):
     p, hub = linked.name, fake_hub
     hub.must(p, "spawn", Template="web", Name="peer", Actor="user:7")

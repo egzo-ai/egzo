@@ -140,6 +140,10 @@ The hub relays what its users say to agents, and what agents say to them, for th
   queues: the hub drops the message.
 - **`resolve`** is a hub user answering a question, or closing a request, addressed to them: `Message`, `Actor`, `Text`, `Outcome`. A
   user answers only what is addressed to that user; the operator, at the CLI, answers anything.
+- **`undelivered`** is the hub saying that an agent's message to one of its users did not reach them: `Message`, and `Text`, why, in words
+  the hub chose for the agent. The agent gets a notice from `egzo` that names the message, its start and the reason, and says how to send
+  it again. A question or request is closed as `failed`; a result stays as the agent closed the request; an update gets no notice. Told
+  twice, it is one notice. Only an agent's message to a `user:` can be reported.
 - **The `events` feed** follows the control sidecar's event stream. It begins after `FeedStart.After`, the sequence number of the last
   event the hub has, so a link that was away resumes where the hub is and loses nothing. A hub that never read the feed says -1: only the
   events to come, and the first is a `start` event whose `Seq` says where that is, which the hub keeps like any other, so a feed opened

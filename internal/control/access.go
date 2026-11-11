@@ -72,11 +72,17 @@ func (s *server) forgetAccess(agent string) error {
 	return nil
 }
 
-// openNotices lists the notices from egzo an agent has not resolved.
+// The notices egzo sends an agent.
+const (
+	noticeAccess      = "access"      // its network access changed
+	noticeUndelivered = "undelivered" // a message it sent a person did not reach them
+)
+
+// openNotices lists the notices about its access an agent has not resolved.
 func (s *server) openNotices(agent string) []Message {
 	to := "agent:" + agent
 	return s.events.messagesOf(to, func(m Message) bool {
-		return m.To == to && m.From == egzoSender && m.Kind == kindRequest && m.State != stateResolved
+		return m.To == to && m.From == egzoSender && m.Notice == noticeAccess && m.Kind == kindRequest && m.State != stateResolved
 	})
 }
 
@@ -148,7 +154,7 @@ func (s *server) storeAccess(agent string, before access.Access, known bool, aft
 		return err
 	}
 	// a full inbox is not an error: the access is stored, the agent sees it at its next `access`
-	_, _, _ = s.send(sendRequest{From: egzoSender, To: "agent:" + agent, Text: text})
+	_, _, _ = s.send(sendRequest{From: egzoSender, To: "agent:" + agent, Text: text, Notice: noticeAccess})
 	return nil
 }
 

@@ -147,6 +147,10 @@ func TestTheWordingDependsOnWhoIsSpeaking(t *testing.T) {
 		{"a reply", []Message{{ID: "ma", From: "agent:reviewer", Kind: kindResolution}}, "egzo message ma is the reply to your earlier request: fetch it."},
 		{"an answer from a person", []Message{{ID: "ma", From: "operator", Kind: kindResolution}}, "egzo message ma is the reply to your earlier request: fetch it."},
 		{"several replies", []Message{{ID: "ma", From: "operator", Kind: kindResolution}, {ID: "mb", From: "agent:x", Kind: kindResolution}}, "egzo messages ma, mb are the replies to your earlier requests: fetch them."},
+		{"access", []Message{{ID: "ma", From: egzoSender, Kind: kindRequest, Notice: noticeAccess}}, "egzo message ma: your network access changed; fetch it."},
+		{"undelivered", []Message{{ID: "ma", From: egzoSender, Kind: kindRequest, Notice: noticeUndelivered}}, "egzo message ma: a message you sent a person did not reach them; fetch it."},
+		{"several undelivered", []Message{{ID: "ma", From: egzoSender, Kind: kindRequest, Notice: noticeUndelivered}, {ID: "mb", From: egzoSender, Kind: kindRequest, Notice: noticeUndelivered}},
+			"egzo messages ma, mb: messages you sent people did not reach them; fetch them."},
 		{"mixed", []Message{{ID: "ma", From: "agent:a", Kind: kindRequest}, {ID: "mb", From: "operator", Kind: kindRequest}, {ID: "mc", From: "agent:a", Kind: kindResolution}},
 			"check egzo message mb and handle the request for me. egzo message ma from another agent is waiting: fetch it and decide whether it fits your work. egzo message mc is the reply to your earlier request: fetch it."},
 	}

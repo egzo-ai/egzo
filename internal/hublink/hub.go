@@ -341,6 +341,11 @@ func (p *Peer) Resolve(ctx context.Context, message, actor, text, outcome string
 	return p.ask(ctx, Request{Verb: VerbResolve, Message: message, Actor: actor, Text: text, Outcome: outcome}, nil, nil)
 }
 
+// Undelivered tells the agent that its message to one of the hub's users did not reach them, and why.
+func (p *Peer) Undelivered(ctx context.Context, message, reason string) error {
+	return p.ask(ctx, Request{Verb: VerbUndelivered, Message: message, Text: reason}, nil, nil)
+}
+
 // Start starts an instance.
 func (p *Peer) Start(ctx context.Context, agent string) error {
 	return p.ask(ctx, Request{Verb: VerbStart, Agent: agent}, nil, nil)

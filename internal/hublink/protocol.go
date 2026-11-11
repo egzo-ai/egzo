@@ -117,6 +117,9 @@ const (
 	VerbSend = "send"
 	// VerbResolve is one of the hub's users answering a question, or closing a request, that is addressed to them.
 	VerbResolve = "resolve"
+	// VerbUndelivered is the hub saying that a message an agent sent one of its users did not reach them: Message, and Text, why, in words
+	// for the agent.
+	VerbUndelivered = "undelivered"
 )
 
 // The feeds a link pushes.
@@ -200,10 +203,10 @@ type Request struct {
 	Port      int    `json:",omitempty"` // forward
 	Workspace string `json:",omitempty"` // files
 	Instance  string `json:",omitempty"` // files: the instance whose worktree, for a git workspace
-	Text      string `json:",omitempty"` // send, resolve
+	Text      string `json:",omitempty"` // send, resolve; undelivered: why
 	Key       string `json:",omitempty"` // send: makes it idempotent, the platform's id of the message
 	Interrupt bool   `json:",omitempty"` // send
-	Message   string `json:",omitempty"` // resolve: the id of the question or request
+	Message   string `json:",omitempty"` // resolve: the id of the question or request; undelivered: of the agent's message
 	Outcome   string `json:",omitempty"` // resolve: done, declined or failed; "" is done
 }
 

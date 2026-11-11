@@ -683,8 +683,14 @@ sender out of anything typed (nothing a message contains can forge an origin or 
 the typed line a user's authority, and makes a retry safe because the announcement carries no content.
 
 ### The model
-- **Addresses:** `operator` (the CLI), `user:<id>` (a person, via the hub), `agent:<name>`, and `egzo`, which only sends: the
-  request that tells a running agent its access changed (`access`, below). Its announcement has words of its own; it is not rate-limited.
+- **Addresses:** `operator` (the CLI), `user:<id>` (a person, via the hub), `agent:<name>`, and `egzo`, which only sends notices: the
+  request that tells a running agent its access changed (`access`, below), and the one that tells it a message it sent a person did not
+  reach them (the hub's `undelivered` verb). Each kind of notice has an announcement of its own; they are not rate-limited.
+- **A message to a person that did not reach them:** the hub says so with the link's `undelivered` verb and a reason in words for the agent.
+  Control sends the agent a notice from `egzo`, keyed by the message, so a report made twice is one notice. It names the message, its
+  start and the reason, and says how to send it again with `message(to, re)`: the retry is the agent's. A question or request nobody will
+  see is closed as `failed`, so the agent does not wait for an answer that cannot come; a result stays as the agent closed the request; an
+  update gets no notice, since what ends the same request tells.
 - **A message** has an id (`m` + 32 random hex characters, unguessable: it is a capability), `from`, `to`, a
   `kind`, `text` (at most 16 KB), `re` (the id it answers or belongs to), `hops`, and for a question
   `choices` (a list of strings, for quick answers; unused for now).
@@ -733,6 +739,8 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 | request or question from an `agent` | `egzo message <id> from another agent is waiting: fetch it and decide whether it fits your work.` |
 | resolution (a result) | `egzo message <id> is the reply to your earlier request: fetch it.` |
 | resolution of a question (an answer) | `egzo message <id> answers your question on request <request id>: fetch it.` A resolution carries `re_kind` (the kind it closes) and, for an answer, `on` (the request the question was asked about). |
+| notice from `egzo`: access | `egzo message <id>: your network access changed; fetch it.` |
+| notice from `egzo`: undelivered | `egzo message <id>: a message you sent a person did not reach them; fetch it.` |
 | several of one kind | `check egzo messages <id1>, <id2> and handle each one.` (wording of the kind, ids listed) |
 
   A message pending when the harness starts is announced the same way once its TUI is ready.
