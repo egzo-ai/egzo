@@ -1,0 +1,13 @@
+#!/bin/sh
+# Starts the Docker daemon when this agent may become root (sudo works only when its template keeps capabilities), with its
+# socket in the agent's group, then runs the harness. Without it, or when the daemon cannot start (an engine whose runtime is
+# not sysbox), the harness starts all the same; the daemon's log is /var/log/dockerd.log.
+if sudo -n true 2>/dev/null; then
+	sudo -n sh -c "dockerd --group $(id -g) >/var/log/dockerd.log 2>&1 &"
+	tries=0
+	until docker version >/dev/null 2>&1 || [ "$tries" -ge 30 ]; do
+		tries=$((tries + 1))
+		sleep 1
+	done
+fi
+exec /usr/local/bin/egzo agent run -- "$@"

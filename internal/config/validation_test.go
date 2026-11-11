@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -234,4 +235,24 @@ func TestOpenCodeWithASubscriptionTokenIsWarnedAbout(t *testing.T) {
 			t.Errorf("claude-code takes a subscription token: %q", w)
 		}
 	}
+}
+
+func TestCapabilitiesAreSpelledAsDockerDoesAndAnUnknownOneIsRefused(t *testing.T) {
+	yaml := func(capabilities string) string {
+		return "agents:\n  a: { harness: custom, image: x, capabilities: " + capabilities + " }\n"
+	}
+	resolved, _ := mustResolve(t, t.TempDir(), yaml("[cap_net_admin, SYS_ADMIN, NET_ADMIN]"))
+	if got := resolved.Agents["a"].Capabilities; !slices.Equal(got, []string{"NET_ADMIN", "SYS_ADMIN"}) {
+		t.Errorf("capabilities = %v", got)
+	}
+	resolved, _ = mustResolve(t, t.TempDir(), yaml("[all]"))
+	if got := resolved.Agents["a"].Capabilities; !slices.Equal(got, []string{"ALL"}) {
+		t.Errorf("capabilities = %v", got)
+	}
+	resolved, _ = mustResolve(t, t.TempDir(), "agents:\n  a: { harness: custom, image: x }\n")
+	if got := resolved.Agents["a"].Capabilities; got != nil {
+		t.Errorf("an agent that lists none keeps %v", got)
+	}
+	wantProblems(t, t.TempDir(), yaml("[SYS_WIZARD]"), "SYS_WIZARD")
+	wantProblems(t, t.TempDir(), yaml("[ALL, NET_ADMIN]"), "ALL")
 }

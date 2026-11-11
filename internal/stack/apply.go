@@ -146,6 +146,7 @@ func createContainer(ctx context.Context, c *engine.Client, spec ContainerSpec, 
 		Init:           &spec.Init,
 		Resources:      container.Resources{NanoCPUs: spec.NanoCPUs, Memory: spec.Memory, MemorySwap: spec.MemorySwap},
 	}
+	host.CapDrop, host.CapAdd, host.SecurityOpt = capabilityOptions(spec.Capabilities)
 	if spec.PidsLimit > 0 {
 		limit := spec.PidsLimit
 		host.Resources.PidsLimit = &limit
@@ -540,4 +541,17 @@ func Age(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// capabilityOptions are the engine's options for the capabilities a container keeps. None: drop them all and forbid gaining
+// privileges. Some: drop all, add those, and allow gaining them, since an agent starts as its user and reaches them only
+// through a setuid program such as sudo. ALL is added alone, without the drop, which engines read differently.
+func capabilityOptions(keep []string) (drop, add strslice.StrSlice, security []string) {
+	switch {
+	case len(keep) == 0:
+		return strslice.StrSlice{"ALL"}, nil, []string{"no-new-privileges"}
+	case len(keep) == 1 && keep[0] == "ALL":
+		return nil, strslice.StrSlice{"ALL"}, nil
+	}
+	return strslice.StrSlice{"ALL"}, strslice.StrSlice(keep), nil
 }

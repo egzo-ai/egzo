@@ -9,7 +9,7 @@ REGISTRY ?= ghcr.io/egzo-ai
 # The Dockerfiles build on $BUILDPLATFORM, which only BuildKit sets; passing it keeps `docker build` working without buildx.
 BUILD_PLATFORM := --build-arg BUILDPLATFORM=linux/$(shell $(GO) env GOARCH)
 
-# The sidecar image, the harness base image built on it, and the harness images built on that. VERSION is also what the CLI looks for.
+# The sidecar image, the harness base image built on it, the harness images built on that, and their Docker variants. VERSION is also what the CLI looks for.
 image:
 	docker build $(BUILD_PLATFORM) --build-arg VERSION=$(VERSION) -t $(REGISTRY)/egzo:$(VERSION) .
 
@@ -17,6 +17,7 @@ images: image
 	docker build --build-arg EGZO_IMAGE=$(REGISTRY)/egzo:$(VERSION) -t $(REGISTRY)/egzo-harness-base:$(VERSION) harness/base
 	for harness in claude-code opencode codex; do \
 		docker build --build-arg BASE_IMAGE=$(REGISTRY)/egzo-harness-base:$(VERSION) -t $(REGISTRY)/egzo-harness-$$harness:$(VERSION) harness/$$harness || exit 1; \
+		docker build --build-arg BASE_IMAGE=$(REGISTRY)/egzo-harness-$$harness:$(VERSION) -t $(REGISTRY)/egzo-harness-$$harness-docker:$(VERSION) harness/docker || exit 1; \
 	done
 
 build:
