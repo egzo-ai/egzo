@@ -6,6 +6,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,8 +142,10 @@ func TestWhatAgentsAndUsersSayToEachOtherGoesInTheOutboxAndTheFeedResumesWhereTh
 	id := r.id("web")
 	bob := r.login("bob")
 	r.store.SetRole(ctx, id, bob.ID, rbac.Admin)
+	r.account(bob)
 	carol := r.login("carol") // no role on the project
-	_, _, wake, err := r.hub.Outbox(ctx, -1, 10)
+	r.account(carol)
+	_, start, wake, err := r.hub.Outbox(ctx, -1, 10) // after the accounts linked
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +160,7 @@ func TestWhatAgentsAndUsersSayToEachOtherGoesInTheOutboxAndTheFeedResumesWhereTh
 	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + carol.ID, Kind: "request", Text: "hello stranger", ID: "m4"})
 	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "user:" + bob.ID, To: "agent:coder-1", Kind: "resolution", Text: "staging", Re: "m1", ID: "m3"})
 
-	got, last, _, err := r.hub.Outbox(ctx, 0, 10)
+	got, last, _, err := r.hub.Outbox(ctx, start, 10)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("outbox = %+v, %v", got, err)
 	}
@@ -165,6 +168,10 @@ func TestWhatAgentsAndUsersSayToEachOtherGoesInTheOutboxAndTheFeedResumesWhereTh
 	if q.Project != id || q.Agent != "coder-1" || q.From != "agent:coder-1" || q.To != "user:"+bob.ID || q.Kind != "question" || q.Text != "where?\nstaging or prod" || len(q.Choices) != 2 {
 		t.Errorf("the question = %+v", q)
 	}
+	if q.Bridge != "discord" || q.Account != "d-"+bob.ID {
+		t.Errorf("the question goes to bob's account: %+v", q)
+	}
+	eventually(t, "carol's agent told", func() bool { return slices.Contains(web.Calls(), "undelivered m4 carol may not hear from this project") })
 	if a.Kind != "resolution" || a.From != "user:"+bob.ID || a.Re != "m1" || a.Seq != last || a.Seq <= q.Seq {
 		t.Errorf("the answer = %+v (last %d)", a, last)
 	}
@@ -174,7 +181,7 @@ func TestWhatAgentsAndUsersSayToEachOtherGoesInTheOutboxAndTheFeedResumesWhereTh
 	if fromNow, at, _, _ := r.hub.Outbox(ctx, -1, 10); len(fromNow) != 0 || at != last {
 		t.Errorf("from now: %+v at %d", fromNow, at)
 	}
-	if again, _, _, _ := r.hub.Outbox(ctx, last+100, 10); len(again) != 2 {
+	if again, _, _, _ := r.hub.Outbox(ctx, last+100, 10); len(again) != 4 { // the accounts linked too
 		t.Errorf("past the end is a database made anew: all of it, got %+v", again)
 	}
 	if seq, _ := r.store.EventCursor(ctx, id); seq != 5 {
@@ -186,6 +193,74 @@ func TestWhatAgentsAndUsersSayToEachOtherGoesInTheOutboxAndTheFeedResumesWhereTh
 	eventually(t, "the feed to open again", func() bool { return len(web.EventsAfters()) == 2 })
 	if afters := web.EventsAfters(); afters[0] != -1 || afters[1] != 5 {
 		t.Errorf("the events feed began after %v, want [-1 5]", afters)
+	}
+}
+
+func TestAMessageGoesToTheAccountLinkedLastAndWithNoneTheAgentIsTold(t *testing.T) {
+	r := newRig(t)
+	web := r.link("web", "coder")
+	id := r.id("web")
+	bob := r.login("bob")
+	r.store.SetRole(ctx, id, bob.ID, rbac.Admin)
+	_, start, _, _ := r.hub.Outbox(ctx, -1, 10)
+	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + bob.ID, Kind: "update", Text: "on it", ID: "m1"})
+	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + bob.ID, Kind: "question", Text: "where?", ID: "m2"})
+	eventually(t, "the agent told", func() bool { return slices.Contains(web.Calls(), "undelivered m2 bob has no chat account linked to the hub") })
+	for _, c := range web.Calls() {
+		if strings.HasPrefix(c, "undelivered m1") {
+			t.Errorf("an update is not told: %q", c)
+		}
+	}
+	if got, _, _, _ := r.hub.Outbox(ctx, start, 10); len(got) != 0 {
+		t.Errorf("no bridge carries it: %+v", got)
+	}
+
+	r.account(bob)
+	for _, bridge := range []string{"slack"} { // a second account, linked last
+		code, _, err := r.hub.BridgeCode(ctx, bridge, "s-bob", "bob")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.hub.ConfirmBridgeCode(ctx, bob, code); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, start, _, _ = r.hub.Outbox(ctx, -1, 10)
+	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + bob.ID, Kind: "request", Text: "may I?", ID: "m3"})
+	got, _, _, _ := r.hub.Outbox(ctx, start, 10)
+	if len(got) != 1 || got[0].Bridge != "slack" || got[0].Account != "s-bob" {
+		t.Fatalf("outbox %+v", got)
+	}
+
+	// the bridge it went to says it could not deliver it: the agent is told, in the hub's words
+	if err := r.hub.Undelivered(ctx, "discord", "m3", "d-"+bob.ID, UndeliveredRefused, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a bridge it did not go to: %v", err)
+	}
+	if err := r.hub.Undelivered(ctx, "slack", "m3", "s-someone", UndeliveredRefused, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another account: %v", err)
+	}
+	if err := r.hub.Undelivered(ctx, "slack", "m-none", "s-bob", UndeliveredRefused, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no such message: %v", err)
+	}
+	for code, said := range map[string]string{
+		UndeliveredUnreachable: "bob cannot be reached on Slack",
+		UndeliveredNoPlace:     "there is nowhere to reach bob on Slack",
+		UndeliveredUnavailable: "Slack did not take it in time",
+		UndeliveredRefused:     "Slack refused it",
+		"something-new":        "Slack refused it",
+	} {
+		if err := r.hub.Undelivered(ctx, "slack", "m3", "s-bob", code, "403 Missing Access"); err != nil {
+			t.Fatal(err)
+		}
+		if calls := web.Calls(); calls[len(calls)-1] != "undelivered m3 "+said {
+			t.Errorf("%s: told %q", code, calls[len(calls)-1])
+		}
+	}
+	entries, _ := r.store.AuditOf(ctx, id, 100)
+	if !slices.ContainsFunc(entries, func(e store.AuditEntry) bool {
+		return e.Action == "agent.undelivered" && strings.Contains(e.Detail, "403 Missing Access")
+	}) {
+		t.Error("what the platform said is in the audit log")
 	}
 }
 

@@ -108,7 +108,8 @@ type BridgeEvent struct {
 	Text    string   `json:"text,omitempty"`
 	Choices []string `json:"choices,omitempty"`
 	Outcome string   `json:"outcome,omitempty"`
-	// A change's: the user it is about, and the account linked or unlinked.
+	// A message to a user: the bridge that carries it, and the person's account there. A change's: the user it is about, and the account
+	// linked or unlinked.
 	User    string `json:"user,omitempty"`
 	Bridge  string `json:"bridge,omitempty"`
 	Account string `json:"account,omitempty"`
@@ -133,19 +134,39 @@ const outboxRetention = 7 * 24 * time.Hour
 const cursorEvery = 10 * time.Second
 
 // handleEvent is one event of a project's events feed. What an agent and a user said to each other goes in the outbox for the bridges, and
-// the cursor moves past the event in the same step. An error is an event that was not kept: the feed must not go past it.
+// the cursor moves past the event in the same step. A message to a user goes to one bridge: the one of the account they linked last. With
+// none, or to someone who may not hear from the project, it is not kept, and the agent is told. An error is an event that was not kept:
+// the feed must not go past it.
 func (h *Hub) handleEvent(ctx context.Context, project string, event links.Event) error {
 	var body []byte
 	keep := forUsers(event)
+	var bridge, account, why string
 	if keep {
 		var err error
 		if keep, err = h.mayReceive(ctx, project, event); err != nil {
 			return err
 		}
+		if !keep {
+			why = UndeliveredNoAccess
+		}
+	}
+	if user, ok := strings.CutPrefix(event.To, "user:"); keep && ok {
+		a, err := h.store.LatestBridgeAccount(ctx, user)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			keep, why = false, UndeliveredNoAccount
+		case err != nil:
+			return err
+		default:
+			bridge, account = a.Bridge, a.ExternalID
+		}
+	}
+	if why != "" {
+		h.notDelivered(project, event, why)
 	}
 	if keep {
 		body, _ = json.Marshal(BridgeEvent{Type: EventMessage, Time: event.Time, Project: project, Agent: event.Agent, ID: event.ID, From: event.Actor, To: event.To,
-			Kind: event.Kind, Re: event.Re, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome})
+			Kind: event.Kind, Re: event.Re, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome, Bridge: bridge, Account: account})
 	}
 	if body == nil && event.Type != "start" && !h.cursorDue(project) {
 		return nil

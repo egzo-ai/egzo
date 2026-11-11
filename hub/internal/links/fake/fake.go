@@ -294,6 +294,17 @@ func (e *Engine) Resolve(ctx context.Context, message, actor, text, outcome stri
 	return nil
 }
 
+// Undelivered is the hub telling an agent that its message did not reach a person.
+func (e *Engine) Undelivered(ctx context.Context, message, reason string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.dropped(); err != nil {
+		return err
+	}
+	e.record("undelivered %s %s", message, reason)
+	return nil
+}
+
 // AuditFollows lists the since of every connection, in order.
 func (e *Engine) AuditFollows() []time.Time {
 	e.mu.Lock()

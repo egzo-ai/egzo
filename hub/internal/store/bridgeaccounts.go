@@ -128,6 +128,18 @@ func (s *Store) BridgeAccountsOf(ctx context.Context, userID string) ([]BridgeAc
 	return scanBridgeAccounts(s.db.QueryContext(ctx, bridgeAccountSelect+`WHERE b.user_id = ? ORDER BY b.bridge, b.linked_at`, userID))
 }
 
+// LatestBridgeAccount is the account a user linked last, which carries what agents say to them; ErrNotFound when they linked none.
+func (s *Store) LatestBridgeAccount(ctx context.Context, userID string) (BridgeAccount, error) {
+	list, err := scanBridgeAccounts(s.db.QueryContext(ctx, bridgeAccountSelect+`WHERE b.user_id = ? ORDER BY b.linked_at DESC LIMIT 1`, userID))
+	if err != nil {
+		return BridgeAccount{}, err
+	}
+	if len(list) == 0 {
+		return BridgeAccount{}, ErrNotFound
+	}
+	return list[0], nil
+}
+
 // BridgeAccountOf is the account a bridge names, ErrNotFound when nobody linked it.
 func (s *Store) BridgeAccountOf(ctx context.Context, bridge, externalID string) (BridgeAccount, error) {
 	list, err := scanBridgeAccounts(s.db.QueryContext(ctx, bridgeAccountSelect+`WHERE b.bridge = ? AND b.external_id = ?`, bridge, externalID))

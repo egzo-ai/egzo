@@ -218,9 +218,19 @@ func TestTheStreamGivesWhatComesAndABridgeResumesAfterTheLastItHandled(t *testin
 	if m := next(t, again); m.ID != "m3" {
 		t.Errorf("resumed with %+v, want the update", m)
 	}
-	_, slack := r.open(secret+"-slack", "0") // what came before, the account linked, is no message and is skipped here
-	if m := next(t, slack); m.ID != "m1" {
-		t.Errorf("another bridge reads from its own place: %+v", m)
+	// another bridge reads from its own place, and never what goes to a person on the first: only what is everybody's, such as what a
+	// person said to an agent
+	_, slack := r.open(secret+"-slack", "0")
+	r.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "user:" + r.admin.ID, To: "agent:coder-1", Kind: "resolution", Text: "staging", Re: "m1", ID: "m4"})
+	for {
+		m := next(t, slack)
+		if m.Type != hub.EventMessage {
+			continue // the account linked
+		}
+		if m.ID != "m4" {
+			t.Errorf("slack read %+v", m)
+		}
+		break
 	}
 }
 
@@ -304,5 +314,44 @@ func TestABridgeAsksWhetherAgentsAreStillInTheirProjects(t *testing.T) {
 	}
 	if code := r.call("POST", "/presence", map[string]any{"agents": many}, nil); code != http.StatusBadRequest {
 		t.Errorf("too many = %d", code)
+	}
+}
+
+func TestABridgeSaysAMessageItWasGivenDidNotReachThePersonAndTheAgentIsTold(t *testing.T) {
+	r := newRig(t)
+	_, lines := r.open(secret, "-1")
+	r.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + r.admin.ID, Kind: "question", Text: "staging?", ID: "m1"})
+	if m := next(t, lines); m.ID != "m1" || m.Bridge != "discord" || m.Account != "d-admin" {
+		t.Fatalf("read %+v", m)
+	}
+	report := func(token, id string, body any) int {
+		data, _ := json.Marshal(body)
+		req, _ := http.NewRequest("POST", r.server.URL+Prefix+"/messages/"+id+"/undelivered", strings.NewReader(string(data)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, c := range []struct {
+		token, id string
+		body      any
+		want      int
+	}{
+		{secret, "m1", map[string]string{"account": "d-admin"}, http.StatusBadRequest},
+		{secret, "m1", map[string]string{"account": "d-other", "code": "refused"}, http.StatusNotFound},
+		{secret + "-slack", "m1", map[string]string{"account": "d-admin", "code": "refused"}, http.StatusNotFound},
+		{"nope", "m1", map[string]string{"account": "d-admin", "code": "refused"}, http.StatusUnauthorized},
+		{secret, "m1", map[string]string{"account": "d-admin", "code": "person-unreachable", "detail": "50007"}, http.StatusNoContent},
+	} {
+		if got := report(c.token, c.id, c.body); got != c.want {
+			t.Errorf("%v: %d, want %d", c.body, got, c.want)
+		}
+	}
+	calls := r.web.Calls()
+	if last := calls[len(calls)-1]; last != "undelivered m1 admin cannot be reached on Discord" {
+		t.Errorf("told %q", last)
 	}
 }

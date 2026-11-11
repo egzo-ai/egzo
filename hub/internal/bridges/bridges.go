@@ -81,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+Prefix+"/messages", s.authed(s.stream))
 	mux.HandleFunc("POST "+Prefix+"/messages", s.authed(s.deliver))
+	mux.HandleFunc("POST "+Prefix+"/messages/{id}/undelivered", s.authed(s.undelivered))
 	mux.HandleFunc("POST "+Prefix+"/codes", s.authed(s.code))
 	mux.HandleFunc("GET "+Prefix+"/accounts", s.authed(s.accounts))
 	mux.HandleFunc("GET "+Prefix+"/agents", s.authed(s.agents))
@@ -144,6 +145,9 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, bridge string) {
 		}
 		after = at
 		for _, m := range messages {
+			if m.Type == hub.EventMessage && m.Bridge != "" && m.Bridge != bridge {
+				continue // a message to a person goes to one bridge, the one of the account they linked last
+			}
 			if err := encoder.Encode(m); err != nil {
 				return
 			}
@@ -187,6 +191,35 @@ func (s *Server) deliver(w http.ResponseWriter, r *http.Request, bridge string) 
 		return
 	}
 	answer(w, http.StatusOK, map[string]string{"id": id})
+}
+
+// Undelivered is what a bridge says of a message it could not deliver: the account it was for, a code (hub.Undelivered*: what happened,
+// on any platform), and detail, the platform's own words, for the audit log.
+type Undelivered struct {
+	Account string `json:"account"`
+	Code    string `json:"code"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// undelivered takes a bridge's word that a message the hub gave it did not reach the person. The agent is told.
+func (s *Server) undelivered(w http.ResponseWriter, r *http.Request, bridge string) {
+	var in Undelivered
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxIn)).Decode(&in); err != nil || !validAccount(in.Account) || in.Code == "" || len(in.Code) > 64 {
+		answer(w, http.StatusBadRequest, map[string]string{"error": "expected {account, code, detail}"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), deliverLimit)
+	defer cancel()
+	err := s.hub.Undelivered(ctx, bridge, r.PathValue("id"), in.Account, in.Code, in.Detail)
+	switch {
+	case errors.Is(err, hub.ErrNotFound):
+		answer(w, http.StatusNotFound, map[string]string{"error": "no such message for this bridge"})
+	case err != nil:
+		s.log.Warn("tell an agent that its message was not delivered", "bridge", bridge, "err", err)
+		answer(w, http.StatusServiceUnavailable, map[string]string{"error": "the agent could not be told now"})
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // wellFormed checks the shape of what a bridge posts; the hub checks the person.

@@ -42,10 +42,13 @@ the same chat account again moves it to whoever confirms last.
   - A message with a hub user at one end goes into the hub's **outbox**: an agent asking a user a question, answering their request, or
     telling them how it goes, or what a user said. A message for a user who holds no role on the project, or is disabled, stays out:
     an agent addresses anybody, and only the project's people hear from it.
+  - **A message to a person goes to one bridge:** the one of the chat account they linked last. Later, the hub may let people choose. A
+    person with no linked account gets nothing, and the agent is told.
   - The project's cursor moves past the event in the same step. An event the hub could not keep holds the feed, and the hub tries it
     again: it never goes past one. Events with nothing for the outbox move the cursor at most every ten seconds; reading them again costs
     nothing.
   - The outbox keeps a message for a week. What agents say to each other, or to the operator, never leaves the project.
+- **Not delivered.** The agent is told by a notice from egzo, which says why and how to send it again ([undelivered](#not-delivered)).
 - **In.** A bridge posts what a user says, with the hub user id the person is linked to. The hub checks it, then hands it to the project's
   link with `send` (or `resolve`, for an answer) as `user:<id>`.
 
@@ -75,11 +78,13 @@ dropped connection sends nothing twice. An answer names the question it answers 
     with `-1`.
   - A `seq` past the end means the hub's database was made anew, so the bridge gets everything the outbox has.
 - **Keepalives.** A quiet stream sends an empty line every 15 seconds.
-- **Every bridge reads everything,** and picks what it relays to which place.
+- **A message to a person** comes only to the bridge that carries it, with `bridge` and `account`, the person's account there. A message
+  from a person comes to every bridge.
 
 ```json
 {"seq": 42, "time": "...", "project": "p1a2b3", "agent": "coder-1", "id": "m...", "from": "agent:coder-1", "to": "user:u7",
- "kind": "question", "re": "m...", "text": "staging or production?", "choices": ["staging", "production"]}
+ "kind": "question", "re": "m...", "text": "staging or production?", "choices": ["staging", "production"], "bridge": "discord",
+ "account": "<the platform's id for the person>"}
 ```
 
 `kind` is `request`, `question`, `resolution` (with `outcome`) or `update`.
@@ -110,6 +115,7 @@ The other calls:
 | `GET /bridge/v1/agents?account=` | the agents the person may chat with | `[{project, project_name, agent, template, state, admin}]`, 403 for an account nobody linked |
 | `POST /bridge/v1/may-add` `{account, project, agent}` | may the person add the agent to a place: an admin of its project | `{allowed}` |
 | `POST /bridge/v1/presence` `{agents: [{project, agent}]}` | is each agent still in its project, at most 1000 per call | `{agents: [{project, agent, state}]}` |
+| `POST /bridge/v1/messages/{id}/undelivered` `{account, code, detail}` | a message the bridge was given did not reach the person ([below](#not-delivered)) | 204; 404 for a message not given to this bridge for that account; 503 when the agent cannot be told now |
 
 **Presence.** Re-creating an agent (`egzo agent rm`, then `egzo agent spawn` with the same name) removes it, so `agent.removed` cannot
 tell a removal from a re-creation. A bridge keeps an agent's places for a while after it left, and asks `presence` from time to time:
@@ -119,6 +125,38 @@ tell a removal from a re-creation. A bridge keeps an agent's places for a while 
 - `unknown`: the hub has not heard from the project since it started. Ask again later; do not take it as gone.
 
 The hub answers from what each project's link last pushed, and asks no link.
+
+## Not delivered
+
+Bridges are the only way people read agents' messages, so a message that does not reach its person is told to the agent: a notice from
+egzo that names the message, says why, and how to send it again. The retry is the agent's. A question or request is closed as `failed`;
+a result stays; an update gets no notice ([messages](../DESIGN.md#the-model)).
+
+The codes say what happened, never on which platform: every bridge uses the same. The hub writes what the agent reads, with the person's
+hub name and the platform's name from the bridge's (`discord` is Discord). `detail`, the platform's own words, goes to the audit log
+(`agent.undelivered`), never to the agent. A code the hub does not know is read as `refused`.
+
+| Code | Set by | What happened | The agent reads |
+|---|---|---|---|
+| `no-account` | hub | the person linked no chat account | joe has no chat account linked to the hub |
+| `no-access` | hub | the person holds no role on the project, or is disabled | joe may not hear from this project |
+| `person-unreachable` | bridge | the platform will not let the bot reach the person: DMs off, blocked, gone | joe cannot be reached on Discord |
+| `no-place` | bridge | the bridge has nowhere to put it | there is nowhere to reach joe on Discord |
+| `refused` | bridge | the platform refused it for good: permissions, a deleted channel, too long | Discord refused it |
+| `unavailable` | bridge | the platform did not take it within the bridge's retry window | Discord did not take it in time |
+
+### What every bridge does
+
+- **Where an agent's message to a person goes:**
+  1. a reply to the message it is about, if the person was part of it (they wrote it, or it was posted to them);
+  2. otherwise where the person last talked to that agent, in a place the agent is still in;
+  3. otherwise the platform's direct channel to the person;
+  4. otherwise, report `no-place`.
+
+  Never to another place just because the agent is there too: the person may not be.
+- **Answers:** only the person a question is for answers it.
+- **Failures:** report one within a bounded time, or never; silence is delivered. Retry what may succeed (the network, the platform's own
+  errors) idempotently, if the platform allows it, and never what it refused for good: platforms punish that.
 
 ## Trust
 

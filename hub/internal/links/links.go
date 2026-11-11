@@ -42,6 +42,8 @@ type Engine interface {
 	SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error)
 	// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done.
 	Resolve(ctx context.Context, message, actor, text, outcome string) error
+	// Undelivered tells the agent that its message to one of the hub's users did not reach them, and why, in words for the agent.
+	Undelivered(ctx context.Context, message, reason string) error
 }
 
 // Conn is a link that has proved its key: the project's verbs, and the connection they travel on.
