@@ -47,6 +47,10 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("discord: %d %s (code %d)", e.Status, e.Message, e.Code)
 }
 
+// ErrCodeCannotMessageUser is Discord's code for a DM the person does not take: they turned off DMs from server members, or share no
+// server with the bot.
+const ErrCodeCannotMessageUser = 50007
+
 // ErrTooManyInvalid is returned instead of sending a request once the client has made too many invalid ones: Discord would ban it.
 var ErrTooManyInvalid = errors.New("discord: too many invalid requests in the last 10 minutes, holding back")
 
@@ -479,6 +483,12 @@ func (c *REST) CreateMessage(ctx context.Context, channel Snowflake, m MessageCr
 		body = mp
 	}
 	return out, c.Do(ctx, http.MethodPost, "/channels/"+string(channel)+"/messages", body, &out)
+}
+
+// CreateDM opens the bot's DM channel with a user, or returns the one it has.
+func (c *REST) CreateDM(ctx context.Context, user Snowflake) (Channel, error) {
+	var out Channel
+	return out, c.Do(ctx, http.MethodPost, "/users/@me/channels", map[string]any{"recipient_id": user}, &out)
 }
 
 func (c *REST) EditMessage(ctx context.Context, channel, message Snowflake, m MessageCreate) (Message, error) {

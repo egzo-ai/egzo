@@ -18,6 +18,7 @@ type Snowflake string
 const (
 	IntentGuilds         = 1 << 0
 	IntentGuildMessages  = 1 << 9
+	IntentDirectMessages = 1 << 12
 	IntentMessageContent = 1 << 15 // privileged: enabled in the Developer Portal
 )
 
@@ -61,6 +62,7 @@ type MessageReference struct {
 // Channel types the bridge cares about.
 const (
 	ChannelText          = 0
+	ChannelDM            = 1
 	ChannelPublicThread  = 11
 	ChannelPrivateThread = 12
 )
@@ -116,9 +118,18 @@ type Interaction struct {
 	Token         string          `json:"token"`
 	GuildID       Snowflake       `json:"guild_id,omitempty"`
 	ChannelID     Snowflake       `json:"channel_id,omitempty"`
-	Member        *Member         `json:"member,omitempty"`
+	Member        *Member         `json:"member,omitempty"`  // in a guild
+	User          *User           `json:"user,omitempty"`    // in a DM
 	Message       *Message        `json:"message,omitempty"` // the message a component is on
 	Data          InteractionData `json:"data"`
+}
+
+// Person is who made the interaction: a member in a guild, a user in a DM. Nil if Discord said neither.
+func (i Interaction) Person() *User {
+	if i.Member != nil && i.Member.User != nil {
+		return i.Member.User
+	}
+	return i.User
 }
 
 // InteractionData is what the interaction carries: the command and its options, or the component and its values.
