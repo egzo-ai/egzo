@@ -231,7 +231,8 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 		result, err := peer.SendMessage(ctx, q.Agent, q.Actor, q.Text, q.Key, q.Interrupt)
 		return result, steps, err
 	case hublink.VerbResolve:
-		return nil, steps, peer.Resolve(ctx, q.Message, q.Actor, q.Text, q.Outcome)
+		result, err := peer.Resolve(ctx, q.Message, q.Actor, q.Text, q.Outcome, q.Key)
+		return result, steps, err
 	case hublink.VerbUndelivered:
 		return nil, steps, peer.Undelivered(ctx, q.Message, q.Text)
 	case hublink.VerbWorkspaces:

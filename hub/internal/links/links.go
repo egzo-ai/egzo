@@ -40,8 +40,9 @@ type Engine interface {
 	// SendMessage is what one of the hub's users said to an agent: actor is "user:<id>", and key the chat platform's id for the message,
 	// which makes it idempotent.
 	SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error)
-	// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done.
-	Resolve(ctx context.Context, message, actor, text, outcome string) error
+	// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done. key, the chat platform's
+	// id for the answer, makes it idempotent as for SendMessage. Resolved.Already says the user had answered before: nothing changed.
+	Resolve(ctx context.Context, message, actor, text, outcome, key string) (Resolved, error)
 	// Undelivered tells the agent that its message to one of the hub's users did not reach them, and why, in words for the agent.
 	Undelivered(ctx context.Context, message, reason string) error
 }
@@ -81,6 +82,7 @@ type (
 	Verdict       = hublink.Verdict
 	Handlers      = hublink.Handlers
 	Sent          = hublink.Sent
+	Resolved      = hublink.Resolved
 )
 
 // AuditBacklog is how many lines of a proxy's log a link reads first when the hub has no time to start from.

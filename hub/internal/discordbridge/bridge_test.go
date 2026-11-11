@@ -211,7 +211,7 @@ func TestAPersonLinksAddsAnAgentTalksToItAndAnswersItsQuestionWithAButton(t *tes
 	// joe mentions the role: the agent gets it, as joe's hub user
 	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "100", ChannelID: room, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
 		Content: "<@&" + roleID + "> deploy it", MentionRoles: []discord.Snowflake{discord.Snowflake(roleID)}})
-	eventually(t, "the message to reach the agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" 100")) == 1 })
+	eventually(t, "the message to reach the agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" discord:100")) == 1 })
 	w.recorded("100") // where the agent's answer goes
 
 	// the agent asks joe a question: it comes back as a reply to joe's message, with buttons, pinging joe only
@@ -270,7 +270,7 @@ func TestAPersonLinksAddsAnAgentTalksToItAndAnswersItsQuestionWithAButton(t *tes
 	w.web.SetAgent(links.Agent{Name: "coder-1", Template: "coder", State: "running", Actor: "operator", Created: time.Now()})
 	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "103", ChannelID: room, GuildID: guild, Author: discord.User{ID: "7", Username: "joe"},
 		Content: "<@&" + roleID + "> welcome back", MentionRoles: []discord.Snowflake{discord.Snowflake(roleID)}})
-	eventually(t, "the message to reach the new agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" 103")) == 1 })
+	eventually(t, "the message to reach the new agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" discord:103")) == 1 })
 	w.gone("coder-1", false)
 	if deleted := w.discord.Requests("DELETE /guilds/" + guild + "/roles/"); len(deleted) != 0 {
 		t.Errorf("a role was deleted: %v", deleted)
@@ -383,7 +383,7 @@ func (w *world) talks(id, channel, role string) {
 	w.t.Helper()
 	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: discord.Snowflake(id), ChannelID: discord.Snowflake(channel), GuildID: guild,
 		Author: discord.User{ID: "7", Username: "joe"}, Content: "<@&" + role + "> hi", MentionRoles: []discord.Snowflake{discord.Snowflake(role)}})
-	eventually(w.t, "the message to reach the agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" "+id)) == 1 })
+	eventually(w.t, "the message to reach the agent", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" discord:"+id)) == 1 })
 	w.recorded(id)
 }
 
@@ -561,6 +561,39 @@ func TestOnlyThePersonAskedAnswersAQuestion(t *testing.T) {
 	}
 }
 
+func TestAClickTheProjectDidNotConfirmIsSentAgainAndASecondClickSaysItWasAnsweredAlready(t *testing.T) {
+	w := setupWith(t, setupOptions{config: func(c *discordbridge.Config) { c.DeliverFor, c.RetryBase = 2*time.Second, 20*time.Millisecond }})
+	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
+	role := w.linked(joe)
+	w.talks("600", room, role)
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "question",
+		Text: "staging or production?", Re: "m00000000000000000000000000000001", ID: "mq", Choices: []string{"staging", "production"}})
+	posted := w.request("the question", "POST /channels/"+room+"/messages")
+	var sent struct{ ID string }
+	_ = json.Unmarshal(posted.Response, &sent)
+	w.recorded(sent.ID)
+
+	w.web.LoseReplies(1)
+	w.interaction("601", discord.InteractionComponent, map[string]any{"custom_id": "egzo:c:0", "component_type": 2}, joe, &discord.Message{ID: discord.Snowflake(sent.ID)})
+	var said struct{ Content string }
+	_ = w.request("the click answer", "PATCH /webhooks/2/tok-601/messages/@original").JSON(&said)
+	if said.Content != "You answered **coder-1**: staging" {
+		t.Errorf("the click said %q, want that it was answered", said.Content)
+	}
+	if answers := w.calls("resolve mq user:" + w.admin.ID + " staging discord:601"); len(answers) != 1 {
+		t.Errorf("the project got %v, want the answer once", answers)
+	}
+
+	w.interaction("602", discord.InteractionComponent, map[string]any{"custom_id": "egzo:c:1", "component_type": 2}, joe, &discord.Message{ID: discord.Snowflake(sent.ID)})
+	_ = w.request("the second click's answer", "PATCH /webhooks/2/tok-602/messages/@original").JSON(&said)
+	if said.Content != "You already answered **coder-1**: an answer is final." {
+		t.Errorf("the second click said %q", said.Content)
+	}
+	if answers := w.calls("resolve mq"); len(answers) != 1 {
+		t.Errorf("answers %v, want one", answers)
+	}
+}
+
 func TestSayIsAPublicMessageWhatTheAgentAnswersRepliesToIt(t *testing.T) {
 	w := setup(t)
 	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
@@ -577,7 +610,7 @@ func TestSayIsAPublicMessageWhatTheAgentAnswersRepliesToIt(t *testing.T) {
 	if deferral.Type != discord.ResponseDeferredMessage || deferral.Data.Flags&discord.Ephemeral != 0 {
 		t.Errorf("say is answered in public: %+v", deferral)
 	}
-	eventually(t, "the message", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" 601")) == 1 })
+	eventually(t, "the message", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" discord:601")) == 1 })
 	original := w.request("the answer", "PATCH /webhooks/2/tok-601/messages/@original")
 	var shown struct{ ID string }
 	_ = json.Unmarshal(original.Response, &shown)

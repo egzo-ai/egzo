@@ -90,7 +90,7 @@ $ egzo message reply m3f... "No, skip it" --outcome declined
 ```
 
 A message to a person is not typed into any terminal; it waits here until answered. The answer goes back to the
-agent as a reply, announced in its terminal like any message.
+agent as a reply, announced in its terminal like any message. An answer is final: replying again is refused.
 
 ## What you see in `egzo ps`
 

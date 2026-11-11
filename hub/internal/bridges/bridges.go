@@ -42,11 +42,13 @@ var projectID = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 
 // Inbound is what a bridge posts: a user's message to an agent, or their answer to what the agent asked.
 type Inbound struct {
-	Project   string `json:"project"`
-	Agent     string `json:"agent"`
-	Account   string `json:"account"` // the person's account on the platform, which they linked to a hub user
-	Text      string `json:"text"`
-	Key       string `json:"key,omitempty"` // the platform's id for the message: the same key is the same message
+	Project string `json:"project"`
+	Agent   string `json:"agent"`
+	Account string `json:"account"` // the person's account on the platform, which they linked to a hub user
+	Text    string `json:"text"`
+	// Key is the platform's id for the message, or for the answer (the click, the reply): the same key with the same message is a retry,
+	// and with another one a mistake. It is required, at most maxKey printable characters.
+	Key       string `json:"key,omitempty"`
 	Interrupt bool   `json:"interrupt,omitempty"`
 	Answer    string `json:"answer,omitempty"` // the id of the question, or request, this answers
 	Outcome   string `json:"outcome,omitempty"`
@@ -170,6 +172,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, bridge string) {
 }
 
 // deliver takes one message from a bridge. It answers its id, or that it was not delivered and never why: the hub's audit log says why.
+// Two answers say more, and tell nothing a person does not know: 409 "already answered", to the person who answered, and 504 "not
+// confirmed", a project that did not answer in time, which may have taken it; sent again with the same key, it is the same message.
 func (s *Server) deliver(w http.ResponseWriter, r *http.Request, bridge string) {
 	var in Inbound
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxIn)).Decode(&in); err != nil || !wellFormed(in) {
@@ -181,6 +185,15 @@ func (s *Server) deliver(w http.ResponseWriter, r *http.Request, bridge string) 
 	defer cancel()
 	id, err := s.hub.Deliver(ctx, in.Project, in.Agent, hub.Inbound{Via: bridge, Account: in.Account, Text: in.Text, Key: in.Key,
 		Interrupt: in.Interrupt, Answer: in.Answer, Outcome: in.Outcome})
+	if errors.Is(err, hub.ErrAnsweredAlready) { // only ever the person who answered: it tells them nothing new
+		answer(w, http.StatusConflict, map[string]string{"error": "already answered"})
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil && r.Context().Err() == nil {
+		// The project did not answer in time: it may have taken the message. The bridge may send it again with the same key.
+		answer(w, http.StatusGatewayTimeout, map[string]string{"error": "not confirmed"})
+		return
+	}
 	if err != nil {
 		status := http.StatusForbidden
 		var offline hub.OfflineError
@@ -225,15 +238,22 @@ func (s *Server) undelivered(w http.ResponseWriter, r *http.Request, bridge stri
 // wellFormed checks the shape of what a bridge posts; the hub checks the person.
 func wellFormed(in Inbound) bool {
 	return projectID.MatchString(in.Project) && corenames.Instance(in.Agent) && validAccount(in.Account) &&
-		strings.TrimSpace(in.Text) != "" && (in.Answer != "" || in.Key != "")
+		strings.TrimSpace(in.Text) != "" && printable(in.Key, maxKey)
 }
 
+// maxKey is the longest key a bridge gives: the hub puts the bridge's name (at most 32 characters) and a colon before it, and a project
+// takes keys of up to 128.
+const maxKey = 95
+
 // validAccount is a platform's id for a person, as a bridge names it.
-func validAccount(account string) bool {
-	if account == "" || len(account) > 64 {
+func validAccount(account string) bool { return printable(account, 64) }
+
+// printable is an id a bridge gives, a person's account or a key: 1 to max characters, none a space or a control character.
+func printable(id string, max int) bool {
+	if id == "" || len(id) > max {
 		return false
 	}
-	for _, r := range account {
+	for _, r := range id {
 		if r <= 0x20 || r == 0x7f {
 			return false
 		}

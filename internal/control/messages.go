@@ -104,16 +104,19 @@ type Message struct {
 	Re   string `json:"re,omitempty"`
 	// ReKind is, for a resolution, the kind of the message it closes (request or question), and On, for the answer to a
 	// question, the request the question was asked about: the reader knows an answer from a result.
-	ReKind   string    `json:"re_kind,omitempty"`
-	On       string    `json:"on,omitempty"`
-	State    string    `json:"state"`
-	Outcome  string    `json:"outcome,omitempty"`
-	Choices  []string  `json:"choices,omitempty"`
-	Time     time.Time `json:"time"`
-	Hops     int       `json:"-"`
-	Notice   string    `json:"-"` // which notice from egzo it is: noticeAccess or noticeUndelivered
-	Attempts int       `json:"-"`
-	Deadline time.Time `json:"-"`
+	ReKind  string    `json:"re_kind,omitempty"`
+	On      string    `json:"on,omitempty"`
+	State   string    `json:"state"`
+	Outcome string    `json:"outcome,omitempty"`
+	Choices []string  `json:"choices,omitempty"`
+	Time    time.Time `json:"time"`
+	Hops    int       `json:"-"`
+	Notice  string    `json:"-"` // which notice from egzo it is: noticeAccess or noticeUndelivered
+	// ResolvedBy and Resolution are, for a resolved request or question, who closed it and the resolution they sent.
+	ResolvedBy string    `json:"-"`
+	Resolution string    `json:"-"`
+	Attempts   int       `json:"-"`
+	Deadline   time.Time `json:"-"`
 }
 
 // messageData is what a `message` event carries besides its text.
@@ -231,10 +234,11 @@ func (s *store) index(event Event) {
 			s.setState(m, stateResolved)
 			delete(s.announced, event.ID)
 			var data struct {
-				Outcome string `json:"outcome"`
+				Outcome    string `json:"outcome"`
+				Resolution string `json:"resolution"`
 			}
 			json.Unmarshal(event.Data, &data)
-			m.Outcome = data.Outcome
+			m.Outcome, m.ResolvedBy, m.Resolution = data.Outcome, event.Actor, data.Resolution
 		}
 	}
 }
@@ -409,6 +413,9 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 		}
 		if id, ok := s.events.keyedMessage(req.From, req.Key); ok {
 			m, _ := s.events.message(id)
+			if m.To != req.To || m.Text != req.Text || m.Kind != kindRequest || m.Re != req.Re {
+				return Message{}, Event{}, keyReused(req.Key)
+			}
 			return m, Event{}, nil // sent before: this is a retry
 		}
 	}
@@ -468,6 +475,11 @@ func validKey(key string) bool {
 		}
 	}
 	return true
+}
+
+// keyReused is the answer to a key given again with another message: a bug of the sender's, never taken for a retry.
+func keyReused(key string) error {
+	return conflict("the key %q was already used for another message", key)
 }
 
 // keyedMessage is the message a sender already sent with this key.
@@ -565,15 +577,16 @@ func (s *server) openRequest(agent, id string) (Message, error) {
 	return m, nil
 }
 
-// resolveMessage closes a request or question and sends the result back to whoever sent it.
-func (s *server) resolveMessage(actor string, m Message, text, outcome string) (string, error) {
+// resolveMessage closes a request or question and sends the result back to whoever sent it. key, when not empty, is the
+// resolver's id for it: see resolveForPerson.
+func (s *server) resolveMessage(actor string, m Message, text, outcome, key string) (string, error) {
 	if !outcomes[outcome] {
 		return "", badRequest("outcome must be done, declined or failed")
 	}
 	if !validText(text) {
 		return "", badRequest("%s", textTooLong)
 	}
-	data, _ := json.Marshal(messageData{To: m.From, Kind: kindResolution, Re: m.ID, Hops: m.Hops, Outcome: outcome})
+	data, _ := json.Marshal(messageData{To: m.From, Kind: kindResolution, Re: m.ID, Hops: m.Hops, Outcome: outcome, Key: key})
 	id := newMessageID()
 	if _, err := s.events.append(Event{Type: "message", Agent: involved(actor, m.From), Actor: actor, ID: id, Text: text, Data: data}); err != nil {
 		return "", err
@@ -589,26 +602,48 @@ func (s *server) resolve(agent, id, text, outcome string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return s.resolveMessage("agent:"+agent, m, text, outcome)
+	return s.resolveMessage("agent:"+agent, m, text, outcome, "")
 }
 
 // resolveForPerson is a person closing what was addressed to them: answering a question, or closing a
 // request an agent made of them. No fetch comes first: a person reads their messages in the CLI.
-func (s *server) resolveForPerson(actor, id, text, outcome string) (string, error) {
+//
+// key, as for send, is the person's id for the answer (a chat platform's id for the click or the message): the same key with the same
+// answer is a retry, and returns the resolution it made. A message the person already resolved otherwise is not resolved again: already
+// is true, and the id is their first resolution, so a bridge can tell them they answered already.
+func (s *server) resolveForPerson(actor, id, text, outcome, key string) (resolution string, already bool, err error) {
+	s.sendMu.Lock() // the check and the write are one step, as in send: two answers at once must not both see it open
+	defer s.sendMu.Unlock()
+	if key != "" && !validKey(key) {
+		return "", false, badRequest("a key is 1 to %d printable characters", maxKeyLength)
+	}
 	m, ok := s.events.message(id)
 	if !ok {
-		return "", errNoSuchMessage
+		return "", false, errNoSuchMessage
 	}
 	if !isHuman(m.To) || (strings.HasPrefix(actor, "user:") && m.To != actor) {
-		return "", badRequest("message %s is addressed to %s: only it can resolve it", id, m.To)
+		return "", false, badRequest("message %s is addressed to %s: only it can resolve it", id, m.To)
 	}
 	if m.Kind != kindRequest && m.Kind != kindQuestion {
-		return "", badRequest("only a request or a question can be answered; this is a %s", m.Kind)
+		return "", false, badRequest("only a request or a question can be answered; this is a %s", m.Kind)
+	}
+	if key != "" {
+		if first, ok := s.events.keyedMessage(actor, key); ok {
+			r, _ := s.events.message(first)
+			if r.Kind != kindResolution || r.Re != id || r.Text != text || r.Outcome != outcome {
+				return "", false, keyReused(key)
+			}
+			return first, false, nil // resolved before: this is a retry
+		}
 	}
 	if m.State == stateResolved {
-		return "", conflict("message %s is already resolved", id)
+		if m.ResolvedBy == actor {
+			return m.Resolution, true, nil
+		}
+		return "", false, conflict("message %s is already resolved", id)
 	}
-	return s.resolveMessage(actor, m, text, outcome)
+	resolution, err = s.resolveMessage(actor, m, text, outcome, key)
+	return resolution, false, err
 }
 
 // update tells the sender of a request how it is going. It is passive: never announced.
@@ -713,7 +748,7 @@ func (s *server) retire(agent string) error {
 	for _, m := range s.events.messagesOf(address, func(m Message) bool { return !terminal(&m) }) {
 		switch {
 		case m.To == address && (m.Kind == kindRequest || m.Kind == kindQuestion):
-			if _, err := s.resolveMessage("operator", m, "agent "+agent+" was removed before it could answer", "failed"); err != nil {
+			if _, err := s.resolveMessage("operator", m, "agent "+agent+" was removed before it could answer", "failed", ""); err != nil {
 				return err
 			}
 		case m.To == address:

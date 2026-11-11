@@ -64,10 +64,15 @@ every message:
 
 A message that fails is **dropped and audited**: `agent.message` or `agent.answer`, refused, with the reason and the bridge's name. The
 bridge gets `{"error": "not delivered"}` (503 when the project is offline, 403 otherwise) and never the reason, and the person is told
-nothing. A message that goes through is audited too, with its id and never its text.
+nothing. A message that goes through is audited too, with its id and never its text. Two answers say more, and nothing the person does
+not know:
+- **409 `already answered`:** the person answers again a question they answered. An answer is final: nothing changed.
+- **504 `not confirmed`:** the project did not answer in time. It may have taken the message: send it again with the same key.
 
-A message carries `key`, the platform's id for it. The same key from the same user is the same message, so a bridge that retries after a
-dropped connection sends nothing twice. An answer names the question it answers instead.
+**Keys.** Every message and every answer carries `key`, the platform's id for it (a message, a click), at most 95 printable characters.
+The same key with the same message is a retry: the hub answers what it answered the first time, and the agent gets it once. The same key
+with another message is the bridge's mistake, and refused. So a bridge may send again whatever it did not hear back about. The hub puts
+the bridge's name before the key, so two bridges' ids never meet.
 
 ## The API
 
@@ -103,7 +108,7 @@ The stream also carries the changes a bridge acts on, with `type` other than `me
 
 ```json
 {"project": "p1a2b3", "agent": "coder-1", "account": "<the platform's id for the person>", "text": "deploy it", "key": "<the platform's message id>", "interrupt": false}
-{"project": "p1a2b3", "agent": "coder-1", "account": "<the platform's id for the person>", "text": "staging", "answer": "<the question's id>", "outcome": "done"}
+{"project": "p1a2b3", "agent": "coder-1", "account": "<the platform's id for the person>", "text": "staging", "key": "<the platform's id for the click>", "answer": "<the question's id>", "outcome": "done"}
 ```
 
 The other calls:
@@ -154,7 +159,9 @@ hub name and the platform's name from the bridge's (`discord` is Discord). `deta
   4. otherwise, report `no-place`.
 
   Never to another place just because the agent is there too: the person may not be.
-- **Answers:** only the person a question is for answers it.
+- **Answers:** only the person a question is for answers it. Tell them on 409 that they answered already.
+- **What a person says:** send it with the platform's id as `key`. Send it again with the same key while the hub is not heard from or
+  answers 504, for a bounded time; then tell the person it was not confirmed.
 - **Failures:** report one within a bounded time, or never; silence is delivered. Retry what may succeed (the network, the platform's own
   errors) idempotently, if the platform allows it, and never what it refused for good: platforms punish that.
 
@@ -237,6 +244,11 @@ needs no address of its own, and the hub on the bridge API.
 - What may pass later is tried again for 2 minutes, inside the few minutes Discord remembers a nonce. Messages after it wait.
 - What Discord refuses for good (no access, a deleted channel, a person who does not take DMs) is never tried again: those refusals count
   toward the invalid requests Discord bans an IP for. The bridge tells the hub, which tells the agent ([not delivered](#not-delivered)).
+
+**When the hub does not confirm what a person said**
+- Every message and click goes with its Discord id as the key. One the hub may have taken (the hub not heard from, or a 504) is sent
+  again for a minute, and reaches the agent once. Then the person reads **⚠️ Not confirmed**: it may have arrived.
+- A second answer to a question gets **You already answered**: an answer is final.
 
 A message the hub refuses gets **⚠️ Not delivered**, and never why: the hub's audit log says why. Someone who has not linked an account is
 told to run `/egzo register`.

@@ -406,12 +406,14 @@ func (s *server) getMessage(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(message)
 }
 
-// resolveForOperator is a person answering a question or closing a request addressed to them.
+// resolveForOperator is a person answering a question or closing a request addressed to them. It answers the resolution's id, and
+// already: true when the person had resolved it before, in which case nothing changed (see resolveForPerson).
 func (s *server) resolveForOperator(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Actor   string `json:"actor"`
 		Text    string `json:"text"`
 		Outcome string `json:"outcome"`
+		Key     string `json:"key"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body); err != nil {
 		http.Error(w, "expected {\"text\": answer, \"outcome\": done|declined|failed}", http.StatusBadRequest)
@@ -427,11 +429,12 @@ func (s *server) resolveForOperator(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid actor", http.StatusBadRequest)
 		return
 	}
-	if _, err := s.resolveForPerson(body.Actor, r.PathValue("id"), body.Text, body.Outcome); err != nil {
+	resolution, already, err := s.resolveForPerson(body.Actor, r.PathValue("id"), body.Text, body.Outcome, body.Key)
+	if err != nil {
 		fail(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	reply(w, http.StatusOK, map[string]any{"id": resolution, "already": already})
 }
 
 func (s *server) agents(w http.ResponseWriter, r *http.Request) {

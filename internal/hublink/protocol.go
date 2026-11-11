@@ -115,7 +115,8 @@ const (
 	// VerbSend is a message from one of the hub's users to an agent. Key makes it idempotent: the same key from the same user is the
 	// same message, however often it is sent.
 	VerbSend = "send"
-	// VerbResolve is one of the hub's users answering a question, or closing a request, that is addressed to them.
+	// VerbResolve is one of the hub's users answering a question, or closing a request, that is addressed to them. Key makes it
+	// idempotent, as for send; the same key with another answer is an error.
 	VerbResolve = "resolve"
 	// VerbUndelivered is the hub saying that a message an agent sent one of its users did not reach them: Message, and Text, why, in words
 	// for the agent.
@@ -204,7 +205,7 @@ type Request struct {
 	Workspace string `json:",omitempty"` // files
 	Instance  string `json:",omitempty"` // files: the instance whose worktree, for a git workspace
 	Text      string `json:",omitempty"` // send, resolve; undelivered: why
-	Key       string `json:",omitempty"` // send: makes it idempotent, the platform's id of the message
+	Key       string `json:",omitempty"` // send, resolve: makes it idempotent, the platform's id of the message or the click
 	Interrupt bool   `json:",omitempty"` // send
 	Message   string `json:",omitempty"` // resolve: the id of the question or request; undelivered: of the agent's message
 	Outcome   string `json:",omitempty"` // resolve: done, declined or failed; "" is done
@@ -213,6 +214,13 @@ type Request struct {
 // Sent is what send answers: the message's id, the same however often the same key is sent.
 type Sent struct {
 	ID string
+}
+
+// Resolved is what resolve answers: the id of the resolution, the same however often the same key is sent. Already is true when the
+// user had resolved the message before with another key, or none: nothing changed, and ID is their first resolution.
+type Resolved struct {
+	ID      string
+	Already bool
 }
 
 // Reply is a line the link answers a Request with: progress of what it does, then one with Done. After a Done without Error,

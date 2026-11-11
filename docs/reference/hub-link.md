@@ -136,10 +136,13 @@ The hub relays what its users say to agents, and what agents say to them, for th
 
 - **`send`** is a message from a hub user to an agent: `Agent`, `Actor` (`user:<id>`, nothing else), `Text`, `Interrupt`, and a `Key`,
   the chat platform's id for the message. The key is required: the same key from the same user is the same message, so a retry after a
-  dropped connection sends nothing twice. It answers the message's id. While the project is offline there is no link to ask, and nothing
+  dropped connection sends nothing twice. The same key with another text or agent is an error. It answers the message's id. While the project is offline there is no link to ask, and nothing
   queues: the hub drops the message.
-- **`resolve`** is a hub user answering a question, or closing a request, addressed to them: `Message`, `Actor`, `Text`, `Outcome`. A
-  user answers only what is addressed to that user; the operator, at the CLI, answers anything.
+- **`resolve`** is a hub user answering a question, or closing a request, addressed to them: `Message`, `Actor`, `Text`, `Outcome`, and
+  `Key`, the chat platform's id for the answer. A user answers only what is addressed to that user; the operator, at the CLI, answers
+  anything. It answers `{ID, Already}`: the resolution's id, the same for a retry with the same key. An answer is final: a user who
+  answers again what they resolved changes nothing, and gets their first resolution with `Already` true. The same key with another answer
+  is an error, and so is answering what someone else resolved.
 - **`undelivered`** is the hub saying that an agent's message to one of its users did not reach them: `Message`, and `Text`, why, in words
   the hub chose for the agent. The agent gets a notice from `egzo` that names the message, its start and the reason, and says how to send
   it again. A question or request is closed as `failed`; a result stays as the agent closed the request; an update gets no notice. Told

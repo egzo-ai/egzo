@@ -165,7 +165,7 @@ func TestWhatABridgePostsIsDeliveredUnderItsNameAndARefusalSaysNothingOfWhy(t *t
 		t.Fatalf("deliver = %d %v", code, out)
 	}
 	calls := r.web.Calls()
-	if last := calls[len(calls)-1]; last != "send coder-1 user:"+r.admin.ID+" d-1" {
+	if last := calls[len(calls)-1]; last != "send coder-1 user:"+r.admin.ID+" discord:d-1" {
 		t.Errorf("the project got %q", last)
 	}
 	if code, again := r.post(secret, Inbound{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "deploy it", Key: "d-1"}); code != 200 || again["id"] != out["id"] {
@@ -176,6 +176,9 @@ func TestWhatABridgePostsIsDeliveredUnderItsNameAndARefusalSaysNothingOfWhy(t *t
 	}
 	for _, bad := range []Inbound{
 		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "no key"},
+		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "an answer without a key", Answer: "mq"},
+		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "x", Key: strings.Repeat("k", 96)},
+		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "x", Key: "with space"},
 		{Project: r.project, Agent: "Bad_Name", Account: "d-admin", Text: "x", Key: "k"},
 		{Project: "../x", Agent: "coder-1", Account: "d-admin", Text: "x", Key: "k"},
 		{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "  ", Key: "k"},
@@ -193,6 +196,47 @@ func TestWhatABridgePostsIsDeliveredUnderItsNameAndARefusalSaysNothingOfWhy(t *t
 	}
 	if len(via) != 3 || !strings.Contains(strings.Join(via, "|"), "via discord") {
 		t.Errorf("audited %q", via)
+	}
+}
+
+func TestAnAnswerIsTriedAgainSafelyAndASecondOneSaysItWasAnsweredAlready(t *testing.T) {
+	r := newRig(t)
+	click := func(account, key, text string) (int, map[string]string) {
+		return r.post(secret, Inbound{Project: r.project, Agent: "coder-1", Account: account, Text: text, Answer: "mq", Key: key})
+	}
+	if code, out := click("d-admin", "i-1", "staging"); code != http.StatusOK {
+		t.Fatalf("the answer = %d %v", code, out)
+	}
+	if code, out := click("d-admin", "i-1", "staging"); code != http.StatusOK {
+		t.Errorf("the answer tried again = %d %v, want it delivered", code, out)
+	}
+	if code, out := click("d-admin", "i-2", "production"); code != http.StatusConflict || out["error"] != "already answered" {
+		t.Errorf("a second answer = %d %v, want 409 already answered", code, out)
+	}
+	if code, out := click("d-nobody", "i-3", "production"); code != http.StatusForbidden || out["error"] != "not delivered" {
+		t.Errorf("someone else = %d %v: a refusal still says nothing of why", code, out)
+	}
+}
+
+func TestAMessageTheProjectTookButDidNotConfirmInTimeIsSentAgainSafely(t *testing.T) {
+	r := newRig(t)
+	r.web.LoseReplies(1)
+	in := Inbound{Project: r.project, Agent: "coder-1", Account: "d-admin", Text: "deploy it", Key: "d-9"}
+	if code, out := r.post(secret, in); code != http.StatusGatewayTimeout || out["error"] != "not confirmed" {
+		t.Fatalf("a reply that was lost = %d %v, want 504 not confirmed", code, out)
+	}
+	code, out := r.post(secret, in)
+	if code != http.StatusOK || out["id"] == "" {
+		t.Fatalf("sent again = %d %v", code, out)
+	}
+	var sends int
+	for _, call := range r.web.Calls() {
+		if strings.HasPrefix(call, "send coder-1 ") && strings.HasSuffix(call, " discord:d-9") {
+			sends++
+		}
+	}
+	if sends != 1 {
+		t.Errorf("the project got the message %d times, want once", sends)
 	}
 }
 
