@@ -38,12 +38,13 @@ engine asks for: a container whose init is a non-root user starts with **no capa
 process that becomes root could reach, stays **full**, whatever egzo drops. What keeps an egzo agent from becoming root in
 its sandbox under sysbox is `no-new-privileges`, which egzo sets on every agent that keeps no capability.
 
-**Docker inside an agent.** A template that keeps its capabilities (`capabilities: [ALL]`, [the project file](project-file.md#agents))
-is started without `no-new-privileges`, so a setuid `sudo` in its image makes it root in its own sandbox: root that sysbox maps
-to an unprivileged host uid, with the mounts and namespaces a Docker daemon needs, and no host socket or `--privileged`. The
-harness images with Docker inside, `egzo-harness-<harness>-docker` ([images](images.md#docker-inside-an-agent)), start the daemon
-that way before the harness. Because sysbox gives such an agent every capability whatever the list says, `up` refuses any
-list but `[ALL]` on a sysbox engine. What the agent can do as root in its sandbox is in [the security model](security.md).
+**Docker inside an agent.** Sysbox, a template with `capabilities: [ALL]` ([the project file](project-file.md#capabilities)) and a
+harness image with Docker inside, `egzo-harness-<harness>-docker` ([images](images.md#docker-inside-an-agent)), together give an
+agent Docker in its own sandbox. `[ALL]` is the one list egzo starts without `no-new-privileges`, so the image's `sudo` makes
+the agent root in its container: root that sysbox maps to an unprivileged host uid, with the mounts and namespaces a Docker
+daemon needs, and no host socket or `--privileged`. The image starts the daemon that way before the harness. Any other list
+keeps `no-new-privileges`, and under sysbox the list itself changes nothing, since sysbox sets the capabilities. What the agent
+can do as root in its sandbox is in [the security model](security.md).
 
 The rest of what sysbox is known for stays out of reach:
 

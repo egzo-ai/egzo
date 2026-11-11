@@ -1,4 +1,4 @@
-# The agent is the only user of its sandbox, and becomes root in it only when its template keeps capabilities
+# The agent is the only user of its sandbox, and becomes root in it only when its template keeps all capabilities
 # (otherwise no-new-privileges stops sudo). The proxy and the project CA egzo gives the agent reach what runs as root,
 # so that the daemon pulls through the proxy and trusts the CA.
 Defaults env_keep += "HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy SSL_CERT_FILE"

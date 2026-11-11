@@ -110,8 +110,8 @@ differ.
 ## Docker inside an agent
 
 Each stock harness image has a variant with Docker inside, `egzo-harness-<harness>-docker` (`harness/docker`): Ubuntu's Docker
-engine, buildx and compose, and `sudo`. Its entrypoint starts the daemon before the harness when the agent may become root, which
-it may only when its template keeps capabilities:
+engine, buildx and compose, and `sudo`. Its entrypoint starts the daemon before the harness when the agent can become root, which
+it can when its template keeps all capabilities:
 
 ```yaml
 agents:
@@ -121,8 +121,8 @@ agents:
     capabilities: [ALL]
 ```
 
-The daemon runs in the agent's own container, so this needs an engine whose runtime is sysbox ([sysbox](sysbox.md)); elsewhere the
-daemon does not start and the harness runs as usual. Its socket belongs to the agent's group, and `sudo` keeps the proxy and the
+The daemon runs in the agent's own container, which takes an engine whose runtime is sysbox ([sysbox](sysbox.md)). Without it, or
+without `[ALL]`, the daemon does not start and the harness runs as usual. Its socket belongs to the agent's group, and `sudo` keeps the proxy and the
 project CA, so pulls go through the agent's egress profile: allow the registries it needs. The daemon's log is
 `/var/log/dockerd.log`, and its images live in the container, so they are gone when the agent is recreated.
 

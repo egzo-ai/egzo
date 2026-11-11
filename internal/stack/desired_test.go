@@ -565,31 +565,17 @@ func TestAnAgentKeepsTheCapabilitiesItListsAndNoneByDefault(t *testing.T) {
 	}
 }
 
-func TestCapabilityOptionsForbidGainingPrivilegesOnlyWhenNoneAreKept(t *testing.T) {
+func TestCapabilityOptionsForbidGainingPrivilegesUnlessAllAreKept(t *testing.T) {
 	drop, add, security := capabilityOptions(nil)
 	if !slices.Equal(drop, []string{"ALL"}) || len(add) != 0 || !slices.Equal(security, []string{"no-new-privileges"}) {
 		t.Errorf("none: drop %v add %v security %v", drop, add, security)
 	}
 	drop, add, security = capabilityOptions([]string{"NET_ADMIN", "SYS_ADMIN"})
-	if !slices.Equal(drop, []string{"ALL"}) || !slices.Equal(add, []string{"NET_ADMIN", "SYS_ADMIN"}) || len(security) != 0 {
+	if !slices.Equal(drop, []string{"ALL"}) || !slices.Equal(add, []string{"NET_ADMIN", "SYS_ADMIN"}) || !slices.Equal(security, []string{"no-new-privileges"}) {
 		t.Errorf("some: drop %v add %v security %v", drop, add, security)
 	}
 	drop, add, security = capabilityOptions([]string{"ALL"})
 	if len(drop) != 0 || !slices.Equal(add, []string{"ALL"}) || len(security) != 0 {
 		t.Errorf("all: drop %v add %v security %v", drop, add, security)
-	}
-}
-
-func TestOnSysboxOnlyAllIsAccepted(t *testing.T) {
-	if err := capabilitiesOnRuntime("sysbox-runc", []string{"coder"}); err == nil || !strings.Contains(err.Error(), "capabilities: [ALL]") {
-		t.Errorf("sysbox with a partial list: %v", err)
-	}
-	for _, runtime := range []string{"runc", "runsc", "crun"} {
-		if err := capabilitiesOnRuntime(runtime, []string{"coder"}); err != nil {
-			t.Errorf("%s: %v", runtime, err)
-		}
-	}
-	if err := capabilitiesOnRuntime("sysbox-runc", nil); err != nil {
-		t.Errorf("sysbox with none partial: %v", err)
 	}
 }
