@@ -92,6 +92,22 @@ run on a host with SELinux enabled.
   $ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock alpine stat -c %u /var/run/docker.sock
   0
   ```
+- **On Ubuntu 25.04 and later**, an AppArmor profile for `fusermount3` denies the FUSE mounts `sysbox-fs` makes, and no
+  sysbox container starts: `failed to pre-register with sysbox-fs`, with `fusermount3: mount failed: Permission denied` in
+  `journalctl -u sysbox-fs`. The fix is pending in sysbox (issue #947); until it lands, allow sysbox in the profile's local
+  file and reload it:
+
+  ```console
+  $ sudo tee -a /etc/apparmor.d/local/fusermount3 <<'EOF'
+  mount fstype=@{fuse_types} options=(nosuid,nodev,rw) -> /var/lib/sysboxfs/**/,
+  mount fstype=@{fuse_types} options=(nosuid,nodev,ro) -> /var/lib/sysboxfs/**/,
+  umount /var/lib/sysboxfs/**/,
+  EOF
+  $ sudo apparmor_parser -r /etc/apparmor.d/fusermount3
+  $ sudo systemctl restart sysbox
+  ```
+
+  `scripts/ci-engine.sh` does this for the sysbox spec platform, which runs on Ubuntu 26.04.
 - **Docker's embedded DNS and internal networks** need no setting under sysbox: containers keep a normal network namespace,
   so `127.0.0.11` and the project's internal networks work as they do for any other container. (This is where gVisor needs
   its `--network=host` flag; sysbox does not.)
@@ -124,8 +140,9 @@ CI cell is experimental, like the gVisor one, until it has a clean history.
 ## If something fails
 
 - `docker run --rm hello-world` failing while `egzo system check` names `sysbox-runc`: the runtime is registered but not
-  working on this host. Check `systemctl status sysbox`, the kernel version, and whether the distribution is one sysbox
-  supports.
+  working on this host. Check `systemctl status sysbox`, `journalctl -u sysbox-fs`, and the kernel and distribution
+  requirements above: on Ubuntu 25.04 and later the usual cause is the `fusermount3` AppArmor denial, fixed as
+  [Requirements](#requirements) says.
 - A project that comes up but whose log is full of `operation not permitted` for `mknod`, `unshare` or `binfmt_misc`: one
   of the sysbox limits above, in the image or a tool the agent runs. Use an image that does not need it, or run that
   workload on a plain Docker host.
