@@ -170,6 +170,10 @@ type MessageCreate struct {
 	MessageReference *MessageReference `json:"message_reference,omitempty"`
 	Attachments      []Attachment      `json:"attachments,omitempty"`
 	Files            []File            `json:"-"` // sent as multipart parts files[n]
+	// Nonce, with EnforceNonce, makes a post idempotent: a message the bot posted with the same nonce a few minutes before is returned
+	// instead of posted again. At most 25 characters. The client then tries a post again after a network error, a 500 or a 504.
+	Nonce        string `json:"nonce,omitempty"`
+	EnforceNonce bool   `json:"enforce_nonce,omitempty"`
 }
 
 // Attachment describes a file sent with a message.

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -143,6 +144,26 @@ func (h *HubAPI) Deliver(ctx context.Context, in Inbound) (string, error) {
 		return "", ErrNotDelivered{}
 	}
 	return out.ID, nil
+}
+
+// Why a message the hub gave the bridge did not reach the person: the hub's codes, the same for every bridge (docs/hub-bridges.md).
+const (
+	UndeliveredUnreachable = "person-unreachable" // Discord will not let the bot reach the person: DMs off, no shared server
+	UndeliveredNoPlace     = "no-place"           // nowhere to put it
+	UndeliveredRefused     = "refused"            // Discord refused it for good
+	UndeliveredUnavailable = "unavailable"        // Discord did not take it in RetryFor
+)
+
+// Undelivered tells the hub that a message it gave the bridge, for account, did not reach the person. detail is what Discord said.
+func (h *HubAPI) Undelivered(ctx context.Context, message, account, code, detail string) error {
+	status, err := h.do(ctx, http.MethodPost, "/messages/"+url.PathEscape(message)+"/undelivered", map[string]string{"account": account, "code": code, "detail": detail}, nil)
+	switch {
+	case err != nil:
+		return err
+	case status != http.StatusNoContent:
+		return fmt.Errorf("the hub answered %d", status)
+	}
+	return nil
 }
 
 // Code makes a link code for a Discord account, and the address the person opens with it.
