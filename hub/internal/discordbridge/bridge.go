@@ -3,8 +3,8 @@
 
 // Package discordbridge is egzo-discord: the bridge between Discord and the hub's agents (docs/hub-bridges.md). An agent is added to a
 // channel as a role people mention, which the bot creates and nobody holds. A mention of the role, a reply to what the agent posted, or a
-// message in a thread it started goes to the agent; what the agent says to a person comes back where they spoke to it, or in its home
-// channel, mentioning them. The hub checks every message; the bridge vets Discord's side.
+// message in a thread it started goes to the agent; what the agent says to a person comes back where that person last talked to it,
+// mentioning them. The hub checks every message; the bridge vets Discord's side.
 package discordbridge
 
 import (
@@ -377,8 +377,8 @@ func (b *Bridge) onMessage(ctx context.Context, m discord.Message) {
 	if m.MessageReference != nil && m.MessageReference.MessageID != "" {
 		if p, ok, _ := b.state.PostOf(ctx, m.MessageReference.MessageID); ok {
 			t := target{agent: Agent{Guild: p.Guild, Project: p.Project, Agent: p.Agent}}
-			if p.Kind == "question" || p.Kind == "request" {
-				t.answer = p.Egzo // a reply to what an agent asked answers it
+			if (p.Kind == "question" || p.Kind == "request") && p.Person == m.Author.ID {
+				t.answer = p.Egzo // a reply to what an agent asked answers it; anyone else's reply is a message to the agent
 			}
 			add(t)
 		}
@@ -415,8 +415,9 @@ func (b *Bridge) onMessage(ctx context.Context, m discord.Message) {
 			continue
 		}
 		_ = b.state.MarkBack(ctx, t.agent.Project, t.agent.Agent)
-		if id != "" {
-			_ = b.state.AddPost(ctx, Post{Message: m.ID, Channel: m.ChannelID, Guild: m.GuildID, Project: t.agent.Project, Agent: t.agent.Agent, Egzo: id, Kind: "said"})
+		if id != "" { // an answer has none: the question's post is already between them, here
+			_ = b.state.AddPost(ctx, Post{Message: m.ID, Channel: m.ChannelID, Place: place, Guild: m.GuildID, Project: t.agent.Project, Agent: t.agent.Agent,
+				Egzo: id, Person: m.Author.ID, Kind: "said"})
 		}
 	}
 }
@@ -588,7 +589,10 @@ func (b *Bridge) dropRole(ctx context.Context, a Agent, why string) {
 	b.log.Info("an agent's role is deleted", "guild", a.Guild, "project", a.Project, "agent", a.Agent, "why", why)
 }
 
-// post shows what an agent says to a person: as a reply where the person spoke to it, or in the agent's home channel.
+// post shows what an agent says to a person, mentioning them. Agents only answer: what they say is about a message, which is either one the
+// bridge posted or the person wrote, or one from elsewhere (another bridge, the hub, an unattended agent's task). It goes as a reply to that
+// message when the person was part of it; otherwise where the person last talked to the agent. Never anywhere else: an agent can be in
+// several servers, and the person in none of the others. With neither, the bridge has nowhere to post it.
 func (b *Bridge) post(ctx context.Context, e Event) {
 	b.mu.Lock()
 	account, ok := b.byUser[strings.TrimPrefix(e.To, "user:")]
@@ -596,32 +600,33 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 	if !ok {
 		return // not a person on Discord
 	}
-	var channel, guild discord.Snowflake
+	person := discord.Snowflake(account.Account)
+	var where Post
+	var found bool
 	var reference *discord.MessageReference
 	if e.Re != "" {
-		if p, found, _ := b.state.PostFor(ctx, e.Re); found {
+		if where, found, _ = b.state.PostFor(ctx, e.Re, person); found {
 			no := false
-			channel, guild, reference = p.Channel, p.Guild, &discord.MessageReference{MessageID: p.Message, FailIfNotExists: &no}
+			reference = &discord.MessageReference{MessageID: where.Message, FailIfNotExists: &no}
 		}
 	}
-	if channel == "" {
-		list, _ := b.state.AgentEverywhere(ctx, e.Project, e.Agent)
-		if len(list) == 0 {
-			b.log.Info("an agent spoke to a person, and is in no channel", "agent", e.Agent, "to", e.To)
+	if !found {
+		if where, found, _ = b.state.LastPost(ctx, person, e.Project, e.Agent); !found {
+			b.log.Info("an agent spoke to a person who has not talked to it in any channel it is in: not posted", "agent", e.Agent, "to", e.To)
 			return
 		}
-		channel, guild = list[0].Home, list[0].Guild
 	}
-	for i, msg := range render(e, discord.Snowflake(account.Account)) {
+	for i, msg := range render(e, person) {
 		if i == 0 {
 			msg.MessageReference = reference
 		}
-		sent, err := b.rest.CreateMessage(ctx, channel, msg)
+		sent, err := b.rest.CreateMessage(ctx, where.Channel, msg)
 		if err != nil {
 			b.log.Warn("post what an agent said", "agent", e.Agent, "err", err)
 			return
 		}
-		_ = b.state.AddPost(ctx, Post{Message: sent.ID, Channel: channel, Guild: guild, Project: e.Project, Agent: e.Agent, Egzo: e.ID, Kind: e.Kind, Choices: e.Choices})
+		_ = b.state.AddPost(ctx, Post{Message: sent.ID, Channel: where.Channel, Place: where.Place, Guild: where.Guild, Project: e.Project, Agent: e.Agent,
+			Egzo: e.ID, Person: person, Kind: e.Kind, Choices: e.Choices})
 	}
 }
 
@@ -876,7 +881,9 @@ func (b *Bridge) command(ctx context.Context, i discord.Interaction) {
 		_ = b.state.MarkBack(ctx, project, agent)
 		m, err := b.finish(ctx, i, fmt.Sprintf("💬 <@%s> to **%s**: %s", user.ID, agent, text))
 		if err == nil && m.ID != "" { // what the agent answers comes back as a reply to this
-			_ = b.state.AddPost(ctx, Post{Message: m.ID, Channel: i.ChannelID, Guild: i.GuildID, Project: project, Agent: agent, Egzo: id, Kind: "said"})
+			place, _ := b.place(i.ChannelID)
+			_ = b.state.AddPost(ctx, Post{Message: m.ID, Channel: i.ChannelID, Place: place, Guild: i.GuildID, Project: project, Agent: agent, Egzo: id,
+				Person: user.ID, Kind: "said"})
 		}
 	default:
 		b.finish(ctx, i, "Unknown command.")
@@ -924,7 +931,7 @@ func (b *Bridge) addAgent(ctx context.Context, i discord.Interaction, value, nam
 			b.finish(ctx, i, "⚠️ Discord refused to make the role: the bot needs Manage Roles.")
 			return
 		}
-		a = Agent{Guild: i.GuildID, Role: role.ID, Project: project, Agent: agent, Name: name, Home: place}
+		a = Agent{Guild: i.GuildID, Role: role.ID, Project: project, Agent: agent, Name: name}
 		if err := b.state.AddAgent(ctx, a); err != nil {
 			b.finish(ctx, i, "⚠️ Something went wrong.")
 			return
@@ -995,6 +1002,10 @@ func (b *Bridge) click(ctx context.Context, i discord.Interaction) {
 	p, found, _ := b.state.PostOf(ctx, i.Message.ID)
 	if err != nil || !found || p.Kind != "question" || index < 0 || index >= len(p.Choices) {
 		b.finish(ctx, i, "This question is not open any more.")
+		return
+	}
+	if p.Person != i.Member.User.ID {
+		b.finish(ctx, i, fmt.Sprintf("This question is for <@%s>.", p.Person))
 		return
 	}
 	if !b.known(ctx, i.Member.User.ID) {
