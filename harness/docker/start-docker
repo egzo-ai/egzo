@@ -1,13 +1,25 @@
 #!/bin/sh
 # Starts the Docker daemon when this agent can become root (sudo works only when its template keeps all capabilities), with its
-# socket in the agent's group, then runs the harness. Without it, or when the daemon cannot start (an engine whose runtime is
-# not sysbox), the harness starts all the same; the daemon's log is /var/log/dockerd.log.
-if sudo -n true 2>/dev/null; then
-	sudo -n sh -c "dockerd --group $(id -g) >/var/log/dockerd.log 2>&1 &"
+# socket in the agent's group, then runs the harness. When it cannot, or the daemon does not come up (it needs an engine whose
+# runtime is sysbox), the harness starts all the same. Why is in /tmp/egzo-docker.log, which the agent can read; the daemon's own
+# log is /var/log/dockerd.log.
+log=/tmp/egzo-docker.log
+say() { echo "egzo-docker: $*" | tee -a "$log" >&2; }
+
+if ! refused=$(sudo -n true 2>&1); then
+	say "no Docker daemon: sudo cannot make this agent root ($refused); its template needs capabilities: [ALL]"
+else
+	sudo -n sh -c "dockerd --group $(id -g) >>/var/log/dockerd.log 2>&1 &"
 	tries=0
-	until docker version >/dev/null 2>&1 || [ "$tries" -ge 30 ]; do
+	until docker version >/dev/null 2>&1; do
 		tries=$((tries + 1))
+		if [ "$tries" -ge 30 ]; then
+			say "no Docker daemon: dockerd did not come up in 30 s (it needs an engine whose runtime is sysbox); its log:"
+			sudo -n tail -n 20 /var/log/dockerd.log 2>&1 | tee -a "$log" >&2
+			break
+		fi
 		sleep 1
 	done
+	[ "$tries" -lt 30 ] && say "Docker daemon started"
 fi
 exec /usr/local/bin/egzo agent run -- "$@"

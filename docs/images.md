@@ -123,8 +123,8 @@ agents:
 
 The daemon runs in the agent's own container, which takes an engine whose runtime is sysbox ([sysbox](sysbox.md)). Without it, or
 without `[ALL]`, the daemon does not start and the harness runs as usual. Its socket belongs to the agent's group, and `sudo` keeps the proxy and the
-project CA, so pulls go through the agent's egress profile: allow the registries it needs. The daemon's log is
-`/var/log/dockerd.log`, and its images live in the container, so they are gone when the agent is recreated.
+project CA, so pulls go through the agent's egress profile: allow the registries it needs. When the daemon does not start,
+`/tmp/egzo-docker.log` says why; the daemon's own log is `/var/log/dockerd.log`. Its images live in the container, so they are gone when the agent is recreated.
 
 ## Building the stock images yourself
 
