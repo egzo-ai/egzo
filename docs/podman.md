@@ -13,7 +13,8 @@ $ systemctl --user enable --now podman.socket
 $ export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 ```
 
-gVisor on rootless Podman is untested.
+gVisor on rootless Podman is untested. Sysbox does not apply to Podman at all: it is a runtime registered with rootful Docker
+([Using sysbox](sysbox.md)).
 
 Rootless Podman forwards a published port to one of a container's networks, chosen at random at each start. egzo's relay for
 [local ports](project-file.md#local-ports) handles it: it listens on both its networks and checks the agent's address, never the network.

@@ -10,6 +10,7 @@ named (`--engine` or EGZO_ENGINE). On a developer machine, with none named, this
 platform the machine can be, in this order:
 
     docker-gvisor     Docker with gVisor (runsc) as its default runtime
+    docker-sysbox     Docker with sysbox (sysbox-runc) as its default runtime
     podman-rootless   rootless Podman
     docker            Docker
     podman            rootful Podman
@@ -21,7 +22,7 @@ import os
 import sys
 from dataclasses import dataclass
 
-ORDER = ["docker-gvisor", "podman-rootless", "docker", "podman"]
+ORDER = ["docker-gvisor", "docker-sysbox", "podman-rootless", "docker", "podman"]
 
 
 @dataclass

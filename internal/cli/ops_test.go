@@ -128,6 +128,24 @@ func TestMinimumGit(t *testing.T) {
 	}
 }
 
+func TestSystemCheckSaysWhatASandboxedRuntimeAlreadyDoesAboutIsolation(t *testing.T) {
+	for runtime, sandboxed := range map[string]string{"runsc": "gVisor", "sysbox-runc": "sysbox"} {
+		line := rootfulLine(runtime)
+		if strings.Contains(line, "consider rootless") {
+			t.Errorf("%s: still advises a sandboxed runtime:\n%s", runtime, line)
+		}
+		if !strings.Contains(line, runtime) || !strings.Contains(line, sandboxed) {
+			t.Errorf("%s: does not say what containers run under (%s):\n%s", runtime, sandboxed, line)
+		}
+	}
+	plain := rootfulLine("runc")
+	for _, want := range []string{"consider rootless", "gVisor", "sysbox"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("on a plain runtime, %q is missing:\n%s", want, plain)
+		}
+	}
+}
+
 func TestTheProjectFileIsFoundFromASubdirectoryAndNamedWithFlagOrEnv(t *testing.T) {
 	root := t.TempDir()
 	deep := filepath.Join(root, "a", "b")

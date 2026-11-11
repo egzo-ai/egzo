@@ -171,10 +171,17 @@ def test_a_directory_workspace_survives_down_and_a_new_up_finds_it_and_egzo_leav
     assert live_project.left_in_directory() == before
 
 
-def test_agents_run_under_the_engines_default_runtime_which_is_gvisor_only_on_a_gvisor_platform(sandbox, engine):
+def test_agents_run_under_the_engines_default_runtime_which_is_gvisor_or_sysbox_only_on_their_platform(sandbox, engine):
     """egzo never picks a runtime: an agent runs under whatever the engine's default is. Proved from inside the agent."""
     p = sandbox
     plain = p.spawn("plain")
-    assert ("gvisor" in run_in(engine, p, plain, "cat", "/proc/version").stdout.lower()) == engine.gvisor
+    version = run_in(engine, p, plain, "cat", "/proc/version").stdout.lower()
+    assert ("gvisor" in version) == engine.gvisor
     if engine.gvisor:
         assert "Starting gVisor" in run_in(engine, p, plain, "dmesg").stdout
+    # sysbox puts every container in a user namespace, so the ids the agent sees are mapped, not the host's: its uid
+    # is not the host's uid even were it root (docs/sysbox.md). A rootless engine maps ids the same way.
+    mapping = run_in(engine, p, plain, "cat", "/proc/self/uid_map").stdout.splitlines()
+    first = mapping[0].split() if mapping else []
+    mapped = len(first) == 3 and first[1] != "0"
+    assert mapped == (engine.sysbox or engine.rootless), "/proc/self/uid_map:\n" + "\n".join(mapping)

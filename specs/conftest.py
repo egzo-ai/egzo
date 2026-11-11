@@ -8,8 +8,8 @@ The suite drives the real `egzo` binary as a black box (set EGZO_BIN, or put it 
 A run tests egzo on ONE reference platform (ENGINES below), chosen with `--engine NAME` or EGZO_ENGINE,
 or, when neither is given, by select_platform.py from what this machine has (the report is printed in
 the header of the run). A platform says what the host is like: a rootful Docker host, a Docker host that
-has gVisor as its default runtime, rootful or rootless Podman. It does not ask egzo for anything: egzo never
-chooses a runtime, so the platform is what makes agents run under gVisor. A spec that needs a feature a platform
+has gVisor or sysbox as its default runtime, rootful or rootless Podman. It does not ask egzo for anything: egzo never
+chooses a runtime, so the platform is what makes agents run under that runtime. A spec that needs a feature a platform
 lacks is expected to fail there, and is marked so. Nothing is probed or skipped for it: egzo is asked, and fails or not.
 """
 
@@ -217,20 +217,31 @@ class Engine:
     The CLI (docker, or podman in remote mode) talks to the same socket egzo does, so the specs
     observe exactly what egzo sees, and the socket is all a host has to provide."""
 
-    def __init__(self, name, cli, host, rootless=False, gvisor=False, setup=""):
+    def __init__(self, name, cli, host, rootless=False, runtime="", setup=""):
         self.name = name
         self.cli = cli
         self.host = host
         self.rootless = rootless
-        # Whether gVisor (runsc) is this reference platform's default runtime. It describes the host: egzo does
-        # not choose a runtime, so every container the engine starts runs under it.
-        self.gvisor = gvisor
+        # The OCI runtime the host makes the engine's default, when it is not the ordinary one: runsc for a gVisor host,
+        # sysbox-runc for a sysbox one. It describes the host: egzo does not choose a runtime, so every container the
+        # engine starts runs under it.
+        self.runtime = runtime
         self.setup = setup
         self.env = {"DOCKER_HOST": host}
         # The ids the invoking user has inside a container. A rootless engine maps that user to root
         # of the container's user namespace; every other engine keeps the host ids.
         self.uid = 0 if rootless else os.getuid()
         self.gid = 0 if rootless else os.getgid()
+
+    @property
+    def gvisor(self):
+        """Whether this platform's default runtime is gVisor's runsc."""
+        return self.runtime == "runsc"
+
+    @property
+    def sysbox(self):
+        """Whether this platform's default runtime is sysbox's sysbox-runc."""
+        return self.runtime == "sysbox-runc"
 
     def __repr__(self):
         return self.name
@@ -277,10 +288,13 @@ class Engine:
         problem = self.problem()
         if problem:
             return False, problem
-        if self.cli == "docker" and (self.default_runtime() == "runsc") != self.gvisor:
-            return False, f"the engine at {self.host} has {self.default_runtime()!r} as its default runtime" + (
-                ": it is a docker-gvisor host" if not self.gvisor else ", not runsc (gVisor)"
-            )
+        if self.cli == "docker":
+            found = self.default_runtime()
+            if self.runtime:
+                if found != self.runtime:
+                    return False, f"the engine at {self.host} has {found!r} as its default runtime, not {self.runtime} ({SANDBOXED_RUNTIMES[self.runtime]})"
+            elif found in SANDBOXED_RUNTIMES:
+                return False, f"the engine at {self.host} has {found!r} as its default runtime: it is a Docker host with {SANDBOXED_RUNTIMES[found]}"
         return True, ""
 
     def image_for(self, binary):
@@ -403,7 +417,8 @@ class Engine:
         return tag
 
     def default_runtime(self):
-        """The engine's default OCI runtime (Docker only): runsc on a gVisor platform, usually runc."""
+        """The engine's default OCI runtime (Docker only): runsc on a gVisor platform, sysbox-runc on a sysbox one,
+        usually runc."""
         info = self.run("info", "--format", "{{.DefaultRuntime}}")
         return info.stdout.strip() if info.returncode == 0 else ""
 
@@ -485,11 +500,20 @@ GVISOR_SETUP = (
     'install gVisor, register it and make it the default: {"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}, "default-runtime": "runsc"} '
     "in /etc/docker/daemon.json"
 )
+SYSBOX_SETUP = (
+    "install the sysbox package (https://github.com/nestybox/sysbox, rootful Docker and systemd on the host), then make "
+    'sysbox-runc the default: {"default-runtime": "sysbox-runc"} in /etc/docker/daemon.json'
+)
+
+# The runtimes that isolate a container from the host beyond a plain container: a Docker host whose default is one of
+# them is not the plain `docker` platform, and a platform that names one requires it.
+SANDBOXED_RUNTIMES = {"runsc": "gVisor", "sysbox-runc": "sysbox"}
 
 # The supported reference platforms. A run tests exactly one.
 ENGINES = [
     Engine("docker", "docker", "unix:///var/run/docker.sock", setup=DOCKER_SETUP),
-    Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", gvisor=True, setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
+    Engine("docker-gvisor", "docker", "unix:///var/run/docker.sock", runtime="runsc", setup=f"{DOCKER_SETUP}; {GVISOR_SETUP}"),
+    Engine("docker-sysbox", "docker", "unix:///var/run/docker.sock", runtime="sysbox-runc", setup=f"{DOCKER_SETUP}; {SYSBOX_SETUP}"),
     Engine(
         "podman",
         "podman",

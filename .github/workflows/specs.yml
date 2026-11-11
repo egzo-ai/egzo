@@ -37,6 +37,7 @@ jobs:
           if [ "$FULL" = true ]; then
             cells="[$docker,
               {\"name\":\"docker-gvisor\",\"engine\":\"docker-gvisor\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
+              {\"name\":\"docker-sysbox\",\"engine\":\"docker-sysbox\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
               {\"name\":\"podman\",\"engine\":\"podman\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
               {\"name\":\"podman-rootless\",\"engine\":\"podman-rootless\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
               {\"name\":\"docker-arm64\",\"engine\":\"docker\",\"runner\":\"ubuntu-26.04-arm\",\"experimental\":true}]"

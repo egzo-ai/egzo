@@ -137,12 +137,31 @@ func checkEngine(ctx context.Context, c *engine.Client, report func(level, forma
 	if rootless {
 		report("ok", "engine runs rootless: a compromised container is only you")
 	} else {
-		report("ok", "engine runs rootful: agents run as your user without capabilities, but a container escape is root; consider rootless, or a sandboxed runtime such as gVisor as the engine's default")
+		report("ok", "%s", rootfulLine(info.DefaultRuntime))
 	}
 	checkInternalNetworks(ctx, c, report)
 	// egzo never chooses a runtime: containers run under the engine's default one, which is the sysadmin's choice.
-	// Shown so that anyone can confirm what they run on (runsc is gVisor); never a warning, most engines run runc.
+	// Shown so that anyone can confirm what they run on (runsc is gVisor, sysbox-runc is sysbox); never a warning, most
+	// engines run runc.
 	report("ok", "runtime: containers run under %s, the engine's default OCI runtime", info.DefaultRuntime)
+}
+
+// sandboxedRuntimes are the OCI runtimes that isolate a container from the host beyond what a plain container has:
+// gVisor's runsc answers its system calls in user space, and sysbox's sysbox-runc puts every container in a Linux user
+// namespace. egzo never chooses one (docs/gvisor.md, docs/sysbox.md): the host makes one its default runtime.
+var sandboxedRuntimes = map[string]string{
+	"runsc":       "gVisor",
+	"sysbox-runc": "sysbox",
+}
+
+// rootfulLine is what `system check` says about a rootful engine. A host whose default runtime already sandboxes its
+// containers is told what runs; one that runs them on the host kernel is pointed at both, so that the advice is never
+// what the host already does.
+func rootfulLine(defaultRuntime string) string {
+	if sandboxed, ok := sandboxedRuntimes[defaultRuntime]; ok {
+		return fmt.Sprintf("engine runs rootful: agents run as your user without capabilities, and containers run under %s, a sandboxed runtime (%s)", defaultRuntime, sandboxed)
+	}
+	return "engine runs rootful: agents run as your user without capabilities, but a container escape is root; consider rootless, or a sandboxed runtime such as gVisor (runsc) or sysbox (sysbox-runc) as the engine's default"
 }
 
 // --- ca rotate ------------------------------------------------------------------------------------

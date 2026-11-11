@@ -8,7 +8,7 @@ Three ideas carry the design:
 
 - **The sandbox is the security boundary.** Agents run in their harness's bypass mode and never stop to ask
   permission. What limits the damage is where they run: a container of their own, on a network with no route out except
-  through the egzo proxy, running as your uid, optionally under gVisor.
+  through the egzo proxy, running as your uid, optionally under gVisor or sysbox.
 - **Secrets never reach the agent.** Credentials live in the proxy, which adds them to outgoing requests for the
   hosts you named. A compromised agent cannot leak credentials it does not have. It can still use them through the
   proxy while it runs, for those hosts; [the security model](security.md) spells out what that means.
@@ -40,7 +40,7 @@ In short:
 ## Requirements
 
 Linux with Docker or Podman, reached through `DOCKER_HOST` like the docker CLI does (default `/var/run/docker.sock`). Docker is
-the engine to start with. Rootless Podman and gVisor are covered in [Installing](install.md), as advanced setups.
+the engine to start with. Rootless Podman, gVisor and sysbox are covered in [Installing](install.md), as advanced setups.
 
 Run `egzo system check` to check the engine and its isolation. [the security model](security.md) says what the isolation does and
 does not give you.
@@ -62,5 +62,5 @@ something misbehaves, see [troubleshooting](troubleshooting.md).
 
 Working on Docker: validation, `project up` / `agent spawn` / `agent rm` / `project down`, templates and instances, the egress proxy with
 credential injection, git workspaces, Claude Code, OpenCode and Codex, message delivery, declared ports, and the operator commands. Not yet:
-the `pi` harness; the Podman and gVisor spec runs are reported in CI but are not required checks. A separate web UI, [the hub](hub.md), is built and is not part
+the `pi` harness; the Podman, gVisor and sysbox spec runs are reported in CI but are not required checks. A separate web UI, [the hub](hub.md), is built and is not part
 of the CLI. Binaries and images are published for Linux (amd64 and arm64), still as early 0.x releases ([1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1)).
