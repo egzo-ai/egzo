@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	agent TEXT NOT NULL,
 	name TEXT NOT NULL,
 	home TEXT NOT NULL,                 -- the channel where what it says unprompted goes: the first it was added to
+	gone INTEGER NOT NULL DEFAULT 0,    -- when the agent was first known to have left its project (unix ms), 0 while it is there
 	PRIMARY KEY (guild, role),
 	UNIQUE (guild, project, agent)
 );
@@ -59,6 +60,9 @@ type Agent struct {
 	Guild, Role          discord.Snowflake
 	Project, Agent, Name string
 	Home                 discord.Snowflake
+	// Gone is when the agent was first known to have left its project, zero while it is there. Its role is kept for a while: an agent
+	// re-created under the same name gets it back.
+	Gone time.Time
 }
 
 // Post is a Discord message that is an egzo message.
@@ -110,7 +114,7 @@ func (s *State) AddAgent(ctx context.Context, a Agent) error {
 	return err
 }
 
-const agentSelect = `SELECT guild, role, project, agent, name, home FROM agents `
+const agentSelect = `SELECT guild, role, project, agent, name, home, gone FROM agents `
 
 func scanAgents(rows *sql.Rows, err error) ([]Agent, error) {
 	if err != nil {
@@ -120,8 +124,12 @@ func scanAgents(rows *sql.Rows, err error) ([]Agent, error) {
 	var out []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(&a.Guild, &a.Role, &a.Project, &a.Agent, &a.Name, &a.Home); err != nil {
+		var gone int64
+		if err := rows.Scan(&a.Guild, &a.Role, &a.Project, &a.Agent, &a.Name, &a.Home, &gone); err != nil {
 			return nil, err
+		}
+		if gone != 0 {
+			a.Gone = time.UnixMilli(gone)
 		}
 		out = append(out, a)
 	}
@@ -153,8 +161,44 @@ func (s *State) AgentEverywhere(ctx context.Context, project, agent string) ([]A
 
 // AgentsIn lists the agents that are in a channel.
 func (s *State) AgentsIn(ctx context.Context, guild, channel discord.Snowflake) ([]Agent, error) {
-	return scanAgents(s.db.QueryContext(ctx, `SELECT a.guild, a.role, a.project, a.agent, a.name, a.home FROM agents a
+	return scanAgents(s.db.QueryContext(ctx, `SELECT a.guild, a.role, a.project, a.agent, a.name, a.home, a.gone FROM agents a
 		JOIN places p ON p.guild = a.guild AND p.role = a.role WHERE a.guild = ? AND p.channel = ? ORDER BY a.name`, guild, channel))
+}
+
+// MarkGone records that an agent left its project, in every guild, unless it was known already: the first time is when its roles go. An
+// empty agent is all of the project's.
+func (s *State) MarkGone(ctx context.Context, project, agent string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET gone = ? WHERE project = ? AND (? = '' OR agent = ?) AND gone = 0`, at.UnixMilli(), project, agent, agent)
+	return err
+}
+
+// MarkBack records that an agent is in its project again: re-created under the same name, it keeps its roles and channels.
+func (s *State) MarkBack(ctx context.Context, project, agent string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET gone = 0 WHERE project = ? AND agent = ? AND gone != 0`, project, agent)
+	return err
+}
+
+// KeptAgents lists every agent that has a role somewhere, once: what to ask the hub about.
+func (s *State) KeptAgents(ctx context.Context) ([][2]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT project, agent FROM agents ORDER BY project, agent`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]string
+	for rows.Next() {
+		var pa [2]string
+		if err := rows.Scan(&pa[0], &pa[1]); err != nil {
+			return nil, err
+		}
+		out = append(out, pa)
+	}
+	return out, rows.Err()
+}
+
+// GoneBefore lists the roles of agents that left their project before a time.
+func (s *State) GoneBefore(ctx context.Context, before time.Time) ([]Agent, error) {
+	return scanAgents(s.db.QueryContext(ctx, agentSelect+`WHERE gone != 0 AND gone < ?`, before.UnixMilli()))
 }
 
 // AddPlace puts an agent in a channel.
