@@ -641,6 +641,8 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 		result, err = engine.Send(ctx, project, request.Agent, request.Actor, request.Text, request.Key, request.Interrupt)
 	case hublink.VerbResolve:
 		err = engine.Resolve(ctx, project, request.Message, request.Actor, request.Text, request.Outcome)
+	case hublink.VerbUndelivered:
+		err = engine.Undelivered(ctx, project, request.Message, request.Text)
 	case hublink.VerbWorkspaces:
 		result, err = engine.Workspaces(ctx, project)
 	case hublink.VerbFiles:

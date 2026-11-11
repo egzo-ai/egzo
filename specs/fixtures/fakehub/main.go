@@ -174,7 +174,7 @@ func answer(w http.ResponseWriter, value any) {
 type verbRequest struct {
 	Project, Verb, Template, Name, Actor, Agent, Container, Input string
 	Workspace, Instance                                           string // files
-	Text, Key, Message, Outcome                                   string // send, resolve
+	Text, Key, Message, Outcome                                   string // send, resolve, undelivered
 	Interrupt                                                     bool   // send
 	Tail, Limit, Port                                             int
 	Seconds                                                       float64
@@ -232,6 +232,8 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 		return result, steps, err
 	case hublink.VerbResolve:
 		return nil, steps, peer.Resolve(ctx, q.Message, q.Actor, q.Text, q.Outcome)
+	case hublink.VerbUndelivered:
+		return nil, steps, peer.Undelivered(ctx, q.Message, q.Text)
 	case hublink.VerbWorkspaces:
 		result, err := peer.Workspaces(ctx)
 		return result, steps, err

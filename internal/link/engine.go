@@ -561,6 +561,13 @@ func (d *Engine) Resolve(ctx context.Context, project, message, actor, text, out
 	return err
 }
 
+// Undelivered is the hub saying that an agent's message to one of its users did not reach them: the agent is told why.
+func (d *Engine) Undelivered(ctx context.Context, project, message, reason string) error {
+	body, _ := json.Marshal(map[string]string{"reason": reason})
+	_, err := stack.ControlRequest(ctx, d.client, project, "POST", "/v1/messages/"+url.PathEscape(message)+"/undelivered", body)
+	return err
+}
+
 func (d *Engine) Logs(ctx context.Context, project, name string, tail int) (string, error) {
 	observed, err := stack.Observe(ctx, d.client, project)
 	if err != nil {

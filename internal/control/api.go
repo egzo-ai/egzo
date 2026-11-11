@@ -86,6 +86,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /messages", s.listMessages)
 	mux.HandleFunc("GET /messages/{id}", s.getMessage)
 	mux.HandleFunc("POST /messages/{id}/resolve", s.resolveForOperator)
+	mux.HandleFunc("POST /messages/{id}/undelivered", s.reportUndelivered)
 	mux.HandleFunc("GET /agents", s.agents)
 	mux.HandleFunc("PUT /agents/{name}", s.registerAgent)
 	mux.HandleFunc("DELETE /agents/{name}", s.unregisterAgent)
