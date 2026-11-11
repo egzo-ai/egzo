@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS posts (
 	message TEXT PRIMARY KEY,
 	channel TEXT NOT NULL,
 	place TEXT NOT NULL,                -- the channel the agent is in: the channel, or a thread's parent
-	guild TEXT NOT NULL,
+	guild TEXT NOT NULL,                -- empty in a DM
 	project TEXT NOT NULL,
 	agent TEXT NOT NULL,
 	egzo TEXT NOT NULL,                 -- the egzo message's id
@@ -290,9 +290,10 @@ func (s *State) PostOf(ctx context.Context, message discord.Snowflake) (Post, bo
 	return scanPost(s.db.QueryRowContext(ctx, postSelect+`WHERE message = ?`, message))
 }
 
-// stillThere keeps the posts whose agent is still in their channel: an agent taken out of a channel posts nothing more there.
-const stillThere = `EXISTS (SELECT 1 FROM agents a JOIN places pl ON pl.guild = a.guild AND pl.role = a.role
-	WHERE a.guild = posts.guild AND a.project = posts.project AND a.agent = posts.agent AND pl.channel = posts.place)`
+// stillThere keeps the posts in a DM, and those whose agent is still in their channel: an agent taken out of a channel posts nothing more
+// there.
+const stillThere = `(posts.guild = '' OR EXISTS (SELECT 1 FROM agents a JOIN places pl ON pl.guild = a.guild AND pl.role = a.role
+	WHERE a.guild = posts.guild AND a.project = posts.project AND a.agent = posts.agent AND pl.channel = posts.place))`
 
 // PostFor is the first Discord message that is an egzo message between its agent and a person, in a channel the agent is still in: where
 // to answer it. A message the person was not part of is none: an agent may answer one person's message to another.

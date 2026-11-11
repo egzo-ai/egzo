@@ -64,7 +64,18 @@ type Server struct {
 	ready      []json.RawMessage
 	starts     int           // session starts left; negative: plenty
 	resetAfter time.Duration // when they renew
+	noDMs      map[string]bool
 }
+
+// RefuseDMs makes a message to a user's DM channel fail as Discord does when they turned off DMs: 403, code 50007.
+func (s *Server) RefuseDMs(user string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noDMs[user] = true
+}
+
+// DMChannel is the id of the bot's DM channel with a user.
+func DMChannel(user string) string { return "9" + user }
 
 // SessionStarts sets how many sessions the bot may still start, and when that renews.
 func (s *Server) SessionStarts(left int, resetAfter time.Duration) {
@@ -75,7 +86,8 @@ func (s *Server) SessionStarts(left int, resetAfter time.Duration) {
 
 // New starts a fake Discord for a bot token.
 func New(token string) *Server {
-	s := &Server{Token: token, Heartbeat: time.Second, sessions: map[string]*session{}, limited: map[string]int{}, connected: make(chan struct{}), starts: -1}
+	s := &Server{Token: token, Heartbeat: time.Second, sessions: map[string]*session{}, limited: map[string]int{}, connected: make(chan struct{}), starts: -1,
+		noDMs: map[string]bool{}}
 	s.nextID.Store(1000)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/gateway/", s.gateway)
@@ -202,6 +214,18 @@ func (s *Server) RateLimit(path string, n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.limited[path] = n
+}
+
+// refusesDM reports whether a path posts in the DM channel of a user who refuses DMs.
+func (s *Server) refusesDM(path string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for user := range s.noDMs {
+		if path == "/channels/"+DMChannel(user)+"/messages" {
+			return true
+		}
+	}
+	return false
 }
 
 // Requests lists the REST requests answered so far, with prefix as the start of their "METHOD path" ("" for all).
@@ -364,6 +388,19 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 			"session_start_limit": map[string]int64{"total": 1000, "remaining": int64(left), "reset_after": reset.Milliseconds(), "max_concurrency": 1}})
 	case path == "/applications/@me":
 		io.WriteString(w, `{"id": "2", "name": "egzo"}`)
+	case path == "/users/@me/channels":
+		var in struct {
+			Recipient string `json:"recipient_id"`
+		}
+		_ = json.Unmarshal(body, &in)
+		data, _ := json.Marshal(map[string]any{"id": DMChannel(in.Recipient), "type": 1, "recipients": []map[string]string{{"id": in.Recipient}}})
+		s.mu.Lock()
+		s.requests[index].Response = data
+		s.mu.Unlock()
+		w.Write(data)
+	case r.Method == http.MethodPost && s.refusesDM(path):
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"message": "Cannot send messages to this user", "code": 50007}`)
 	case r.Method == http.MethodDelete || strings.HasSuffix(path, "/callback") || r.Method == http.MethodPut:
 		w.WriteHeader(http.StatusNoContent)
 	default:

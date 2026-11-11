@@ -169,8 +169,11 @@ needs no address of its own, and the hub on the bridge API.
   - as a reply to the message it is about, when you were part of it: one you wrote, or one the bot posted to you;
   - otherwise (it is about a message from elsewhere, such as the task an agent was started with) in the channel where you last talked to
     that agent, among those it is still in. It never goes to another server just because the agent is there too;
-  - otherwise nowhere yet: the bot does not post it. A question shows its choices as buttons, and only you can click them; a reply to it
-    answers it.
+  - otherwise by **DM**: the first time an agent reaches you, such as one started unattended with a task from the hub. Reply to its
+    messages in the DM to talk to it. If you turned off DMs from server members, the bot cannot reach you there, and tries again 10
+    minutes later at the earliest.
+
+  A question shows its choices as buttons, and only you can click them; a reply to it answers it.
 
 **What the bot posts**
 - Discord's Components V2 messages, a colour for each kind.

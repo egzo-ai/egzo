@@ -4,7 +4,7 @@
 // Package discordbridge is egzo-discord: the bridge between Discord and the hub's agents (docs/hub-bridges.md). An agent is added to a
 // channel as a role people mention, which the bot creates and nobody holds. A mention of the role, a reply to what the agent posted, or a
 // message in a thread it started goes to the agent; what the agent says to a person comes back where that person last talked to it,
-// mentioning them. The hub checks every message; the bridge vets Discord's side.
+// mentioning them, or by DM. The hub checks every message; the bridge vets Discord's side.
 package discordbridge
 
 import (
@@ -58,6 +58,8 @@ type Bridge struct {
 	channels map[discord.Snowflake]discord.Channel
 	hinted   map[discord.Snowflake]time.Time // people told to link their account, and when
 	asked    map[discord.Snowflake]time.Time // people the hub was asked about, and when
+	noted    map[discord.Snowflake]time.Time // people told how to talk to an agent in a DM, and when
+	noDMs    map[discord.Snowflake]time.Time // people whose DMs Discord refused, and when
 	running  int                             // interactions being worked on
 	runs     map[discord.Snowflake]int       // and how many of them each person's are
 	stopped  bool                            // Run is returning
@@ -95,6 +97,7 @@ func New(cfg Config) *Bridge {
 	return &Bridge{cfg: cfg, rest: discord.NewREST(cfg.Token, cfg.API, nil), hub: cfg.Hub, state: cfg.State, log: cfg.Log,
 		accounts: map[discord.Snowflake]Account{}, byUser: map[string]Account{}, roles: map[discord.Snowflake]map[discord.Snowflake]discord.Role{},
 		channels: map[discord.Snowflake]discord.Channel{}, hinted: map[discord.Snowflake]time.Time{}, asked: map[discord.Snowflake]time.Time{},
+		noted: map[discord.Snowflake]time.Time{}, noDMs: map[discord.Snowflake]time.Time{},
 		runs: map[discord.Snowflake]int{}}
 }
 
@@ -130,7 +133,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		}
 		events <- e
 	}
-	gateway := &discord.Gateway{Token: b.cfg.Token, Intents: discord.IntentGuilds | discord.IntentGuildMessages | discord.IntentMessageContent,
+	gateway := &discord.Gateway{Token: b.cfg.Token, Intents: discord.IntentGuilds | discord.IntentGuildMessages | discord.IntentDirectMessages | discord.IntentMessageContent,
 		URL: gw.URL, Handler: handler, Log: b.log, Sessions: b.rest.GatewayBot}
 	failed := make(chan error, 1)
 	go func() { failed <- gateway.Run(ctx) }()
@@ -352,7 +355,11 @@ type target struct {
 // onMessage sends a person's message to the agents it addresses: those whose role it mentions in a channel they are in, the agent whose
 // message it replies to, or the agent of the thread it is in. Anything else is not for the bridge.
 func (b *Bridge) onMessage(ctx context.Context, m discord.Message) {
-	if m.Author.Bot || m.GuildID == "" {
+	if m.Author.Bot {
+		return
+	}
+	if m.GuildID == "" {
+		b.onDM(ctx, m)
 		return
 	}
 	place, inThread := b.place(m.ChannelID)
@@ -376,11 +383,7 @@ func (b *Bridge) onMessage(ctx context.Context, m discord.Message) {
 	}
 	if m.MessageReference != nil && m.MessageReference.MessageID != "" {
 		if p, ok, _ := b.state.PostOf(ctx, m.MessageReference.MessageID); ok {
-			t := target{agent: Agent{Guild: p.Guild, Project: p.Project, Agent: p.Agent}}
-			if (p.Kind == "question" || p.Kind == "request") && p.Person == m.Author.ID {
-				t.answer = p.Egzo // a reply to what an agent asked answers it; anyone else's reply is a message to the agent
-			}
-			add(t)
+			add(replyTo(p, m))
 		}
 	}
 	if inThread {
@@ -388,6 +391,42 @@ func (b *Bridge) onMessage(ctx context.Context, m discord.Message) {
 			add(target{agent: Agent{Guild: p.Guild, Project: p.Project, Agent: p.Agent}})
 		}
 	}
+	b.deliver(ctx, m, place, targets)
+}
+
+// replyTo is the agent a reply to one of its posts goes to: a reply to what it asked answers it, if the person it asked wrote it. Anyone
+// else's is a message to the agent.
+func replyTo(p Post, m discord.Message) target {
+	t := target{agent: Agent{Guild: p.Guild, Project: p.Project, Agent: p.Agent}}
+	if (p.Kind == "question" || p.Kind == "request") && p.Person == m.Author.ID {
+		t.answer = p.Egzo
+	}
+	return t
+}
+
+// onDM is a message in the bot's DM with a person: a reply to what an agent posted there goes to it. There are no roles to mention in a
+// DM, so anything else is told how.
+func (b *Bridge) onDM(ctx context.Context, m discord.Message) {
+	if m.MessageReference != nil && m.MessageReference.MessageID != "" {
+		if p, ok, _ := b.state.PostOf(ctx, m.MessageReference.MessageID); ok && p.Channel == m.ChannelID {
+			b.deliver(ctx, m, m.ChannelID, []target{replyTo(p, m)})
+			return
+		}
+	}
+	b.mu.Lock()
+	last := b.noted[m.Author.ID]
+	if time.Since(last) < 10*time.Minute {
+		b.mu.Unlock()
+		return
+	}
+	b.noted[m.Author.ID] = time.Now()
+	b.mu.Unlock()
+	b.say(ctx, m, "To talk to an agent here, reply to one of its messages.")
+}
+
+// deliver sends a person's message to its agents, and tells them of one the hub did not deliver. place is the channel the agents are in:
+// the message's channel, or a thread's parent.
+func (b *Bridge) deliver(ctx context.Context, m discord.Message, place discord.Snowflake, targets []target) {
 	if len(targets) == 0 {
 		return
 	}
@@ -591,8 +630,9 @@ func (b *Bridge) dropRole(ctx context.Context, a Agent, why string) {
 
 // post shows what an agent says to a person, mentioning them. Agents only answer: what they say is about a message, which is either one the
 // bridge posted or the person wrote, or one from elsewhere (another bridge, the hub, an unattended agent's task). It goes as a reply to that
-// message when the person was part of it; otherwise where the person last talked to the agent. Never anywhere else: an agent can be in
-// several servers, and the person in none of the others. With neither, the bridge has nowhere to post it.
+// message when the person was part of it; otherwise where the person last talked to the agent; otherwise by DM. Never in another channel
+// the agent is in: an agent can be in several servers, and the person in none of the others. A person who does not take DMs from the bot
+// does not get it.
 func (b *Bridge) post(ctx context.Context, e Event) {
 	b.mu.Lock()
 	account, ok := b.byUser[strings.TrimPrefix(e.To, "user:")]
@@ -611,10 +651,15 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 		}
 	}
 	if !found {
-		if where, found, _ = b.state.LastPost(ctx, person, e.Project, e.Agent); !found {
-			b.log.Info("an agent spoke to a person who has not talked to it in any channel it is in: not posted", "agent", e.Agent, "to", e.To)
+		where, found, _ = b.state.LastPost(ctx, person, e.Project, e.Agent)
+	}
+	if !found {
+		dm, ok := b.dm(ctx, person)
+		if !ok {
+			b.log.Info("an agent spoke to a person who has not talked to it here, and does not take DMs: not posted", "agent", e.Agent, "to", e.To)
 			return
 		}
+		where = Post{Channel: dm, Place: dm}
 	}
 	for i, msg := range render(e, person) {
 		if i == 0 {
@@ -622,12 +667,49 @@ func (b *Bridge) post(ctx context.Context, e Event) {
 		}
 		sent, err := b.rest.CreateMessage(ctx, where.Channel, msg)
 		if err != nil {
+			if where.Guild == "" && refusedDM(err) {
+				b.refuseDMs(person)
+			}
 			b.log.Warn("post what an agent said", "agent", e.Agent, "err", err)
 			return
 		}
 		_ = b.state.AddPost(ctx, Post{Message: sent.ID, Channel: where.Channel, Place: where.Place, Guild: where.Guild, Project: e.Project, Agent: e.Agent,
 			Egzo: e.ID, Person: person, Kind: e.Kind, Choices: e.Choices})
 	}
+}
+
+// dmRefusal is how long the bridge does not try again to DM someone Discord refused it: a refusal counts toward Discord's invalid
+// requests, past which it bans the bot's IP.
+const dmRefusal = 10 * time.Minute
+
+// dm is the bot's DM channel with a person, unless Discord refused to DM them a moment ago.
+func (b *Bridge) dm(ctx context.Context, person discord.Snowflake) (discord.Snowflake, bool) {
+	b.mu.Lock()
+	refused := time.Since(b.noDMs[person]) < dmRefusal
+	b.mu.Unlock()
+	if refused {
+		return "", false
+	}
+	c, err := b.rest.CreateDM(ctx, person)
+	if err != nil {
+		if refusedDM(err) {
+			b.refuseDMs(person)
+		}
+		b.log.Warn("open a DM", "err", err)
+		return "", false
+	}
+	return c.ID, true
+}
+
+func (b *Bridge) refuseDMs(person discord.Snowflake) {
+	b.mu.Lock()
+	b.noDMs[person] = time.Now()
+	b.mu.Unlock()
+}
+
+func refusedDM(err error) bool {
+	var de *discord.Error
+	return errors.As(err, &de) && de.Code == discord.ErrCodeCannotMessageUser
 }
 
 // --- commands and buttons --------------------------------------------------------------------------------------------------------
@@ -687,10 +769,11 @@ func boolean(o discord.CommandOption) bool {
 // start works on an interaction on its own goroutine, or answers at once that the bridge is busy. It does not block: the gateway's handler
 // calls it.
 func (b *Bridge) start(ctx context.Context, i discord.Interaction) {
-	if i.Member == nil || i.Member.User == nil || i.GuildID == "" {
+	user := i.Person()
+	if user == nil || i.GuildID == "" && i.Type != discord.InteractionComponent { // in a DM, only buttons: the commands are a guild's
 		return
 	}
-	person := i.Member.User.ID
+	person := user.ID
 	busy := ""
 	b.mu.Lock()
 	if b.stopped {
@@ -1004,16 +1087,17 @@ func (b *Bridge) click(ctx context.Context, i discord.Interaction) {
 		b.finish(ctx, i, "This question is not open any more.")
 		return
 	}
-	if p.Person != i.Member.User.ID {
+	user := i.Person()
+	if p.Person != user.ID {
 		b.finish(ctx, i, fmt.Sprintf("This question is for <@%s>.", p.Person))
 		return
 	}
-	if !b.known(ctx, i.Member.User.ID) {
+	if !b.known(ctx, user.ID) {
 		b.finish(ctx, i, "Link your Discord account to the hub first: `/egzo register`.")
 		return
 	}
 	choice := p.Choices[index]
-	if _, err := b.hub.Deliver(ctx, Inbound{Project: p.Project, Agent: p.Agent, Account: string(i.Member.User.ID), Text: choice, Answer: p.Egzo}); err != nil {
+	if _, err := b.hub.Deliver(ctx, Inbound{Project: p.Project, Agent: p.Agent, Account: string(user.ID), Text: choice, Answer: p.Egzo}); err != nil {
 		said, gone := b.goneNote(ctx, i.GuildID, p.Project, p.Agent, err)
 		if !gone {
 			said = "⚠️ Not delivered to **" + p.Agent + "**" + offlineNote(err) + ". It may have been answered already."

@@ -454,15 +454,85 @@ func TestAnAgentThatAnswersSomeoneElsesMessageDoesNotPostThere(t *testing.T) {
 	}
 }
 
-func TestWhatAnAgentSaysToSomeoneWhoNeverTalkedToItIsNotPosted(t *testing.T) {
+func TestAnAgentReachesSomeoneWhoNeverTalkedToItByDM(t *testing.T) {
 	w := setup(t)
 	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
-	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "nowhere", ID: "m1"})
-	w.talks("500", room, role) // after the first event: the outbox is in order
-	w.says("here", "", "m2")
-	if posts := w.discord.Requests("POST /channels/"); len(posts) != 1 || strings.Contains(string(posts[0].Body), "nowhere") {
-		t.Errorf("posts %v", posts)
+	dm := discordtest.DMChannel("7")
+	// the task an unattended agent was started with came from the hub: joe never talked to it on Discord
+	posted, sent := w.says("may I merge?", "m-task", "mr")
+	var open struct {
+		Recipient string `json:"recipient_id"`
 	}
+	_ = w.request("the DM opened", "POST /users/@me/channels").JSON(&open)
+	if open.Recipient != "7" || posted.Path != "/channels/"+dm+"/messages" || !strings.Contains(string(posted.Body), "may I merge?") {
+		t.Errorf("opened a DM with %q, posted %s %s", open.Recipient, posted.Path, posted.Body)
+	}
+	// a reply in the DM answers it
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "700", ChannelID: discord.Snowflake(dm), Author: discord.User{ID: "7", Username: "joe"},
+		Content: "yes", MessageReference: &discord.MessageReference{MessageID: discord.Snowflake(sent)}})
+	eventually(t, "the answer", func() bool { return len(w.calls("resolve mr user:"+w.admin.ID+" yes")) == 1 })
+	// what it says next stays in the DM, a question's buttons work there
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "question",
+		Text: "staging or production?", Re: "m-task-2", ID: "mq", Choices: []string{"staging", "production"}})
+	question := w.count("the question", "POST /channels/"+dm+"/messages", 2)[1]
+	var q struct{ ID string }
+	_ = json.Unmarshal(question.Response, &q)
+	w.recorded(q.ID)
+	raw, _ := json.Marshal(map[string]any{"custom_id": "egzo:c:0", "component_type": 2})
+	w.discord.Dispatch("INTERACTION_CREATE", map[string]any{"id": "701", "application_id": "2", "type": discord.InteractionComponent, "token": "tok-701",
+		"channel_id": dm, "user": discord.User{ID: "7", Username: "joe"}, "message": discord.Message{ID: discord.Snowflake(q.ID)}, "data": json.RawMessage(raw)})
+	eventually(t, "the click", func() bool { return len(w.calls("resolve mq user:"+w.admin.ID+" staging")) == 1 })
+	// once joe talks to it in a channel, that is where it reaches him
+	w.talks("702", room, role)
+	if posted, _ := w.says("deployed", "m-task-3", "md"); posted.Path != "/channels/"+room+"/messages" {
+		t.Errorf("posted in %s", posted.Path)
+	}
+	if opened := w.discord.Requests("POST /users/@me/channels"); len(opened) > 2 {
+		t.Errorf("opened the DM %d times", len(opened))
+	}
+}
+
+// handled waits until the bridge is past an agent's message in the hub's outbox.
+func (w *world) handled(id string) {
+	w.t.Helper()
+	var seq int64 = -1
+	eventually(w.t, "the message in the outbox", func() bool {
+		events, _, _, err := w.hub.Outbox(ctx, 0, 1000)
+		for _, e := range events {
+			if err == nil && e.ID == id {
+				seq = e.Seq
+			}
+		}
+		return seq >= 0
+	})
+	eventually(w.t, "the bridge past "+id, func() bool { c, _ := w.state.Cursor(ctx); return c >= seq })
+}
+
+func TestADMThatRepliesToNothingIsToldHowToTalkToAnAgent(t *testing.T) {
+	w := setup(t)
+	w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	dm := discordtest.DMChannel("7")
+	w.discord.Dispatch("MESSAGE_CREATE", discord.Message{ID: "710", ChannelID: discord.Snowflake(dm), Author: discord.User{ID: "7", Username: "joe"}, Content: "hello?"})
+	var said struct{ Content string }
+	_ = w.request("the note", "POST /channels/"+dm+"/messages").JSON(&said)
+	if !strings.Contains(said.Content, "reply to one of its messages") || len(w.calls("send")) != 0 {
+		t.Errorf("said %q, sends %v", said.Content, w.calls("send"))
+	}
+}
+
+func TestSomeoneWhoRefusesDMsIsNotAskedAgainAtOnce(t *testing.T) {
+	w := setup(t)
+	role := w.linked(discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"})
+	w.discord.RefuseDMs("7")
+	dm := discordtest.DMChannel("7")
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "one", Re: "m-a", ID: "m1"})
+	w.web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + w.admin.ID, Kind: "request", Text: "two", Re: "m-b", ID: "m2"})
+	w.handled("m2")
+	if refused := w.discord.Requests("POST /channels/" + dm + "/messages"); len(refused) != 1 {
+		t.Errorf("tried the DM %d times", len(refused))
+	}
+	w.talks("720", room, role) // a channel still reaches him
+	w.says("three", "m-c", "m3")
 }
 
 func TestOnlyThePersonAskedAnswersAQuestion(t *testing.T) {
