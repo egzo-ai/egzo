@@ -171,7 +171,9 @@ func TestWhatAgentsAndUsersSayToEachOtherGoesInTheOutboxAndTheFeedResumesWhereTh
 	if q.Bridge != "discord" || q.Account != "d-"+bob.ID {
 		t.Errorf("the question goes to bob's account: %+v", q)
 	}
-	eventually(t, "carol's agent told", func() bool { return slices.Contains(web.Calls(), "undelivered m4 carol may not hear from this project") })
+	eventually(t, "carol's agent told", func() bool {
+		return slices.Contains(web.Calls(), "undelivered m4 carol may not hear from this project")
+	})
 	if a.Kind != "resolution" || a.From != "user:"+bob.ID || a.Re != "m1" || a.Seq != last || a.Seq <= q.Seq {
 		t.Errorf("the answer = %+v (last %d)", a, last)
 	}
@@ -205,7 +207,9 @@ func TestAMessageGoesToTheAccountLinkedLastAndWithNoneTheAgentIsTold(t *testing.
 	_, start, _, _ := r.hub.Outbox(ctx, -1, 10)
 	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + bob.ID, Kind: "update", Text: "on it", ID: "m1"})
 	web.PushEvent(links.Event{Type: "message", Agent: "coder-1", Actor: "agent:coder-1", To: "user:" + bob.ID, Kind: "question", Text: "where?", ID: "m2"})
-	eventually(t, "the agent told", func() bool { return slices.Contains(web.Calls(), "undelivered m2 bob has no chat account linked to the hub") })
+	eventually(t, "the agent told", func() bool {
+		return slices.Contains(web.Calls(), "undelivered m2 bob has no chat account linked to the hub")
+	})
 	for _, c := range web.Calls() {
 		if strings.HasPrefix(c, "undelivered m1") {
 			t.Errorf("an update is not told: %q", c)
