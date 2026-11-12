@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -83,6 +84,11 @@ func TestAnAgentIsToldWhenWhoStartedItCanAndCannotBeReachedAndNothingElse(t *tes
 	}
 	if told[0].State != stateResolved || told[0].Outcome != outcomeSuperseded {
 		t.Errorf("the notice it had not read = %s %s, want superseded", told[0].State, told[0].Outcome)
+	}
+	r.idle("coder")
+	if line := r.claim("coder", time.Minute).Line; !strings.Contains(line, told[1].ID+": whether the person who started you can be reached changed") ||
+		strings.Contains(line, "network access") {
+		t.Errorf("the typed line: %q", line)
 	}
 
 	for _, bad := range []string{`{"operator":{"name":"x","reachable":true}}`, `{"agent:coder":{}}`, `{"user:7":{"name":"two\nlines"}}`, `[]`} {

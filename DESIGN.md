@@ -741,6 +741,7 @@ The holder asks the control sidecar when the terminal is ready; control answers 
 | resolution of a question (an answer) | `egzo message <id> answers your question on request <request id>: fetch it.` A resolution carries `re_kind` (the kind it closes) and, for an answer, `on` (the request the question was asked about). |
 | notice from `egzo`: access | `egzo message <id>: your network access changed; fetch it.` |
 | notice from `egzo`: undelivered | `egzo message <id>: a message you sent a person did not reach them; fetch it.` |
+| notice from `egzo`: starter | `egzo message <id>: whether the person who started you can be reached changed; fetch it.` |
 | several of one kind | `check egzo messages <id1>, <id2> and handle each one.` (wording of the kind, ids listed) |
 
   A message pending when the harness starts is announced the same way once its TUI is ready.
