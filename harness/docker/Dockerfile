@@ -13,8 +13,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY sudoers /etc/sudoers.d/egzo-docker
+COPY pam-sudo /etc/pam.d/sudo
 COPY start-docker /usr/local/bin/egzo-start-docker
-RUN chmod 0440 /etc/sudoers.d/egzo-docker && chmod 0755 /usr/local/bin/egzo-start-docker && visudo -cf /etc/sudoers.d/egzo-docker
+RUN chmod 0440 /etc/sudoers.d/egzo-docker && chmod 0644 /etc/pam.d/sudo && chmod 0755 /usr/local/bin/egzo-start-docker \
+ && visudo -cf /etc/sudoers.d/egzo-docker
 
 # A new ENTRYPOINT clears the CMD of the image below, so the harness is started with no program and runs its own default
 # (claude, opencode or codex), as egzo expects of a harness image.
