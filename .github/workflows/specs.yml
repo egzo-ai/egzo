@@ -42,9 +42,7 @@ jobs:
               {\"name\":\"podman-rootless\",\"engine\":\"podman-rootless\",\"runner\":\"ubuntu-26.04\",\"experimental\":true},
               {\"name\":\"docker-arm64\",\"engine\":\"docker\",\"runner\":\"ubuntu-26.04-arm\",\"experimental\":true}]"
           else
-            # TEMPORARY while PR 200 (sysbox) is worked on: the sysbox cell runs on a pull request too. Remove before merging.
-            cells="[$docker,
-              {\"name\":\"docker-sysbox\",\"engine\":\"docker-sysbox\",\"runner\":\"ubuntu-26.04\",\"experimental\":true}]"
+            cells="[$docker]"
           fi
           echo "cells=$(echo "$cells" | jq -c .)" >> "$GITHUB_OUTPUT"
 
