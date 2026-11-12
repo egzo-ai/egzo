@@ -210,6 +210,7 @@ needs no address of its own, and the hub on the bridge API.
   **`/egzo agent list`** shows the agents of the channel, and when the role of one that left its project goes.
 - **Talk to an agent:** mention its role in a channel it is in, reply to what it posted, or write in a thread started from one of its
   messages. **`/egzo say agent: text: [interrupt:]`** works anywhere. The message is yours: the hub checks it as it would your terminal.
+  A text longer than Discord shows in one message reaches the agent whole; the channel sees its first 2000 characters.
 - **What an agent says to you** mentions you, and comes:
   - as a reply to the message it is about, when you were part of it: one you wrote, or one the bot posted to you;
   - otherwise (it is about a message from elsewhere, such as the task an agent was started with) in the channel where you last talked to
