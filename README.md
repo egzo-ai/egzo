@@ -21,6 +21,17 @@ I built it to stop wondering what each of my agents has access to. No web forms 
 kept in databases and daemons. Just a short project file that you apply with `egzo project up`, and your container engine
 does the rest.
 
+## How it works
+
+![A project on one machine: the CLI, three agents, the control sidecar and the proxy, which lets through the hosts you listed and denies the rest. The project and one on another machine dial out to the hub, where a browser and Discord connect.](assets/overview.svg)
+
+Egzo isolates agents in standard containers, with all file and network access denied by default. Network access goes
+through a built-in proxy that injects the credentials. Services, allowed hosts and file access are configured in a short
+YAML project file.
+
+Projects can live on different machines and connect out to a central hub over a websocket. There you control every agent,
+and you can link your Discord account to chat with them.
+
 ## Features
 
 - **Claude Code, OpenCode and Codex.** More harnesses planned.
@@ -33,7 +44,7 @@ does the rest.
 - **[Credential injection](docs/security.md#how-secret-injection-works).** Agents can't leak passwords and tokens they don't have access to.
 - **[Secrets](docs/project-file.md#vaults-and-secrets).** Read from `pass`, environment variables or a `.env` file. More password managers planned.
 - **[Git integration](docs/workspaces.md).** Git worktrees and multiple repos per agent are supported.
-- **[Messaging](docs/messaging.md).** User to agent, agent to agent and agent to user. External bridges (Discord) in the works.
+- **[Messaging](docs/messaging.md).** User to agent, agent to agent and agent to user. From [Discord](docs/hub-bridges.md#discord) too, through the hub.
 - **[Built-in browser](docs/browser.md).** Batteries included with Chromium and the Playwright MCP pre-installed in our default
   harness images.
 - **[Your own tools](docs/images.md).** Add software to a harness image, or run any image with the `custom` harness.
@@ -113,6 +124,21 @@ $ egzo agent attach architect-1  # the real Claude Code TUI; detach with Ctrl-]
 $ egzo agent spawn coder review-123 -m "Review the new PR" --wait    # waits for the answer, exits 0 when done
 $ egzo agent rm review-123
 ```
+
+## Similar projects
+
+Egzo is one person's project. Bigger teams work on the same problem, and they are worth a look.
+
+| | Isolation | Network | Credentials | Your files | Web UI, chat | Open source |
+|---|---|---|---|---|---|---|
+| **egzo** | container | denied by default | kept in the proxy | not mounted | yes | yes |
+| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | microVM | a preset you pick | kept in the proxy | mounted by default | no | no |
+| [Claude Code's sandbox](https://code.claude.com/docs/en/sandboxing) | shell commands only | allowlist | in the agent by default | used in place | no | the sandbox part |
+| [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | container, kernel rules | denied by default | kept out of the agent | the paths you declare | no | yes |
+| [Scion](https://github.com/GoogleCloudPlatform/scion) | container | open by default | given to the agent | worktree or clone | yes | yes |
+
+Docker Sandboxes and OpenShell are sandboxes, and Scion is orchestration. Egzo is a small attempt at both. This is from
+their docs in November 2026: tell me if I got one wrong.
 
 ## Supported platforms
 

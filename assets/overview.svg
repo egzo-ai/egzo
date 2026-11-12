@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 630" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" fill="#0f172a">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#15803d"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b91c1c"/></marker>
+  </defs>
+  <rect width="1040" height="630" fill="#fff"/>
+
+  <!-- people -->
+  <rect x="30" y="30" width="230" height="68" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="145" y="58" text-anchor="middle" font-weight="700">Browser</text>
+  <text x="145" y="80" text-anchor="middle" font-size="13" fill="#475569">terminals, files, previews</text>
+  <rect x="30" y="122" width="230" height="68" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="145" y="150" text-anchor="middle" font-weight="700">Discord</text>
+  <text x="145" y="172" text-anchor="middle" font-size="13" fill="#475569">talk to agents in a channel</text>
+
+  <!-- hub -->
+  <rect x="330" y="30" width="370" height="160" rx="10" fill="#f8fafc" stroke="#64748b"/>
+  <text x="350" y="58" font-size="16" font-weight="700">egzo hub <tspan font-size="13" font-weight="400" fill="#475569">optional</tspan></text>
+  <text x="350" y="82" fill="#475569">one web UI for every linked project</text>
+  <text x="350" y="102" fill="#475569">single sign-on, roles per project</text>
+  <rect x="350" y="134" width="170" height="44" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="435" y="161" text-anchor="middle" font-weight="600">Discord bridge</text>
+  <line x1="262" y1="64" x2="328" y2="64" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="262" y1="156" x2="348" y2="156" stroke="#475569" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+
+  <!-- another machine -->
+  <rect x="780" y="30" width="230" height="160" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="796" y="56" font-weight="700" fill="#334155">Another machine</text>
+  <rect x="796" y="70" width="198" height="104" rx="8" fill="#fff" stroke="#94a3b8"/>
+  <text x="895" y="98" text-anchor="middle" font-weight="600">another project</text>
+  <text x="895" y="122" text-anchor="middle" font-size="13" fill="#475569">its own proxy, control</text>
+  <text x="895" y="142" text-anchor="middle" font-size="13" fill="#475569">and agents</text>
+  <line x1="778" y1="110" x2="702" y2="110" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="740" y="100" text-anchor="middle" font-size="12" fill="#475569">dials out</text>
+
+  <!-- this machine -->
+  <rect x="30" y="230" width="750" height="380" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="46" y="256" font-weight="700" fill="#334155">A machine with Docker or Podman</text>
+  <text x="46" y="276" font-size="13" fill="#475569">one project: egzo.yaml</text>
+
+  <rect x="510" y="246" width="240" height="44" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="630" y="273" text-anchor="middle"><tspan font-weight="600">link</tspan><tspan fill="#475569">  dials out to the hub</tspan></text>
+  <line x1="630" y1="244" x2="630" y2="192" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="50" y="340" width="150" height="96" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="125" y="368" text-anchor="middle" font-weight="700">egzo CLI</text>
+  <text x="125" y="390" text-anchor="middle" font-size="13" fill="#475569">spawn, attach</text>
+  <text x="125" y="410" text-anchor="middle" font-size="13" fill="#475569">no daemon</text>
+  <line x1="202" y1="388" x2="238" y2="388" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="240" y="300" width="240" height="244" rx="8" fill="none" stroke="#94a3b8" stroke-dasharray="5 4"/>
+  <text x="254" y="322" font-weight="700" fill="#334155">agents</text>
+  <rect x="255" y="334" width="210" height="58" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="360" y="358" text-anchor="middle" font-weight="600">claude-1</text>
+  <text x="360" y="378" text-anchor="middle" font-size="13" fill="#475569">Claude Code</text>
+  <rect x="255" y="402" width="210" height="58" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="360" y="426" text-anchor="middle" font-weight="600">codex-1</text>
+  <text x="360" y="446" text-anchor="middle" font-size="13" fill="#475569">Codex</text>
+  <rect x="255" y="470" width="210" height="58" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="360" y="494" text-anchor="middle" font-weight="600">issue-123</text>
+  <text x="360" y="514" text-anchor="middle" font-size="13" fill="#475569">OpenCode</text>
+  <text x="360" y="568" text-anchor="middle" font-size="13" fill="#475569">each: own container, network, worktree</text>
+  <text x="360" y="588" text-anchor="middle" font-size="13" font-weight="600" fill="#b91c1c">bypass mode, no secrets inside</text>
+
+  <rect x="530" y="320" width="220" height="84" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="640" y="348" text-anchor="middle" font-weight="700">control</text>
+  <text x="640" y="370" text-anchor="middle" font-size="13" fill="#475569">status, messages,</text>
+  <text x="640" y="388" text-anchor="middle" font-size="13" fill="#475569">tools for the agents</text>
+  <line x1="482" y1="362" x2="528" y2="362" stroke="#475569" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+
+  <rect x="530" y="440" width="220" height="104" rx="8" fill="#fff" stroke="#64748b"/>
+  <text x="640" y="468" text-anchor="middle" font-weight="700">proxy</text>
+  <text x="640" y="490" text-anchor="middle" font-size="13" fill="#475569">the only way out</text>
+  <text x="640" y="508" text-anchor="middle" font-size="13" fill="#475569">an allowlist per agent</text>
+  <text x="640" y="526" text-anchor="middle" font-size="13" fill="#475569">adds the credentials</text>
+  <line x1="482" y1="492" x2="528" y2="492" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- internet -->
+  <rect x="820" y="372" width="190" height="212" rx="10" fill="#fff" stroke="#cbd5e1"/>
+  <text x="836" y="396" font-weight="700" fill="#334155">Internet</text>
+  <rect x="836" y="408" width="158" height="86" rx="6" fill="#f0fdf4" stroke="#15803d"/>
+  <text x="915" y="432" text-anchor="middle" font-weight="600" fill="#15803d">hosts you listed</text>
+  <text x="915" y="454" text-anchor="middle" font-size="13" fill="#475569">api.anthropic.com</text>
+  <text x="915" y="474" text-anchor="middle" font-size="13" fill="#475569">github.com</text>
+  <rect x="836" y="506" width="158" height="64" rx="6" fill="#fef2f2" stroke="#b91c1c"/>
+  <text x="915" y="533" text-anchor="middle" font-weight="600" fill="#b91c1c">everything else</text>
+  <text x="915" y="553" text-anchor="middle" font-size="13" fill="#475569">denied</text>
+  <line x1="752" y1="466" x2="834" y2="452" stroke="#15803d" stroke-width="1.5" marker-end="url(#g)"/>
+  <line x1="752" y1="522" x2="834" y2="538" stroke="#b91c1c" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#r)"/>
+</svg>
