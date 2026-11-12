@@ -747,7 +747,8 @@ The holder asks the control sidecar when the terminal is ready; control answers 
   A message pending when the harness starts is announced the same way once its TUI is ready.
 - **Fetching is the acknowledgement.** No fetch within `inject.ack_timeout` (60 s by default) announces
   again, safely, up to three times in all; then the message is `unconfirmed`, shown by `egzo message ls`, and
-  still found by `list_messages`. Reporting `working` no longer acknowledges anything.
+  still found by `list_messages`. An unconfirmed message is announced again after a backoff of 5, then 15, then 60 ack timeouts (5 min,
+  15 min, an hour by default), for one ack timeout each time, until it is fetched: one missed line never loses a request. Reporting `working` no longer acknowledges anything.
 - **Interrupt:** `egzo message send --interrupt` makes the holder send the harness's interrupt key first, as before.
 - **Limits** (a loop between agents is easy to start): at most 20 open requests per recipient, a thread is
   at most 8 messages deep (`re` adds one hop), and a sender may send at most 30 messages a minute.

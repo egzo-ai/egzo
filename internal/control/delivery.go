@@ -139,7 +139,7 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 	if ackTimeout <= 0 {
 		ackTimeout = time.Minute
 	}
-	now := time.Now()
+	now := clock()
 	to := "agent:" + agent
 	announceable := func(m Message) bool {
 		if m.To != to || m.Kind == kindUpdate {
@@ -150,6 +150,8 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 			return true
 		case stateAnnounced:
 			return now.After(m.Deadline) && m.Attempts < maxAnnouncements
+		case stateUnconfirmed:
+			return now.After(m.Deadline.Add(reannounceAfter(m.Attempts, ackTimeout)))
 		}
 		return false
 	}
@@ -173,8 +175,24 @@ func (s *server) claim(agent string, ackTimeout time.Duration) (claimResult, err
 	return result, nil
 }
 
-// expire marks the messages announced maxAnnouncements times and never fetched as unconfirmed: they
-// stay findable (list_messages) but nobody announces them again.
+// reannounceAfter is how long after its last announcement an unconfirmed message is announced again, by how many times it was
+// announced, in ack timeouts (with the default of a minute: 5 min, 15 min, then every hour). A message nobody fetched is never
+// lost, but a harness that keeps missing it is not typed at all the time.
+func reannounceAfter(attempts int, ackTimeout time.Duration) time.Duration {
+	switch {
+	case attempts <= maxAnnouncements:
+		return 5 * ackTimeout
+	case attempts == maxAnnouncements+1:
+		return 15 * ackTimeout
+	}
+	return 60 * ackTimeout
+}
+
+// clock is the time delivery decides by; tests move it.
+var clock = time.Now
+
+// expire marks the messages announced maxAnnouncements times and never fetched as unconfirmed: they stay findable
+// (list_messages), and claim announces them again after a backoff (reannounceAfter), each time for one ack timeout.
 func (s *server) expire(now time.Time) {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
