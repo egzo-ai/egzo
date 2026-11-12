@@ -7,7 +7,7 @@
 Rich messages, where an agent writes for the platform, are next (#177).
 
 A **bridge** connects a chat platform to the hub's agents. People talk to an agent from a channel, and answer what it asks them there.
-The hub is not a chat: it never shows a message's text ([the hub](hub.md#messages)). It is the broker: it keeps, relays and checks.
+The hub is not a chat: [its pages](hub.md) never show a message's text. It is the broker: it keeps, relays and checks.
 
 ## Running one
 
