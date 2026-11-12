@@ -100,10 +100,10 @@ type ContainerSpec struct {
 	Init bool
 	// Hardened sidecars get a read-only root filesystem. Agents need a writable one.
 	ReadonlyRootfs bool
-	// Capabilities are the capabilities the container keeps (config.ResolvedAgent.Capabilities). Only ALL lifts
-	// no-new-privileges (capabilityOptions).
-	Capabilities []string        `json:",omitempty"`
-	Identity     engine.Identity `json:"-"`
+	// KeepCapabilities starts the container without dropping its capabilities and without no-new-privileges
+	// (drop_capabilities: false, config.ResolvedAgent.KeepCapabilities). Every sidecar drops them.
+	KeepCapabilities bool            `json:",omitempty"`
+	Identity         engine.Identity `json:"-"`
 }
 
 // PublishedPort is a port of the container published on a host address.
@@ -483,8 +483,8 @@ func agentContainer(
 		Init:       true,
 		Identity:   identity,
 
-		PidsLimit:    defaultAgentPids,
-		Capabilities: agent.Capabilities,
+		PidsLimit:        defaultAgentPids,
+		KeepCapabilities: agent.KeepCapabilities,
 	}
 
 	// Agents reach the world only through the proxy and trust only the project CA on top of the

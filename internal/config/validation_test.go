@@ -4,11 +4,13 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestReservedAndMalformedNames(t *testing.T) {
@@ -237,25 +239,15 @@ func TestOpenCodeWithASubscriptionTokenIsWarnedAbout(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesAreSpelledAsDockerDoesAndAnUnknownOneIsRefused(t *testing.T) {
-	yaml := func(capabilities string) string {
-		return "agents:\n  a: { harness: custom, image: x, capabilities: " + capabilities + " }\n"
-	}
-	resolved, _ := mustResolve(t, t.TempDir(), yaml("[cap_net_admin, SYS_ADMIN, NET_ADMIN]"))
-	if got := resolved.Agents["a"].Capabilities; !slices.Equal(got, []string{"NET_ADMIN", "SYS_ADMIN"}) {
-		t.Errorf("capabilities = %v", got)
-	}
-	resolved, _ = mustResolve(t, t.TempDir(), yaml("[all]"))
-	if got := resolved.Agents["a"].Capabilities; !slices.Equal(got, []string{"ALL"}) {
-		t.Errorf("capabilities = %v", got)
-	}
-	resolved, _ = mustResolve(t, t.TempDir(), "agents:\n  a: { harness: custom, image: x }\n")
-	if got := resolved.Agents["a"].Capabilities; got != nil {
-		t.Errorf("an agent that lists none keeps %v", got)
-	}
-	wantProblems(t, t.TempDir(), yaml("[SYS_WIZARD]"), "SYS_WIZARD")
-	resolved, _ = mustResolve(t, t.TempDir(), yaml("[NET_ADMIN, all]"))
-	if got := resolved.Agents["a"].Capabilities; !slices.Equal(got, []string{"ALL"}) {
-		t.Errorf("a list with ALL keeps %v", got)
+func TestCapabilitiesAreDroppedUnlessTheFileSaysNot(t *testing.T) {
+	resolved, _ := mustResolve(t, t.TempDir(), "agents:\n  a: { harness: custom, image: x }\n  b: { harness: custom, image: x, drop_capabilities: false }\n  c: { harness: custom, image: x, drop_capabilities: true }\n")
+	for name, keep := range map[string]bool{"a": false, "b": true, "c": false} {
+		if got := resolved.Agents[name].KeepCapabilities; got != keep {
+			t.Errorf("%s: keeps its capabilities: %v, want %v", name, got, keep)
+		}
+		out, err := yaml.Marshal(resolved.Agents[name])
+		if err != nil || !strings.Contains(string(out), fmt.Sprintf("drop_capabilities: %v", !keep)) {
+			t.Errorf("%s: the resolved form says\n%s(%v)", name, out, err)
+		}
 	}
 }

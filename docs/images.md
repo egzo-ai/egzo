@@ -111,18 +111,18 @@ differ.
 
 Each stock harness image has a variant with Docker inside, `egzo-harness-<harness>-docker` (`harness/docker`): Ubuntu's Docker
 engine, buildx and compose, and `sudo`. Its entrypoint starts the daemon before the harness when the agent can become root, which
-it can when its template keeps all capabilities:
+it can when its template does not drop its capabilities:
 
 ```yaml
 agents:
   builder:
     harness: claude-code
     image: ghcr.io/egzo-ai/egzo-harness-claude-code-docker:latest
-    capabilities: [ALL]
+    drop_capabilities: false
 ```
 
 The daemon runs in the agent's own container, which takes an engine whose runtime is sysbox ([sysbox](sysbox.md)). Without it, or
-without `[ALL]`, the daemon does not start and the harness runs as usual. Its socket belongs to the agent's group, and `sudo` keeps the proxy and the
+without `drop_capabilities: false`, the daemon does not start and the harness runs as usual. Its socket belongs to the agent's group, and `sudo` keeps the proxy and the
 project CA, so pulls go through the agent's egress profile: allow the registries it needs. When the daemon does not start,
 `/tmp/egzo-docker.log` says why; the daemon's own log is `/var/log/dockerd.log`. Its images live in the container, so they are gone when the agent is recreated.
 

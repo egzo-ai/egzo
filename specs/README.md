@@ -223,7 +223,7 @@ it covers and how the project it runs on is shared.
 | `agent/test_agent_spawn.py` | `agent spawn`: names, exit 17, published templates, `-m`, `--wait`, `--attach`, refusals |
 | `agent/test_agent_lifecycle.py` | `ps`, `agent ls`, `agent rm` and its filters, `start`, `stop`, what a removed container leaves |
 | `agent/test_agent_stale.py` | stale instances, the `up` refusal, `down` and a name that was an instance |
-| `agent/test_agent_docker.py` | Docker inside an agent that keeps its capabilities, on the harness image with Docker (sysbox only) |
+| `agent/test_agent_docker.py` | Docker inside an agent with `drop_capabilities: false`, on the harness image with Docker (sysbox only) |
 | `agent/test_agent_containers.py` | the network, who an agent runs as, limits, whether it runs under gVisor or sysbox on those platforms, and the workspace volumes it mounts |
 | `service/test_service_commands.py` | `logs`, `exec` (with and without a terminal), `start`, `stop`, `restart` on an instance or a sidecar |
 | `message/test_message_cli.py` | `message send|ls|reply`, `--wait`, what a person sees in `ps` and `events` |
