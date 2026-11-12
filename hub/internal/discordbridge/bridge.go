@@ -988,12 +988,16 @@ func (b *Bridge) deferAnswer(ctx context.Context, i discord.Interaction, private
 	return true
 }
 
-// finish replaces the "thinking" answer.
+// maxContent is the most characters Discord takes as the content of a message: it refuses a longer one whole.
+const maxContent = 2000
+
+// finish replaces the "thinking" answer. A text past what Discord takes is cut: /egzo say takes up to 4000 characters, which reach the agent
+// whole, and what the channel sees of them ends with an ellipsis.
 func (b *Bridge) finish(ctx context.Context, i discord.Interaction, text string) (discord.Message, error) {
 	b.mu.Lock()
 	app := b.app
 	b.mu.Unlock()
-	m, err := b.rest.EditOriginal(ctx, app, i.Token, discord.MessageCreate{Content: text, AllowedMentions: &discord.AllowedMentions{Parse: []string{}}})
+	m, err := b.rest.EditOriginal(ctx, app, i.Token, discord.MessageCreate{Content: truncate(text, maxContent), AllowedMentions: &discord.AllowedMentions{Parse: []string{}}})
 	if err != nil {
 		b.log.Warn("finish an interaction", "err", err)
 	}

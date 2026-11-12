@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 )
@@ -430,6 +431,9 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 	case failed != nil && !failed.taken:
 		w.WriteHeader(failed.status)
 		fmt.Fprintf(w, `{"message": "failed", "code": %d}`, failed.code)
+	case tooLong(body):
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"message": "Invalid Form Body", "code": 50035, "errors": {"content": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": "Must be 2000 or fewer in length."}]}}}`)
 	default:
 		out := map[string]any{}
 		_ = json.Unmarshal(body, &out)
@@ -460,4 +464,12 @@ func (s *Server) rest(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write(data)
 	}
+}
+
+// tooLong says a message's content is past the 2000 characters Discord takes.
+func tooLong(body []byte) bool {
+	var m struct {
+		Content string `json:"content"`
+	}
+	return json.Unmarshal(body, &m) == nil && utf8.RuneCountInString(m.Content) > 2000
 }

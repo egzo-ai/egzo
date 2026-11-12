@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egzo-ai/egzo/hub/internal/bridges"
 	"github.com/egzo-ai/egzo/hub/internal/discord"
@@ -626,6 +627,27 @@ func TestSayIsAPublicMessageWhatTheAgentAnswersRepliesToIt(t *testing.T) {
 	if body.Reference == nil || string(body.Reference.MessageID) != shown.ID {
 		t.Errorf("the result replies to %+v, want %s", body.Reference, shown.ID)
 	}
+}
+
+func TestALongSayReachesTheAgentWholeAndIsShownCut(t *testing.T) {
+	w := setup(t)
+	joe := discord.Member{User: &discord.User{ID: "7", Username: "joe"}, Permissions: "8"}
+	w.linked(joe)
+	long := strings.Repeat("é", 3999) + "!" // the most /egzo say takes
+	w.interaction("611", discord.InteractionCommand, say(w.project, long), joe, nil)
+	eventually(t, "the message", func() bool { return len(w.calls("send coder-1 user:"+w.admin.ID+" discord:611")) == 1 })
+	original := w.request("the answer", "PATCH /webhooks/2/tok-611/messages/@original")
+	var said struct{ Content string }
+	_ = original.JSON(&said)
+	if n := utf8.RuneCountInString(said.Content); n != 2000 || !strings.HasPrefix(said.Content, "💬 <@7> to **coder-1**: ééé") || !strings.HasSuffix(said.Content, "é…") {
+		t.Errorf("shown %d characters, beginning %.60q", n, said.Content)
+	}
+	var shown struct{ ID string }
+	_ = json.Unmarshal(original.Response, &shown)
+	if shown.ID == "" {
+		t.Fatalf("discord refused what is shown: %s", original.Response)
+	}
+	w.recorded(shown.ID) // what the agent answers replies to it
 }
 
 func TestAChannelTheBotCanNoLongerSeeLosesItsAgents(t *testing.T) {
