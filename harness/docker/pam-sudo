@@ -1,0 +1,6 @@
+# PAM for sudo in an egzo agent: egzo writes the agent's uid into /etc/passwd but not /etc/shadow, so pam_unix refuses the account
+# ("account validation failure"). The agent is the only user of its sandbox and sudoers lets it in without a password, so PAM
+# permits it; whether sudo can make it root at all is decided by no-new-privileges (drop_capabilities).
+auth     sufficient pam_permit.so
+account  sufficient pam_permit.so
+session  sufficient pam_permit.so
