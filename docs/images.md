@@ -131,7 +131,7 @@ project CA, so pulls go through the agent's egress profile: allow the registries
 (See also [installing](install.md).)
 
 ```console
-$ make images                   # builds egzo and egzo-harness-{claude-code,opencode}
+$ make images                   # builds egzo, egzo-harness-{claude-code,opencode,codex} and their -docker variants
 $ EGZO_HARNESS_PREFIX=registry.example/team egzo agent spawn coder
 ```
 

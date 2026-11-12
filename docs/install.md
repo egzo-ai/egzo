@@ -104,5 +104,6 @@ $ make images           # builds the sidecar image and the harness images locall
 $ bin/egzo version
 ```
 
-`make images` builds `ghcr.io/egzo-ai/egzo:<version>` and `ghcr.io/egzo-ai/egzo-harness-{claude-code,opencode}:<version>`
+`make images` builds `ghcr.io/egzo-ai/egzo:<version>`, `ghcr.io/egzo-ai/egzo-harness-{claude-code,opencode,codex}:<version>` and
+the variant of each with Docker inside (`egzo-harness-<harness>-docker`)
 in your local engine, so a built `egzo` finds them without pulling. Put `bin/egzo` on your `PATH`, or run it by path.
