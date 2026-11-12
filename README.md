@@ -129,13 +129,14 @@ $ egzo agent rm review-123
 
 Egzo is one person's project. Bigger teams work on the same problem, and they are worth a look.
 
-| | Isolation | Network | Credentials | Your files | Web UI, chat | Open source |
-|---|---|---|---|---|---|---|
-| **egzo** | container | denied by default | kept in the proxy | not mounted | yes | yes |
-| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | microVM | a preset you pick | kept in the proxy | mounted by default | no | no |
-| [Claude Code's sandbox](https://code.claude.com/docs/en/sandboxing) | shell commands only | allowlist | in the agent by default | used in place | no | the sandbox part |
-| [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | container, kernel rules | denied by default | kept out of the agent | the paths you declare | no | yes |
-| [Scion](https://github.com/GoogleCloudPlatform/scion) | container | open by default | given to the agent | worktree or clone | yes | yes |
+| | **egzo** | [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | [Claude Code's Bash sandbox](https://code.claude.com/docs/en/sandboxing) | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | [Scion](https://github.com/GoogleCloudPlatform/scion) |
+|---|---|---|---|---|---|
+| **Isolation** | container | microVM | shell commands only | container, kernel rules | container |
+| **Network** | denied by default | a preset you pick | allowlist | denied by default | open by default |
+| **Credentials** | kept in the proxy | kept in the proxy | in the agent by default | kept out of the agent | given to the agent |
+| **Your files** | not mounted | mounted by default | used in place | the paths you declare | worktree or clone |
+| **Web UI, chat** | yes | no | no | no | yes |
+| **License** | AGPL-3.0-only | proprietary | Apache-2.0 (sandbox-runtime) | Apache-2.0 | Apache-2.0 |
 
 Docker Sandboxes and OpenShell are sandboxes, and Scion is orchestration. Egzo is a small attempt at both. This is from
 their docs in November 2026: tell me if I got one wrong.

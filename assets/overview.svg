@@ -61,7 +61,7 @@
   <text x="360" y="494" text-anchor="middle" font-weight="600">issue-123</text>
   <text x="360" y="514" text-anchor="middle" font-size="13" fill="#475569">OpenCode</text>
   <text x="360" y="568" text-anchor="middle" font-size="13" fill="#475569">each: own container, network, worktree</text>
-  <text x="360" y="588" text-anchor="middle" font-size="13" font-weight="600" fill="#b91c1c">bypass mode, no secrets inside</text>
+  <text x="360" y="588" text-anchor="middle" font-size="13" font-weight="600" fill="#b91c1c">permission prompts off, no secrets inside</text>
 
   <rect x="530" y="320" width="220" height="84" rx="8" fill="#fff" stroke="#64748b"/>
   <text x="640" y="348" text-anchor="middle" font-weight="700">control</text>
