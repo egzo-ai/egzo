@@ -224,7 +224,7 @@ func (l *limited) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if time.Since(l.began) >= l.window {
 		l.began, l.used = time.Now(), 0
 	}
-	left := l.began.Add(l.window).Sub(time.Now())
+	left := time.Until(l.began.Add(l.window))
 	refused := l.used >= l.limit
 	if refused {
 		l.refused++
