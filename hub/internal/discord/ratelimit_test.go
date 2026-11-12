@@ -6,9 +6,11 @@ package discord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -199,6 +201,161 @@ func TestOnlyARefusalThatCannotPassLaterIsPermanent(t *testing.T) {
 	} {
 		if Permanent(err) != want {
 			t.Errorf("%v: permanent = %v", err, !want)
+		}
+	}
+}
+
+// limited is a route as Discord limits it: so many requests per window, the rest answered 429.
+type limited struct {
+	limit  int
+	window time.Duration
+	// backwards makes the answers of requests sent together come back in the reverse of the order they were counted in.
+	backwards bool
+
+	mu      sync.Mutex
+	began   time.Time
+	used    int
+	refused int
+}
+
+func (l *limited) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	time.Sleep(5 * time.Millisecond) // the time an answer takes: requests sent together are here together
+	l.mu.Lock()
+	if time.Since(l.began) >= l.window {
+		l.began, l.used = time.Now(), 0
+	}
+	left := l.began.Add(l.window).Sub(time.Now())
+	refused := l.used >= l.limit
+	if refused {
+		l.refused++
+	} else {
+		l.used++
+	}
+	remaining := l.limit - l.used
+	l.mu.Unlock()
+	if l.backwards {
+		time.Sleep(time.Duration(remaining) * 10 * time.Millisecond)
+		left -= time.Duration(remaining) * 10 * time.Millisecond
+	}
+	w.Header().Set("X-RateLimit-Bucket", "abcd")
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(l.limit))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+	w.Header().Set("X-RateLimit-Reset-After", strconv.FormatFloat(left.Seconds(), 'f', 3, 64))
+	if refused {
+		w.Header().Set("X-RateLimit-Scope", "user")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprintf(w, `{"message": "You are being rate limited.", "retry_after": %.3f, "global": false}`, left.Seconds())
+		return
+	}
+	w.Write([]byte(`{}`))
+}
+
+func TestRequestsSentTogetherDoNotBurstWhileTheBucketIsNotKnown(t *testing.T) {
+	route := &limited{limit: 5, window: 300 * time.Millisecond}
+	srv := httptest.NewServer(route)
+	defer srv.Close()
+	c := NewREST("t", srv.URL, nil)
+	var wg sync.WaitGroup
+	var failed atomic.Int32
+	for range 12 { // the first window (no answer yet), and twice a window that just reset
+		wg.Go(func() {
+			if err := c.Do(context.Background(), http.MethodPost, "/channels/20/messages", map[string]string{}, nil); err != nil {
+				failed.Add(1)
+				t.Log(err)
+			}
+		})
+	}
+	wg.Wait()
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	if route.refused != 0 || failed.Load() != 0 {
+		t.Errorf("Discord refused %d requests with 429, and %d of 12 were lost", route.refused, failed.Load())
+	}
+}
+
+func TestOnceTheLimitIsKnownOnlyWhatIsLeftGoesBeforeTheReset(t *testing.T) {
+	route := &limited{limit: 5, window: 300 * time.Millisecond, backwards: true}
+	srv := httptest.NewServer(route)
+	defer srv.Close()
+	c := NewREST("t", srv.URL, nil)
+	ctx := context.Background()
+	if err := c.Do(ctx, http.MethodGet, "/channels/20", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 4 { // what is left, together: their answers come back in any order
+		wg.Go(func() { _ = c.Do(ctx, http.MethodGet, "/channels/20", nil, nil) })
+	}
+	wg.Wait()
+	if err := c.Do(ctx, http.MethodGet, "/channels/20", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	if route.refused != 0 {
+		t.Errorf("the sixth request did not wait for the reset: Discord refused %d", route.refused)
+	}
+}
+
+func TestARouteDiscordDoesNotLimitIsNotHeldBack(t *testing.T) {
+	var now, most atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := now.Add(1)
+		for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
+		}
+		time.Sleep(50 * time.Millisecond)
+		now.Add(-1)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := NewREST("t", srv.URL, nil)
+	ctx := context.Background()
+	if err := c.Do(ctx, http.MethodGet, "/gateway/bot", nil, nil); err != nil { // the first answer says there is no limit
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 6 {
+		wg.Go(func() { _ = c.Do(ctx, http.MethodGet, "/gateway/bot", nil, nil) })
+	}
+	wg.Wait()
+	if most.Load() < 2 {
+		t.Error("6 requests sent together went one at a time")
+	}
+}
+
+func TestAnswersToInteractionsDoNotWaitOnEachOther(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Bucket", "abcd") // each token has a limit of its own: this one is spent, the next person's is not
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset-After", "5")
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := NewREST("t", srv.URL, nil)
+	ctx := context.Background()
+	began := time.Now()
+	for n := range 3 {
+		token := "tok-" + strconv.Itoa(n)
+		if err := c.Do(ctx, http.MethodPost, "/interactions/"+strconv.Itoa(55+n)+"/"+token+"/callback", map[string]int{"type": 5}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Do(ctx, http.MethodPatch, "/webhooks/2/"+token+"/messages/@original", map[string]string{}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if took := time.Since(began); took > time.Second {
+		t.Errorf("one person's answer waited on another's limit: %v", took)
+	}
+	for path, want := range map[string]bool{
+		"/interactions/55/tok/callback":      true,
+		"/webhooks/2/tok":                    true,
+		"/webhooks/2/tok/messages/@original": true,
+		"/webhooks/2":                        false,
+		"/channels/20/webhooks":              false,
+		"/channels/20/messages":              false,
+	} {
+		if withToken(path) != want {
+			t.Errorf("%s: with a token = %v", path, !want)
 		}
 	}
 }

@@ -73,12 +73,15 @@ type REST struct {
 	invalid []time.Time
 }
 
-// bucket is what Discord said of one route's limit: how many requests are left until when.
+// bucket is what Discord said of one route's limit: how many requests are left until when. While it is not known (no answer yet, or the
+// limit just reset), one request goes and the others wait for its answer: sent together, they would all pass a limit nobody has read.
 type bucket struct {
 	mu        sync.Mutex
 	remaining int
 	reset     time.Time
 	known     bool
+	free      bool          // Discord answered without a limit: nothing to wait for
+	first     chan struct{} // closed when the one request sent to learn the limit is answered; nil when none is out
 }
 
 // NewREST is the API at base (DefaultURL, or a fake's) with a bot token.
@@ -158,6 +161,15 @@ func route(method, path string) string {
 	return method + " " + strings.Join(parts, "/")
 }
 
+// withToken reports whether a request goes with an interaction's or a webhook's token: an answer to an interaction, or what follows it.
+// The client holds none of them back. Discord limits these per token, a token gets a few requests, and its documentation says they are
+// not bound to the bot's global limit; kept in one bucket, the answers to one person's commands would wait on another's, past the 3
+// seconds Discord gives an answer. A 429 is still waited out.
+func withToken(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	return len(parts) >= 3 && (parts[0] == "interactions" || parts[0] == "webhooks") && !isID(parts[2])
+}
+
 func isID(s string) bool {
 	if s == "" {
 		return false
@@ -205,12 +217,13 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 		payload, contentType = data, "application/json"
 	}
 	for attempt := 0; ; attempt++ {
-		key := c.bucketKey(method, path)
-		if err := c.wait(ctx, key); err != nil {
+		answered, err := c.wait(ctx, method, path)
+		if err != nil {
 			return err
 		}
 		req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(payload))
 		if err != nil {
+			answered(0, nil)
 			return err
 		}
 		if !strings.HasPrefix(path, "/interactions/") { // answering an interaction takes its token, not the bot's
@@ -225,6 +238,7 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
+			answered(0, nil)
 			if again && attempt < retries && ctx.Err() == nil {
 				if err := c.sleep(ctx, backoff(attempt)); err != nil {
 					return err
@@ -235,10 +249,10 @@ func (c *REST) do(ctx context.Context, method, path string, body, out any, reaso
 		}
 		data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
 		resp.Body.Close()
+		answered(resp.StatusCode, resp.Header)
 		if err != nil {
 			return err
 		}
-		c.learn(method, path, key, resp.Header)
 		switch {
 		case retryable(again, resp.StatusCode) && attempt < retries:
 			if err := c.sleep(ctx, backoff(attempt)); err != nil {
@@ -307,8 +321,9 @@ func retryAfter(h http.Header, data []byte) time.Duration {
 	return time.Second
 }
 
-// wait holds a request back until the route's bucket and the global limit allow it.
-func (c *REST) wait(ctx context.Context, key string) error {
+// wait holds a request back until the route's bucket and the global limit allow it. The caller tells what came back with answered, once,
+// a status of 0 when nothing did.
+func (c *REST) wait(ctx context.Context, method, path string) (answered func(status int, h http.Header), err error) {
 	c.mu.Lock()
 	cut := c.now().Add(-invalidWindow)
 	for len(c.invalid) > 0 && c.invalid[0].Before(cut) {
@@ -316,33 +331,86 @@ func (c *REST) wait(ctx context.Context, key string) error {
 	}
 	if len(c.invalid) >= c.invalidLimit {
 		c.mu.Unlock()
-		return ErrTooManyInvalid
+		return nil, ErrTooManyInvalid
 	}
-	b := c.buckets[key]
-	if b == nil {
-		b = &bucket{}
-		c.buckets[key] = b
+	c.mu.Unlock()
+	if withToken(path) {
+		return func(int, http.Header) {}, nil
 	}
+	b, key, first, err := c.turn(ctx, method, path)
+	if err != nil {
+		return nil, err
+	}
+	answered = func(status int, h http.Header) {
+		if status != 0 {
+			c.learn(method, path, key, status, h)
+		}
+		if first {
+			b.mu.Lock()
+			close(b.first)
+			b.first = nil
+			b.mu.Unlock()
+		}
+	}
+	c.mu.Lock()
 	global := c.global
 	c.mu.Unlock()
 	if err := c.sleep(ctx, global.Sub(c.now())); err != nil {
-		return err
+		answered(0, nil)
+		return nil, err
 	}
 	if err := c.globalSlot(ctx); err != nil {
-		return err
+		answered(0, nil)
+		return nil, err
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.known && b.remaining <= 0 {
-		if err := c.sleep(ctx, b.reset.Sub(c.now())); err != nil {
-			return err
+	return answered, nil
+}
+
+// turn waits until the request's bucket lets it go, and counts it. first says it is the one request sent to learn a limit that is not
+// known: the others wait until it is answered. What was known of a limit ends at its reset. The bucket is looked up again after every
+// wait: the first answer of a route says which bucket Discord keeps it in.
+func (c *REST) turn(ctx context.Context, method, path string) (b *bucket, key string, first bool, err error) {
+	for {
+		key = c.bucketKey(method, path)
+		c.mu.Lock()
+		b = c.buckets[key]
+		if b == nil {
+			b = &bucket{}
+			c.buckets[key] = b
 		}
-		b.known = false // the next answer says where it stands
+		c.mu.Unlock()
+		b.mu.Lock()
+		switch {
+		case b.free:
+			b.mu.Unlock()
+			return b, key, false, nil
+		case b.known && !c.now().Before(b.reset):
+			b.known = false // the next answer says where it stands
+			b.mu.Unlock()
+		case b.known && b.remaining > 0:
+			b.remaining--
+			b.mu.Unlock()
+			return b, key, false, nil
+		case b.known:
+			wait := b.reset.Sub(c.now())
+			b.mu.Unlock()
+			if err := c.sleep(ctx, wait); err != nil {
+				return nil, "", false, err
+			}
+		case b.first != nil:
+			answered := b.first
+			b.mu.Unlock()
+			select {
+			case <-answered:
+			case <-ctx.Done():
+				return nil, "", false, ctx.Err()
+			}
+		default:
+			b.first = make(chan struct{})
+			b.mu.Unlock()
+			return b, key, true, nil
+		}
 	}
-	if b.known {
-		b.remaining--
-	}
-	return nil
 }
 
 // globalSlot keeps to 50 requests a second.
@@ -367,15 +435,18 @@ func (c *REST) globalSlot(ctx context.Context) error {
 }
 
 // learn keeps what an answer says of its limit. When Discord names the bucket the route shares, the limit moves there: other routes
-// in the same bucket wait on it too.
-func (c *REST) learn(method, path, key string, h http.Header) {
+// in the same bucket wait on it too. Until the reset, what is left only goes down: the answers to requests sent together come back in
+// any order, and the last to arrive is not the last Discord counted. A request Discord took without naming a limit means the route has
+// none; an error without one says nothing of the route.
+func (c *REST) learn(method, path, key string, status int, h http.Header) {
 	remaining, err1 := strconv.Atoi(h.Get("X-RateLimit-Remaining"))
 	resetAfter, err2 := strconv.ParseFloat(h.Get("X-RateLimit-Reset-After"), 64)
-	if err1 != nil || err2 != nil {
+	limited := err1 == nil && err2 == nil
+	if !limited && status >= 300 {
 		return
 	}
 	c.mu.Lock()
-	if hash := h.Get("X-RateLimit-Bucket"); hash != "" {
+	if hash := h.Get("X-RateLimit-Bucket"); limited && hash != "" {
 		_, template, majors := limitKeys(method, path)
 		c.hashes[template] = hash
 		key = hash + ":" + majors
@@ -387,8 +458,16 @@ func (c *REST) learn(method, path, key string, h http.Header) {
 	}
 	c.mu.Unlock()
 	b.mu.Lock()
-	b.remaining, b.reset, b.known = remaining, c.now().Add(time.Duration(resetAfter*float64(time.Second))), true
-	b.mu.Unlock()
+	defer b.mu.Unlock()
+	now := c.now()
+	switch {
+	case !limited:
+		b.free, b.known = true, false
+	case b.known && now.Before(b.reset):
+		b.remaining = min(b.remaining, remaining)
+	default:
+		b.remaining, b.reset, b.known, b.free = remaining, now.Add(time.Duration(resetAfter*float64(time.Second))), true, false
+	}
 }
 
 // retryable is a server error worth trying again: a gateway or an overloaded Discord. A post is sent again after a 500 or a 504, when
