@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright (C) Neopeak Internet Solutions inc.
 
-"""Docker inside an agent: a template that keeps its capabilities (`capabilities: [ALL]`), on the harness image with Docker inside
+"""Docker inside an agent: a template that keeps its capabilities (`drop_capabilities: false`), on the harness image with Docker inside
 (harness/docker), whose entrypoint starts the daemon with sudo before the harness. The daemon runs in the agent's own sandbox, with no
 host socket and no --privileged; that needs an engine whose runtime is sysbox, so the spec is unsupported on every other platform.
 
@@ -22,7 +22,7 @@ def sandbox(shared_project, engine, egzo):
     p = shared_project
     p.env.update({"ANTHROPIC_API_KEY": API_KEY})
     image = engine.docker_harness_image("claude-code", egzo.binary)
-    p.up(spec(egress={"default": anthropic_profile()}, agents={"docker": agent(image=image, capabilities=["ALL"])}), timeout=900)
+    p.up(spec(egress={"default": anthropic_profile()}, agents={"docker": agent(image=image, drop_capabilities=False)}), timeout=900)
     return p
 
 

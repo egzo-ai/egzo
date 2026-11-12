@@ -222,9 +222,9 @@ type Agent struct {
 	Inject      *AgentInject      `yaml:"inject,omitempty"`
 	// Ports are the ports the agent may serve, by name: "5173/http", "5432/tcp" or "5432/udp".
 	Ports map[string]string `yaml:"ports,omitempty"`
-	// Capabilities are the Linux capabilities the agent's container keeps, by Docker's names (SYS_ADMIN, NET_ADMIN, or ALL).
-	// Empty, the default, keeps none. Only ALL lifts no-new-privileges.
-	Capabilities []string `yaml:"capabilities,omitempty"`
+	// DropCapabilities: egzo drops every capability of the agent's container and sets no-new-privileges (the default, true).
+	// false starts it with neither, so a setuid program in its image (sudo) can make the agent root in its container.
+	DropCapabilities *bool `yaml:"drop_capabilities,omitempty"`
 }
 
 // Build is an image `up` builds from a Dockerfile, in Compose's terms. The context is relative to the project

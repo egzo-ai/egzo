@@ -1,6 +1,6 @@
 # A harness image with Docker inside: any egzo harness image (BASE_IMAGE) plus Docker's engine, sudo, and an entrypoint that starts the
-# daemon before the harness when the agent can become root: when its template keeps all capabilities (`capabilities: [ALL]`), the one
-# list egzo starts without no-new-privileges. On an engine whose runtime is sysbox, the daemon then runs in the agent's own sandbox,
+# daemon before the harness when the agent can become root: when its template says `drop_capabilities: false`, which also lifts
+# no-new-privileges. On an engine whose runtime is sysbox, the daemon then runs in the agent's own sandbox,
 # with no host socket and no --privileged (docs/sysbox.md). Otherwise sudo or the daemon fails, and the image runs the harness like
 # the one it is built on.
 # Build: docker build --build-arg BASE_IMAGE=ghcr.io/egzo-ai/egzo-harness-claude-code:<version> -t egzo-harness-claude-code-docker harness/docker

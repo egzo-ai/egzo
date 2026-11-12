@@ -549,33 +549,18 @@ func TestOnlyAnAgentWithPortsIsToldThemAndTheEnvironmentSaysWhatTheProjectCanOpe
 	}
 }
 
-func TestAnAgentKeepsTheCapabilitiesItListsAndNoneByDefault(t *testing.T) {
+func TestOnlyAnAgentWhoseTemplateSaysSoKeepsItsCapabilities(t *testing.T) {
 	project := desireProject()
 	coder := project.Agents["coder"]
-	coder.Capabilities = []string{"ALL"}
+	coder.KeepCapabilities = true
 	project.Agents["coder"] = coder
 	d := desire(t, project)
-	if got := findContainer(t, d, "proj-coder").Capabilities; !slices.Equal(got, []string{"ALL"}) {
-		t.Errorf("coder keeps %v", got)
+	if !findContainer(t, d, "proj-coder").KeepCapabilities {
+		t.Errorf("coder drops its capabilities")
 	}
 	for _, c := range d.Containers {
-		if c.Name != "proj-coder" && len(c.Capabilities) > 0 {
-			t.Errorf("%s keeps %v", c.Name, c.Capabilities)
+		if c.Name != "proj-coder" && c.KeepCapabilities {
+			t.Errorf("%s keeps its capabilities", c.Name)
 		}
-	}
-}
-
-func TestCapabilityOptionsForbidGainingPrivilegesUnlessAllAreKept(t *testing.T) {
-	drop, add, security := capabilityOptions(nil)
-	if !slices.Equal(drop, []string{"ALL"}) || len(add) != 0 || !slices.Equal(security, []string{"no-new-privileges"}) {
-		t.Errorf("none: drop %v add %v security %v", drop, add, security)
-	}
-	drop, add, security = capabilityOptions([]string{"NET_ADMIN", "SYS_ADMIN"})
-	if !slices.Equal(drop, []string{"ALL"}) || !slices.Equal(add, []string{"NET_ADMIN", "SYS_ADMIN"}) || !slices.Equal(security, []string{"no-new-privileges"}) {
-		t.Errorf("some: drop %v add %v security %v", drop, add, security)
-	}
-	drop, add, security = capabilityOptions([]string{"ALL"})
-	if len(drop) != 0 || !slices.Equal(add, []string{"ALL"}) || len(security) != 0 {
-		t.Errorf("all: drop %v add %v security %v", drop, add, security)
 	}
 }

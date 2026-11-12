@@ -217,7 +217,7 @@ agents:
     resources: { cpus: 2, memory: 4g, pids: 4096 }
     permissions: bypass           # bypass (default) | default (the harness asks)
     env: { LOG_LEVEL: debug }     # plain settings; secret-looking values are rejected
-    capabilities: [ALL]           # optional: capabilities the container keeps; see below
+    drop_capabilities: true       # default; false keeps the container's capabilities, see below
     ports:                        # what the agent may serve, by name; see below
       web: "5173/http"
       db: "5432/tcp"
@@ -225,12 +225,11 @@ agents:
 
 ### Capabilities
 
-`capabilities:` lists the Linux capabilities the agent's container keeps, by Docker's names (`SYS_ADMIN`, `NET_ADMIN`, with or
-without `CAP_`), or `[ALL]`. Without it, the default, the container keeps none. The container runs with `no-new-privileges`
-unless the list is `[ALL]`: an agent starts as your uid, so with `[ALL]` a setuid program of its image such as `sudo` makes it
-root in its container, and with any other list the capabilities are only there for a process that already runs as root. With
-sysbox and a harness image with Docker inside, `[ALL]` gives an agent Docker in its own sandbox ([images](images.md#docker-inside-an-agent)).
-Read [the security model](security.md) first: on a rootful engine without sysbox, root in the container is root on the host.
+`drop_capabilities:` is true by default: egzo starts the agent's container with every Linux capability dropped and with
+`no-new-privileges`. `false` starts it with neither: the container has the engine's default capabilities, and a setuid program of
+its image such as `sudo` can make the agent, which starts as your uid, root in its container. With sysbox and a harness image with
+Docker inside, that gives an agent Docker in its own sandbox ([images](images.md#docker-inside-an-agent)). Read
+[the security model](security.md) first: on a rootful engine without sysbox, root in the container is root on the host.
 
 ### Ports
 

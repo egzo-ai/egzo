@@ -18,9 +18,9 @@ and [messaging](messaging.md).
   host key; forwarding is refused and every session and command is audited ([ssh to servers](sandboxing.md#ssh-to-servers)).
 - **Hardened containers:** all capabilities dropped, `no-new-privileges`, memory and process limits,
   sidecars as a non-root uid with a read-only root. Agents run as your uid and gid, not as root. The engine socket is
-  never mounted into an agent. A template with `capabilities: [ALL]` runs without `no-new-privileges`, so a setuid program in
-  its image (sudo) makes it root in its container: on a rootful engine without sysbox, that root is root on the host. It is
-  how an agent runs Docker inside its sandbox on a sysbox engine ([sysbox](sysbox.md#what-an-egzo-agent-gets-and-what-it-does-not)).
+  never mounted into an agent. A template with `drop_capabilities: false` keeps the engine's capabilities and runs without
+  `no-new-privileges`, so a setuid program in its image (sudo) makes it root in its container: on a rootful engine without
+  sysbox, that root is root on the host. It is how an agent runs Docker inside its sandbox on a sysbox engine ([sysbox](sysbox.md#what-an-egzo-agent-gets-and-what-it-does-not)).
 - **Optional gVisor or sysbox** for the engine: egzo runs containers under the engine's default runtime. gVisor is a stronger kernel
   boundary, so make `runsc` the engine's default ([gVisor](gvisor.md)); sysbox puts every container in a user namespace, so root in a
   container is not root on the host ([sysbox](sysbox.md)). A rootless engine maps ids the same way and needs neither.
