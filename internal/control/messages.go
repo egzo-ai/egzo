@@ -111,7 +111,7 @@ type Message struct {
 	Choices []string  `json:"choices,omitempty"`
 	Time    time.Time `json:"time"`
 	Hops    int       `json:"-"`
-	Notice  string    `json:"-"` // which notice from egzo it is: noticeAccess or noticeUndelivered
+	Notice  string    `json:"-"` // which notice from egzo it is: noticeAccess, noticeUndelivered or noticeStarter
 	// ResolvedBy and Resolution are, for a resolved request or question, who closed it and the resolution they sent.
 	ResolvedBy string    `json:"-"`
 	Resolution string    `json:"-"`

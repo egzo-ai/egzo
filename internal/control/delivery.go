@@ -50,7 +50,7 @@ type claimResult struct {
 // words and ids (hex), so nothing a message says can reach the terminal. Wording depends on who is
 // speaking: a person gets a user's authority, a peer agent does not.
 func announceLine(messages []Message) string {
-	var fromPeople, fromAgents, replies, answers, fromEgzo, undelivered []string
+	var fromPeople, fromAgents, replies, answers, fromEgzo, undelivered, starter []string
 	for _, m := range messages {
 		switch {
 		case m.Kind == kindResolution && m.ReKind == kindQuestion && m.On != "":
@@ -59,6 +59,8 @@ func announceLine(messages []Message) string {
 			replies = append(replies, m.ID)
 		case m.From == egzoSender && m.Notice == noticeUndelivered:
 			undelivered = append(undelivered, m.ID)
+		case m.From == egzoSender && m.Notice == noticeStarter:
+			starter = append(starter, m.ID)
 		case m.From == egzoSender:
 			fromEgzo = append(fromEgzo, m.ID)
 		case isHuman(m.From):
@@ -77,6 +79,9 @@ func announceLine(messages []Message) string {
 		parts = append(parts, "egzo message "+undelivered[0]+": a message you sent a person did not reach them; fetch it.")
 	default:
 		parts = append(parts, "egzo messages "+strings.Join(undelivered, ", ")+": messages you sent people did not reach them; fetch them.")
+	}
+	if len(starter) > 0 {
+		parts = append(parts, "egzo message "+strings.Join(starter, ", ")+": whether the person who started you can be reached changed; fetch it.")
 	}
 	switch len(fromPeople) {
 	case 0:
