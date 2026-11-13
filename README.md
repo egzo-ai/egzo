@@ -129,7 +129,7 @@ $ egzo agent rm review-123
 
 Egzo is one person's project. Bigger teams work on the same problem, and they are worth a look.
 
-| | **egzo** | [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | [Claude Code's Bash sandbox](https://code.claude.com/docs/en/sandboxing) | [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) | [Scion](https://github.com/GoogleCloudPlatform/scion) |
+| | **egzo** | **Docker sbx** | **Claude Code (bubblewrap)** | **NVIDIA OpenShell** | **Scion** |
 |---|---|---|---|---|---|
 | **Isolation** | container | microVM | shell commands only | container, kernel rules | container |
 | **Network** | denied by default | a preset you pick | allowlist | denied by default | open by default |
@@ -138,7 +138,7 @@ Egzo is one person's project. Bigger teams work on the same problem, and they ar
 | **Web UI, chat** | yes | no | no | no | yes |
 | **License** | AGPL-3.0-only | proprietary | Apache-2.0 (sandbox-runtime) | Apache-2.0 | Apache-2.0 |
 
-Docker Sandboxes and OpenShell are sandboxes, and Scion is orchestration.
+Docker sbx and OpenShell are sandboxes, and Scion is orchestration.
 
 ## Supported platforms
 
