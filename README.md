@@ -138,8 +138,7 @@ Egzo is one person's project. Bigger teams work on the same problem, and they ar
 | **Web UI, chat** | yes | no | no | no | yes |
 | **License** | AGPL-3.0-only | proprietary | Apache-2.0 (sandbox-runtime) | Apache-2.0 | Apache-2.0 |
 
-Docker Sandboxes and OpenShell are sandboxes, and Scion is orchestration. Egzo is a small attempt at both. This is from
-their docs in November 2026: tell me if I got one wrong.
+Docker Sandboxes and OpenShell are sandboxes, and Scion is orchestration.
 
 ## Supported platforms
 
