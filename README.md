@@ -131,6 +131,7 @@ Egzo is one person's project. Bigger teams work on the same problem, and they ar
 
 | | **egzo** | **Docker sbx** | **Claude Code (bubblewrap)** | **NVIDIA OpenShell** | **Scion** |
 |---|---|---|---|---|---|
+| **Project config** | one file: `egzo.yaml` (agents, workspaces, egress) | `.sbxenv.yaml` (experimental) | `.claude/settings.json` | policy YAML | `.scion/` |
 | **Isolation** | container | microVM | shell commands only | container, kernel rules | container |
 | **Network** | denied by default | a preset you pick | allowlist | denied by default | open by default |
 | **Credentials** | kept in the proxy | kept in the proxy | in the agent by default | kept out of the agent | given to the agent |
