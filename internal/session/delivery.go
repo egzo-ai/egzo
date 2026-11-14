@@ -198,9 +198,8 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		if cfg.BeforeInject != nil {
 			cfg.BeforeInject()
 		}
-		// The line is fixed words and ids from the control sidecar, never message text, with one exception: the task the person who
-		// started the agent gave it, typed once as its first prompt, which they could type themselves. Sanitize keeps any of it from
-		// leaving the bracketed paste, even if the sidecar were wrong.
+		// The line is fixed words and ids from the control sidecar, never message text. Sanitize keeps any of it from leaving the bracketed
+		// paste, even if the sidecar were wrong.
 		h.Inject(Sanitize(work.Line))
 	}
 }

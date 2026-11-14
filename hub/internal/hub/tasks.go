@@ -65,8 +65,8 @@ var (
 // maxTask is the longest task: the most text a message carries.
 const maxTask = 16 << 10
 
-// Spawning is what a user asks of a spawn: the template, the agent's name, and the task it starts on, if any. A task is typed as the
-// agent's first prompt, as if the user had typed it; an unattended agent gets it as a request from them instead, and nobody reads its
+// Spawning is what a user asks of a spawn: the template, the agent's name, and the task it starts on, if any. A task is in the agent's
+// instructions, as if the user had typed it as its first prompt; an unattended agent gets it as a request from them instead, and nobody reads its
 // terminal, so it needs a task and a chat account to reach them.
 type Spawning struct {
 	Template, Name, Task string

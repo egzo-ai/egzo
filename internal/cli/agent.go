@@ -156,6 +156,7 @@ func runAgent(args []string) error {
 			Starter:          os.Getenv(harness.StarterEnv),
 			StarterName:      os.Getenv(harness.StarterNameEnv),
 			Unattended:       os.Getenv(harness.UnattendedEnv) == "1",
+			Task:             os.Getenv(harness.TaskEnv),
 			Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",
 			ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
 			InstructionsFile: home + "/.egzo/instructions.md",

@@ -28,8 +28,8 @@ type SpawnRequest struct {
 	Actor string
 	// StarterName is what the agent calls its starter besides its id: a hub user's name. Empty for the operator.
 	StarterName string
-	// Task is what the agent starts on. Typed as its first prompt, as if the starter had typed it; with Unattended, sent as a request from
-	// the starter instead, and the agent is told nobody reads its terminal. Unattended needs a task and a user:<id> starter.
+	// Task is what the agent starts on. In its instructions, as if the starter had typed it as its first prompt; with Unattended, sent as a
+	// request from the starter instead, and the agent is told nobody reads its terminal. Unattended needs a task and a user:<id> starter.
 	Task       string
 	Unattended bool
 	// NoFetch makes the worktrees from the base clones as they are, without fetching first.
@@ -143,6 +143,9 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	view := published.View(instances)
 	identity := InstanceIdentity{ID: NewInstanceID(), Template: req.Template, Actor: actor, TemplateHash: template.Hash, StarterName: req.StarterName,
 		Unattended: req.Unattended}
+	if !req.Unattended {
+		identity.Task = req.Task
+	}
 	// The resources first: their specs do not depend on the token, which only exists once the instance is
 	// registered, and the registration must wait until the network has decided who wins a race.
 	desired, err := DesireInstance(view, dir, published.inputs(instances, map[string]string{}, nil), name, identity)
@@ -286,7 +289,7 @@ func spawnSteps(ctx context.Context, c *engine.Client, p spawnPlan, undo *undoSt
 	if err := ControlPushIdentity(ctx, c, p.project, p.name, p.templateName, p.template, p.identity); err != nil {
 		return err
 	}
-	// The task waits in control before the agent starts: it is the first thing the agent gets once it takes input.
+	// An unattended agent's task waits in control as a request before the agent starts; an attended one's is in its instructions.
 	if err := controlTask(ctx, c, p.project, p.name, p.identity, p.task); err != nil {
 		return err
 	}
@@ -488,21 +491,14 @@ func checkStart(req SpawnRequest, actor string) error {
 // maxTask is the longest task: the most text a message carries.
 const maxTask = 16 << 10
 
-// controlTask gives control the task an agent starts on: a request from its starter for an unattended agent, keyed by the instance so a
-// retry sends it once; else the first prompt typed into its terminal.
+// controlTask gives an unattended agent its task: a request from its starter, keyed by the instance so a retry sends it once. An attended
+// agent's task is in its instructions (identity.Task), nothing to send.
 func controlTask(ctx context.Context, c *engine.Client, project, name string, identity InstanceIdentity, task string) error {
-	if task == "" {
+	if task == "" || !identity.Unattended {
 		return nil
 	}
-	if identity.Unattended {
-		body, _ := json.Marshal(map[string]string{"from": identity.Actor, "to": "agent:" + name, "text": task, "key": "spawn:" + identity.ID})
-		if _, err := ControlRequest(ctx, c, project, "POST", "/v1/messages", body); err != nil {
-			return fmt.Errorf("give %s its task: %w", name, err)
-		}
-		return nil
-	}
-	body, _ := json.Marshal(map[string]string{"text": task})
-	if _, err := ControlRequest(ctx, c, project, "PUT", "/v1/agents/"+name+"/task", body); err != nil {
+	body, _ := json.Marshal(map[string]string{"from": identity.Actor, "to": "agent:" + name, "text": task, "key": "spawn:" + identity.ID})
+	if _, err := ControlRequest(ctx, c, project, "POST", "/v1/messages", body); err != nil {
 		return fmt.Errorf("give %s its task: %w", name, err)
 	}
 	return nil
