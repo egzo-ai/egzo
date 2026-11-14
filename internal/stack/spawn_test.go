@@ -42,4 +42,12 @@ func TestAnAgentsEnvironmentSaysWhoStartedIt(t *testing.T) {
 	if want := []string{"EGZO_STARTER=user:u7", "EGZO_STARTER_NAME=Joe", "EGZO_UNATTENDED=1"}; !slices.Equal(got, want) {
 		t.Errorf("a hub user's unattended agent = %v, want %v", got, want)
 	}
+	got = starterEnv(InstanceIdentity{Actor: "user:u7", Task: "list the open issues"})
+	if want := []string{"EGZO_STARTER=user:u7", "EGZO_TASK=list the open issues"}; !slices.Equal(got, want) {
+		t.Errorf("an attended agent with a task = %v, want %v", got, want)
+	}
+	got = starterEnv(InstanceIdentity{Actor: "user:u7", Unattended: true, Task: "list the open issues"})
+	if slices.ContainsFunc(got, func(e string) bool { return strings.HasPrefix(e, "EGZO_TASK=") }) {
+		t.Errorf("an unattended agent's task is a request, not in its environment: %v", got)
+	}
 }
