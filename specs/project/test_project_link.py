@@ -357,7 +357,7 @@ def you(agent):
 
 def screen(project, name, seconds=5):
     """An agent's terminal as `agent attach --read-only` shows it, read for a few seconds. The reporting stand-in prints `got:` and
-    each line typed into it."""
+    each line typed into it. Control keeps no prompt in the event log but its own announcements: a task is free text."""
     import pexpect
 
     client = project.pty("agent attach --read-only", name)
@@ -410,30 +410,24 @@ def test_an_agent_started_at_the_cli_was_started_by_the_operator(linked, engine)
     linked.ok("agent rm --force by-hand")
 
 
-def test_a_task_is_in_the_agents_instructions_never_typed_and_sends_no_message(linked, fake_hub, engine):
-    """An attended agent's task is in its instructions (EGZO_TASK, rendered by harness.InstructionsFor): there before its first turn,
-    whoever attaches and whenever, unlike a prompt typed at the agent's first quiet idle, which a person at the terminal holds back (#213)."""
+def test_a_task_is_typed_once_as_the_first_prompt_and_sends_no_message(linked, fake_hub, engine):
     p, hub = linked.name, fake_hub
-    hub.must(p, "spawn", Template="typed", Name="tasked", Actor="user:7", StarterName="Joe", Task="list the open issues\nand label them")
+    hub.must(p, "spawn", Template="typed", Name="tasked", Actor="user:7", StarterName="Joe", Task="list the open issues")
     env = env_of(engine, linked, "tasked")
-    assert env["EGZO_TASK"] == "list the open issues\nand label them", "its instructions carry the task"
-    assert "EGZO_UNATTENDED" not in env
-    assert b"got:list the open issues" not in screen(linked, "tasked", 10), "nothing is typed into its terminal"
+    assert "EGZO_UNATTENDED" not in env and "list the open issues" not in json.dumps(env), "the task is typed, never in the settings"
+    assert eventually(lambda: screen(linked, "tasked").count(b"got:list the open issues") == 1, seconds=60), screen(linked, "tasked")
     assert not [e for e in message_events(hub, p) if e["Agent"] == "tasked" and e["Kind"] == "request"], "nothing goes to chat"
 
     linked.ok("stop tasked")
     linked.ok("start tasked")
-    assert env_of(engine, linked, "tasked")["EGZO_TASK"] == "list the open issues\nand label them", "a restarted agent still knows it"
-    assert b"got:list the open issues" not in screen(linked, "tasked", 10)
+    assert b"got:list the open issues" not in screen(linked, "tasked", 10), "typed once, not again after a restart"
     hub.must(p, "remove", Agent="tasked")
 
 
 def test_an_unattended_agent_gets_its_task_as_a_request_from_who_started_it_and_answers_them(linked, fake_hub, engine):
     p, hub = linked.name, fake_hub
     hub.must(p, "spawn", Template="typed", Name="alone", Actor="user:7", StarterName="Joe", Task="list the open issues", Unattended=True)
-    env = env_of(engine, linked, "alone")
-    assert env["EGZO_UNATTENDED"] == "1", "its instructions say nobody reads its terminal"
-    assert "EGZO_TASK" not in env, "its task is a request, which it resolves, not in its instructions"
+    assert env_of(engine, linked, "alone")["EGZO_UNATTENDED"] == "1", "its instructions say nobody reads its terminal"
     task = eventually(lambda: [e for e in message_events(hub, p) if e["Agent"] == "alone" and e["Kind"] == "request"])
     assert len(task) == 1 and (task[0]["Actor"], task[0]["To"], task[0]["Text"]) == ("user:7", "agent:alone", "list the open issues")
     answer = eventually(lambda: [e for e in message_events(hub, p) if e["Kind"] == "resolution" and e["Re"] == task[0]["ID"]], seconds=60)

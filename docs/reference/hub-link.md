@@ -147,7 +147,7 @@ The hub relays what its users say to agents, and what agents say to them, for th
   answers again what they resolved changes nothing, and gets their first resolution with `Already` true. The same key with another answer
   is an error, and so is answering what someone else resolved.
 - **`spawn`** takes, besides `Template` and `Name`, `Actor`, who the agent is told started it, `StarterName`, their name, and `Task`, what
-  it starts on: in its instructions, as if typed as its first prompt, or with `Unattended` sent as a request from the actor, and the agent told that nobody
+  it starts on: typed once as its first prompt, or with `Unattended` sent as a request from the actor, and the agent told that nobody
   reads its terminal. `Unattended` needs a `Task` and a `user:` actor. The task's text goes to the project only.
 - **`people`** is the hub saying what it knows now of the users who started the project's agents: `People`, by `user:<id>`, each with a
   `Name`, and `Reachable`: whether a bridge can reach them now. It is the whole list each time. An agent whose starter became reachable, or

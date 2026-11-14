@@ -4,8 +4,8 @@ See [managing projects](managing-projects.md) for the rest of the CLI.
 
 Everything people and agents say to each other is a **message**, kept by the control sidecar. The terminal only
 ever gets a short fixed line that announces a message; the agent fetches the text with a tool. Nothing a message
-contains can be typed into the terminal, so a message cannot pretend to be you. Nothing else is typed either: the
-[task](#who-started-an-agent) the person who spawned an agent gave it is in the agent's instructions.
+contains can be typed into the terminal, so a message cannot pretend to be you. The one exception is not a message: the
+[task](#who-started-an-agent) the person who spawned an agent gave it, typed once as its first prompt.
 
 ## Sending a task
 
@@ -60,10 +60,8 @@ An agent that cannot go on without an answer says what it is waiting for on its 
 what branch name to push. Joe is unreachable.`, so the people who watch the project see it in `egzo ps` and in the hub.
 
 **A task to start on.** Spawning in the hub can give the agent a task:
-- In its instructions, as if the person had typed it as its first prompt, with what they say of who started it and that the session
-  is attended: it is there before the agent's first turn, whoever attaches and whenever, and still there after a restart. Nothing is
-  typed into its terminal, and nothing goes to chat. The agent works on it from its first turn, which starts when someone types into its
-  terminal or a message is announced to it.
+- Typed as its first prompt, once, at the agent's first idle, as if the person had typed it in its terminal; they may attach later.
+  It is the one free text egzo ever types, kept apart from the event log; nothing goes to chat.
 - **Unattended:** sent as a request from the person, and the agent is told that nobody reads its terminal: it answers them with its
   egzo tools, on their chat account. An unattended agent needs a task, and the person a linked chat account.
 

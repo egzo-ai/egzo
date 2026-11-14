@@ -360,13 +360,13 @@ func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) 
 func TestThePlatformInstructionsTellTheAgentWhereItsAnswerGoes(t *testing.T) {
 	for _, needed := range []string{
 		"get_message", "list_messages", "resolve(id, text, outcome)", "done", "declined", "failed", "update(id, text)", "ask(id, text)",
-		"message(to, text)", "agents", "status(text)", "attended or unattended", "not your terminal",
+		"message(to, text)", "agents", "status(text)", "unattended", "not your terminal",
 	} {
 		if !strings.Contains(PlatformInstructions, needed) {
 			t.Errorf("the platform instructions do not mention %q", needed)
 		}
 	}
-	for _, retired := range []string{"check_inbox", "handoff", "ask_user", "get_answer", "[egzo msg", "sparingly", "You often run unattended"} {
+	for _, retired := range []string{"check_inbox", "handoff", "ask_user", "get_answer", "[egzo msg", "sparingly"} {
 		if strings.Contains(PlatformInstructions, retired) {
 			t.Errorf("the platform instructions still mention %q", retired)
 		}
@@ -522,7 +522,7 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 		t.Errorf("an agent the operator started is told %q", operator)
 	}
 	joe := text(Options{Starter: "user:u7", StarterName: "Joe"})
-	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "This is an attended session"} {
+	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "may be a task from them"} {
 		if !strings.Contains(joe, needed) {
 			t.Errorf("an agent Joe started is not told %q", needed)
 		}
@@ -536,31 +536,10 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 			t.Errorf("an unattended agent is not told %q", needed)
 		}
 	}
-	if strings.Contains(alone, "This is an attended session") {
-		t.Error("an unattended agent is told it is attended")
+	if strings.Contains(alone, "may be a task from them") {
+		t.Error("an unattended agent is told its task is typed")
 	}
 	if strings.Contains(text(Options{}), "You were started by") {
 		t.Error("an agent nobody said who started is told someone did")
-	}
-}
-
-// The task an attended agent was started with is in its instructions, there before its first turn whoever attaches (#213). An unattended
-// agent's is a request, never in its instructions.
-func TestAnAttendedAgentsTaskIsInItsInstructions(t *testing.T) {
-	joe := string(InstructionsFor(Options{Starter: "user:u7", StarterName: "Joe", Task: "  list the open issues\n"}))
-	for _, needed := range []string{"<task>\nlist the open issues\n</task>", "from your first turn", "carry on from where it stands"} {
-		if !strings.Contains(joe, needed) {
-			t.Errorf("an attended agent with a task is not told %q:\n%s", needed, joe)
-		}
-	}
-	if strings.Index(joe, "<task>") < strings.Index(joe, "started by Joe") {
-		t.Error("the task comes after who gave it")
-	}
-	alone := string(InstructionsFor(Options{Starter: "user:u7", Unattended: true, Task: "list the open issues"}))
-	if strings.Contains(alone, "list the open issues") {
-		t.Errorf("an unattended agent's task is in its instructions:\n%s", alone)
-	}
-	if strings.Contains(string(InstructionsFor(Options{Starter: "user:u7", Task: "   "})), "<task>") {
-		t.Error("a blank task is told")
 	}
 }

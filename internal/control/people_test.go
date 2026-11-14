@@ -122,15 +122,31 @@ func TestUpKeepsTheStartersNameSpawnGave(t *testing.T) {
 	}
 }
 
-// A task is in the agent's instructions (harness.TaskEnv), or a request for an unattended one: control never types one (#213).
-func TestControlTypesNoTaskOnlyAnnouncements(t *testing.T) {
+func TestATaskIsTypedOnceAtTheFirstIdleBeforeAnyAnnouncement(t *testing.T) {
 	r := newRig(t)
-	if code := r.put("/v1/agents/coder/task", `{"text":"list the open issues"}`); code != http.StatusNotFound && code != http.StatusMethodNotAllowed {
-		t.Errorf("control still takes a task: %d", code)
+	if code := r.put("/v1/agents/coder/task", `{"text":"list the open issues"}`); code != http.StatusNoContent {
+		t.Fatalf("task: %d", code)
+	}
+	if code := r.put("/v1/agents/nobody/task", `{"text":"x"}`); code != http.StatusNotFound {
+		t.Errorf("a task for no agent: %d", code)
+	}
+	if code := r.put("/v1/agents/reviewer/task", `{"text":"  "}`); code != http.StatusBadRequest {
+		t.Errorf("an empty task: %d", code)
 	}
 	r.request("coder", "a request")
+	if got, _ := r.srv.claim("coder", 0); got.Line != "" {
+		t.Errorf("typed %q before the agent was idle", got.Line)
+	}
 	r.srv.setActivity("coder", activityIdle)
-	if got, _ := r.srv.claim("coder", 0); len(got.IDs) != 1 || strings.Contains(got.Line, "list the open issues") {
-		t.Errorf("the first claim = %+v, want the request announced", got)
+	if got, _ := r.srv.claim("coder", 0); got.Line != "list the open issues" || len(got.IDs) != 0 {
+		t.Errorf("the first claim = %+v, want the task", got)
+	}
+	if got, _ := r.srv.claim("coder", 0); got.Line == "list the open issues" || len(got.IDs) != 1 {
+		t.Errorf("the second claim = %+v, want the request announced", got)
+	}
+	for _, e := range r.srv.events.all() {
+		if strings.Contains(e.Text, "list the open issues") || strings.Contains(string(e.Data), "list the open issues") {
+			t.Errorf("the task is in the event log: %+v", e)
+		}
 	}
 }
