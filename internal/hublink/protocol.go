@@ -221,7 +221,7 @@ type Request struct {
 }
 
 // SpawnRequest is what the hub asks of a spawn. Actor is who starts the agent, and StarterName their name. Task is what the agent starts
-// on: in its instructions, as if they had typed it as its first prompt; or, Unattended, a request from them, and nobody reads its terminal. Unattended
+// on: typed as its first prompt, as if they had typed it; or, Unattended, a request from them, and nobody reads its terminal. Unattended
 // needs a task and a user:<id> actor.
 type SpawnRequest struct {
 	Template, Name, Actor, StarterName, Task string

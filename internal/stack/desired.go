@@ -347,8 +347,6 @@ type InstanceIdentity struct {
 	// StarterName and Unattended are what the agent is told of who started it and how (see SpawnRequest).
 	StarterName string
 	Unattended  bool
-	// Task is what an attended agent starts on, told in its instructions (see SpawnRequest). Empty for an unattended one.
-	Task string
 }
 
 // DesireInstance computes the resources of one instance: its network, its home volume, its container,
@@ -685,8 +683,7 @@ func bearerProvider(project *config.Resolved, agent config.ResolvedAgent) bool {
 	return false
 }
 
-// starterEnv tells the agent who started it, whether it is unattended, and the task it starts on when it is attended: its instructions say
-// so (harness.InstructionsFor).
+// starterEnv tells the agent who started it, and whether it is unattended: its instructions say so (harness.Starter).
 func starterEnv(from InstanceIdentity) []string {
 	actor := from.Actor
 	if actor == "" {
@@ -698,8 +695,6 @@ func starterEnv(from InstanceIdentity) []string {
 	}
 	if from.Unattended {
 		env = append(env, harness.UnattendedEnv+"=1")
-	} else if from.Task != "" {
-		env = append(env, harness.TaskEnv+"="+from.Task)
 	}
 	return env
 }

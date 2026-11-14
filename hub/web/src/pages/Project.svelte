@@ -382,7 +382,7 @@
             <span class="help">Lowercase letters, digits, - and _. The name stays with the agent's branch, even after it is removed.</span></div>
           <div class="field"><label for="sp-task">Task{#if !spawnForm.unattended} <span class="muted">(optional)</span>{/if}</label>
             <textarea id="sp-task" class="textarea" bind:value={spawnForm.task} required={spawnForm.unattended} maxlength="16000" rows="3"></textarea>
-            <span class="help">{spawnForm.unattended ? "Sent to the agent as a request from you. It answers you on your chat account." : "In the agent's instructions, as if you typed it as its first prompt. It works on it from its first turn: type in its terminal to start it."}</span></div>
+            <span class="help">{spawnForm.unattended ? "Sent to the agent as a request from you. It answers you on your chat account." : "Typed as the agent's first prompt, as if you typed it in its terminal."}</span></div>
           <label class="check"><input type="checkbox" bind:checked={spawnForm.unattended} data-testid="unattended" /> Unattended: nobody watches its terminal</label>
           {#if spawnForm.unattended}<span class="help">It reports to you on your linked chat account (<a href={href.account()}>Account</a>), and says on its status line what it waits for.</span>{/if}
         {/if}

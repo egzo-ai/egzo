@@ -96,6 +96,7 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("PUT /access", s.putAccess)
 	mux.HandleFunc("PUT /identities", s.putIdentities)
 	mux.HandleFunc("PUT /people", s.putPeople)
+	mux.HandleFunc("PUT /agents/{name}/task", s.putTask)
 	mux.HandleFunc("PUT /templates", s.putTemplates)
 	mux.HandleFunc("GET /templates", s.getTemplates)
 	mux.HandleFunc("PUT /preview-template", s.putPreviewTemplate)
@@ -508,6 +509,10 @@ func (s *server) unregisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.forgetIdentity(name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.forgetTask(name); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
