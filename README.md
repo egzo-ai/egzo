@@ -143,9 +143,7 @@ main inspiration, and this is what I wanted to improve:
 - [declarative projects](docs/project-file.md) in a single config file, with no REST API or database to configure them.
 - [network and file isolation](docs/security.md) (sandbox), with [secret injection](docs/security.md#how-secret-injection-works)
   through the proxy.
-- easily authenticate agents with [Claude](docs/harnesses.md#claude-code) and [ChatGPT](docs/harnesses.md#codex) subscriptions, or an
-  [OpenCode Go](docs/harnesses.md#getting-the-key-for-an-opencode-go-subscription) key. Log in once for the subscriptions; the proxy
-  keeps the sign-in, and every agent after the first starts signed in.
+- easily authenticate agents to claude/chatgpt/opencode-go using subscriptions and the normal browser based login flow.
 - explore enhanced container security using [gVisor](docs/gvisor.md), [rootless Podman](docs/podman.md) and
   [sysbox](docs/sysbox.md).
 
@@ -159,7 +157,7 @@ main inspiration, and this is what I wanted to improve:
 | **Web UI, chat** | yes | no | no | no | yes |
 | **License** | AGPL-3.0-only | proprietary | Apache-2.0 (sandbox part) | Apache-2.0 | Apache-2.0 |
 
-Docker sbx and OpenShell are sandboxes, and Scion is an orchestration platform. Egzo does both.
+Docker sbx and OpenShell are sandboxes. Scion is more an orchestration platform. With Egzo I am attempting to do both.
 
 ## Supported platforms
 
