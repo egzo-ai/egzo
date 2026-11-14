@@ -10,6 +10,10 @@
 > The core CLI tool and web UI are stable enough for testing and non-production work.
 > See [the 1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1) for details.
 
+> [!NOTE]
+> Egzo 0.16.0 is out and the Discord integration is included as a feature preview. We are nearing feature completion for 1.0.
+> [I am looking for Beta testers!](https://github.com/egzo-ai/egzo/discussions/209)
+
 ![The egzo hub: a project with OpenCode and Codex running, Claude Code spawned next to them, then the files and the network](assets/hub.gif)
 
 Egzo is a CLI tool to sandbox coding agents and organize your projects, with an optional [web UI](docs/hub.md),
@@ -30,7 +34,10 @@ through a built-in proxy that injects the credentials. Services, allowed hosts a
 YAML project file.
 
 Projects can live on different machines and connect out to a central hub over a websocket. There you control every agent,
-and you can link your Discord account to chat with them.
+you can link your Discord account to chat with them and you can invite other users to collaborate on your projects.
+
+Agents can expose TCP/UDP ports on your lan, so you can expose the minecraft mod or a game server your agent is working on,
+or use the web preview feature to securely access any webapp your agent is working on, through the hub.
 
 ## Features
 
@@ -127,7 +134,12 @@ $ egzo agent rm review-123
 
 ## Similar projects
 
-Egzo is one person's project. Bigger teams work on the same problem, and they are worth a look.
+I am aware of similar projects and took inspiration from some. SCION was the main inspiration, and what I wanted to improve upon is:
+
+- declarative projects in single config file, no REST API/database to configure projects.
+- network and file isolation (sandbox), using secret injection through the proxy.
+- easily authenticate agents to claude/chatgpt/opencode-go subscriptions. Login once and egzo stores and shares the token with your other agents on the same project.
+- explore enhanced container security using runtimes like gVisor, rootless podman and sysbox.
 
 | | **egzo** | **Docker sbx** | **Claude Code (bubblewrap)** | **NVIDIA OpenShell** | **Scion** |
 |---|---|---|---|---|---|
@@ -137,9 +149,9 @@ Egzo is one person's project. Bigger teams work on the same problem, and they ar
 | **Credentials** | kept in the proxy | kept in the proxy | in the agent by default | kept out of the agent | given to the agent |
 | **Your files** | not mounted | mounted by default | used in place | the paths you declare | worktree or clone |
 | **Web UI, chat** | yes | no | no | no | yes |
-| **License** | AGPL-3.0-only | proprietary | Apache-2.0 (sandbox-runtime) | Apache-2.0 | Apache-2.0 |
+| **License** | AGPL3 | proprietary | Apache-2.0 (sandbox part) | Apache-2.0 | Apache-2.0 |
 
-Docker sbx and OpenShell are sandboxes, and Scion is orchestration.
+Docker sbx and OpenShell are sandboxes, and Scion is orchestration. Egzo does both.
 
 ## Supported platforms
 
