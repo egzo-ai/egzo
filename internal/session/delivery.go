@@ -6,6 +6,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -50,6 +51,9 @@ type Delivery struct {
 	// means it is not working. It defaults to three minutes. Only "working" is released: an agent that
 	// is blocked on a dialog stays blocked.
 	StuckAfter time.Duration
+	// AttachHold is the longest HoldAttach keeps read-write clients out waiting for the task to be typed: a harness that never gets ready
+	// must not lock its terminal for good. It defaults to two minutes.
+	AttachHold time.Duration
 	// BeforeInject runs right before a line is typed, so what the line may send the agent to look at is in place
 	// (the ssh servers of an access that changed). Nil does nothing.
 	BeforeInject func()
@@ -104,6 +108,11 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 	if cfg.StuckAfter == 0 {
 		cfg.StuckAfter = 3 * time.Minute
 	}
+	if cfg.AttachHold == 0 {
+		cfg.AttachHold = 2 * time.Minute
+	}
+	started := time.Now()
+	taskPending := false // control said a task waits: it is typed at once, without waiting for a quiet terminal
 	ready := false
 	var rawSince, released time.Time
 	startReported := false
@@ -125,6 +134,25 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		if !startReported {
 			if _, err := api.Do(ctx, "POST", "/v1/activity", map[string]any{"state": "starting", "if_unset": true}); err == nil {
 				startReported = true
+			}
+		}
+
+		// A held terminal opens as soon as control says no task waits, once the task is typed, or after AttachHold whatever happens.
+		if h.AttachHeld() {
+			if time.Since(started) >= cfg.AttachHold {
+				h.OpenAttach()
+			} else if reply, err := api.Do(ctx, "GET", "/v1/task", nil); errors.As(err, new(*agentclient.StatusError)) {
+				h.OpenAttach() // a control that keeps no task: nothing to wait for
+			} else if err == nil {
+				var task struct {
+					Pending bool `json:"pending"`
+				}
+				if json.Unmarshal(reply, &task) == nil {
+					taskPending = task.Pending
+					if !task.Pending {
+						h.OpenAttach()
+					}
+				}
 			}
 		}
 
@@ -177,7 +205,8 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 				continue
 			}
 		}
-		if time.Since(h.LastHumanInput()) < cfg.HumanQuiet || time.Since(lastClaim) < time.Second {
+		// The task does not wait for a quiet terminal: nobody can type while it is held back for it.
+		if (!taskPending && time.Since(h.LastHumanInput()) < cfg.HumanQuiet) || time.Since(lastClaim) < time.Second {
 			continue
 		}
 		lastClaim = time.Now()
@@ -202,5 +231,9 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		// started the agent gave it, typed once as its first prompt, which they could type themselves. Sanitize keeps any of it from
 		// leaving the bracketed paste, even if the sidecar were wrong.
 		h.Inject(Sanitize(work.Line))
+		if taskPending {
+			taskPending = false
+			h.OpenAttach() // the task is typed: whoever waited comes in, and finds it as the first prompt
+		}
 	}
 }

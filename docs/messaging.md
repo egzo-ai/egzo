@@ -17,7 +17,8 @@ $ egzo agent spawn coder issue-412 -m "..." --wait                      # spawn,
 ```
 
 A message waits in the queue until the agent is idle, nobody has typed in its terminal for a while (30 s by default)
-and the harness is ready. Then a line like `check egzo message m3f... and handle the request for me.` is typed in, and
+and the harness is ready. Only keys count as typing: what a terminal sends on its own (focus events when its window or tab gets
+the focus, mouse reports, answers to the program's queries) does not. Then a line like `check egzo message m3f... and handle the request for me.` is typed in, and
 the agent fetches and answers it. If it does not fetch it within a minute, the line is typed again, up to three
 times, after which the message is marked `unconfirmed`. A message for a stopped agent waits until it runs again.
 
@@ -60,7 +61,9 @@ An agent that cannot go on without an answer says what it is waiting for on its 
 what branch name to push. Joe is unreachable.`, so the people who watch the project see it in `egzo ps` and in the hub.
 
 **A task to start on.** Spawning in the hub can give the agent a task:
-- Typed as its first prompt, once, at the agent's first idle, as if the person had typed it in its terminal; they may attach later.
+- Typed as its first prompt, once, as soon as the agent takes input, as if the person had typed it in its terminal. It does not wait
+  for a quiet terminal: until it is typed, whoever attaches read-write waits (`egzo: the agent is starting and gets its task
+  first...`), at most two minutes, so the task is always the first prompt. Read-only clients watch as usual.
   It is the one free text egzo ever types, kept apart from the event log; nothing goes to chat.
 - **Unattended:** sent as a request from the person, and the agent is told that nobody reads its terminal: it answers them with its
   egzo tools, on their chat account. An unattended agent needs a task, and the person a linked chat account.

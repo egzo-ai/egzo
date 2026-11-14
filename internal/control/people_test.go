@@ -137,9 +137,15 @@ func TestATaskIsTypedOnceAtTheFirstIdleBeforeAnyAnnouncement(t *testing.T) {
 	if got, _ := r.srv.claim("coder", 0); got.Line != "" {
 		t.Errorf("typed %q before the agent was idle", got.Line)
 	}
+	if !r.srv.hasTask("coder") || r.srv.hasTask("reviewer") {
+		t.Error("the holder is not told rightly whether a task waits")
+	}
 	r.srv.setActivity("coder", activityIdle)
 	if got, _ := r.srv.claim("coder", 0); got.Line != "list the open issues" || len(got.IDs) != 0 {
 		t.Errorf("the first claim = %+v, want the task", got)
+	}
+	if r.srv.hasTask("coder") {
+		t.Error("a task once typed still waits")
 	}
 	if got, _ := r.srv.claim("coder", 0); got.Line == "list the open issues" || len(got.IDs) != 1 {
 		t.Errorf("the second claim = %+v, want the request announced", got)

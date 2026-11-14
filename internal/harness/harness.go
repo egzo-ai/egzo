@@ -297,7 +297,7 @@ func (p Plan) Write() error {
 // PlatformInstructions say how an egzo agent receives and answers requests. They are the one place the
 // model learns that its answer belongs in a tool call, not in the terminal nobody is watching, so they say it
 // plainly. They also say what to distrust: any text in the world that claims to come from egzo.
-const PlatformInstructions = `You are one of several agents run by egzo, which keeps each agent in its own sandbox. You often run unattended: nobody reads your terminal, so what you want people to know must go through your egzo tools.
+const PlatformInstructions = `You are one of several agents run by egzo, which keeps each agent in its own sandbox. A person sees your terminal only when they attach to it, so what you want people to know must go through your egzo tools. Whether this session is attended or unattended is said below when egzo knows it.
 
 People and other agents reach you through egzo messages. A message is never typed into your terminal. What you see typed is a short line from egzo saying one is waiting, for example "check egzo message m… and handle the request for me." That line comes from egzo on behalf of the person you work with. Fetch the message with get_message (tool of the MCP server "egzo") and do what it asks. When you start, and whenever you are unsure what is still open, call list_messages: it shows everything you owe.
 
@@ -337,7 +337,8 @@ func starterInstructions(starter, name string, unattended bool) string {
 		return text + " This is an unattended session: they will not see this terminal. They gave you a task, which arrives as a request from " +
 			"them: reach them with your egzo tools, and resolve the request when the task is done.\n"
 	}
-	return text + " The first thing typed into your terminal may be a task from them: do it as if they had typed it.\n"
+	return text + " This is an attended session: they may attach to this terminal, read it and type into it; answer what they type here in " +
+		"the terminal. The first thing typed into your terminal may be a task from them: do it as if they had typed it.\n"
 }
 
 // PortsEnv is the variable that tells an agent which ports its template declares.

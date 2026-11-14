@@ -67,3 +67,15 @@ func (s *server) forgetTask(agent string) error {
 	}
 	return nil
 }
+
+// hasTask says whether an agent's task is still waiting to be typed.
+func (s *server) hasTask(agent string) bool {
+	_, err := os.Stat(s.taskFile(agent))
+	return err == nil
+}
+
+// task answers the session holder whether a task waits: it keeps read-write clients out of the terminal until it has typed it, so the
+// task is the first prompt whoever attaches and whenever.
+func (a *agentAPI) task(w http.ResponseWriter, r *http.Request, agent string) {
+	json.NewEncoder(w).Encode(map[string]bool{"pending": a.server.hasTask(agent)})
+}

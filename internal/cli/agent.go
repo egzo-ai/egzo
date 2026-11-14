@@ -213,6 +213,10 @@ func runAgent(args []string) error {
 		return err
 	}
 	defer listener.Close()
+	api, apiErr := agentclient.FromEnv()
+	if apiErr == nil {
+		holder.HoldAttach() // until control says whether a task waits, and the task is typed if one does
+	}
 	go holder.Serve(listener)
 	holder.ForwardSignals()
 
@@ -225,7 +229,7 @@ func runAgent(args []string) error {
 	if value := os.Getenv("EGZO_IDLE_SIGNAL"); value == "state" || value == "quiescence" {
 		idle = value
 	}
-	if api, err := agentclient.FromEnv(); err == nil {
+	if apiErr == nil {
 		go holder.RunDelivery(context.Background(), api, sess.Delivery{
 			HumanQuiet:   durationEnv("EGZO_HUMAN_QUIET", 30*time.Second),
 			AckTimeout:   durationEnv("EGZO_ACK_TIMEOUT", 60*time.Second),

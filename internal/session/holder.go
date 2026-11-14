@@ -50,6 +50,10 @@ type Holder struct {
 
 	helloTimeout atomic.Int64 // nanoseconds
 
+	// gate is closed when read-write clients may attach: at once, unless HoldAttach kept them out until the first prompt is typed.
+	gate     chan struct{}
+	gateOnce *sync.Once
+
 	pumped chan struct{} // closed when the program's output has been read to the end
 	done   chan struct{}
 	code   int
@@ -145,7 +149,9 @@ func Start(argv, env []string, dir string) (*Holder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", argv[0], err)
 	}
-	h := &Holder{cmd: cmd, master: master, clients: map[*client]bool{}, rows: 24, cols: 80, pumped: make(chan struct{}), done: make(chan struct{}), lastOutput: time.Now()}
+	h := &Holder{cmd: cmd, master: master, clients: map[*client]bool{}, rows: 24, cols: 80, pumped: make(chan struct{}), done: make(chan struct{}), lastOutput: time.Now(),
+		gate: make(chan struct{}), gateOnce: new(sync.Once)}
+	h.OpenAttach()
 	h.helloTimeout.Store(int64(defaultHelloTimeout))
 	go h.pump()
 	go h.wait()
@@ -249,6 +255,14 @@ func (h *Holder) handle(conn net.Conn) {
 	}
 	conn.SetReadDeadline(time.Time{})
 	c := newClient(conn, greeting.ReadOnly)
+	if !greeting.ReadOnly && h.AttachHeld() {
+		// The agent's task is typed first, as its first prompt: nobody types before it, and nothing waits for a quiet terminal.
+		c.enqueue(frameOutput, []byte(attachHeldNotice))
+		select {
+		case <-h.attachGate():
+		case <-h.done:
+		}
+	}
 	select {
 	case <-h.done:
 		body, _ := json.Marshal(exitStatus{Code: h.code})
@@ -293,9 +307,11 @@ func (h *Holder) handle(conn net.Conn) {
 			if c.readOnly {
 				continue
 			}
-			h.mu.Lock()
-			h.lastHuman = time.Now()
-			h.mu.Unlock()
+			if Typed(payload) {
+				h.mu.Lock()
+				h.lastHuman = time.Now()
+				h.mu.Unlock()
+			}
 			h.inputMu.Lock()
 			h.master.Write(payload)
 			h.inputMu.Unlock()
@@ -460,4 +476,38 @@ func (h *Holder) ForwardSignals() {
 		<-signals
 		h.Terminate()
 	}()
+}
+
+// attachHeldNotice is what a read-write client is shown while HoldAttach keeps it out.
+const attachHeldNotice = "egzo: the agent is starting and gets its task first; this terminal opens once it has it...\r\n"
+
+// HoldAttach keeps read-write clients out of the terminal until OpenAttach: read-only ones still watch. Call it before Serve.
+func (h *Holder) HoldAttach() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.gate, h.gateOnce = make(chan struct{}), new(sync.Once)
+}
+
+func (h *Holder) attachGate() chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.gate
+}
+
+// OpenAttach lets read-write clients in, those that waited too.
+func (h *Holder) OpenAttach() {
+	h.mu.Lock()
+	gate, once := h.gate, h.gateOnce
+	h.mu.Unlock()
+	once.Do(func() { close(gate) })
+}
+
+// AttachHeld says whether HoldAttach still keeps read-write clients out.
+func (h *Holder) AttachHeld() bool {
+	select {
+	case <-h.attachGate():
+		return false
+	default:
+		return true
+	}
 }

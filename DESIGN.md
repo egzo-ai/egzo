@@ -728,7 +728,9 @@ message), `check_inbox` (`list_messages`), `handoff` (`message`).
 The holder asks the control sidecar when the terminal is ready; control answers with the line to type.
 - **Gates:** the agent is `idle`, nothing it was announced is awaiting a fetch, the TUI has taken the terminal and
   drawn its prompt, and no read-write client has typed for `inject.human_quiet` (default 30 s). Read-only
-  observers never block. A half-typed draft merges with the line (no screen model); accepted.
+  observers never block, and only keys count as typing: focus events, mouse reports and a terminal's answers to queries do not
+  (`session.Typed`). A spawn's task skips the quiet gate: the holder keeps read-write clients out (`HoldAttach`) from its start until
+  control says no task waits (`GET /v1/task`) or the task is typed, at most two minutes, so the task is the first prompt. A half-typed draft merges with the line (no screen model); accepted.
 - **Mechanics:** one atomic write of `ESC[200~ line ESC[201~`, a pause, then Enter, as before. Only the
   id varies in the line, and it is hex, so there is nothing to sanitize but nothing to trust either.
 - **The lines** (control composes them, in one place; one line per kind, joined, when several are pending):

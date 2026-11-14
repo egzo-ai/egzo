@@ -360,13 +360,13 @@ func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) 
 func TestThePlatformInstructionsTellTheAgentWhereItsAnswerGoes(t *testing.T) {
 	for _, needed := range []string{
 		"get_message", "list_messages", "resolve(id, text, outcome)", "done", "declined", "failed", "update(id, text)", "ask(id, text)",
-		"message(to, text)", "agents", "status(text)", "unattended", "not your terminal",
+		"message(to, text)", "agents", "status(text)", "attended or unattended", "not your terminal",
 	} {
 		if !strings.Contains(PlatformInstructions, needed) {
 			t.Errorf("the platform instructions do not mention %q", needed)
 		}
 	}
-	for _, retired := range []string{"check_inbox", "handoff", "ask_user", "get_answer", "[egzo msg", "sparingly"} {
+	for _, retired := range []string{"check_inbox", "handoff", "ask_user", "get_answer", "[egzo msg", "sparingly", "You often run unattended"} {
 		if strings.Contains(PlatformInstructions, retired) {
 			t.Errorf("the platform instructions still mention %q", retired)
 		}
@@ -522,7 +522,7 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 		t.Errorf("an agent the operator started is told %q", operator)
 	}
 	joe := text(Options{Starter: "user:u7", StarterName: "Joe"})
-	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "may be a task from them"} {
+	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "may be a task from them", "This is an attended session"} {
 		if !strings.Contains(joe, needed) {
 			t.Errorf("an agent Joe started is not told %q", needed)
 		}
@@ -536,7 +536,7 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 			t.Errorf("an unattended agent is not told %q", needed)
 		}
 	}
-	if strings.Contains(alone, "may be a task from them") {
+	if strings.Contains(alone, "may be a task from them") || strings.Contains(alone, "This is an attended session") {
 		t.Error("an unattended agent is told its task is typed")
 	}
 	if strings.Contains(text(Options{}), "You were started by") {
