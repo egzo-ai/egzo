@@ -11,8 +11,9 @@
 > See [the 1.0.0 milestone](https://github.com/egzo-ai/egzo/milestone/1) for details.
 
 > [!NOTE]
-> Egzo 0.16.0 is out and the Discord integration is included as a feature preview. We are nearing feature completion for 1.0.
-> [I am looking for Beta testers!](https://github.com/egzo-ai/egzo/discussions/209)
+> Egzo 0.16.0 is out, and the [Discord integration](docs/hub-bridges.md#discord) is included as a feature preview. We are
+> nearing feature completion for 1.0.
+> [I am looking for beta testers!](https://github.com/egzo-ai/egzo/discussions/209)
 
 ![The egzo hub: a project with OpenCode and Codex running, Claude Code spawned next to them, then the files and the network](assets/hub.gif)
 
@@ -33,11 +34,13 @@ Egzo isolates agents in standard containers, with all file and network access de
 through a built-in proxy that injects the credentials. Services, allowed hosts and file access are configured in a short
 YAML project file.
 
-Projects can live on different machines and connect out to a central hub over a websocket. There you control every agent,
-you can link your Discord account to chat with them and you can invite other users to collaborate on your projects.
+Projects can live on different machines and connect out to a central hub over a WebSocket. There you control every agent,
+[link your Discord account](docs/hub-bridges.md#discord) to chat with them, and [invite other people](docs/hub-access.md#invites)
+to collaborate on your projects.
 
-Agents can expose TCP/UDP ports on your lan, so you can expose the minecraft mod or a game server your agent is working on,
-or use the web preview feature to securely access any webapp your agent is working on, through the hub.
+Agents can expose [TCP/UDP ports on your LAN](docs/project-file.md#local-ports), so you can reach the Minecraft mod or game server
+your agent is working on. You can also use [web previews](docs/hub.md#previews) to securely access any web app it is working on,
+through the hub.
 
 ## Features
 
@@ -134,12 +137,17 @@ $ egzo agent rm review-123
 
 ## Similar projects
 
-I am aware of similar projects and took inspiration from some. SCION was the main inspiration, and what I wanted to improve upon is:
+I am aware of similar projects and took inspiration from some of them. [Scion](https://googlecloudplatform.github.io/scion/) was the
+main inspiration, and this is what I wanted to improve:
 
-- declarative projects in single config file, no REST API/database to configure projects.
-- network and file isolation (sandbox), using secret injection through the proxy.
-- easily authenticate agents to claude/chatgpt/opencode-go subscriptions. Login once and egzo stores and shares the token with your other agents on the same project.
-- explore enhanced container security using runtimes like gVisor, rootless podman and sysbox.
+- [declarative projects](docs/project-file.md) in a single config file, with no REST API or database to configure them.
+- [network and file isolation](docs/security.md) (sandbox), with [secret injection](docs/security.md#how-secret-injection-works)
+  through the proxy.
+- easily authenticate agents with [Claude](docs/harnesses.md#claude-code) and [ChatGPT](docs/harnesses.md#codex) subscriptions, or an
+  [OpenCode Go](docs/harnesses.md#getting-the-key-for-an-opencode-go-subscription) key. Log in once for the subscriptions; the proxy
+  keeps the sign-in, and every agent after the first starts signed in.
+- explore enhanced container security using [gVisor](docs/gvisor.md), [rootless Podman](docs/podman.md) and
+  [sysbox](docs/sysbox.md).
 
 | | **egzo** | **Docker sbx** | **Claude Code (bubblewrap)** | **NVIDIA OpenShell** | **Scion** |
 |---|---|---|---|---|---|
@@ -149,9 +157,9 @@ I am aware of similar projects and took inspiration from some. SCION was the mai
 | **Credentials** | kept in the proxy | kept in the proxy | in the agent by default | kept out of the agent | given to the agent |
 | **Your files** | not mounted | mounted by default | used in place | the paths you declare | worktree or clone |
 | **Web UI, chat** | yes | no | no | no | yes |
-| **License** | AGPL3 | proprietary | Apache-2.0 (sandbox part) | Apache-2.0 | Apache-2.0 |
+| **License** | AGPL-3.0-only | proprietary | Apache-2.0 (sandbox part) | Apache-2.0 | Apache-2.0 |
 
-Docker sbx and OpenShell are sandboxes, and Scion is orchestration. Egzo does both.
+Docker sbx and OpenShell are sandboxes, and Scion is an orchestration platform. Egzo does both.
 
 ## Supported platforms
 
