@@ -32,16 +32,16 @@
   <text x="895" y="122" text-anchor="middle" font-size="13" fill="#475569">its own proxy, control</text>
   <text x="895" y="142" text-anchor="middle" font-size="13" fill="#475569">and agents</text>
   <line x1="778" y1="110" x2="702" y2="110" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
-  <text x="740" y="100" text-anchor="middle" font-size="12" fill="#475569">dials out</text>
 
   <!-- this machine -->
   <rect x="30" y="230" width="750" height="380" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
   <text x="46" y="256" font-weight="700" fill="#334155">A machine with Docker or Podman</text>
   <text x="46" y="276" font-size="13" fill="#475569">one project: egzo.yaml</text>
 
-  <rect x="510" y="246" width="240" height="44" rx="6" fill="#fff" stroke="#94a3b8"/>
-  <text x="630" y="273" text-anchor="middle"><tspan font-weight="600">link</tspan><tspan fill="#475569">  dials out to the hub</tspan></text>
+  <rect x="570" y="246" width="120" height="44" rx="6" fill="#fff" stroke="#94a3b8"/>
+  <text x="630" y="273" text-anchor="middle" font-weight="600">link</text>
   <line x1="630" y1="244" x2="630" y2="192" stroke="#475569" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="640" y="222" font-size="12" fill="#475569">websocket</text>
 
   <rect x="50" y="340" width="150" height="96" rx="8" fill="#fff" stroke="#64748b"/>
   <text x="125" y="368" text-anchor="middle" font-weight="700">egzo CLI</text>
