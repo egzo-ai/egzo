@@ -51,6 +51,10 @@ type config struct {
 	// OutputDir is where it puts automatically named files (snapshots, screenshots). Left alone it is a
 	// `.playwright-mcp` directory in the working directory, which is the agent's workspace.
 	OutputDir string `json:"outputDir"`
+	// AllowUnrestrictedFileAccess lets the browser open file:// URLs and save files outside the workspace. Playwright
+	// MCP refuses both by default, to keep a page from steering an agent into the files of the person's own machine;
+	// here the browser runs in the agent's container and sees only what the agent can already read.
+	AllowUnrestrictedFileAccess bool `json:"allowUnrestrictedFileAccess"`
 }
 
 // Config returns the configuration file for the proxy at proxyServer (the forwarder's URL, without credentials; empty for
@@ -69,7 +73,8 @@ func Config(proxyServer, outputDir string) ([]byte, error) {
 				Args:            []string{"--disable-dev-shm-usage"}, // /dev/shm is 64 MB
 			},
 		},
-		OutputDir: outputDir,
+		OutputDir:                   outputDir,
+		AllowUnrestrictedFileAccess: true,
 	}
 	if proxyServer != "" {
 		settings.Browser.LaunchOptions.Proxy = &proxySettings{Server: proxyServer, Bypass: bypass}

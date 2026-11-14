@@ -159,10 +159,15 @@ def test_the_browser_is_part_of_the_image_registered_with_the_harness_and_browse
             break
         time.sleep(0.5)
     assert "local dev page" in served.stdout, served.stderr
+    # a file in the container opens as file://: the browser sees what the agent can read, nothing of the host's
+    written = engine.exec(container, "sh", "-c", "echo '<title>local file</title>' > /tmp/egzo-local.html")
+    assert written.returncode == 0, written.stderr
     before = len(proxy_events(p))
-    allowed, local, refused = call_tools(  # the refused one last: a failed page interrupts the next navigation
-        engine, p, name, harness, [navigate("https://example.com/"), navigate("http://localhost:8123/"), navigate("https://example.org/")]
+    allowed, local, opened, refused = call_tools(  # the refused one last: a failed page interrupts the next navigation
+        engine, p, name, harness,
+        [navigate("https://example.com/"), navigate("http://localhost:8123/"), navigate("file:///tmp/egzo-local.html"), navigate("https://example.org/")],
     )
+    assert "Page Title: local file" in opened["text"], opened["text"]
     # everything the browser sent, Chromium's own background requests included, reached the proxy with the agent's credentials:
     # nothing from the agent's container was left at the challenge, and the proxy knows the browser by what it says it is
     addresses = {n["IPAddress"] for n in engine.instance(p.name, name).raw["NetworkSettings"]["Networks"].values()}
@@ -177,7 +182,7 @@ def test_the_browser_is_part_of_the_image_registered_with_the_harness_and_browse
     assert [e for e in audit(p, "example.org", name) if e.get("decision") == "deny" and e["reason"]["code"] == "not-in-profile"]
     assert audit(p, "localhost", name) == []
     found = engine.exec(container, "sh", "-c", "find / \\( -path /proc -o -path /sys \\) -prune -o -name .playwright-mcp -print 2>/dev/null")
-    assert found.stdout.strip() == "" and ".playwright-mcp" not in json.dumps([allowed, refused, local]), "the browser leaves nothing where the agent works"
+    assert found.stdout.strip() == "" and ".playwright-mcp" not in json.dumps([allowed, refused, local, opened]), "the browser leaves nothing where the agent works"
 
     # an entry egzo wrote earlier, with arguments that no longer are right: replaced as a whole, not merged into
     registered = servers["playwright"]
