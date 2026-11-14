@@ -48,6 +48,12 @@ func TestTheConfigurationRunsAnIsolatedHeadlessChromiumWithoutTheSandbox(t *test
 	}
 }
 
+func TestTheBrowserMayOpenTheContainersFiles(t *testing.T) {
+	if config := decode(t, ""); config["allowUnrestrictedFileAccess"] != true {
+		t.Errorf("allowUnrestrictedFileAccess = %v", config["allowUnrestrictedFileAccess"])
+	}
+}
+
 func TestTheProxyIsTheForwarderWithoutCredentialsAndLocalhostBypassesIt(t *testing.T) {
 	proxy := launch(t, decode(t, "http://127.0.0.1:4567"))["proxy"].(map[string]any)
 	if len(proxy) != 2 || proxy["server"] != "http://127.0.0.1:4567" || proxy["bypass"] != "localhost,127.0.0.1" {
