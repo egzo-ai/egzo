@@ -46,6 +46,7 @@ func (a *agentAPI) handler() http.Handler {
 	mux.HandleFunc("POST /v1/state", a.authenticatedLimit(maxStatePayload, a.state))
 	mux.HandleFunc("POST /v1/activity", a.authenticated(a.activity))
 	mux.HandleFunc("POST /v1/claim", a.authenticated(a.claim))
+	mux.HandleFunc("GET /v1/task", a.authenticated(a.task))
 	mux.HandleFunc("POST /v1/boot", a.authenticated(a.boot))
 	mux.HandleFunc("POST /v1/expose", a.authenticated(a.expose))
 	mux.HandleFunc("GET /v1/expose", a.authenticated(a.exposed))

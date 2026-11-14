@@ -253,6 +253,8 @@ type fakeControl struct {
 	releases  []string // the "if" of each conditional activity change
 	failFirst int      // how many activity reports to refuse before accepting
 	claimBody []byte
+	task      string // the task that waits: the next claim gives it
+	taskPeeks int
 }
 
 func (f *fakeControl) handler() http.Handler {
@@ -278,8 +280,19 @@ func (f *fakeControl) handler() http.Handler {
 		defer f.mu.Unlock()
 		f.claims++
 		f.claimBody, _ = io.ReadAll(r.Body)
+		if f.task != "" {
+			json.NewEncoder(w).Encode(claimed{Line: f.task})
+			f.task = ""
+			return
+		}
 		json.NewEncoder(w).Encode(f.reply)
 		f.reply = claimed{}
+	})
+	mux.HandleFunc("GET /v1/task", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.taskPeeks++
+		json.NewEncoder(w).Encode(map[string]bool{"pending": f.task != ""})
 	})
 	return mux
 }
@@ -808,5 +821,126 @@ func TestTheHistoryASlowArrivalGetsIsTheLastTailSizeBytesExactly(t *testing.T) {
 	out := h.Output()
 	if len(out) != tailSize || !strings.HasSuffix(string(out), "aaaEND") {
 		t.Errorf("history = %d bytes ending %q, want %d", len(out), out[len(out)-6:], tailSize)
+	}
+}
+
+// heldRig is deliveryRig for a holder that keeps read-write clients out until its task is typed, as `egzo agent run` starts it.
+func heldRig(t *testing.T, task string, cfg Delivery) (*Holder, string, *fakeControl) {
+	t.Helper()
+	holder, err := Start([]string{"sh", "-c", rawCat}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	path := filepath.Join(t.TempDir(), "s.sock")
+	listener, err := Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	holder.HoldAttach()
+	go holder.Serve(listener)
+	fake := &fakeControl{task: task}
+	server := httptest.NewServer(fake.handler())
+	t.Cleanup(server.Close)
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	cfg.Interval, cfg.Settle = 20*time.Millisecond, 50*time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go holder.RunDelivery(ctx, api, cfg)
+	return holder, path, fake
+}
+
+// #213: a person who attaches at once used to hold the task back (their keys, their terminal's focus events), until it came, if ever,
+// after their own prompt. Now they wait for it, and it is typed as soon as the program is ready, whatever the human quiet.
+func TestTheTaskIsTypedFirstAndAReadWriteClientWaitsForIt(t *testing.T) {
+	holder, path, _ := heldRig(t, "list the open issues", Delivery{HumanQuiet: time.Hour, AckTimeout: time.Minute, IdleSignal: "state"})
+	watcher := connect(t, path, true, 24, 80)
+	early := connect(t, path, false, 24, 80)
+	early.waitFor("gets its task first")
+	early.send("mine\r")
+	watcher.waitFor("\x1b[200~list the open issues\x1b[201~\r")
+	early.waitFor("mine")
+	watcher.mu.Lock()
+	seen := watcher.out.String()
+	watcher.mu.Unlock()
+	if task, mine := strings.Index(seen, "list the open issues"), strings.Index(seen, "mine"); mine >= 0 && mine < task {
+		t.Errorf("what the person typed reached the program before the task: %q", seen)
+	}
+	if holder.AttachHeld() {
+		t.Error("the terminal is still held once the task is typed")
+	}
+	if watcher.has("gets its task first") {
+		t.Error("a read-only client is held back")
+	}
+}
+
+func TestAHeldTerminalOpensAtOnceWhenNoTaskWaits(t *testing.T) {
+	holder, path, fake := heldRig(t, "", Delivery{HumanQuiet: time.Hour, AckTimeout: time.Minute, IdleSignal: "state"})
+	deadline := time.Now().Add(2 * time.Second)
+	for holder.AttachHeld() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if holder.AttachHeld() {
+		t.Fatal("no task waits, and the terminal is still held")
+	}
+	c := connect(t, path, false, 24, 80)
+	c.send("x")
+	c.waitFor("x")
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.taskPeeks == 0 {
+		t.Error("the holder never asked control whether a task waits")
+	}
+}
+
+func TestAHeldTerminalOpensAfterAttachHoldWhateverHappens(t *testing.T) {
+	// a program that never takes the terminal over is never ready: the task is never typed
+	holder, err := Start([]string{"sh", "-c", "sleep 30"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	holder.HoldAttach()
+	fake := &fakeControl{task: "never typed"}
+	server := httptest.NewServer(fake.handler())
+	t.Cleanup(server.Close)
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go holder.RunDelivery(ctx, api, Delivery{IdleSignal: "state", RequireRaw: true, Interval: 20 * time.Millisecond, AttachHold: 300 * time.Millisecond})
+	deadline := time.Now().Add(3 * time.Second)
+	for holder.AttachHeld() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if holder.AttachHeld() {
+		t.Error("a harness that never gets ready locks its terminal")
+	}
+}
+
+func TestWhatTheTerminalSendsOnItsOwnIsNotAPersonTyping(t *testing.T) {
+	holder, path := startHolder(t, rawCat)
+	c := connect(t, path, false, 24, 80)
+	c.waitFor("READY")
+	c.send("\x1b[I\x1b[O\x1b[<35;10;5M\x1b[12;40R\x1b[?62;22c\x1b]11;rgb:0000/0000/0000\x1b\\")
+	time.Sleep(200 * time.Millisecond)
+	if !holder.LastHumanInput().IsZero() {
+		t.Error("focus events, mouse reports and terminal answers count as typing")
+	}
+	c.send("x")
+	waitForHumanInput(t, holder)
+}
+
+func TestTyped(t *testing.T) {
+	for input, want := range map[string]bool{
+		"a": true, "\r": true, "\x1b": true, "\x1bx": true, "\x1b[A": true, "\x1bOA": true, "\x1b[200~pasted\x1b[201~": true,
+		"\x1b[15~": true, "\x1b[97;5u": true, "\x1b[I": false, "\x1b[O": false, "\x1b[I\x1b[O": false, "\x1b[M #!": false,
+		"\x1b[<0;3;4m": false, "\x1b[24;80R": false, "\x1b[?1;2c": false, "\x1b[>0;95;0c": false, "\x1b[?2004;1$y": false,
+		"\x1b[?1u": false, "\x1b]10;rgb:ffff/ffff/ffff\x07": false, "\x1bP1+r616d\x1b\\": false, "\x1b[Ix": true, "\x1b[": true,
+		"\x1b]11;unterminated": true,
+	} {
+		if got := Typed([]byte(input)); got != want {
+			t.Errorf("Typed(%q) = %v, want %v", input, got, want)
+		}
 	}
 }

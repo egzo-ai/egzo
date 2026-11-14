@@ -424,6 +424,27 @@ def test_a_task_is_typed_once_as_the_first_prompt_and_sends_no_message(linked, f
     hub.must(p, "remove", Agent="tasked")
 
 
+def test_a_task_is_typed_first_even_when_a_person_attaches_at_once_and_types(linked, fake_hub, engine):
+    """The hub opens the terminal as soon as a spawn is done. The person who attaches, their keys, and what their terminal sends on its
+    own (focus events) must not hold the task back: the holder keeps them out until it has typed it (#213)."""
+    import pexpect
+
+    p, hub = linked.name, fake_hub
+    hub.must(p, "spawn", Template="typed", Name="rushed", Actor="user:7", StarterName="Joe", Task="list the open issues")
+    client = linked.pty("agent attach", "rushed")
+    try:
+        client.send("\x1b[I")  # the terminal's focus event, as the hub's sends when its tab gets the focus
+        client.send("my own prompt\r")
+        client.expect(pexpect.TIMEOUT, timeout=15)
+    finally:
+        client.close(force=True)
+    seen = screen(linked, "rushed", 10)
+    assert seen.count(b"got:list the open issues") == 1, seen
+    mine = seen.find(b"got:my own prompt")
+    assert mine == -1 or mine > seen.find(b"got:list the open issues"), "the task is the first prompt, before the person's"
+    hub.must(p, "remove", Agent="rushed")
+
+
 def test_an_unattended_agent_gets_its_task_as_a_request_from_who_started_it_and_answers_them(linked, fake_hub, engine):
     p, hub = linked.name, fake_hub
     hub.must(p, "spawn", Template="typed", Name="alone", Actor="user:7", StarterName="Joe", Task="list the open issues", Unattended=True)
