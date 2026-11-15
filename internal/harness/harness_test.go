@@ -5,10 +5,13 @@ package harness
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/egzo-ai/egzo/internal/golden"
 )
 
 func options(t *testing.T) Options {
@@ -360,7 +363,7 @@ func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) 
 func TestThePlatformInstructionsTellTheAgentWhereItsAnswerGoes(t *testing.T) {
 	for _, needed := range []string{
 		"get_message", "list_messages", "resolve(id, text, outcome)", "done", "declined", "failed", "update(id, text)", "ask(id, text)",
-		"message(to, text)", "agents", "status(text)", "attended or unattended", "not your terminal",
+		"message(to, text)", "agents", "status(text)", "not your terminal",
 	} {
 		if !strings.Contains(PlatformInstructions, needed) {
 			t.Errorf("the platform instructions do not mention %q", needed)
@@ -521,25 +524,22 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 	if !strings.Contains(operator, `started by the operator: message "operator"`) || strings.Contains(operator, "reached now") {
 		t.Errorf("an agent the operator started is told %q", operator)
 	}
-	joe := text(Options{Starter: "user:u7", StarterName: "Joe"})
-	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "may be a task from them", "This is an attended session"} {
-		if !strings.Contains(joe, needed) {
-			t.Errorf("an agent Joe started is not told %q", needed)
-		}
-	}
-	if strings.Contains(joe, "unattended session") {
-		t.Error("an attended agent is told it is unattended")
-	}
-	alone := text(Options{Starter: "user:u7", Unattended: true})
-	for _, needed := range []string{"started by user:u7", "unattended session", "arrives as a request", "resolve the request"} {
-		if !strings.Contains(alone, needed) {
-			t.Errorf("an unattended agent is not told %q", needed)
-		}
-	}
-	if strings.Contains(alone, "may be a task from them") || strings.Contains(alone, "This is an attended session") {
-		t.Error("an unattended agent is told its task is typed")
-	}
 	if strings.Contains(text(Options{}), "You were started by") {
 		t.Error("an agent nobody said who started is told someone did")
+	}
+}
+
+var update = flag.Bool("update", false, "rewrite the golden files with what egzo produces now")
+
+// How an agent starts is compared word for word with testdata/start, which shows each case in full: the system prompt here, the
+// first prompt and the request in internal/control.
+func TestTheSystemPromptOfEachWayAnAgentStartsIsExactlyTheGoldenOne(t *testing.T) {
+	agent := Options{Agent: "coder", Template: "coder", Harness: "claude-code"}
+	joe, alone, operator := agent, agent, agent
+	joe.Starter, joe.StarterName = "user:u7", "Joe"
+	alone.Starter, alone.StarterName, alone.Unattended = "user:u7", "Joe", true
+	operator.Starter = "operator"
+	for file, o := range map[string]Options{"attended-task": joe, "attended-no-task": joe, "unattended-task": alone, "operator": operator} {
+		golden.Check(t, filepath.Join("testdata", "start", file+".md"), "System prompt", string(InstructionsFor(o)), *update)
 	}
 }
