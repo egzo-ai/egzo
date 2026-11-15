@@ -305,6 +305,16 @@ func (h *Hub) endTask(task *Task, done chan struct{}, err error) {
 		task.State, task.Err = store.TaskFailed, err.Error()
 	}
 	t := *task
+	h.tasks.mu.Unlock()
+	if err != nil {
+		h.log.Warn("task failed", "verb", t.Verb, "project", t.Project, "agent", t.Agent, "actor", t.Actor, "err", err)
+	}
+	// The end is in the store before the task leaves the maps: waitTask reads the store as soon as it no longer finds the task's
+	// channel, and would otherwise find it still running, with no error.
+	if err := h.store.EndTask(context.Background(), t.ID, t.State, t.Err, t.Ended); err != nil {
+		h.log.Warn("record the end of a task", "task", t.ID, "err", err)
+	}
+	h.tasks.mu.Lock()
 	delete(h.tasks.busy, agentKey{t.Project, t.Agent})
 	delete(h.tasks.done, t.ID)
 	if t.State == store.TaskDone {
@@ -314,12 +324,6 @@ func (h *Hub) endTask(task *Task, done chan struct{}, err error) {
 		delete(h.tasks.last, t.Project)
 	}
 	h.tasks.mu.Unlock()
-	if err != nil {
-		h.log.Warn("task failed", "verb", t.Verb, "project", t.Project, "agent", t.Agent, "actor", t.Actor, "err", err)
-	}
-	if err := h.store.EndTask(context.Background(), t.ID, t.State, t.Err, t.Ended); err != nil {
-		h.log.Warn("record the end of a task", "task", t.ID, "err", err)
-	}
 }
 
 // Spawn spawns an agent and waits until it exists or the task has failed: StartSpawn, for a caller that has the time.
