@@ -65,8 +65,13 @@ what branch name to push. Joe is unreachable.`, so the people who watch the proj
   for a quiet terminal: until it is typed, whoever attaches read-write waits (`egzo: the agent is starting and gets its task
   first...`), at most two minutes, so the task is always the first prompt. Read-only clients watch as usual.
   It is the one free text egzo ever types, kept apart from the event log; nothing goes to chat.
-- **Unattended:** sent as a request from the person, and the agent is told that nobody reads its terminal: it answers them with its
-  egzo tools, on their chat account. An unattended agent needs a task, and the person a linked chat account.
+- **Unattended:** sent as a request from the person, and the agent is told they indicated they will not attend the session directly
+  (a checkbox, not a lock: they may still attach): it answers them with its egzo tools, on their chat account. An unattended agent
+  needs a task, and the person a linked chat account.
+
+An attended agent is told nothing about being attended: it is the normal case. Exactly what an agent gets when it starts, its system
+prompt and its first prompt, attended or not, with a task or not, is in `internal/harness/testdata/start/`, and the tests compare it
+word for word.
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
