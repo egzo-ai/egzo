@@ -5,9 +5,10 @@
 provider's real name on the egress network (`proxy.upstream`), so the harness needs no setting of its own and calls home as it does in
 production. It is pinged and answers, and then it opens a page in the browser it started itself. The page is a real one on the internet.
 
-What each harness gives its model as its system prompt, in full, is pinned in harness/prompts for the version its Dockerfile installs. A
-harness changes it often, and a change can break how it works with egzo: a new version fails here until someone has read the diff and
-pinned it again with --update-prompts. The tools are not pinned: their schemas are too large for anyone to review."""
+What each harness gives its model as its system prompt, in full, is pinned in harness/prompts/<harness>.txt. A harness changes it often,
+and a change can break how it works with egzo: a version that words it differently fails here until someone has read the diff and pinned
+it again with --update-prompts, by hand. A version bump that leaves the prompt as it was passes. The tools are not pinned: their schemas
+are too large for anyone to review."""
 
 import json
 import re
@@ -145,7 +146,7 @@ def normalized(text, p):
         (r"OS Version: [^\n\\\"]*", "OS Version: <host kernel>"),  # the kernel of the machine the specs run on
         (r"cch=[0-9a-f]+", "cch=<hash>"),  # Claude Code's billing header carries a hash of the request
         (r"cc_prompt_id=[0-9a-f-]+", "cc_prompt_id=<id>"),  # and an id new for every prompt
-        (r"(cc_version=\d+\.\d+\.\d+)\.[0-9a-f]+", r"\1.<hash>"),  # and a short hash after the version
+        (r"cc_version=\d+\.\d+\.\d+\.[0-9a-f]+", "cc_version=<version>.<hash>"),  # and its version, which a bump changes, with a short hash
     ]
     for pattern, fixed in replacements:
         text = re.sub(pattern, fixed, text)
@@ -167,17 +168,15 @@ def rendered_system(system):
     return "".join(f"===== {where} =====\n{text}\n" for where, text in parts)
 
 
-def pinned(request, harness, kind, got):
-    """Compare got with the pinned file of this harness's version, or pin it with --update-prompts."""
-    path = PROMPTS / f"{harness}-{version(harness)}.{kind}"
+def pinned(request, harness, got):
+    """Compare got with this harness's pinned prompt, or pin it with --update-prompts."""
+    path = PROMPTS / f"{harness}.txt"
     if request.config.getoption("--update-prompts"):
-        for old in PROMPTS.glob(f"{harness}-*.{kind}"):
-            old.unlink()
         PROMPTS.mkdir(exist_ok=True)
         path.write_text(got)
         return
     if not path.exists():
-        pytest.fail(f"nothing is pinned for {harness} {version(harness)}: run with --update-prompts, read the diff, and commit {path.name}", pytrace=False)
+        pytest.fail(f"nothing is pinned for {harness}: run with --update-prompts, read the diff, and commit {path.name}", pytrace=False)
     want = path.read_text()
     if got != want:
         import difflib
@@ -188,7 +187,7 @@ def pinned(request, harness, kind, got):
 
 
 @pytest.mark.parametrize("harness", HARNESSES)
-def test_a_harness_gives_its_model_exactly_the_system_prompt_pinned_for_its_version(sandbox, engine, harness, request):
+def test_a_harness_gives_its_model_exactly_the_pinned_system_prompt(sandbox, engine, harness, request):
     p = sandbox
     name = start(p, harness)
     p.ok("message send", name, "ping")
@@ -203,4 +202,4 @@ def test_a_harness_gives_its_model_exactly_the_system_prompt_pinned_for_its_vers
     for told in ("# egzo: your sandbox\n\nYou are one of several agents run by egzo", f"You are the agent {name}, an instance of the template {harness},",
                  "You were started by the operator"):
         assert told in system, f"{harness} does not give its model egzo's instructions ({told!r} is missing):\n{system}"
-    pinned(request, harness, "system.txt", normalized(system, p))
+    pinned(request, harness, normalized(system, p))
