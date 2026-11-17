@@ -38,6 +38,21 @@ that platform. Today none does: one spec checks, from inside an agent, that it r
 says so, and that its ids are mapped when the platform is sysbox or a rootless engine. Nothing is probed or skipped: egzo is
 asked, and the outcome is the result. CI runs them on every platform: see [In CI](#in-ci).
 
+### Pinned harness prompts
+
+`harness/test_harness_happy_path.py` pins what each harness gives its model, its whole system prompt and every tool it offers, in
+`harness/prompts/<harness>-<version>.system.txt` and `.tools.json`, for the version its Dockerfile installs (`ARG ..._VERSION`). A new
+version, or a change to what egzo tells agents, fails there with a diff until it is pinned again:
+
+```console
+$ EGZO_BIN=/path/to/egzo specs/.venv/bin/pytest specs/harness/test_harness_happy_path.py -k pinned --update-prompts
+```
+
+Read the diff before you commit it: a harness that words its prompt or its tools differently can stop working with egzo. Only what
+changes on every run (the project's name, the date, the host's kernel, a hash in Claude Code's billing header) is replaced by a fixed
+`<...>`, by `normalized()` in that spec. Exactly what egzo tells an agent is not pinned there but written out in
+`project/test_project_start.py`, which a change to that text starts with.
+
 Without `python3-venv`: `python3 -m venv --without-pip specs/.venv`, then bootstrap pip with
 `get-pip.py`.
 

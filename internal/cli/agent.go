@@ -112,6 +112,15 @@ func attachInContainer(detachKeys string, readOnly bool) error {
 	return nil
 }
 
+// writeInstructions writes what an agent is told, as harness.InstructionsFor makes it, to egzo/instructions.md under dir, and returns its path.
+func writeInstructions(dir string, options harness.Options) (string, error) {
+	path := filepath.Join(dir, "egzo", "instructions.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, harness.InstructionsFor(options), 0o644)
+}
+
 func durationEnv(name string, fallback time.Duration) time.Duration {
 	if value := os.Getenv(name); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil && parsed > 0 {
@@ -146,40 +155,48 @@ func runAgent(args []string) error {
 	ssh := &sshFollower{home: home, token: os.Getenv("EGZO_TOKEN"), published: filepath.Join(proxy.AgentCADir, "ssh_config")}
 	go ssh.Follow(sshFollowInterval, nil)
 
-	if hasIntegration {
-		options := harness.Options{
-			Agent:            os.Getenv("EGZO_AGENT"),
-			Template:         os.Getenv("EGZO_TEMPLATE"),
-			Harness:          os.Getenv("EGZO_HARNESS"),
-			Home:             home,
-			Model:            os.Getenv("EGZO_MODEL"),
-			Starter:          os.Getenv(harness.StarterEnv),
-			StarterName:      os.Getenv(harness.StarterNameEnv),
-			Unattended:       os.Getenv(harness.UnattendedEnv) == "1",
-			Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",
-			ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
-			InstructionsFile: home + "/.egzo/instructions.md",
-			LookPath:         exec.LookPath,
-			Getenv:           os.Getenv,
+	options := harness.Options{
+		Agent:            os.Getenv("EGZO_AGENT"),
+		Template:         os.Getenv("EGZO_TEMPLATE"),
+		Harness:          os.Getenv("EGZO_HARNESS"),
+		Home:             home,
+		Model:            os.Getenv("EGZO_MODEL"),
+		Starter:          os.Getenv(harness.StarterEnv),
+		StarterName:      os.Getenv(harness.StarterNameEnv),
+		Unattended:       os.Getenv(harness.UnattendedEnv) == "1",
+		Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",
+		ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
+		InstructionsFile: home + "/.egzo/instructions.md",
+		LookPath:         exec.LookPath,
+		Getenv:           os.Getenv,
+	}
+	if workspaces := os.Getenv("EGZO_WORKSPACES"); workspaces != "" {
+		options.Workspaces = strings.Split(workspaces, ":")
+	}
+	options.Workdir, _ = os.Getwd()
+	if agent, token := os.Getenv("EGZO_AGENT"), os.Getenv("EGZO_TOKEN"); agent != "" && token != "" {
+		options.Authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(agent+":"+token))
+	}
+	options.Prompt = os.Getenv("EGZO_PROMPT")
+	ports, err := harness.ParsePorts(os.Getenv(harness.PortsEnv))
+	if err != nil {
+		return err
+	}
+	options.Ports = ports
+	workspaces, err := harness.ParseWorkspaces(os.Getenv(harness.WorkspacesEnv))
+	if err != nil {
+		return err
+	}
+	options.WorkspaceInfo = workspaces
+	if !hasIntegration {
+		// custom has no integration to hand the instructions to: they are written to a file, named by EGZO_INSTRUCTIONS, for the
+		// image's program to give its model. Best effort, like ssh: a program that has no instructions still runs.
+		if path, err := writeInstructions(os.TempDir(), options); err != nil {
+			fmt.Fprintf(os.Stderr, "egzo: could not write the agent's instructions: %v\n", err)
+		} else {
+			environment = append(environment, harness.InstructionsEnv+"="+path)
 		}
-		if workspaces := os.Getenv("EGZO_WORKSPACES"); workspaces != "" {
-			options.Workspaces = strings.Split(workspaces, ":")
-		}
-		options.Workdir, _ = os.Getwd()
-		if agent, token := os.Getenv("EGZO_AGENT"), os.Getenv("EGZO_TOKEN"); agent != "" && token != "" {
-			options.Authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(agent+":"+token))
-		}
-		options.Prompt = os.Getenv("EGZO_PROMPT")
-		ports, err := harness.ParsePorts(os.Getenv(harness.PortsEnv))
-		if err != nil {
-			return err
-		}
-		options.Ports = ports
-		workspaces, err := harness.ParseWorkspaces(os.Getenv(harness.WorkspacesEnv))
-		if err != nil {
-			return err
-		}
-		options.WorkspaceInfo = workspaces
+	} else {
 		plan, err := integration.Plan(options, args)
 		if err != nil {
 			return err

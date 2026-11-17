@@ -77,6 +77,10 @@ reporting) # a harness with state reports and tools: it reports its life cycle l
 	stty -echo
 	trap : INT
 	printf 'READY\r\n'
+	# what egzo gave it to tell its model (a custom harness gets it in EGZO_INSTRUCTIONS), on one line, base64: printed exactly as received
+	if [ -n "$EGZO_INSTRUCTIONS" ]; then
+		printf 'instructions:%s\r\n' "$(base64 <"$EGZO_INSTRUCTIONS" | tr -d '\n')"
+	fi
 	[ "${FAKE_REPORTS:-1}" = 1 ] && egzo state idle --reason SessionStart </dev/null
 	api() { curl -s -m 5 -u "$EGZO_AGENT:$EGZO_TOKEN" -H 'content-type: application/json' "$@"; }
 	buf=""
