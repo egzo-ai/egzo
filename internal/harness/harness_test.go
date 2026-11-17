@@ -5,13 +5,10 @@ package harness
 
 import (
 	"encoding/json"
-	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/egzo-ai/egzo/internal/golden"
 )
 
 func options(t *testing.T) Options {
@@ -526,20 +523,5 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 	}
 	if strings.Contains(text(Options{}), "You were started by") {
 		t.Error("an agent nobody said who started is told someone did")
-	}
-}
-
-var update = flag.Bool("update", false, "rewrite the golden files with what egzo produces now")
-
-// How an agent starts is compared word for word with testdata/start, which shows each case in full: the system prompt here, the
-// first prompt and the request in internal/control.
-func TestTheSystemPromptOfEachWayAnAgentStartsIsExactlyTheGoldenOne(t *testing.T) {
-	agent := Options{Agent: "coder", Template: "coder", Harness: "claude-code"}
-	joe, alone, operator := agent, agent, agent
-	joe.Starter, joe.StarterName = "user:u7", "Joe"
-	alone.Starter, alone.StarterName, alone.Unattended = "user:u7", "Joe", true
-	operator.Starter = "operator"
-	for file, o := range map[string]Options{"attended-task": joe, "attended-no-task": joe, "unattended-task": alone, "operator": operator} {
-		golden.Check(t, filepath.Join("testdata", "start", file+".md"), "System prompt", string(InstructionsFor(o)), *update)
 	}
 }

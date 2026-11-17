@@ -238,10 +238,7 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
     assert server["alwaysLoad"] is True
     assert "alwaysLoad" not in state["mcpServers"].get("playwright", {})
 
-    assert "--append-system-prompt" in cmdline(engine, p, scratch, "claude")
-    instructions = read(engine, p, scratch, "$HOME/.egzo/instructions.md")
-    for needed in ("get_message", "list_messages", "resolve", "outcome", "update", "ask", "message(", "agents"):
-        assert needed in instructions, f"the platform instructions do not mention {needed}"
+    # that the model gets egzo's instructions, and exactly what it gets, is pinned by test_harness_happy_path.py and project/test_project_start.py
 
     several_state = read_json(engine, p, two, "$HOME/.claude.json")
     several_settings = read_json(engine, p, two, "$HOME/.claude/settings.json")

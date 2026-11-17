@@ -70,8 +70,8 @@ what branch name to push. Joe is unreachable.`, so the people who watch the proj
   needs a task, and the person a linked chat account.
 
 An attended agent is told nothing about being attended: it is the normal case. Exactly what an agent gets when it starts, its system
-prompt and its first prompt, attended or not, with a task or not, is in `internal/harness/testdata/start/`, and the tests compare it
-word for word.
+prompt and its first prompt, attended or not, with a task or not, is written out in the spec `specs/project/test_project_start.py`,
+and what each harness adds around it in `specs/harness/prompts` ([pinned harness prompts](../specs/README.md#pinned-harness-prompts)).
 
 So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
 request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
