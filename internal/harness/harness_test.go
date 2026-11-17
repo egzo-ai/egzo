@@ -361,6 +361,7 @@ func TestThePlatformInstructionsTellTheAgentWhereItsAnswerGoes(t *testing.T) {
 	for _, needed := range []string{
 		"get_message", "list_messages", "resolve(id, text, outcome)", "done", "declined", "failed", "update(id, text)", "ask(id, text)",
 		"message(to, text)", "agents", "status(text)", "not your terminal",
+		"HTTPS_PROXY", "no DNS", "no plain HTTP", "not the sub-agents your harness",
 	} {
 		if !strings.Contains(PlatformInstructions, needed) {
 			t.Errorf("the platform instructions do not mention %q", needed)
