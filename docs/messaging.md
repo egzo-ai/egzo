@@ -19,7 +19,8 @@ $ egzo agent spawn coder issue-412 -m "..." --wait                      # spawn,
 A message waits in the queue until the agent is idle, nobody has typed in its terminal for a while (30 s by default)
 and the harness is ready. Then a line like `check egzo message m3f... and handle the request for me.` is typed in, and
 the agent fetches and answers it. If it does not fetch it within a minute, the line is typed again, up to three
-times, after which the message is marked `unconfirmed`. A message for a stopped agent waits until it runs again.
+times, after which the message is marked `unconfirmed`. An unconfirmed message is not lost: it is announced once more after five
+`ack_timeout`s (5 minutes by default), again after fifteen, then every sixty (an hour), until the agent fetches it. A message for a stopped agent waits until it runs again.
 
 `--wait` prints progress notes to stderr and the answer to stdout. Exit codes: 0 done, 3 declined, 4 failed, 5 the
 `--timeout` passed (the message stays open).
