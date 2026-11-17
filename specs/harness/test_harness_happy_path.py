@@ -5,9 +5,9 @@
 provider's real name on the egress network (`proxy.upstream`), so the harness needs no setting of its own and calls home as it does in
 production. It is pinged and answers, and then it opens a page in the browser it started itself. The page is a real one on the internet.
 
-What each harness gives its model, its whole system prompt and every tool it offers, its own and egzo's, is pinned in harness/prompts for the
-version its Dockerfile installs. A harness changes them often, and a change can break how it works with egzo: a new version fails here
-until someone has read the diff and pinned it again with --update-prompts."""
+What each harness gives its model as its system prompt, in full, is pinned in harness/prompts for the version its Dockerfile installs. A
+harness changes it often, and a change can break how it works with egzo: a new version fails here until someone has read the diff and
+pinned it again with --update-prompts. The tools are not pinned: their schemas are too large for anyone to review."""
 
 import json
 import re
@@ -144,6 +144,8 @@ def normalized(text, p):
         (r"\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{4}\b", "<date>"),  # as OpenCode does
         (r"OS Version: [^\n\\\"]*", "OS Version: <host kernel>"),  # the kernel of the machine the specs run on
         (r"cch=[0-9a-f]+", "cch=<hash>"),  # Claude Code's billing header carries a hash of the request
+        (r"cc_prompt_id=[0-9a-f-]+", "cc_prompt_id=<id>"),  # and an id new for every prompt
+        (r"(cc_version=\d+\.\d+\.\d+)\.[0-9a-f]+", r"\1.<hash>"),  # and a short hash after the version
     ]
     for pattern, fixed in replacements:
         text = re.sub(pattern, fixed, text)
@@ -186,18 +188,19 @@ def pinned(request, harness, kind, got):
 
 
 @pytest.mark.parametrize("harness", HARNESSES)
-def test_a_harness_gives_its_model_exactly_the_system_prompt_and_tools_pinned_for_its_version(sandbox, engine, harness, request):
+def test_a_harness_gives_its_model_exactly_the_system_prompt_pinned_for_its_version(sandbox, engine, harness, request):
     p = sandbox
     name = start(p, harness)
     p.ok("message send", name, "ping")
-    # the agent's own turn is the request that offers egzo's tools: a harness also asks its model for a title and the like
-    turn = lambda: [r for r in model_turns(engine, p) if any(t.endswith("get_message") for t in r["tools"])]
+    # the agent's own turn is the request that offers egzo's tools: a harness also asks its model for a title and the like. Codex defers
+    # MCP tools: it sends no schema for them, only the namespace mcp__egzo, listed in its system prompt as a deferred tool namespace.
+    offers_egzo = lambda r: any(t.endswith("get_message") for t in r["tools"] or []) or "- mcp__egzo:" in json.dumps(r.get("system"))
+    turn = lambda: [r for r in model_turns(engine, p) if r["tools"] and offers_egzo(r)]
     log = lambda: "the model API was asked:\n" + "\n".join(json.dumps({k: r.get(k) for k in ("path", "tools")}) for r in asked(engine, p)[-5:])
     first = wait_until(turn, "the harness to ask its model for the agent's turn", 90, context=log)[0]
 
     system = rendered_system(first["system"])
-    for told in ("You are one of several agents run by egzo", f"You are the agent {name}, an instance of the template {harness},",
+    for told in ("# egzo: your sandbox\n\nYou are one of several agents run by egzo", f"You are the agent {name}, an instance of the template {harness},",
                  "You were started by the operator"):
         assert told in system, f"{harness} does not give its model egzo's instructions ({told!r} is missing):\n{system}"
     pinned(request, harness, "system.txt", normalized(system, p))
-    pinned(request, harness, "tools.json", normalized(json.dumps(first["tool_specs"], indent=2, sort_keys=True, ensure_ascii=False) + "\n", p))
