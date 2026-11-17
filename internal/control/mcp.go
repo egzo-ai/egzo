@@ -241,7 +241,8 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "access",
 		Description: "What you may reach: your egress profile, the hosts it allows, each service with how to use its credential (the proxy " +
-			"holds the real ones: you never need a token), and the ssh servers. Every other host is refused. Call it again when egzo " +
+			"holds the real ones: you never need a token), and the ssh servers. Every other host is refused. HTTPS through HTTPS_PROXY " +
+			"and ssh to these servers are your only way out: there is no plain HTTP and no DNS. Call it again when egzo " +
 			"says your access changed.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, access.Access, error) {
 		agent, err := callerOf(req)

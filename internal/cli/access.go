@@ -21,8 +21,8 @@ func newAgentAccessCommand() *cobra.Command {
 		Use:   "access",
 		Short: "Say what this agent may reach (run inside an agent)",
 		Long: "Inside an agent's container: its egress profile, the hosts it allows, each service with how to use its credential (the\n" +
-			"proxy holds the real ones), and the ssh servers. Every other host is refused. It is what the `access` tool answers, for a\n" +
-			"harness without MCP.",
+			"proxy holds the real ones), and the ssh servers. Every other host is refused: HTTPS through HTTPS_PROXY and ssh to these\n" +
+			"servers are the only way out, with no plain HTTP and no DNS. It is what the `access` tool answers, for a harness without MCP.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			api, err := agentclient.FromEnv()

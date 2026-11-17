@@ -542,6 +542,11 @@ def pytest_addoption(parser):
         choices=[e.name for e in ENGINES],
         help="the reference platform this run tests (or set EGZO_ENGINE); default: chosen from this machine",
     )
+    parser.addoption(
+        "--update-prompts",
+        action="store_true",
+        help="rewrite the pinned system prompts and tools of the harnesses (harness/prompts) with what they send now; review the diff",
+    )
 
 
 def pytest_configure(config):

@@ -154,6 +154,11 @@ resource limits, and it runs under whatever runtime the engine defaults to (gVis
 What you do not get is the harness integration. There are no hooks, no MCP tools and no home volume, so egzo judges activity from
 how quiet the output is. Use `custom` to run a script, or a tool egzo has no integration for yet, such as `pi`.
 
+When the image's entrypoint is `egzo agent run` (as `egzo agent run -- <your program>`), the agent is told what every agent is told: the
+instructions the other harnesses give their model, written to a file whose path is in `EGZO_INSTRUCTIONS`. Give them to your model as its
+system prompt. They name egzo's tools, which reach the control sidecar's MCP endpoint at `$EGZO_CONTROL_URL/mcp`, with
+`$EGZO_AGENT:$EGZO_TOKEN` as Basic credentials: wiring them up is up to the image.
+
 ## ssh in an image of your own
 
 The egzo harness images carry what `ssh` needs ([ssh to servers](sandboxing.md#ssh-to-servers)). In an image of your own: install `openssh-client`;

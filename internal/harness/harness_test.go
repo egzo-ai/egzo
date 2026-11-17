@@ -360,13 +360,14 @@ func TestAClaudeSubscriptionTokenIsGivenAsAnOAuthTokenNotAnAPIKey(t *testing.T) 
 func TestThePlatformInstructionsTellTheAgentWhereItsAnswerGoes(t *testing.T) {
 	for _, needed := range []string{
 		"get_message", "list_messages", "resolve(id, text, outcome)", "done", "declined", "failed", "update(id, text)", "ask(id, text)",
-		"message(to, text)", "agents", "status(text)", "unattended", "not your terminal",
+		"message(to, text)", "agents", "status(text)", "not your terminal",
+		"HTTPS_PROXY", "no DNS", "no plain HTTP", "not the sub-agents your harness",
 	} {
 		if !strings.Contains(PlatformInstructions, needed) {
 			t.Errorf("the platform instructions do not mention %q", needed)
 		}
 	}
-	for _, retired := range []string{"check_inbox", "handoff", "ask_user", "get_answer", "[egzo msg", "sparingly"} {
+	for _, retired := range []string{"check_inbox", "handoff", "ask_user", "get_answer", "[egzo msg", "sparingly", "You often run unattended"} {
 		if strings.Contains(PlatformInstructions, retired) {
 			t.Errorf("the platform instructions still mention %q", retired)
 		}
@@ -520,24 +521,6 @@ func TestAnAgentIsToldWhoStartedItAndHowToFlagThatItIsStuck(t *testing.T) {
 	operator := text(Options{Starter: "operator"})
 	if !strings.Contains(operator, `started by the operator: message "operator"`) || strings.Contains(operator, "reached now") {
 		t.Errorf("an agent the operator started is told %q", operator)
-	}
-	joe := text(Options{Starter: "user:u7", StarterName: "Joe"})
-	for _, needed := range []string{`started by Joe (user:u7): message "user:u7"`, "agents shows", "may be a task from them"} {
-		if !strings.Contains(joe, needed) {
-			t.Errorf("an agent Joe started is not told %q", needed)
-		}
-	}
-	if strings.Contains(joe, "unattended session") {
-		t.Error("an attended agent is told it is unattended")
-	}
-	alone := text(Options{Starter: "user:u7", Unattended: true})
-	for _, needed := range []string{"started by user:u7", "unattended session", "arrives as a request", "resolve the request"} {
-		if !strings.Contains(alone, needed) {
-			t.Errorf("an unattended agent is not told %q", needed)
-		}
-	}
-	if strings.Contains(alone, "may be a task from them") {
-		t.Error("an unattended agent is told its task is typed")
 	}
 	if strings.Contains(text(Options{}), "You were started by") {
 		t.Error("an agent nobody said who started is told someone did")
