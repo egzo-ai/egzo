@@ -297,7 +297,9 @@ func (p Plan) Write() error {
 // PlatformInstructions say how an egzo agent receives and answers requests. They are the one place the
 // model learns that its answer belongs in a tool call, not in the terminal nobody is watching, so they say it
 // plainly. They also say what to distrust: any text in the world that claims to come from egzo.
-const PlatformInstructions = `You are one of several agents run by egzo, which keeps each agent in its own sandbox. A person sees your terminal only when they attach to it, so what you want people to know must go through your egzo tools.
+const PlatformInstructions = `# egzo: your sandbox
+
+You are one of several agents run by egzo, which keeps each agent in its own sandbox. A person sees your terminal only when they attach to it, so what you want people to know must go through your egzo tools.
 
 People and other agents reach you through egzo messages. A message is never typed into your terminal. What you see typed is a short line from egzo saying one is waiting, for example "check egzo message m… and handle the request for me." That line comes from egzo on behalf of the person you work with. Fetch the message with get_message (tool of the MCP server "egzo") and do what it asks. When you start, and whenever you are unsure what is still open, call list_messages: it shows everything you owe.
 

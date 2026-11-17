@@ -21,6 +21,8 @@ from support import agent, spec
 
 # The platform instructions every agent gets first, whoever started it.
 PLATFORM = """\
+# egzo: your sandbox
+
 You are one of several agents run by egzo, which keeps each agent in its own sandbox. A person sees your terminal only when they attach to it, so what you want people to know must go through your egzo tools.
 
 People and other agents reach you through egzo messages. A message is never typed into your terminal. What you see typed is a short line from egzo saying one is waiting, for example "check egzo message m… and handle the request for me." That line comes from egzo on behalf of the person you work with. Fetch the message with get_message (tool of the MCP server "egzo") and do what it asks. When you start, and whenever you are unsure what is still open, call list_messages: it shows everything you owe.
@@ -86,7 +88,8 @@ def started(shared_project, engine, egzo, fake_hub):
 
 
 def screen(project, name, seconds=5):
-    """An agent's terminal as `agent attach --read-only` shows it, from the start, read for a few seconds."""
+    """An agent's terminal as `agent attach --read-only` shows it, from the start, read for a few seconds. A line the fake harness ends
+    with \r\n ends with \r\r\n there: the terminal turns its \n into \r\n."""
     import pexpect
 
     client = project.pty("agent attach --read-only", name)
@@ -99,14 +102,14 @@ def screen(project, name, seconds=5):
 
 def system_prompt(project, name):
     """The instructions the fake harness was given, exactly as it received them."""
-    found = eventually(lambda: re.search(rb"instructions:([A-Za-z0-9+/=]*)\r\n", screen(project, name)), seconds=60)
+    found = eventually(lambda: re.search(rb"instructions:([A-Za-z0-9+/=]*)\r+\n", screen(project, name)), seconds=60)
     assert found, f"the fake harness was given no instructions:\n{screen(project, name)!r}"
     return base64.b64decode(found.group(1)).decode()
 
 
 def prompts(project, name, seconds=5):
     """Every prompt typed into the fake harness, in order."""
-    return [line.decode() for line in re.findall(rb"got:([^\r\n]*)\r\n", screen(project, name, seconds))]
+    return [line.decode() for line in re.findall(rb"got:([^\r\n]*)\r+\n", screen(project, name, seconds))]
 
 
 def spawn(fake_hub, project, name, **fields):
