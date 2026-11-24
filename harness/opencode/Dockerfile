@@ -5,7 +5,7 @@ ARG BASE_IMAGE=ghcr.io/egzo-ai/egzo-harness-base:latest
 ARG OPENCODE_VERSION=2.2.7
 # AHP mode (`egzo agent spawn --ahp`): egzo's fork of the opencode-ahp plugin, pinned to a commit. It lands in
 # /usr/local/lib/node_modules/opencode-ahp, where the harness looks for it (harness.OpenCodeAHPPlugin); an image without it has no AHP mode.
-ARG OPENCODE_AHP_COMMIT=931b44f976ab5ab6e4c4f8ccb40a0efa7a624249
+ARG OPENCODE_AHP_COMMIT=cbe1bccd12632d3d40829367110af052413d1a9c
 FROM ${BASE_IMAGE}
 ARG OPENCODE_VERSION
 ARG OPENCODE_AHP_COMMIT

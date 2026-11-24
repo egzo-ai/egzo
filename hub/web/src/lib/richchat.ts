@@ -157,6 +157,12 @@ export function apply(chat: Chat, action: Json): Chat {
           outcome: text(action.result?.pastTenseMessage),
         })),
       );
+    case "chat/turnsLoaded": {
+      // older turns, oldest first, from the harness's own store (after a restart): before the ones the chat has
+      const known = new Set(chat.turns.map((t) => t.id));
+      const older = (action.turns ?? []).filter((t: Json) => !known.has(String(t.id))).map((t: Json) => turnOf(t, (t.state as Turn["state"]) ?? "complete"));
+      return older.length ? { ...chat, turns: [...older, ...chat.turns] } : chat;
+    }
     case "chat/turnComplete":
       return withTurn(chat, id, (t) => ({ ...t, state: "complete" }));
     case "chat/turnCancelled":
@@ -177,6 +183,8 @@ let seq = 0;
 /** The messages the view sends, as JSON-RPC lines. */
 export const messages = {
   initialize: () => ({ jsonrpc: "2.0", id: 1, method: "initialize", params: { channel: "ahp-root://", clientId: `egzo-hub-${Math.random().toString(36).slice(2)}`, protocolVersions: ["1.0.0"], initialSubscriptions: ["ahp-root://"] } }),
+  // listing the sessions first makes the harness's AHP server know a session it did not create, after a restart: then it can be subscribed to
+  listSessions: () => ({ jsonrpc: "2.0", id: 3, method: "listSessions", params: {} }),
   subscribe: (channel: string) => ({ jsonrpc: "2.0", id: 2, method: "subscribe", params: { channel } }),
   prompt: (channel: string, prompt: string, turnId: string) => ({
     jsonrpc: "2.0",

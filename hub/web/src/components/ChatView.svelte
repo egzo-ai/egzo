@@ -30,7 +30,7 @@
       case "x-egzo/mainSession":
         if (m.params?.chat && m.params.chat !== chat.channel) {
           chat = { ...emptyChat(), channel: m.params.chat };
-          send(messages.subscribe(m.params.chat));
+          send(messages.listSessions()); // its answer subscribes to the chat
         }
         return;
       case "action":
@@ -38,6 +38,7 @@
         return;
     }
     if (m.id === 1 && m.result) status = chat.channel ? "live" : "waiting";
+    if (m.id === 3 && chat.channel) send(messages.subscribe(chat.channel));
     if (m.id === 2 && m.result?.snapshot) {
       chat = fromSnapshot(chat.channel, m.result.snapshot.state);
       status = "live";
