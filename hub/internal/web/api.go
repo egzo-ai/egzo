@@ -83,6 +83,10 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, err error) {
 		s.apiFail(w, http.StatusBadRequest, "bad_request", "The task is too long: at most 16 KB. Put the rest in a file of a workspace, and name the file.")
 	case errors.Is(err, hub.ErrNoChatAccount):
 		s.apiFail(w, http.StatusConflict, "no_chat_account", "Link a chat account first: an unattended agent reports to you there.")
+	case errors.Is(err, hub.ErrNoRichUI):
+		s.apiFail(w, http.StatusBadRequest, "bad_request", "This template has no Rich UI: its harness has none. Spawn it without.")
+	case errors.Is(err, hub.ErrNotAHP):
+		s.apiFail(w, http.StatusConflict, "no_rich_ui", "This agent was spawned without the Rich UI: it has a terminal only.")
 	case errors.Is(err, hub.ErrBadName):
 		s.apiFail(w, http.StatusBadRequest, "bad_request", "That name is not valid: "+err.Error()+".")
 	case errors.As(err, new(hub.ExistsError)):
@@ -204,9 +208,16 @@ type agentJSON struct {
 	Holder     string        `json:"holder"`
 	Denied     int           `json:"denied"` // hosts the proxy refused it in the last hour, not reached since
 	Previews   []previewJSON `json:"previews"`
+	// RichUI says the agent was spawned with the Rich UI: its chat opens (richChat).
+	RichUI bool `json:"richUI"`
 	// Task is what the hub does on the agent, or the failure of what it did that nobody dismissed. An agent with a task and no state
 	// is one the project does not have: a spawn that runs or failed, or a removal that is ending.
 	Task *taskJSON `json:"task,omitempty"`
+}
+
+// richUIJSON is what a template's Rich UI keeps of the agent.
+type richUIJSON struct {
+	Terminal bool `json:"terminal"`
 }
 
 // feedJSON says how far the agents' activity can be trusted: live, connecting, stale, unavailable or offline, and why.
@@ -233,6 +244,8 @@ type projectJSON struct {
 	Feed       feedJSON      `json:"feed"`
 	Up         bool          `json:"up"`
 	Templates  []string      `json:"templates"`
+	// RichUI is the templates that can be spawned with the Rich UI, and whether their agents keep a terminal then.
+	RichUI map[string]richUIJSON `json:"richUI"`
 	Services   []serviceJSON `json:"services"`
 	Agents     []agentJSON   `json:"agents"`
 	CanSpawn   bool          `json:"canSpawn"`
@@ -273,7 +286,7 @@ func taskOf(t hub.Task, n namer) taskJSON {
 func (s *Server) agentOf(a hub.AgentView, n namer) agentJSON {
 	return agentJSON{Name: a.Name, Template: a.Template, State: a.State, Running: a.Running(), Activity: a.Activity, Status: a.Status,
 		Waiting: a.Waiting, Stale: a.Stale, Creator: n.actor(a.Actor), CreatedAt: a.Created, CanOperate: a.CanOperate, Holder: a.Holder,
-		Denied: a.Denied, Previews: previewsOf(a.Previews), Task: taskViewOf(a.Task, n)}
+		Denied: a.Denied, Previews: previewsOf(a.Previews), Task: taskViewOf(a.Task, n), RichUI: a.AHP}
 }
 
 // previewJSON is a port an agent has open. Where says what Address is: `hub`, a preview to open, or `local`, a port on the project's machine.
@@ -315,6 +328,10 @@ func (s *Server) projectOf(v hub.ProjectView, n namer) projectJSON {
 		Services: []serviceJSON{}, Agents: []agentJSON{}, CanSpawn: v.CanSpawn, CanManage: v.CanManage, CanUnlink: v.CanUnlink, CanMembers: v.CanMembers, CanAudit: v.Role.AtLeast(rbac.Admin)}
 	if p.Templates == nil {
 		p.Templates = []string{}
+	}
+	p.RichUI = map[string]richUIJSON{}
+	for name, mode := range v.Project.AHP {
+		p.RichUI[name] = richUIJSON{Terminal: mode.Terminal}
 	}
 	for _, svc := range v.Project.Services {
 		p.Services = append(p.Services, serviceJSON{Name: svc.Name, State: svc.State, Health: svc.Health})
@@ -445,12 +462,13 @@ func (s *Server) spawn(w http.ResponseWriter, r *http.Request, user store.User) 
 	var body struct {
 		Template, Name, Task string
 		Unattended           bool
+		RichUI               bool
 	}
 	if !decode(w, r, &body) {
 		return
 	}
 	t, err := s.hub.StartSpawn(r.Context(), user, r.PathValue("project"), hub.Spawning{Template: strings.TrimSpace(body.Template),
-		Name: strings.TrimSpace(body.Name), Task: strings.TrimSpace(body.Task), Unattended: body.Unattended})
+		Name: strings.TrimSpace(body.Name), Task: strings.TrimSpace(body.Task), Unattended: body.Unattended, RichUI: body.RichUI})
 	if err != nil {
 		s.problem(w, r, err)
 		return

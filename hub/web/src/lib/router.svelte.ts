@@ -3,7 +3,7 @@
 export type ProjectTab = "agents" | "templates" | "files" | "activity" | "network" | "spec" | "audit" | "members" | "advanced";
 export const projectTabs: ProjectTab[] = ["agents", "templates", "files", "activity", "network", "spec", "audit", "members", "advanced"];
 
-export type AgentTab = "overview" | "activity" | "network" | "logs";
+export type AgentTab = "overview" | "activity" | "chat" | "network" | "logs";
 
 export type SettingsTab = "links" | "invites" | "users" | "audit" | "account";
 export const settingsTabs: SettingsTab[] = ["links", "invites", "users", "audit", "account"];
@@ -43,7 +43,7 @@ export function parse(pathname: string): Route {
     }
     if (rest[0] === "a" && rest[1]) {
       if (rest.length === 2) return { name: "agent", project, agent: rest[1], tab: "overview" };
-      if (rest.length === 3 && (rest[2] === "logs" || rest[2] === "network" || rest[2] === "activity")) return { name: "agent", project, agent: rest[1], tab: rest[2] };
+      if (rest.length === 3 && (rest[2] === "logs" || rest[2] === "network" || rest[2] === "activity" || rest[2] === "chat")) return { name: "agent", project, agent: rest[1], tab: rest[2] };
     }
   }
   return { name: "notfound" };

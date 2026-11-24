@@ -1071,6 +1071,14 @@ What it shows is in [docs/hub.md](docs/hub.md). The decisions behind it:
   and the account are in the top bar.
 - One terminal per agent at a time, with presence and take-over: no read-only observers (one pty has one size). The CLI is not
   managed, a documented known issue.
+- **Rich UI** ([#227](https://github.com/egzo-ai/egzo/issues/227)): a chat view of an agent spawned in AHP mode, next to its terminal,
+  for phones and many agents. AHP (Microsoft's Agent Host Protocol) is the normalized chat protocol: egzo does not invent its own. The
+  AHP host runs in the agent's container (for OpenCode, egzo's fork of the opencode-ahp plugin inside OpenCode's own server, so the TUI
+  and the chat share the session); `egzo agent ahp` bridges it to stdio, and the link carries it as the verb `ahp`, behind a filter that
+  keeps the main session's chat and nothing else. Each harness declares whether it has an AHP mode, and one thing about it: whether the
+  terminal stays. One session per agent, by ignoring the others: the first session the harness creates is the main one. Below the hub's
+  chat interface, the code says "AHP mode", never "Rich UI". Claude Code (AHP emulated over its hooks, as a separate helper) and an ACP
+  fallback (no terminal) come later.
 - What is rarely needed (health, the spec) is under **Advanced**.
 - **Messaging** comes to the hub for 1.0 as an audit view of messages and the questions agents wait on
   ([#145](https://github.com/egzo-ai/egzo/issues/145)). Until then an agent's "waiting" state shows on its row and its page.

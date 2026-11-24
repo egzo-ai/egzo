@@ -9,6 +9,15 @@ func withTemplates(p links.Project, published links.Published) links.Project {
 		return p
 	}
 	p.Templates = validNames(published.Names(), maxTemplates)
+	p.AHP = nil
+	for _, name := range p.Templates {
+		if mode, ok := published.AHP[name]; ok {
+			if p.AHP == nil {
+				p.AHP = map[string]links.AHPMode{}
+			}
+			p.AHP[name] = mode
+		}
+	}
 	agents := make([]links.Agent, len(p.Agents))
 	for i, a := range p.Agents {
 		agents[i] = a

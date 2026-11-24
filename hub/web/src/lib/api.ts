@@ -93,8 +93,8 @@ export const api = {
   project: (id: string) => request<Project>("GET", project(id)),
   /** Answered at once: the hub runs the spawn as a task, and the agent is in the project from then on. */
   /** task is what the agent starts on: typed as its first prompt, or, unattended, sent to it as a request from the user. */
-  spawn: (id: string, template: string, agentName: string, task = "", unattended = false) =>
-    request<{ task: Task }>("POST", `${project(id)}/spawn`, { template, name: agentName, task, unattended }).then((r) => r.task),
+  spawn: (id: string, template: string, agentName: string, task = "", unattended = false, richUI = false) =>
+    request<{ task: Task }>("POST", `${project(id)}/spawn`, { template, name: agentName, task, unattended, richUI }).then((r) => r.task),
   /** The project's activity, or one agent's: the latest tasks, newest first. */
   tasks: (id: string, agentName = "") =>
     request<{ tasks: Task[] }>("GET", `${project(id)}/tasks${agentName ? "?agent=" + enc(agentName) : ""}`).then((r) => r.tasks),
@@ -140,6 +140,12 @@ function filesPath(id: string, workspace: string, instance: string, path: string
 }
 
 /** The websocket address of an agent's terminal. */
+/** The Rich UI chat of an agent spawned with it: AHP's JSON-RPC, one message per text frame. */
+export function chatURL(id: string, a: string): string {
+  const scheme = location.protocol === "https:" ? "wss://" : "ws://";
+  return `${scheme}${location.host}/api/v1${agent(id, a)}/chat`;
+}
+
 export function terminalURL(id: string, a: string, takeover: boolean): string {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
   return `${scheme}${location.host}/api/v1${agent(id, a)}/terminal${takeover ? "?takeover=1" : ""}`;

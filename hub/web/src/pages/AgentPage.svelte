@@ -12,13 +12,15 @@
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import TaskTable from "../components/TaskTable.svelte";
+  import ChatView from "../components/ChatView.svelte";
   import ErrorPage from "./ErrorPage.svelte";
 
   let { project, agent, tab }: { project: string; agent: string; tab: AgentTab } = $props();
-  // the agent's first section is its activity: the address without a section shows it
-  const shown = $derived(tab === "overview" ? "activity" : tab);
 
   let data = $state<AgentAnswer | null>(null);
+  // the agent's first section is its chat when it was spawned with the Rich UI, else its activity: the address without a section shows it
+  const shown = $derived(tab === "overview" ? (data?.agent.richUI ? "chat" : "activity") : tab);
+
   let failure = $state<unknown>(null);
   let logs = $state<string | null>(null);
   let activity = $state<Task[] | null>(null);
@@ -126,13 +128,16 @@
       <p class="muted" data-testid="overseeing">Its activity, logs and network take a role on the project: give yourself one on its <a href={href.project(project, "members")}>Members</a> tab.</p>
     {:else}
     <div class="tabs" role="tablist">
-      <a class="tab" role="tab" href={href.agent(project, agent)} aria-selected={shown === "activity"}>Activity</a>
+      {#if a.richUI}<a class="tab" role="tab" href={href.agent(project, agent, "chat")} aria-selected={shown === "chat"} data-testid="chat-tab">Chat</a>{/if}
+      <a class="tab" role="tab" href={href.agent(project, agent, a.richUI ? "activity" : "overview")} aria-selected={shown === "activity"}>Activity</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "network")} aria-selected={tab === "network"}>Network{#if a.denied} <span class="count">{a.denied}</span>{/if}</a>
       <a class="tab" role="tab" href={href.agent(project, agent, "logs")} aria-selected={tab === "logs"}>Logs</a>
     </div>
     {/if}
 
-    {#if shown === "activity" && !overseeing}
+    {#if shown === "chat" && !overseeing && a.richUI}
+      {#if a.running && !offline}<ChatView {project} {agent} />{:else}<p class="muted">The chat opens while the agent runs.</p>{/if}
+    {:else if shown === "activity" && !overseeing}
       {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network" && !overseeing}
       <NetworkView {project} {agent} />

@@ -41,6 +41,10 @@ type Engine interface {
 	// DialFiles connects to the read-only file server of a directory workspace, or of the worktree of instance in a git workspace. It
 	// speaks HTTP, GET only. ctx covers the dial, as with DialPort.
 	DialFiles(ctx context.Context, workspace, instance string) (net.Conn, error)
+	// DialAHP connects to the chat of an agent spawned in AHP mode: a line of JSON per message both ways, AHP's JSON-RPC (hublink.VerbAHP).
+	// The link lets through only the chat of the agent's main session, and with readOnly nothing that acts in it. ctx covers the dial, as
+	// with DialPort.
+	DialAHP(ctx context.Context, agent string, readOnly bool) (net.Conn, error)
 	// SendMessage is what one of the hub's users said to an agent: actor is "user:<id>", and key the chat platform's id for the message,
 	// which makes it idempotent.
 	SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error)
@@ -71,6 +75,7 @@ type (
 	Project       = hublink.Project
 	ProjectUpdate = hublink.ProjectUpdate
 	Published     = hublink.Published
+	AHPMode       = hublink.AHPMode
 	Service       = hublink.Service
 	Agent         = hublink.Agent
 	AuditEvent    = hublink.AuditEvent

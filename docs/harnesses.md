@@ -157,6 +157,17 @@ agents:
 - `model:` is passed as `-c model=...`; effort is Codex's `model_reasoning_effort`, which `env` cannot set: put it in the
   agent's `~/.codex/config.toml`.
 
+### AHP mode
+
+`egzo agent spawn open --ahp` (or **Rich UI** in the hub) starts OpenCode with egzo's fork of the
+[opencode-ahp](https://github.com/egzo-ai/opencode-ahp) plugin, which serves the agent's chat over the Agent Host Protocol inside
+OpenCode's own server, on the container's loopback, with a token made anew at each start. It comes through `OPENCODE_CONFIG_CONTENT`:
+your `opencode.json` is left alone, and its own plugins still load. The TUI stays, on the same sessions. The agent's first session is its
+main session: egzo's plugin keeps its id in `~/.egzo/main-session`, and in AHP mode reports the agent's state from that session only.
+`egzo agent ahp`, inside the container, carries the chat over stdin and stdout; the project's link runs it for the hub
+([AHP mode](reference/hub-link.md#ahp-mode)). The stock image carries the plugin; an image without it has no AHP server, and
+`egzo agent ahp` says so. A harness without an AHP mode refuses `--ahp`.
+
 ## Trying two side by side
 
 ```yaml

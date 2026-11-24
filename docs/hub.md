@@ -198,6 +198,23 @@ Keys inside a terminal belong to the agent, with one exception: **Ctrl+]** is th
 chords for itself (Ctrl+W, Ctrl+T, Ctrl+N): a page cannot take them, so they act on the browser tab and never reach the agent. On
 pages, `:` or Ctrl+K opens the command menu; single-key shortcuts can be turned off in the shortcut reference.
 
+## Rich UI
+
+An agent spawned with **Rich UI** (a checkbox of the spawn form, offered only for a template whose harness has an AHP mode: OpenCode
+today) has a **Chat** tab, its first section: the conversation of its main session, live, as messages, the agent's answers as it writes
+them, its reasoning (folded) and its tool calls. It works at a phone's width. Typing in the box sends a prompt into that session, as if it
+were typed in the agent's terminal; **Stop** cancels the turn that runs. The choice is made at spawn and kept for the agent's life.
+
+- **Who sees what.** Whoever may see what the project's agents did (a user or more) may watch the chat; whoever may operate the agent (its
+  starter, an administrator) may also send prompts and stop turns. Several people can have it open at once: it is not a seat, unlike the
+  terminal.
+- **The terminal stays** for OpenCode: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
+  messages announced to the agent) show in the chat as prompts.
+- **One session.** The chat is the agent's main session: the first one its harness created. A session opened later in the terminal (`/new`)
+  works, but the hub does not show it, and the agent's activity follows the main session only.
+- **What the hub reaches.** The chat and nothing else: through the link, the hub cannot read a file of the agent, open a terminal or touch
+  another session ([AHP mode](reference/hub-link.md#ahp-mode)).
+
 ### Known issue: the CLI
 
 The hub only knows the terminals it opened. `egzo agent attach` goes straight to the agent's session and the hub neither sees it nor can

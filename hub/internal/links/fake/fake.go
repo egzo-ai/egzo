@@ -43,14 +43,15 @@ type Engine struct {
 	exposed    map[string][]links.Exposure
 	servers    map[string]*server // what listens in an agent, by "agent:port"
 	workspaces []links.Workspace
-	files      map[string]*server        // the file server of a workspace, by "workspace/instance"
-	keys       map[string]string         // the messages sent, and the answers, by actor and key
-	answers    map[string][2]string      // message -> who answered it and their answer's id
-	lose       int                       // how many sends and answers to come are made and their reply lost: LoseReplies
-	spawns     []links.SpawnRequest      // every spawn asked, in order: Spawns
-	people     []map[string]links.Person // what the hub said of the project's starters, each time: PeopleSaid
-	seq        int                       // the last event's sequence number
-	afters     []int                     // the after of every events feed that was opened
+	files      map[string]*server                            // the file server of a workspace, by "workspace/instance"
+	ahps       map[string]func(conn net.Conn, readOnly bool) // the AHP server of an agent: ServeAHP
+	keys       map[string]string                             // the messages sent, and the answers, by actor and key
+	answers    map[string][2]string                          // message -> who answered it and their answer's id
+	lose       int                                           // how many sends and answers to come are made and their reply lost: LoseReplies
+	spawns     []links.SpawnRequest                          // every spawn asked, in order: Spawns
+	people     []map[string]links.Person                     // what the hub said of the project's starters, each time: PeopleSaid
+	seq        int                                           // the last event's sequence number
+	afters     []int                                         // the after of every events feed that was opened
 
 	// the connection
 	current  *Connection
@@ -67,7 +68,7 @@ func New(name, host string, templates ...string) *Engine {
 	if err != nil {
 		panic(err)
 	}
-	e := &Engine{key: public, host: host, attached: map[string]int{}, feedEvery: 30 * time.Second, exposed: map[string][]links.Exposure{}, servers: map[string]*server{}, files: map[string]*server{},
+	e := &Engine{key: public, host: host, attached: map[string]int{}, feedEvery: 30 * time.Second, exposed: map[string][]links.Exposure{}, servers: map[string]*server{}, files: map[string]*server{}, ahps: map[string]func(net.Conn, bool){},
 		project: links.Project{Name: name, Up: true, Templates: templates, Services: []links.Service{{Name: "control", State: "running", ID: "control-1"}, {Name: "proxy", State: "running", ID: "proxy-1"}}}}
 	e.current = &Connection{Engine: e, closed: make(chan struct{})}
 	close(e.current.closed)
@@ -650,7 +651,7 @@ func (e *Engine) Spawn(ctx context.Context, s links.SpawnRequest, progress func(
 	e.record("spawn %s %s", name, actor)
 	e.spawns = append(e.spawns, s)
 	e.project.Agents = append(e.project.Agents, links.Agent{Name: name, ID: newInstanceID(), Template: template, State: "running", Activity: "idle", Actor: actor,
-		Created: time.Now()})
+		Created: time.Now(), AHP: s.AHP})
 	return name, nil
 }
 
@@ -875,6 +876,35 @@ func (e *Engine) Workspaces(ctx context.Context) ([]links.Workspace, error) {
 	}
 	e.record("workspaces")
 	return append([]links.Workspace(nil), e.workspaces...), nil
+}
+
+// ServeAHP makes serve the AHP server of an agent: it gets each connection DialAHP makes, and whether the client only watches.
+func (e *Engine) ServeAHP(agent string, serve func(conn net.Conn, readOnly bool)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ahps[agent] = serve
+}
+
+// DialAHP reaches a server of ServeAHP, through a pipe.
+func (e *Engine) DialAHP(ctx context.Context, agent string, readOnly bool) (net.Conn, error) {
+	e.mu.Lock()
+	err := e.dropped()
+	serve := e.ahps[agent]
+	closed := e.current.closed
+	if err == nil {
+		e.record("ahp %s read-only=%v", agent, readOnly)
+	}
+	e.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if serve == nil {
+		return nil, fmt.Errorf("agent %q was not spawned in AHP mode", agent)
+	}
+	near, far := net.Pipe()
+	go serve(far, readOnly)
+	go func() { <-closed; near.Close() }()
+	return near, nil
 }
 
 // DialFiles reaches a server of ServeFiles, through a pipe.

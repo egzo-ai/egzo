@@ -28,6 +28,8 @@ type Project struct {
 	Agents    []Agent
 	Templates []string
 	CreatedBy string
+	// AHP is the templates that have an AHP mode, as Published says: the hub fills it in from what the link pushed with the project.
+	AHP map[string]AHPMode `json:",omitempty"`
 	// Ignored is what carries the project's label with labels egzo never writes (engine.IdentityOf): not the project's, and not
 	// shown as part of it. Each says what and why.
 	Ignored []string `json:",omitempty"`
