@@ -47,6 +47,13 @@ describe("the Rich UI chat", () => {
     expect(chat.turns[1].parts[0]).toMatchObject({ kind: "tool", tool: { title: "Read: x", status: "running" } });
   });
 
+  it("puts older turns loaded from the harness's store before the ones it has, once", () => {
+    let chat = apply(emptyChat(), { type: "chat/turnStarted", turnId: "live", message: { text: "now" } });
+    const older = { type: "chat/turnsLoaded", turns: [{ id: "hist_1", message: { text: "before" }, responseParts: [], state: "complete" }] };
+    chat = apply(apply(chat, older), older);
+    expect(chat.turns.map((t) => t.id)).toEqual(["hist_1", "live"]);
+  });
+
   it("ignores a turn it does not know and an action it does not show", () => {
     const chat = emptyChat();
     expect(apply(chat, { type: "chat/delta", turnId: "nope", partId: "p", content: "x" })).toEqual(chat);
