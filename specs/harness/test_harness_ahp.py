@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) Neopeak Internet Solutions inc.
+
+"""AHP mode (issue #227): an agent spawned with `--ahp` serves the chat of its main session over the Agent Host Protocol
+(https://github.com/microsoft/agent-host-protocol), inside its own container, and the project's link carries it to the hub through the verb
+`ahp`, which runs `egzo agent ahp` in the container, the way attach runs `egzo agent attach`: no new port, no new path into the container.
+
+Only a harness that has an AHP mode takes it: OpenCode, through egzo's fork of the opencode-ahp plugin, which runs inside OpenCode's own
+server and so sees the TUI's sessions; the terminal stays. The link lets through only what concerns the chat of the agent's main session (the
+first session its harness created): no file, no terminal, no changeset, no other session, and nothing that acts in the chat for a client that
+only watches. The images are the real ones; no model answers (the turn a message starts fails at the proxy), which is enough for a session and
+a turn to exist."""
+
+import json
+import time
+
+import pytest
+
+from hubkit import eventually
+from support import agent, spec
+
+API_KEY = "sk-ant-egzo-spec-not-a-real-key-0000000000"
+INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"channel": "ahp-root://", "clientId": "egzo-spec", "protocolVersions": ["1.0.0"], "initialSubscriptions": ["ahp-root://"]}}
+
+
+@pytest.fixture(scope="module")
+def ahp(shared_project, engine, egzo, fake_hub):
+    p = shared_project
+    p.env.update({"ANTHROPIC_API_KEY": API_KEY})
+    oc, cc = engine.harness_image("opencode", egzo.binary), engine.harness_image("claude-code", egzo.binary)
+    quick = {"inject": {"human_quiet": "1s"}}
+    p.up(
+        spec(
+            hub={"url": fake_hub.url, "ca": str(fake_hub.ca)},
+            egress={"default": {"allow": ["platform.claude.com"], "services": {"anthropic": "env/ANTHROPIC_API_KEY"}}},
+            agents={
+                "oc": agent(harness="opencode", image=oc, model="anthropic/claude-sonnet-5-5", **quick),
+                "cc": agent(harness="claude-code", image=cc),
+            },
+        ),
+        timeout=900,
+    )
+    p.ok("project register", input=fake_hub.code("alice") + "\n")
+    return p
+
+
+def in_instance(engine, project, name, command):
+    return engine.exec(engine.instance(project.name, name).name, "sh", "-c", command)
+
+
+def bridge(engine, project, name, *lines, seconds=8):
+    """What `egzo agent ahp` answers, inside the instance, to lines of JSON sent a second apart."""
+    script = "; ".join(f"printf '%s\\n' {json.dumps(json.dumps(line))}; sleep 1" for line in lines)
+    return in_instance(engine, project, name, f"({script}; sleep {seconds}) | timeout {seconds + len(lines) + 5} egzo agent ahp")
+
+
+def messages(output):
+    return [json.loads(line) for line in output.splitlines() if line.startswith("{")]
+
+
+def answer_to(found, id_):
+    return next((m for m in found if m.get("id") == id_), None)
+
+
+def test_only_a_harness_with_an_ahp_mode_takes_it_and_nothing_is_made_for_one_without(ahp, engine):
+    refused = ahp.run("agent", "spawn", "cc", "cc-ahp", "--ahp", timeout=300)
+    assert refused.returncode != 0
+    assert "has no AHP mode" in refused.stderr and "opencode" in refused.stderr, refused.stderr
+    assert "cc-ahp" not in ahp.instance_names(), "a refused spawn makes nothing"
+
+
+def test_an_agent_spawned_in_ahp_mode_serves_ahp_inside_its_container(ahp, engine):
+    name = ahp.spawn("oc", "oc-ahp", "--ahp", timeout=900)
+    instance = engine.instance(ahp.name, name)
+    assert instance.labels.get("ai.egzo.agent.ahp") == "1", "the instance keeps its mode, for the link and the hub"
+    assert "EGZO_AHP=1" in instance.raw["Config"]["Env"]
+    endpoint = json.loads(in_instance(engine, ahp, name, "cat $HOME/.egzo/ahp.json").stdout)
+    assert endpoint["url"].startswith("ws://127.0.0.1:"), "the server listens on the container's loopback only"
+    assert endpoint["token"] and in_instance(engine, ahp, name, "stat -c %a $HOME/.egzo/ahp.json").stdout.strip() == "600"
+
+    def initialized():
+        answer = answer_to(messages(bridge(engine, ahp, name, INIT, seconds=3).stdout), 1)
+        return answer and answer.get("result")
+
+    result = eventually(initialized, seconds=120)
+    assert result, "egzo agent ahp reaches the plugin's server: " + bridge(engine, ahp, name, INIT, seconds=3).stderr
+    assert result["protocolVersion"] == "1.0.0"
+    assert result["serverInfo"]["name"] == "opencode-ahp"
+    # the user's opencode.json is left alone: the plugin comes through OpenCode's environment
+    config = json.loads(in_instance(engine, ahp, name, "cat $HOME/.config/opencode/opencode.json").stdout)
+    assert "opencode-ahp" not in json.dumps(config)
+
+
+def test_an_agent_spawned_without_it_has_no_ahp_server(ahp, engine):
+    name = ahp.spawn("oc", "oc-plain", timeout=900)
+    instance = engine.instance(ahp.name, name)
+    assert "ai.egzo.agent.ahp" not in instance.labels
+    assert not any(e.startswith("EGZO_AHP=") for e in instance.raw["Config"]["Env"])
+    assert in_instance(engine, ahp, name, "test -e $HOME/.egzo/ahp.json").returncode != 0
+    ran = in_instance(engine, ahp, name, "egzo agent ahp < /dev/null")
+    assert ran.returncode != 0 and "not in AHP mode" in ran.stderr, ran.stderr
+
+
+def test_the_link_says_which_templates_have_an_ahp_mode_and_which_agents_are_in_it(ahp, fake_hub):
+    if "oc-ahp" not in ahp.instance_names():
+        ahp.spawn("oc", "oc-ahp", "--ahp", timeout=900)
+    published = fake_hub.must(ahp.name, "published")
+    assert published["AHP"] == {"oc": {"Terminal": True}}, "OpenCode keeps its terminal in AHP mode; Claude Code has no AHP mode"
+    agents = {a["Name"]: a for a in fake_hub.must(ahp.name, "project")["Agents"]}
+    assert agents["oc-ahp"].get("AHP") is True
+    assert not agents.get("oc-plain", {}).get("AHP")
+
+
+def test_the_hub_reaches_the_chat_of_the_main_session_and_nothing_else(ahp, engine, fake_hub):
+    if "oc-ahp" not in ahp.instance_names():
+        ahp.spawn("oc", "oc-ahp", "--ahp", timeout=900)
+    name = "oc-ahp"
+    # the TUI creates the agent's first session when a prompt is typed into it: a message does that
+    ahp.ok("message send", name, "say hello")
+    main = eventually(lambda: in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session 2>/dev/null").stdout.strip(), seconds=120)
+    assert main.startswith("ses"), "egzo's OpenCode plugin keeps the first session as the agent's main session"
+    chat = f"ahp-chat:/{main}"
+
+    def ask(*lines, read_only=False, seconds=6):
+        answer = fake_hub.verb(ahp.name, "ahp", Agent=name, Input="\n".join(json.dumps(l) for l in lines), Seconds=seconds + len(lines), ReadOnly=read_only)
+        assert not answer.get("error"), answer["error"]
+        return messages(answer["result"])
+
+    got = ask(INIT,
+              {"jsonrpc": "2.0", "id": 2, "method": "subscribe", "params": {"channel": chat}},
+              {"jsonrpc": "2.0", "id": 3, "method": "resourceRead", "params": {"uri": "file:///etc/passwd"}},
+              {"jsonrpc": "2.0", "id": 4, "method": "createSession", "params": {"channel": "ahp-session:/other"}},
+              {"jsonrpc": "2.0", "id": 5, "method": "createTerminal", "params": {"channel": "x-term:/1"}})
+    note = next((m for m in got if m.get("method") == "x-egzo/mainSession"), None)
+    assert note and note["params"] == {"session": f"ahp-session:/{main}", "chat": chat}, got
+    snapshot = answer_to(got, 2)
+    assert snapshot and snapshot.get("result"), f"the main session's chat can be subscribed to: {snapshot}"
+    turns = snapshot["result"]["snapshot"]["state"]["turns"]
+    assert turns and turns[0]["message"]["text"].strip(), "the turn the message started in the TUI is in the chat"
+    for refused in (3, 4, 5):
+        error = (answer_to(got, refused) or {}).get("error")
+        assert error and error["message"].startswith("egzo:"), f"request {refused} is refused by the link: {answer_to(got, refused)}"
+    assert "root:x:0:0" not in json.dumps(got)
+
+    watching = ask(INIT, {"jsonrpc": "2.0", "id": 2, "method": "subscribe", "params": {"channel": chat}},
+                   {"jsonrpc": "2.0", "id": 6, "method": "dispatchAction",
+                    "params": {"channel": chat, "clientSeq": 1, "action": {"type": "chat/turnCancelled", "turnId": "t"}}},
+                   read_only=True)
+    assert answer_to(watching, 2).get("result"), "a client that only watches still sees the chat"
+    assert (answer_to(watching, 6) or {}).get("error"), "and cannot act in it"
+
+
+def test_the_verb_is_refused_for_an_agent_not_in_ahp_mode(ahp, fake_hub):
+    if "oc-plain" not in ahp.instance_names():
+        ahp.spawn("oc", "oc-plain", timeout=900)
+    answer = fake_hub.verb(ahp.name, "ahp", Agent="oc-plain", Input=json.dumps(INIT), Seconds=3)
+    assert "not spawned in AHP mode" in (answer.get("error") or ""), answer

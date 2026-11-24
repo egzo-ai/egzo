@@ -347,6 +347,8 @@ type InstanceIdentity struct {
 	// StarterName and Unattended are what the agent is told of who started it and how (see SpawnRequest).
 	StarterName string
 	Unattended  bool
+	// AHP is AHP mode, chosen at spawn (see SpawnRequest).
+	AHP bool
 }
 
 // DesireInstance computes the resources of one instance: its network, its home volume, its container,
@@ -376,6 +378,10 @@ func DesireInstance(view *config.Resolved, dir string, in Inputs, name string, f
 		return desired, err
 	}
 	spec.Env = append(spec.Env, starterEnv(from)...)
+	if from.AHP {
+		spec.Env = append(spec.Env, harness.AHPEnv+"=1")
+		spec.Identity.Extra[engine.LabelAgentAHP] = "1"
+	}
 	sort.Strings(spec.Env) // the config hash takes it in order
 	desired.Networks = []NetworkSpec{network}
 	desired.Containers = []ContainerSpec{spec}

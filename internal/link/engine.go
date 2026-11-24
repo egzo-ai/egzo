@@ -24,6 +24,7 @@ import (
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
 	"github.com/egzo-ai/egzo/internal/files"
+	"github.com/egzo-ai/egzo/internal/harness"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/portforward"
@@ -99,7 +100,7 @@ func (d *Engine) Projects(ctx context.Context) ([]Project, error) {
 			p.Agents = append(p.Agents, Agent{
 				Name: id.Instance, ID: id.InstanceID, Template: id.Service, State: item.State,
 				Actor: id.Actor, Created: time.Unix(item.Created, 0), Activity: activityOf(item.State),
-				TemplateHash: id.TemplateHash,
+				TemplateHash: id.TemplateHash, AHP: item.Labels[engine.LabelAgentAHP] == "1",
 			})
 		case kindControl, kindProxy:
 			p.Services = append(p.Services, Service{Name: id.Kind, State: item.State, Health: healthOf(item.Status), ID: item.ID})
@@ -168,7 +169,7 @@ func (d *Engine) Project(ctx context.Context, name string) (Project, error) {
 func projectOf(name string, observed stack.Observed) (Project, error) {
 	project := Project{Name: name, Ignored: observed.Ignored}
 	rows := stack.Rows(observed, nil, nil)
-	hashes, ids := map[string]string{}, map[string]string{}
+	hashes, ids, ahps := map[string]string{}, map[string]string{}, map[string]bool{}
 	for _, r := range observed.Resources {
 		if r.Type != "container" {
 			continue
@@ -179,6 +180,7 @@ func projectOf(name string, observed stack.Observed) (Project, error) {
 		switch r.Kind {
 		case kindAgent:
 			hashes[r.Instance] = r.TemplateHash
+			ahps[r.Instance] = r.AHP
 		case kindControl, kindProxy:
 			ids[r.Kind] = r.ID
 		}
@@ -191,7 +193,7 @@ func projectOf(name string, observed stack.Observed) (Project, error) {
 		case kindAgent:
 			project.Agents = append(project.Agents, Agent{
 				Name: row.Name, ID: row.ID, Template: row.Service, State: row.State, Health: row.Health, Activity: activityOf(row.State),
-				Actor: row.Actor, Created: row.Created, TemplateHash: hashes[row.Name],
+				Actor: row.Actor, Created: row.Created, TemplateHash: hashes[row.Name], AHP: ahps[row.Name],
 			})
 		case kindControl, kindProxy:
 			project.Services = append(project.Services, Service{Name: row.Kind, State: row.State, Health: row.Health, ID: ids[row.Kind]})
@@ -211,6 +213,12 @@ func (d *Engine) Published(ctx context.Context, project string) (Published, erro
 	out := Published{Templates: make(map[string]string, len(published.Templates))}
 	for name, template := range published.Templates {
 		out.Templates[name] = template.Hash
+		if mode, ok := harness.AHPModeOf(template.Agent.Harness); ok {
+			if out.AHP == nil {
+				out.AHP = map[string]hublink.AHPMode{}
+			}
+			out.AHP[name] = hublink.AHPMode{Terminal: mode.Terminal}
+		}
 	}
 	return out, nil
 }
@@ -246,7 +254,7 @@ func (d *Engine) Spawn(ctx context.Context, project string, s hublink.SpawnReque
 	}
 	defer release()
 	spawned, err := stack.Spawn(ctx, d.client, project, "", stack.SpawnRequest{Template: s.Template, Name: s.Name, Actor: s.Actor,
-		StarterName: s.StarterName, Task: s.Task, Unattended: s.Unattended}, &steps{progress: progress})
+		StarterName: s.StarterName, Task: s.Task, Unattended: s.Unattended, AHP: s.AHP}, &steps{progress: progress})
 	if err != nil {
 		return "", err
 	}
@@ -337,6 +345,34 @@ func (d *Engine) runningInstance(ctx context.Context, project, agent string) (*s
 		return nil, fmt.Errorf("agent %q is %s", agent, target.State)
 	}
 	return target, nil
+}
+
+// AHPAvailable says whether the verb ahp can reach an agent: it runs, and it was spawned in AHP mode.
+func (d *Engine) AHPAvailable(ctx context.Context, project, agent string) error {
+	target, err := d.runningInstance(ctx, project, agent)
+	if err != nil {
+		return err
+	}
+	if !target.AHP {
+		return fmt.Errorf("agent %q was not spawned in AHP mode", agent)
+	}
+	return nil
+}
+
+// AHP runs `egzo agent ahp` in the agent's container: its AHP server's messages, a line each, on in and out.
+func (d *Engine) AHP(ctx context.Context, project, agent string, in io.Reader, out, said io.Writer) error {
+	target, err := d.runningInstance(ctx, project, agent)
+	if err != nil {
+		return err
+	}
+	if !target.AHP {
+		return fmt.Errorf("agent %q was not spawned in AHP mode", agent)
+	}
+	code, err := d.client.ExecStream(ctx, target.ID, []string{"egzo", "agent", "ahp"}, engine.Stream{In: in, Out: out, Err: said}, nil)
+	if err == nil && code != 0 {
+		return fmt.Errorf("egzo agent ahp ended with code %d", code)
+	}
+	return err
 }
 
 // Attach runs `egzo agent attach` in the agent's container on a terminal, as `egzo attach` does.

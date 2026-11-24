@@ -42,6 +42,10 @@ type Options struct {
 	Unattended           bool
 	// Bypass is true unless the agent opted out with `permissions: default`.
 	Bypass bool
+	// AHP says the agent was spawned in AHP mode (AHPEnv): an integration that has one serves AHP, if its image carries what it needs.
+	AHP bool
+	// Exists says whether a path is in the container (os.Stat); nil means nothing is.
+	Exists func(path string) bool
 	// ControlURL is the control sidecar's agent API, and Authorization the Basic credentials of the agent.
 	ControlURL    string
 	Authorization string
@@ -170,6 +174,8 @@ type Plan struct {
 	InterruptKey string
 	// Dirs are directories to create.
 	Dirs []string
+	// Remove are files to delete, if they are there: what an earlier run wrote and this one must not leave behind.
+	Remove []string
 	// Setup are commands run once the files are written, in order, before the harness starts. Each is best effort: one
 	// that fails is reported, and the harness starts anyway.
 	Setup [][]string
@@ -254,6 +260,11 @@ func Names() []string {
 
 // Write applies a plan's files and directories.
 func (p Plan) Write() error {
+	for _, path := range p.Remove {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
 	for _, dir := range p.Dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err

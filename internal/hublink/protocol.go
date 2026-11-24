@@ -121,6 +121,10 @@ const (
 	// VerbUndelivered is the hub saying that a message an agent sent one of its users did not reach them: Message, and Text, why, in words
 	// for the agent.
 	VerbUndelivered = "undelivered"
+	// VerbAHP is the chat of an agent spawned in AHP mode: after the Done, one line of JSON per message both ways, AHP's JSON-RPC 2.0 messages
+	// (https://github.com/microsoft/agent-host-protocol). The link lets through only what concerns the chat of the agent's main session,
+	// and with ReadOnly, nothing that acts in it; it says which session that is as the notification x-egzo/mainSession.
+	VerbAHP = "ahp"
 	// VerbPeople is the hub saying what it knows now of the users who started the project's agents: People, every one of them. An agent
 	// whose starter became reachable, or unreachable, is told.
 	VerbPeople = "people"
@@ -203,6 +207,10 @@ type Request struct {
 	StarterName string `json:",omitempty"`
 	Task        string `json:",omitempty"`
 	Unattended  bool   `json:",omitempty"`
+	// spawn: in AHP mode, for a template Published.AHP names
+	AHP bool `json:",omitempty"`
+	// ahp: the client only watches the chat
+	ReadOnly bool `json:",omitempty"`
 	// people: by user:<id>
 	People    map[string]Person `json:",omitempty"`
 	Agent     string            `json:",omitempty"`
@@ -226,6 +234,7 @@ type Request struct {
 type SpawnRequest struct {
 	Template, Name, Actor, StarterName, Task string
 	Unattended                               bool
+	AHP                                      bool
 }
 
 // Person is what the hub says of one of its users who started agents of a project: their name, and whether a chat bridge can reach them

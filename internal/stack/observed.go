@@ -43,6 +43,8 @@ type Resource struct {
 	TemplateHash string
 	InstanceID   string    // on the container and the network of an instance
 	Created      time.Time // containers only
+	// AHP says an instance's container was spawned in AHP mode.
+	AHP bool
 }
 
 // Observed is everything that exists on the engine for a project.
@@ -86,6 +88,7 @@ func resourceFrom(kind, id, name string, labels map[string]string) (Resource, er
 		Actor:        identity.Actor,
 		TemplateHash: identity.TemplateHash,
 		InstanceID:   identity.InstanceID,
+		AHP:          labels[engine.LabelAgentAHP] == "1",
 	}, nil
 }
 

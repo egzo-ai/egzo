@@ -37,6 +37,14 @@ type Project struct {
 // carries from when it was spawned. An instance whose template hash differs, or whose template is gone, is stale.
 type Published struct {
 	Templates map[string]string // name -> hash
+	// AHP is the templates whose harness has an AHP mode, and what that mode keeps: a spawn may ask for it (Request.AHP) for these only.
+	AHP map[string]AHPMode `json:",omitempty"`
+}
+
+// AHPMode is what a template's AHP mode keeps of the agent.
+type AHPMode struct {
+	// Terminal says the agent's terminal is still there in AHP mode, so attach works as well as the chat.
+	Terminal bool
 }
 
 // Names lists the templates, sorted.
@@ -74,6 +82,8 @@ type Agent struct {
 	Created  time.Time
 	// TemplateHash is the hash of the template the instance was spawned from (a label), to compare with Published.
 	TemplateHash string
+	// AHP says the agent was spawned in AHP mode: the verb ahp reaches the chat of its main session.
+	AHP bool `json:",omitempty"`
 }
 
 // Running reports whether the agent's container is running.

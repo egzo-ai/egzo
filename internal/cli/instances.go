@@ -36,7 +36,7 @@ func currentTemplates(s *session) (stack.Published, error) {
 
 func newSpawnCommand(opts *options) *cobra.Command {
 	var message string
-	var attach, wait, asJSON, reuse, noFetch bool
+	var attach, wait, asJSON, reuse, noFetch, ahp bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "spawn TEMPLATE [NAME]",
@@ -73,7 +73,7 @@ func newSpawnCommand(opts *options) *cobra.Command {
 			}
 			defer s.close()
 
-			request := stack.SpawnRequest{Template: args[0], Actor: operatorActor, NoFetch: noFetch, Reuse: reuse}
+			request := stack.SpawnRequest{Template: args[0], Actor: operatorActor, NoFetch: noFetch, Reuse: reuse, AHP: ahp}
 			if len(args) == 2 {
 				request.Name = args[1]
 			}
@@ -129,6 +129,7 @@ func newSpawnCommand(opts *options) *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the instance as one JSON object")
 	cmd.Flags().BoolVar(&reuse, "reuse", false, "continue with the worktree or the branch an earlier instance of this name left")
 	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "make the worktrees from the base clones as they are, without fetching first")
+	cmd.Flags().BoolVar(&ahp, "ahp", false, "spawn in AHP mode: the harness serves its chat over the Agent Host Protocol, for the hub; kept for the instance's life")
 	return cmd
 }
 
