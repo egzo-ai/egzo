@@ -15,6 +15,7 @@ import (
 
 	"github.com/egzo-ai/egzo/internal/config"
 	"github.com/egzo-ai/egzo/internal/engine"
+	"github.com/egzo-ai/egzo/internal/harness"
 	"github.com/egzo-ai/egzo/internal/names"
 	"github.com/egzo-ai/egzo/internal/termsafe"
 )
@@ -32,6 +33,9 @@ type SpawnRequest struct {
 	// the starter instead, and the agent is told nobody reads its terminal. Unattended needs a task and a user:<id> starter.
 	Task       string
 	Unattended bool
+	// AHP spawns the agent in AHP mode: its harness serves the chat of its main session over the Agent Host Protocol, which the project's
+	// link carries to the hub. Only a harness that has an AHP mode takes it, and the instance keeps it for its life.
+	AHP bool
 	// NoFetch makes the worktrees from the base clones as they are, without fetching first.
 	NoFetch bool
 	// Reuse continues with a worktree or a branch an earlier instance of the name left, instead of refusing it.
@@ -138,11 +142,17 @@ func Spawn(ctx context.Context, c *engine.Client, project, dir string, req Spawn
 	if err := checkStart(req, actor); err != nil {
 		return Spawned{}, err
 	}
+	if req.AHP {
+		if _, ok := harness.AHPModeOf(template.Agent.Harness); !ok {
+			return Spawned{}, fmt.Errorf("template %q runs %s, which has no AHP mode (harnesses with one: %s)", req.Template,
+				template.Agent.Harness, strings.Join(harness.WithAHP(), ", "))
+		}
+	}
 
 	instances := map[string]string{name: req.Template}
 	view := published.View(instances)
 	identity := InstanceIdentity{ID: NewInstanceID(), Template: req.Template, Actor: actor, TemplateHash: template.Hash, StarterName: req.StarterName,
-		Unattended: req.Unattended}
+		Unattended: req.Unattended, AHP: req.AHP}
 	// The resources first: their specs do not depend on the token, which only exists once the instance is
 	// registered, and the registration must wait until the network has decided who wins a race.
 	desired, err := DesireInstance(view, dir, published.inputs(instances, map[string]string{}, nil), name, identity)

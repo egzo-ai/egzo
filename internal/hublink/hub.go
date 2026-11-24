@@ -327,7 +327,7 @@ func (p *Peer) Published(ctx context.Context) (Published, error) {
 func (p *Peer) Spawn(ctx context.Context, s SpawnRequest, progress func(string)) (string, error) {
 	var agent string
 	return agent, p.ask(ctx, Request{Verb: VerbSpawn, Template: s.Template, Name: s.Name, Actor: s.Actor, StarterName: s.StarterName, Task: s.Task,
-		Unattended: s.Unattended}, progress, &agent)
+		Unattended: s.Unattended, AHP: s.AHP}, progress, &agent)
 }
 
 // People tells the project what the hub knows now of the users who started its agents, all of them.
@@ -404,6 +404,12 @@ func (p *Peer) Workspaces(ctx context.Context) ([]Workspace, error) {
 // only. ctx covers the dial, as for DialPort.
 func (p *Peer) DialFiles(ctx context.Context, workspace, instance string) (net.Conn, error) {
 	return p.dial(ctx, Request{Verb: VerbFiles, Workspace: workspace, Instance: instance})
+}
+
+// DialAHP connects to the chat of an agent spawned in AHP mode: lines of JSON both ways (see VerbAHP). readOnly keeps the client from acting
+// in the chat. ctx covers the dial, as for DialPort.
+func (p *Peer) DialAHP(ctx context.Context, agent string, readOnly bool) (net.Conn, error) {
+	return p.dial(ctx, Request{Verb: VerbAHP, Agent: agent, ReadOnly: readOnly})
 }
 
 // dial asks a verb that becomes a byte stream once its Done comes without an error.

@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/egzo-ai/egzo/internal/agentclient"
+	"github.com/egzo-ai/egzo/internal/ahp"
 	"github.com/egzo-ai/egzo/internal/browser"
 	"github.com/egzo-ai/egzo/internal/harness"
 	"github.com/egzo-ai/egzo/internal/portforward"
@@ -87,11 +88,37 @@ func newAgentCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	ahpCommand := &cobra.Command{
+		Use:    "ahp",
+		Short:  "Carry the chat of this agent's AHP server over stdin and stdout",
+		Hidden: true,
+		Long: "Connect to the AHP server of this agent's harness, on this container's loopback, and copy its messages, one line of\n" +
+			"JSON each, between it and stdin and stdout. It also says, as the notification " + ahp.MainSessionMethod + ", which\n" +
+			"session is the agent's main one, once the harness has one. What the project's link runs in the agent's container for the\n" +
+			"hub. It fails when the agent was not spawned in AHP mode (`egzo agent spawn --ahp`).",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home := os.Getenv("HOME")
+			if home == "" {
+				home = "/home/agent"
+			}
+			endpoint, err := harness.ReadAHPEndpoint(home)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "egzo:", err)
+				return ExitError{Code: 1}
+			}
+			if err := ahp.Bridge(cmd.Context(), endpoint.URL, endpoint.Token, endpoint.MainSession, os.Stdin, os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, "egzo:", err)
+				return ExitError{Code: 1}
+			}
+			return nil
+		},
+	}
 	forward.Flags().BoolVar(&announce, "announce", false, "say on stderr when the server has been reached")
 	forward.Flags().BoolVar(&closeOnEOF, "close-on-eof", false, "end at the end of stdin")
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
-		newAttachCommand(opts), run, browserCommand, forward, newSSHSetupCommand(), newAgentAccessCommand())
+		newAttachCommand(opts), run, browserCommand, forward, ahpCommand, newSSHSetupCommand(), newAgentAccessCommand())
 	return group(cmd)
 }
 
@@ -165,6 +192,8 @@ func runAgent(args []string) error {
 		StarterName:      os.Getenv(harness.StarterNameEnv),
 		Unattended:       os.Getenv(harness.UnattendedEnv) == "1",
 		Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",
+		AHP:              os.Getenv(harness.AHPEnv) == "1",
+		Exists:           func(path string) bool { _, err := os.Stat(path); return err == nil },
 		ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
 		InstructionsFile: home + "/.egzo/instructions.md",
 		LookPath:         exec.LookPath,

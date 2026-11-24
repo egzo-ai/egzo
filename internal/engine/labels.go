@@ -36,7 +36,9 @@ const (
 	LabelLockExpires = LabelPrefix + "lock-expires"
 
 	// Semantic labels that let a tool show an agent card without parsing a spec.
-	LabelAgentHarness    = LabelPrefix + "agent.harness"
+	LabelAgentHarness = LabelPrefix + "agent.harness"
+	// LabelAgentAHP is "1" on the container of an agent spawned in AHP mode.
+	LabelAgentAHP        = LabelPrefix + "agent.ahp"
 	LabelAgentWorkspaces = LabelPrefix + "agent.workspaces"
 
 	// SpecVersion is the version of the label contract.

@@ -177,7 +177,8 @@ type verbRequest struct {
 	Text, Key, Message, Outcome                                   string                    // send, resolve, undelivered
 	Interrupt                                                     bool                      // send
 	StarterName, Task                                             string                    // spawn
-	Unattended                                                    bool                      // spawn
+	Unattended, AHP                                               bool                      // spawn
+	ReadOnly                                                      bool                      // ahp
 	People                                                        map[string]hublink.Person // people
 	Tail, Limit, Port                                             int
 	Seconds                                                       float64
@@ -196,7 +197,7 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 		return result, steps, err
 	case hublink.VerbSpawn:
 		result, err := peer.Spawn(ctx, hublink.SpawnRequest{Template: q.Template, Name: q.Name, Actor: q.Actor, StarterName: q.StarterName, Task: q.Task,
-			Unattended: q.Unattended}, progress)
+			Unattended: q.Unattended, AHP: q.AHP}, progress)
 		return result, steps, err
 	case hublink.VerbPeople:
 		return nil, steps, peer.People(ctx, q.People)
@@ -253,6 +254,29 @@ func (h *hub) verb(ctx context.Context, peer *hublink.Peer, q verbRequest) (any,
 		if _, err := io.WriteString(conn, q.Input); err != nil {
 			return nil, steps, err
 		}
+		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(q.Seconds * float64(time.Second))))
+		var out bytes.Buffer
+		_, _ = io.Copy(&out, conn)
+		return out.String(), steps, nil
+	case hublink.VerbAHP:
+		// Input is lines of JSON for the agent's AHP server, sent one at a time a second apart; the answer is every line that came back
+		// within Seconds.
+		conn, err := peer.DialAHP(ctx, q.Agent, q.ReadOnly)
+		if err != nil {
+			return nil, steps, err
+		}
+		defer conn.Close()
+		go func() {
+			for _, line := range strings.Split(strings.TrimSpace(q.Input), "\n") {
+				if line == "" {
+					continue
+				}
+				if _, err := io.WriteString(conn, line+"\n"); err != nil {
+					return
+				}
+				time.Sleep(time.Second)
+			}
+		}()
 		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(q.Seconds * float64(time.Second))))
 		var out bytes.Buffer
 		_, _ = io.Copy(&out, conn)

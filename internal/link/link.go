@@ -7,6 +7,8 @@
 package link
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/hashicorp/yamux"
 
+	"github.com/egzo-ai/egzo/internal/ahp"
 	"github.com/egzo-ai/egzo/internal/files"
 	"github.com/egzo-ai/egzo/internal/hublink"
 	"github.com/egzo-ai/egzo/internal/portforward"
@@ -615,7 +618,7 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 		result, err = engine.Published(ctx, project)
 	case hublink.VerbSpawn:
 		result, err = engine.Spawn(ctx, project, hublink.SpawnRequest{Template: request.Template, Name: request.Name, Actor: request.Actor,
-			StarterName: request.StarterName, Task: request.Task, Unattended: request.Unattended}, progress)
+			StarterName: request.StarterName, Task: request.Task, Unattended: request.Unattended, AHP: request.AHP}, progress)
 	case hublink.VerbPeople:
 		err = engine.People(ctx, project, request.People)
 	case hublink.VerbStart:
@@ -653,6 +656,12 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 			return l.options.Engine.Files(ctx, l.options.Project, request.Workspace, request.Instance, in, out, said)
 		}, stream, files.Connected)
 		return
+	case hublink.VerbAHP:
+		if err = engine.AHPAvailable(ctx, project, request.Agent); err == nil {
+			_ = lines.Write(hublink.Reply{Done: true})
+			l.ahpChat(ctx, stream, lines, request)
+			return
+		}
 	case hublink.VerbAttach:
 		if err = engine.Attachable(ctx, project, request.Agent); err == nil {
 			_ = lines.Write(hublink.Reply{Done: true})
@@ -794,4 +803,87 @@ func (l *Link) attach(ctx context.Context, stream net.Conn, lines *hublink.Lines
 	if err := l.options.Engine.Attach(ctx, l.options.Project, request.Agent, Terminal{In: input, Out: stream, Size: request.Size, Resize: resize}); err != nil && ctx.Err() == nil {
 		fmt.Fprintf(os.Stderr, "attach %s: %s\n", request.Agent, strings.TrimSpace(err.Error()))
 	}
+}
+
+// ahpChat carries the chat of an agent in AHP mode on the verb's stream, through `egzo agent ahp` in its container: a line of JSON each way,
+// and only what the filter lets through. What the hub asks that the filter refuses is answered here, and never reaches the agent.
+func (l *Link) ahpChat(ctx context.Context, stream net.Conn, lines *hublink.Lines, request hublink.Request) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	filter := &ahp.Filter{ReadOnly: request.ReadOnly}
+	var mu sync.Mutex // the hub's stream takes lines from both ways
+	send := func(line []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		_, err := stream.Write(append(line, '\n'))
+		return err
+	}
+	input, writer := io.Pipe()
+	go func() {
+		scanner := bufio.NewScanner(lines.Rest())
+		scanner.Buffer(make([]byte, 64<<10), ahp.MaxMessage)
+		for scanner.Scan() {
+			forward, reply := filter.FromClient(scanner.Bytes())
+			if reply != nil && send(reply) != nil {
+				break
+			}
+			if forward == nil {
+				continue
+			}
+			if _, err := writer.Write(append(append([]byte{}, forward...), '\n')); err != nil {
+				break
+			}
+		}
+		writer.Close()
+		cancel() // the hub's side is gone: the chat goes with it
+	}()
+	out := &lineSplitter{each: func(line []byte) error {
+		if passed := filter.FromServer(line); passed != nil {
+			return send(passed)
+		}
+		return nil
+	}}
+	var said bytes.Buffer
+	if err := l.options.Engine.AHP(ctx, l.options.Project, request.Agent, input, out, &limitedWriter{w: &said, room: 1024}); err != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "ahp %s: %s %s\n", request.Agent, strings.TrimSpace(err.Error()), termsafe.Line(strings.TrimSpace(said.String())))
+	}
+}
+
+// lineSplitter hands each complete line written to it to each, without its newline. A line over ahp.MaxMessage is dropped.
+type lineSplitter struct {
+	each    func([]byte) error
+	pending []byte
+}
+
+func (s *lineSplitter) Write(data []byte) (int, error) {
+	s.pending = append(s.pending, data...)
+	for {
+		i := bytes.IndexByte(s.pending, '\n')
+		if i < 0 {
+			if len(s.pending) > ahp.MaxMessage {
+				s.pending = nil
+			}
+			return len(data), nil
+		}
+		line := s.pending[:i]
+		if err := s.each(line); err != nil {
+			return 0, err
+		}
+		s.pending = s.pending[i+1:]
+	}
+}
+
+// limitedWriter keeps at most room bytes of what is written to it, and takes the rest without keeping it.
+type limitedWriter struct {
+	w    io.Writer
+	room int
+}
+
+func (l *limitedWriter) Write(data []byte) (int, error) {
+	if l.room > 0 {
+		n := min(l.room, len(data))
+		l.w.Write(data[:n])
+		l.room -= n
+	}
+	return len(data), nil
 }
