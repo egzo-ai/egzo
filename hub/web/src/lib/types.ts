@@ -108,6 +108,8 @@ export interface Agent {
   denied: number;
   /** The ports it has open: a preview to open, or an address on the project's machine. */
   previews: Preview[];
+  /** Spawned with the Rich UI: its chat opens on the Chat tab. */
+  richUI?: boolean;
   /** What the hub does on it, or the failure of what it did that nobody dismissed. With no `state`, the project does not have the
    * agent: a spawn that runs or failed, or a removal that is ending. */
   task?: Task;
@@ -160,6 +162,8 @@ export interface Project {
   feed: Feed;
   up: boolean;
   templates: string[];
+  /** The templates that can be spawned with the Rich UI, and whether their agents keep a terminal then. */
+  richUI?: Record<string, { terminal: boolean }>;
   services: Service[];
   agents: Agent[] | null;
   canSpawn: boolean;

@@ -166,6 +166,26 @@ The hub relays what its users say to agents, and what agents say to them, for th
   about, and its text and choices **only when a user is one end of it**: what agents say to each other or to the operator stays in the project.
   The `events` verb, which the web UI's timelines ask, carries no message text at all.
 
+## AHP mode
+
+An agent spawned in AHP mode (`egzo agent spawn --ahp`, or **Rich UI** in the hub; [#227](https://github.com/egzo-ai/egzo/issues/227))
+serves the chat of its main session over the [Agent Host Protocol](https://github.com/microsoft/agent-host-protocol), inside its own
+container, on its loopback. The link carries it to the hub; AHP carries chat only, and egzo's verbs stay as they are.
+
+- **`published`** says, in `AHP`, which templates' harnesses have an AHP mode, and whether the terminal stays in it (`{"oc":
+  {"Terminal": true}}`). Only these take `AHP` on **`spawn`**. A spawn in AHP mode gives the instance `EGZO_AHP=1` and the label
+  `ai.egzo.agent.ahp`, and the project's agents say `AHP`.
+- **`ahp`** (`Agent`, `ReadOnly`) runs `egzo agent ahp` in the agent's container, as `attach` runs `egzo agent attach`: no new port,
+  no new path into the container. After the `Done`, the stream is lines of JSON both ways: AHP's JSON-RPC 2.0 messages, and egzo's
+  notification of the main session, `x-egzo/mainSession` (`{"session", "chat"}`), sent when the agent has one and whenever it changes.
+- **The filter.** The link lets through only what concerns the main session's chat: `initialize`, `reconnect`, `ping`, `subscribe` and
+  `unsubscribe` of the root channel and of the main session and its chat, `listSessions` (its answer cut to the main session),
+  `fetchTurns` of the main chat, and `dispatchAction` in the main chat of a prompt (`chat/turnStarted`), a cancel (`chat/turnCancelled`)
+  or a pending message. Anything else (`resource*`, which reads files, terminals, changesets, creating or disposing sessions and chats) is
+  answered by the link with an `egzo:` error and never reaches the agent. With `ReadOnly`, nothing is dispatched. What the server says
+  about another session does not reach the hub.
+- **The version** stays 1: the change is additive. An older link sends no `AHP` in `published`, so a hub never offers it.
+
 ## Versions
 
 Link and hub are released apart and run on different machines, so what each speaks has to be said out loud. Before 1.0 there is one version at a time: no ranges,

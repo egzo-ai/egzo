@@ -60,6 +60,8 @@ var (
 	// ErrNoChatAccount is returned for an unattended spawn by a user with no chat account linked: the agent would have nobody to report
 	// to.
 	ErrNoChatAccount = errors.New("link a chat account first: an unattended agent reports to you there")
+	// ErrNoRichUI is returned for a Rich UI spawn of a template whose harness has no AHP mode.
+	ErrNoRichUI = errors.New("this template has no Rich UI: its harness has no AHP mode")
 )
 
 // maxTask is the longest task: the most text a message carries.
@@ -71,6 +73,8 @@ const maxTask = 16 << 10
 type Spawning struct {
 	Template, Name, Task string
 	Unattended           bool
+	// RichUI spawns the agent in AHP mode, for a template whose harness has one: the hub then shows its chat (OpenChat).
+	RichUI bool
 }
 
 // BusyError is returned for an action on an agent that a task works on already: one at a time.
@@ -159,6 +163,11 @@ func (h *Hub) StartSpawn(ctx context.Context, user store.User, project string, s
 				return Task{}, ExistsError{Agent: name}
 			}
 		}
+		if _, rich := p.AHP[template]; s.RichUI && !rich {
+			return Task{}, ErrNoRichUI
+		}
+	} else if s.RichUI {
+		return Task{}, ErrNoRichUI
 	}
 	if t, ok := h.busyTask(project, name); ok {
 		return Task{}, BusyError{Task: t}
@@ -173,7 +182,7 @@ func (h *Hub) StartSpawn(ctx context.Context, user store.User, project string, s
 	}
 	t := Task{Verb: VerbSpawn, Project: project, Agent: name, Template: template, Actor: rbac.Actor(user.ID)}
 	// The task's text goes to the project only: the hub's task list keeps what was done, never what the agent was asked.
-	req := links.SpawnRequest{Template: template, Name: name, Actor: t.Actor, StarterName: displayName(user), Task: s.Task, Unattended: s.Unattended}
+	req := links.SpawnRequest{Template: template, Name: name, Actor: t.Actor, StarterName: displayName(user), Task: s.Task, Unattended: s.Unattended, AHP: s.RichUI}
 	// one at a time per project, in order: the engine's project lock would make them wait for each other anyway, and not in order
 	return h.startTask(ctx, t, true, func(ctx context.Context, e links.Engine, progress func(string)) error {
 		_, err := e.Spawn(ctx, req, progress)
