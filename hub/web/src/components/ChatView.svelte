@@ -12,6 +12,10 @@
   let failure = $state("");
   let draft = $state("");
   let socket: WebSocket | null = null;
+  // subscribes refused since the last snapshot: the harness's AHP server may not know the main session yet (opencode-ahp registers a
+  // session the TUI made 250 ms after it was made, and egzo can name it before that), so the chat asks again a little later
+  let refused = 0;
+  const maxRefused = 10;
   let scroller: HTMLElement | undefined = $state();
 
   function send(message: object) {
@@ -30,6 +34,7 @@
       case "x-egzo/mainSession":
         if (m.params?.chat && m.params.chat !== chat.channel) {
           chat = { ...emptyChat(), channel: m.params.chat };
+          refused = 0;
           send(messages.listSessions()); // its answer subscribes to the chat
         }
         return;
@@ -42,6 +47,13 @@
     if (m.id === 2 && m.result?.snapshot) {
       chat = fromSnapshot(chat.channel, m.result.snapshot.state);
       status = "live";
+      refused = 0;
+    }
+    if (m.id === 2 && m.error && chat.channel && refused < maxRefused) {
+      refused++;
+      const ws = socket;
+      setTimeout(() => socket === ws && send(messages.listSessions()), 300 * refused); // its answer subscribes again
+      return;
     }
     if (m.error && m.id !== undefined) failure = String(m.error.message ?? "refused");
   }

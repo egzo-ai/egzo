@@ -23,6 +23,9 @@ type scriptedAHP struct {
 	live  map[string]any        // the turn that runs, if any
 	conns map[*ahpConn]struct{} // the connections subscribed to the chat
 	heard []json.RawMessage     // every line a client sent that the filter let through, for the tests
+	// refuse is how many subscribes to come are refused as the plugin refuses a session it has not registered yet: it registers a session
+	// OpenCode made (the TUI's) 250 ms after the fact, and egzo may name it as the main one before that.
+	refuse int
 }
 
 type ahpConn struct {
@@ -114,6 +117,14 @@ func (s *scriptedAHP) serve(conn net.Conn, readOnly bool) {
 			var channel string
 			_ = json.Unmarshal(m.Params["channel"], &channel)
 			s.mu.Lock()
+			if s.refuse > 0 {
+				s.refuse--
+				s.mu.Unlock()
+				if len(m.ID) > 0 {
+					server(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32003, "message": "cannot subscribe to " + channel}})
+				}
+				continue
+			}
 			if channel == s.main.Chat {
 				s.conns[filtered] = struct{}{}
 			}
