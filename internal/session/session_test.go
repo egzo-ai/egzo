@@ -518,6 +518,34 @@ func TestADeliveryWithReadyMarkersWaitsForThePromptToBeDrawn(t *testing.T) {
 	}
 }
 
+func TestADeliveryWithAReadyFileWaitsForTheHarnessToWriteIt(t *testing.T) {
+	// the prompt box is drawn at once, and the server behind it says it is up 1.3 s later, by writing the file
+	ready := filepath.Join(t.TempDir(), "ready")
+	holder, err := Start([]string{"sh", "-c", "stty raw -echo; printf 'Ask anything'; sleep 1.3; touch " + ready + "; sleep 5"}, os.Environ(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(holder.Terminate)
+	fake := &fakeControl{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	api := &agentclient.Client{URL: server.URL, Agent: "coder", Token: "t", HTTP: server.Client()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := time.Now()
+	go holder.RunDelivery(ctx, api, Delivery{
+		HumanQuiet: 0, AckTimeout: time.Minute, IdleSignal: "state", Interval: 20 * time.Millisecond,
+		RequireRaw: true, ReadyMarkers: []string{"Ask anything"}, ReadyFile: ready,
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for fake.claimCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if waited := time.Since(started); waited < 1290*time.Millisecond || fake.claimCount() == 0 {
+		t.Errorf("claimed after %s (%d claims): it must wait for the file, written at 1.3s", waited, fake.claimCount())
+	}
+}
+
 func TestADeliveryGoesAheadWhenTheMarkerNeverShowsUp(t *testing.T) {
 	holder, err := Start([]string{"sh", "-c", "stty raw -echo; printf 'a different screen'; sleep 5"}, os.Environ(), "")
 	if err != nil {

@@ -41,6 +41,7 @@ const token = process.env.EGZO_TOKEN
 // and only its life cycle is the agent's state; sessions opened after it still work, and egzo does not count them.
 const ahp = process.env.EGZO_AHP === "1"
 const mainFile = (process.env.HOME || "/home/agent") + "/.egzo/main-session"
+const readyFile = (process.env.HOME || "/home/agent") + "/.egzo/opencode-ready"
 let main = null
 if (ahp) {
   try { main = readFileSync(mainFile, "utf8").trim() || null } catch {}
@@ -81,6 +82,8 @@ export default {
   id: "egzo",
   async setup(ctx) {
     // The plugin loading is the moment the TUI is up and waiting: OpenCode only creates a session when the first prompt is sent.
+    // It loads once OpenCode's server is up, which can be after the TUI drew its prompt box: egzo types nothing before this file is there.
+    try { mkdirSync(dirname(readyFile), { recursive: true }); writeFileSync(readyFile, "ready\n") } catch {}
     state("idle", { reason: "started" })
     await ctx.session.hook("prompt", (event) => mine(event) && state("working", { reason: "prompt", prompt: event.prompt?.text ?? "" }))
     const stop = new AbortController()
@@ -171,6 +174,7 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		},
 		Command:      command,
 		InterruptKey: "\x1b",
+		ReadyFile:    filepath.Join(opts.Home, ".egzo", "opencode-ready"),
 	}
 	endpoint := filepath.Join(opts.Home, AHPEndpointFile)
 	if !opts.AHP || opts.Exists == nil || !opts.Exists(OpenCodeAHPPlugin) {

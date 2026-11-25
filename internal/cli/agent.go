@@ -162,6 +162,7 @@ func runAgent(args []string) error {
 	command := args
 	environment := os.Environ()
 	interrupt := "\x03"
+	readyFile := ""
 
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -233,7 +234,7 @@ func runAgent(args []string) error {
 		if err := plan.Write(); err != nil {
 			return fmt.Errorf("prepare %s: %w", integration.Name(), err)
 		}
-		command, interrupt = plan.Command, plan.InterruptKey
+		command, interrupt, readyFile = plan.Command, plan.InterruptKey, plan.ReadyFile
 		for key, value := range plan.Env {
 			environment = append(environment, key+"="+value)
 		}
@@ -284,6 +285,7 @@ func runAgent(args []string) error {
 			InterruptKey: interrupt,
 			RequireRaw:   hasIntegration, // a known TUI: it is ready when it has taken the terminal over
 			ReadyMarkers: readyMarkers,
+			ReadyFile:    readyFile,
 			BeforeInject: ssh.Check,
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -44,6 +45,9 @@ type Delivery struct {
 	// not strand its messages.
 	ReadyMarkers []string
 	ReadyTimeout time.Duration
+	// ReadyFile is a file the harness writes once it can take a prompt (harness.Plan.ReadyFile): until it is there, or ReadyTimeout
+	// passed since the takeover, nothing is typed, whatever the screen shows. Empty means no such file.
+	ReadyFile string
 	// StuckAfter is how long the program's output may stay silent while the control sidecar still says
 	// the agent is working (a harness that reports its turns) before the agent is released: a harness
 	// that never reported the end of a turn (an interrupt with Esc, a crash of its reporter) would
@@ -193,6 +197,9 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 				if len(cfg.ReadyMarkers) > 0 && time.Since(rawSince) < cfg.ReadyTimeout && !drawn(h.Output(), cfg.ReadyMarkers) {
 					continue
 				}
+				if cfg.ReadyFile != "" && time.Since(rawSince) < cfg.ReadyTimeout && !exists(cfg.ReadyFile) {
+					continue
+				}
 				ready = true
 				if cfg.IdleSignal == "state" {
 					// A harness that reports its first state only at its first prompt (Codex's SessionStart) is idle once its
@@ -236,4 +243,9 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 			h.OpenAttach() // the task is typed: whoever waited comes in, and finds it as the first prompt
 		}
 	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

@@ -176,6 +176,10 @@ type Plan struct {
 	Dirs []string
 	// Remove are files to delete, if they are there: what an earlier run wrote and this one must not leave behind.
 	Remove []string
+	// ReadyFile is a file the harness writes once it can take a prompt; nothing is typed into it before the file is there (or the ready
+	// timeout passed). A TUI can draw its prompt box before the server behind it is up, and a line typed then is lost. Write removes it
+	// first, so only this run's harness makes it.
+	ReadyFile string
 	// Setup are commands run once the files are written, in order, before the harness starts. Each is best effort: one
 	// that fails is reported, and the harness starts anyway.
 	Setup [][]string
@@ -260,7 +264,10 @@ func Names() []string {
 
 // Write applies a plan's files and directories.
 func (p Plan) Write() error {
-	for _, path := range p.Remove {
+	for _, path := range append(append([]string{}, p.Remove...), p.ReadyFile) {
+		if path == "" {
+			continue
+		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", path, err)
 		}
