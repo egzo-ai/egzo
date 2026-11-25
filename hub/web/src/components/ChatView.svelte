@@ -2,7 +2,7 @@
   // The Rich UI: the chat of an agent spawned with it, live from its harness through the project's link. What is typed here is a prompt in
   // the agent's main session, as if typed in its terminal; Stop cancels the turn that runs. Someone who may only watch sees the chat and no box.
   import { chatURL } from "../lib/api";
-  import { apply, emptyChat, fromSnapshot, messages, running, type Chat } from "../lib/richchat";
+  import { apply, emptyChat, fromSnapshot, messages, newTurnId, running, type Chat } from "../lib/richchat";
 
   let { project, agent }: { project: string; agent: string } = $props();
 
@@ -81,7 +81,7 @@
     e.preventDefault();
     const text = draft.trim();
     if (!text || !chat.channel) return;
-    send(messages.prompt(chat.channel, text, crypto.randomUUID()));
+    send(messages.prompt(chat.channel, text, newTurnId()));
     draft = "";
   }
 

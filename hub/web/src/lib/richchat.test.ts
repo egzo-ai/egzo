@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { apply, emptyChat, fromSnapshot, messages, running } from "./richchat";
+import { apply, emptyChat, fromSnapshot, messages, newTurnId, running } from "./richchat";
 
 const T = "turn-1";
 
@@ -78,5 +78,19 @@ describe("the Rich UI chat", () => {
     // and a finished turn of a snapshot keeps its error part
     const later = fromSnapshot("c", { turns: [{ id: "a", message: { text: "hi" }, state: "error", responseParts: [{ kind: "error", error: { errorType: "APIError", message: "no key" } }] }] });
     expect(later.turns[0].parts).toEqual([{ kind: "error", id: "", content: "no key" }]);
+  });
+
+  it("makes a turn id without crypto.randomUUID, which a hub served over plain http does not have", () => {
+    const original = crypto.randomUUID;
+    try {
+      // @ts-expect-error: what a page that is not a secure context sees
+      delete Crypto.prototype.randomUUID;
+      Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+      const a = newTurnId(), b = newTurnId();
+      expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(a).not.toBe(b);
+    } finally {
+      Object.defineProperty(crypto, "randomUUID", { value: original, configurable: true });
+    }
   });
 });
