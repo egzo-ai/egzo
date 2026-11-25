@@ -71,7 +71,8 @@ def test_only_a_harness_with_an_ahp_mode_takes_it_and_nothing_is_made_for_one_wi
 
 
 def test_an_agent_spawned_in_ahp_mode_serves_ahp_inside_its_container(ahp, engine):
-    name = ahp.spawn("oc", "oc-ahp", "--ahp", timeout=900)
+    name = "oc-ahp"
+    ahp.ok("agent spawn", "oc", name, "--ahp", timeout=900)
     instance = engine.instance(ahp.name, name)
     assert instance.labels.get("ai.egzo.agent.ahp") == "1", "the instance keeps its mode, for the link and the hub"
     assert "EGZO_AHP=1" in instance.raw["Config"]["Env"]
@@ -136,8 +137,10 @@ def test_the_hub_reaches_the_chat_of_the_main_session_and_nothing_else(ahp, engi
     assert note and note["params"] == {"session": f"ahp-session:/{main}", "chat": chat}, got
     snapshot = answer_to(got, 2)
     assert snapshot and snapshot.get("result"), f"the main session's chat can be subscribed to: {snapshot}"
-    turns = snapshot["result"]["snapshot"]["state"]["turns"]
-    assert turns and turns[0]["message"]["text"].strip(), "the turn the message started in the TUI is in the chat"
+    # the turn is still running while OpenCode retries the model the proxy refuses, or it has ended: either way it is in the chat
+    state = snapshot["result"]["snapshot"]["state"]
+    turns = state["turns"] + ([state["activeTurn"]] if state.get("activeTurn") else [])
+    assert turns and turns[0]["message"]["text"].strip(), f"the turn the message started in the TUI is in the chat: {state}"
     for refused in (3, 4, 5):
         error = (answer_to(got, refused) or {}).get("error")
         assert error and error["message"].startswith("egzo:"), f"request {refused} is refused by the link: {answer_to(got, refused)}"

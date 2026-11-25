@@ -2,7 +2,7 @@
 # Build: docker build --build-arg BASE_IMAGE=ghcr.io/egzo-ai/egzo-harness-base:<version> -t egzo-harness-opencode harness/opencode
 # The base image (harness/base) has git, the browser and the egzo entrypoint; this one adds the TUI.
 ARG BASE_IMAGE=ghcr.io/egzo-ai/egzo-harness-base:latest
-ARG OPENCODE_VERSION=2.2.7
+ARG OPENCODE_VERSION=2.2.6
 # AHP mode (`egzo agent spawn --ahp`): egzo's fork of the opencode-ahp plugin, pinned to a commit. It lands in
 # /usr/local/lib/node_modules/opencode-ahp, where the harness looks for it (harness.OpenCodeAHPPlugin); an image without it has no AHP mode.
 ARG OPENCODE_AHP_COMMIT=cbe1bccd12632d3d40829367110af052413d1a9c
