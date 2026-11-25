@@ -68,4 +68,15 @@ describe("the Rich UI chat", () => {
     expect(messages.cancel("c", T).params.action).toEqual({ type: "chat/turnCancelled", turnId: T });
     expect(messages.initialize().params.protocolVersions).toEqual(["1.0.0"]);
   });
+
+  it("shows why a turn failed, as AHP says it: an error part with the harness's message", () => {
+    // what opencode-ahp sends when OpenCode's execution fails (ChatErrorAction: the part to append, then the turn is final)
+    let chat = apply(emptyChat(), { type: "chat/turnStarted", turnId: T, message: { text: "hi" } });
+    chat = apply(chat, { type: "chat/error", turnId: T, duration: 3, part: { kind: "error", error: { errorType: "APIError", message: "the proxy refused api.anthropic.com" } } });
+    expect(chat.turns[0].state).toBe("error");
+    expect(chat.turns[0].parts).toEqual([{ kind: "error", id: "error", content: "the proxy refused api.anthropic.com" }]);
+    // and a finished turn of a snapshot keeps its error part
+    const later = fromSnapshot("c", { turns: [{ id: "a", message: { text: "hi" }, state: "error", responseParts: [{ kind: "error", error: { errorType: "APIError", message: "no key" } }] }] });
+    expect(later.turns[0].parts).toEqual([{ kind: "error", id: "", content: "no key" }]);
+  });
 });
