@@ -159,3 +159,49 @@ def test_the_verb_is_refused_for_an_agent_not_in_ahp_mode(ahp, fake_hub):
         ahp.spawn("oc", "oc-plain", timeout=900)
     answer = fake_hub.verb(ahp.name, "ahp", Agent="oc-plain", Input=json.dumps(INIT), Seconds=3)
     assert "not spawned in AHP mode" in (answer.get("error") or ""), answer
+
+
+def ask_hub(ahp, fake_hub, name, *lines, read_only=False, seconds=6):
+    """What the hub gets back, through the link's verb ahp, for lines of JSON sent a second apart."""
+    answer = fake_hub.verb(ahp.name, "ahp", Agent=name, Input="\n".join(json.dumps(l) for l in lines), Seconds=seconds + len(lines), ReadOnly=read_only)
+    assert not answer.get("error"), answer["error"]
+    return messages(answer["result"])
+
+
+def sessions_in(engine, project, name):
+    """Every session the agent's AHP server knows, unfiltered: what `egzo agent ahp` answers inside the container."""
+    found = messages(bridge(engine, project, name, INIT, {"jsonrpc": "2.0", "id": 3, "method": "listSessions", "params": {}}, seconds=3).stdout)
+    answer = answer_to(found, 3) or {}
+    return [item["resource"] for item in (answer.get("result") or {}).get("items", [])]
+
+
+def test_an_agent_spawned_in_ahp_mode_without_a_task_takes_its_first_prompt_from_the_hub(ahp, engine, fake_hub):
+    # Nothing is typed into a new agent that has no task, and OpenCode makes a session only for a first prompt: the main session is made
+    # when the agent starts, so the chat has one to show and to send the first prompt to. The TUI is on that same session.
+    name = "oc-quiet"
+    ahp.ok("agent spawn", "oc", name, "--ahp", timeout=900)
+    main = eventually(lambda: in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session 2>/dev/null").stdout.strip(), seconds=120)
+    assert main.startswith("ses"), "an agent in AHP mode has its main session before anybody types"
+    chat = f"ahp-chat:/{main}"
+    eventually(lambda: f"ahp-session:/{main}" in sessions_in(engine, ahp, name), seconds=60)
+
+    got = ask_hub(ahp, fake_hub, name, INIT,
+                  {"jsonrpc": "2.0", "id": 2, "method": "subscribe", "params": {"channel": chat}},
+                  {"jsonrpc": "2.0", "method": "dispatchAction", "params": {"channel": chat, "clientSeq": 1, "action": {
+                      "type": "chat/turnStarted", "turnId": "hub-first", "message": {"text": "say hello", "origin": {"kind": "user"}}}}},
+                  seconds=10)
+    assert (answer_to(got, 2) or {}).get("result"), f"the main session's chat can be subscribed to before any prompt: {answer_to(got, 2)}"
+    started = [m for m in got if m.get("method") == "action" and m["params"]["action"].get("type") == "chat/turnStarted"]
+    assert any(m["params"]["action"].get("turnId") == "hub-first" for m in started), f"the hub's first prompt starts a turn: {got}"
+
+    # what is typed into the TUI is a turn of the same session: OpenCode made no other one
+    ahp.ok("message send", name, "and one from the terminal")
+    time.sleep(20)  # typed once the agent is idle and the terminal quiet (human_quiet 1s), and run
+    assert sessions_in(engine, ahp, name) == [f"ahp-session:/{main}"], "the TUI continues the main session"
+
+    # a restart keeps it: the TUI comes back on it
+    ahp.ok("agent stop", name, timeout=300)
+    ahp.ok("agent start", name, timeout=300)
+    eventually(lambda: f"ahp-session:/{main}" in sessions_in(engine, ahp, name), seconds=120)
+    assert in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session").stdout.strip() == main
+    assert sessions_in(engine, ahp, name) == [f"ahp-session:/{main}"]
