@@ -194,9 +194,9 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 	}
 	token := newAHPToken()
 	// The main session is named now, not when OpenCode makes its first session: OpenCode makes one for a first prompt only, and an agent
-	// with no task gets none until someone types, so its chat would have nothing to show and nowhere to send the first prompt. egzo's plugin
-	// makes the session under this name once OpenCode's server is up, in the agent's directory, and the TUI starts on it (-s), so the
-	// TUI and the chat are the same session. The name is kept in the home: a restart continues the same session.
+	// with no task gets none until someone types, so its chat would have nothing to show and nowhere to send the first prompt. The plan's
+	// setup makes the session under this name, in the agent's directory, before the TUI starts on it (-s), so the TUI and the chat are the
+	// same session from the start (egzo's plugin makes it too if it is still missing). The name is kept in the home: a restart continues it.
 	mainFile := filepath.Join(opts.Home, ".egzo", "main-session")
 	main := ""
 	if opts.ReadFile != nil {
@@ -208,7 +208,20 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		main = newOpenCodeSession()
 		plan.Files[mainFile] = File{Content: []byte(main + "\n"), Mode: 0o644}
 	}
-	plan.Command = onSession(plan.Command, main)
+	if command := onSession(plan.Command, main); len(command) != len(plan.Command) {
+		plan.Command = command
+		// The TUI shows the session it is started on only if the session is there when it starts: one made after stays off its screen
+		// until someone types. So the background server the TUI would start is started first, with the same environment (the plugin's
+		// settings below), and the main session is made in it; OpenCode takes making a session that is there as a no-op.
+		session := map[string]any{"id": main}
+		if opts.Workdir != "" {
+			session["location"] = map[string]any{"directory": opts.Workdir}
+		}
+		body, _ := json.Marshal(session)
+		plan.Setup = append(plan.Setup,
+			[]string{"opencode", "service", "start"},
+			[]string{"sh", "-c", `exec opencode api POST /api/session -d "$1" >/dev/null`, "sh", string(body)})
+	}
 	plan.Env = map[string]string{"OPENCODE_CONFIG_CONTENT": openCodeAHPConfig(token), "EGZO_AHP_DIRECTORY": opts.Workdir}
 	described, _ := json.Marshal(AHPEndpoint{
 		URL:         fmt.Sprintf("ws://127.0.0.1:%d%s", openCodeAHPPort, openCodeAHPPath),

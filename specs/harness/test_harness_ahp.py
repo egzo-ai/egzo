@@ -12,8 +12,10 @@ only watches. The images are the real ones; no model answers (the turn a message
 a turn to exist."""
 
 import json
+import re
 import time
 
+import pexpect
 import pytest
 
 from hubkit import eventually
@@ -117,11 +119,18 @@ def test_the_hub_reaches_the_chat_of_the_main_session_and_nothing_else(ahp, engi
     if "oc-ahp" not in ahp.instance_names():
         ahp.spawn("oc", "oc-ahp", "--ahp", timeout=900)
     name = "oc-ahp"
-    # the TUI creates the agent's first session when a prompt is typed into it: a message does that
+    # a message is typed into the TUI, on the agent's main session, once the agent is idle and its terminal quiet: its turn is in the chat
     ahp.ok("message send", name, "say hello")
     main = eventually(lambda: in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session 2>/dev/null").stdout.strip(), seconds=120)
-    assert main.startswith("ses"), "egzo's OpenCode plugin keeps the first session as the agent's main session"
+    assert main.startswith("ses"), "egzo keeps the agent's main session"
     chat = f"ahp-chat:/{main}"
+
+    def typed_turn_in_chat():
+        found = messages(bridge(engine, ahp, name, INIT, {"jsonrpc": "2.0", "id": 2, "method": "subscribe", "params": {"channel": chat}}, seconds=3).stdout)
+        state = ((answer_to(found, 2) or {}).get("result") or {}).get("snapshot", {}).get("state", {})
+        return state.get("turns") or state.get("activeTurn")
+
+    eventually(typed_turn_in_chat, seconds=120)
 
     def ask(*lines, read_only=False, seconds=6):
         answer = fake_hub.verb(ahp.name, "ahp", Agent=name, Input="\n".join(json.dumps(l) for l in lines), Seconds=seconds + len(lines), ReadOnly=read_only)
@@ -175,6 +184,22 @@ def sessions_in(engine, project, name):
     return [item["resource"] for item in (answer.get("result") or {}).get("items", [])]
 
 
+def tui_text(project, name, seconds=8):
+    """What the agent's TUI shows, read through `agent attach --read-only` for a few seconds, as plain text."""
+    client = project.pty("agent attach --read-only", name, dimensions=(40, 140), timeout=60)
+    shown = b""
+    deadline = time.time() + seconds
+    try:
+        while time.time() < deadline:
+            shown += client.read_nonblocking(65536, timeout=1)
+    except (pexpect.TIMEOUT, pexpect.EOF):
+        pass
+    client.send(b"\x1d")
+    client.expect(pexpect.EOF)
+    text = re.sub(rb"\x1b\[[0-9;?<>=]*[A-Za-z~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b.", b" ", shown).decode("utf-8", "replace")
+    return re.sub(r"\s+", " ", text)
+
+
 def test_an_agent_spawned_in_ahp_mode_without_a_task_takes_its_first_prompt_from_the_hub(ahp, engine, fake_hub):
     # Nothing is typed into a new agent that has no task, and OpenCode makes a session only for a first prompt: the main session is made
     # when the agent starts, so the chat has one to show and to send the first prompt to. The TUI is on that same session.
@@ -193,6 +218,9 @@ def test_an_agent_spawned_in_ahp_mode_without_a_task_takes_its_first_prompt_from
     assert (answer_to(got, 2) or {}).get("result"), f"the main session's chat can be subscribed to before any prompt: {answer_to(got, 2)}"
     started = [m for m in got if m.get("method") == "action" and m["params"]["action"].get("type") == "chat/turnStarted"]
     assert any(m["params"]["action"].get("turnId") == "hub-first" for m in started), f"the hub's first prompt starts a turn: {got}"
+    # and the terminal shows it: the TUI is on the main session, not on its welcome screen
+    shown = eventually(lambda: (lambda t: t if "say hello" in t else None)(tui_text(ahp, name)), seconds=60)
+    assert shown, "the TUI shows the turn the hub started: it is on the main session"
 
     # what is typed into the TUI is a turn of the same session: OpenCode made no other one
     ahp.ok("message send", name, "and one from the terminal")
