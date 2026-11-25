@@ -1077,7 +1077,8 @@ What it shows is in [docs/hub.md](docs/hub.md). The decisions behind it:
   and the chat share the session); `egzo agent ahp` bridges it to stdio, and the link carries it as the verb `ahp`, behind a filter that
   keeps the main session's chat and nothing else. Each harness declares whether it has an AHP mode, and one thing about it: whether the
   terminal stays. One session per agent, by ignoring the others: the main session is named when the agent first starts, the harness makes it then and its
-  TUI starts on it, so the chat has a session before anybody types. Below the hub's
+  TUI starts on it (OpenCode's TUI shows a session it is started on only if the session is there before it), so the chat has a session
+  before anybody types. Below the hub's
   chat interface, the code says "AHP mode", never "Rich UI". Claude Code (AHP emulated over its hooks, as a separate helper) and an ACP
   fallback (no terminal) come later.
 - What is rarely needed (health, the spec) is under **Advanced**.

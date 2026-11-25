@@ -110,3 +110,30 @@ func TestOpenCodePluginMakesTheMainSessionBeforeItSaysItIsReady(t *testing.T) {
 		t.Errorf("the plugin makes the main session (ctx.session.create) before it writes the ready file: create at %d, ready at %d", create, ready)
 	}
 }
+
+// The TUI shows a session it is started on (-s) only if the session is there when it starts: one made after stays off its screen until
+// someone types in it. So the background server is started and the main session made before the TUI, by the plan's setup commands, with
+// the harness's environment (the AHP plugin's settings among it).
+func TestOpenCodeInAHPModeMakesTheMainSessionBeforeTheTUIStarts(t *testing.T) {
+	o := ahpOptions(t)
+	plan, _ := openCode{}.Plan(o, nil)
+	main := plan.Command[2]
+	if len(plan.Setup) != 2 || !reflect.DeepEqual(plan.Setup[0], []string{"opencode", "service", "start"}) {
+		t.Fatalf("setup = %v: the background server first", plan.Setup)
+	}
+	create := strings.Join(plan.Setup[1], " ")
+	if !strings.Contains(create, "opencode api POST /api/session") || !strings.Contains(create, `"id":"`+main+`"`) ||
+		!strings.Contains(create, `"directory":"/workspace/scratch"`) {
+		t.Errorf("setup makes the main session %s in the agent's directory: %v", main, plan.Setup[1])
+	}
+	// a restart makes it again, which OpenCode takes as a no-op for a session that is there
+	again, _ := openCode{}.Plan(o, nil)
+	if len(again.Setup) != 2 {
+		t.Errorf("after a restart, setup = %v", again.Setup)
+	}
+	// a command that is not the TUI on the main session gets no setup
+	other, _ := openCode{}.Plan(ahpOptions(t), []string{"opencode", "--continue"})
+	if len(other.Setup) != 0 {
+		t.Errorf("setup = %v for a command that picks its own session", other.Setup)
+	}
+}

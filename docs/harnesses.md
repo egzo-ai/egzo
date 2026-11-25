@@ -163,8 +163,9 @@ agents:
 [opencode-ahp](https://github.com/egzo-ai/opencode-ahp) plugin, which serves the agent's chat over the Agent Host Protocol inside
 OpenCode's own server, on the container's loopback, with a token made anew at each start. It comes through `OPENCODE_CONFIG_CONTENT`:
 your `opencode.json` is left alone, and its own plugins still load. The TUI stays, on the same sessions. The agent has one main session,
-named when it first starts and kept in `~/.egzo/main-session`: egzo's plugin makes it as soon as OpenCode's server is up and the TUI
-starts on it (`opencode -s`), so an agent spawned without a task has a chat to send its first prompt to. A restart continues it. In AHP
+named when it first starts and kept in `~/.egzo/main-session`: egzo starts OpenCode's background server, makes the session in it, then
+starts the TUI on it (`opencode -s`), so an agent spawned without a task has a chat to send its first prompt to, and the TUI shows what is
+said there. A restart continues it. In AHP
 mode the plugin reports the agent's state from that session only. A template whose command already picks a session (`-s`,
 `--continue`) keeps its own choice.
 `egzo agent ahp`, inside the container, carries the chat over stdin and stdout; the project's link runs it for the hub
