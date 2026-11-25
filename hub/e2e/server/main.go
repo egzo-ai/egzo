@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/auth"
@@ -99,7 +100,7 @@ func run(scenario string) error {
 	go http.Serve(previewListener, preview.New(h.Previews(), app.PreviewGate(), preview.Options{Domain: domain, Scheme: "http"}, nil))
 	go h.Run(ctx)
 
-	w := &world{hub: h, db: db, address: address, projects: map[string]*fake.Engine{}}
+	w := &world{hub: h, db: db, address: address, projects: map[string]*fake.Engine{}, ahps: map[string]*scriptedAHP{}}
 	machines := []string{"local"}
 	if scenario == "multi" {
 		machines = append(machines, "lab")
@@ -123,6 +124,7 @@ type world struct {
 	db       *store.Store
 	address  string
 	projects map[string]*fake.Engine
+	ahps     map[string]*scriptedAHP // the AHP servers of agents in AHP mode, by machine/project/agent
 }
 
 // dial is a project's link reaching the hub with a code, or with its key alone: it waits until the hub holds the connection or has told
@@ -336,6 +338,28 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			e.Release()
 		case "fail-next": // the next spawn, start, stop or removal fails, saying c.State
 			e.FailNext(c.State)
+		case "rich-ui": // the templates of c.Text (comma separated) have an AHP mode: the spawn form offers the Rich UI for them
+			published, _ := e.Published(ctx)
+			published.AHP = map[string]links.AHPMode{}
+			for _, t := range strings.Split(c.Text, ",") {
+				published.AHP[strings.TrimSpace(t)] = links.AHPMode{Terminal: c.State != "no-terminal"}
+			}
+			e.SetPublished(published)
+		case "rich-agent": // an agent spawned in AHP mode (a new one, or one the hub spawned), and its AHP server
+			a, ok := agentOf(e, c.Agent)
+			if !ok {
+				a = links.Agent{Name: c.Agent, ID: newInstanceID(), Template: "coder", State: "running", Activity: "idle", Actor: orDefault(c.Actor, "operator"), Created: time.Now()}
+			}
+			a.AHP = true
+			e.SetAgent(a)
+			server := newScriptedAHP("ses_" + c.Agent)
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent] = server
+			e.ServeAHP(c.Agent, server.serve)
+		case "ahp-say": // a prompt typed into the agent's terminal: its turn shows in the chat
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].say(c.Text)
+		case "ahp-heard": // what clients sent the agent's AHP server, after the link's filter
+			json.NewEncoder(rw).Encode(w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].heardLines())
+			return
 		case "calls":
 			json.NewEncoder(rw).Encode(e.Calls())
 			return
@@ -398,7 +422,7 @@ func seedFiles(e *fake.Engine) error {
 	}
 	for path, text := range map[string]string{
 		filepath.Join(docs, "notes", "plan.md"): "# The plan\n", filepath.Join(docs, "report.html"): "<script>alert(1)</script>",
-		filepath.Join(worktree, "wip.txt"): "not committed\n",
+		filepath.Join(worktree, "wip.txt"):       "not committed\n",
 		filepath.Join(docs, "notes", "image.md"): "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", // a PNG named .md
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
