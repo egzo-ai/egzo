@@ -177,7 +177,8 @@ container, on its loopback. The link carries it to the hub; AHP carries chat onl
   `ai.egzo.agent.ahp`, and the project's agents say `AHP`.
 - **`ahp`** (`Agent`, `ReadOnly`) runs `egzo agent ahp` in the agent's container, as `attach` runs `egzo agent attach`: no new port,
   no new path into the container. After the `Done`, the stream is lines of JSON both ways: AHP's JSON-RPC 2.0 messages, and egzo's
-  notification of the main session, `x-egzo/mainSession` (`{"session", "chat"}`), sent when the agent has one and whenever it changes.
+  notification of the main session, `x-egzo/mainSession` (`{"session", "chat"}`), sent once the agent's AHP server lists it (so it can be
+  subscribed to at once) and whenever it changes.
 - **The filter.** The link lets through only what concerns the main session's chat: `initialize`, `reconnect`, `ping`, `subscribe` and
   `unsubscribe` of the root channel and of the main session and its chat, `listSessions` (its answer cut to the main session),
   `fetchTurns` of the main chat, and `dispatchAction` in the main chat of a prompt (`chat/turnStarted`), a cancel (`chat/turnCancelled`)

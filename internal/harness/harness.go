@@ -46,6 +46,8 @@ type Options struct {
 	AHP bool
 	// Exists says whether a path is in the container (os.Stat); nil means nothing is.
 	Exists func(path string) bool
+	// ReadFile reads a file of the container (os.ReadFile): what an earlier run of the harness left. nil reads nothing.
+	ReadFile func(path string) ([]byte, error)
 	// ControlURL is the control sidecar's agent API, and Authorization the Basic credentials of the agent.
 	ControlURL    string
 	Authorization string

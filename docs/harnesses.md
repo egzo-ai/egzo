@@ -162,8 +162,11 @@ agents:
 `egzo agent spawn open --ahp` (or **Rich UI** in the hub) starts OpenCode with egzo's fork of the
 [opencode-ahp](https://github.com/egzo-ai/opencode-ahp) plugin, which serves the agent's chat over the Agent Host Protocol inside
 OpenCode's own server, on the container's loopback, with a token made anew at each start. It comes through `OPENCODE_CONFIG_CONTENT`:
-your `opencode.json` is left alone, and its own plugins still load. The TUI stays, on the same sessions. The agent's first session is its
-main session: egzo's plugin keeps its id in `~/.egzo/main-session`, and in AHP mode reports the agent's state from that session only.
+your `opencode.json` is left alone, and its own plugins still load. The TUI stays, on the same sessions. The agent has one main session,
+named when it first starts and kept in `~/.egzo/main-session`: egzo's plugin makes it as soon as OpenCode's server is up and the TUI
+starts on it (`opencode -s`), so an agent spawned without a task has a chat to send its first prompt to. A restart continues it. In AHP
+mode the plugin reports the agent's state from that session only. A template whose command already picks a session (`-s`,
+`--continue`) keeps its own choice.
 `egzo agent ahp`, inside the container, carries the chat over stdin and stdout; the project's link runs it for the hub
 ([AHP mode](reference/hub-link.md#ahp-mode)). The stock image carries the plugin; an image without it has no AHP server, and
 `egzo agent ahp` says so. A harness without an AHP mode refuses `--ahp`.
