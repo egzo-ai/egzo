@@ -44,13 +44,18 @@ function text(value: Json): string {
   return "";
 }
 
+/** A tool's name, then what it says it does: once, when that is only its name again. */
+function toolTitle(name: string, said: string): string {
+  return said && said !== name ? (name ? `${name}: ${said}` : said) : name;
+}
+
 function toolOf(state: Json): ToolCall {
   const status = state?.status;
   const done = status === "completed";
   return {
     id: String(state?.toolCallId ?? ""),
     name: String(state?.toolName ?? ""),
-    title: [state?.displayName || state?.toolName, text(state?.invocationMessage)].filter(Boolean).join(": "),
+    title: toolTitle(String(state?.displayName || state?.toolName || ""), text(state?.invocationMessage)),
     status: status === "cancelled" ? "cancelled" : done ? (state?.success === false ? "failed" : "done") : "running",
     outcome: done ? text(state?.pastTenseMessage) : "",
   };
@@ -147,7 +152,7 @@ export function apply(chat: Chat, action: Json): Chat {
         withTool(t, String(action.toolCallId), (tool) => {
           const said = text(action.invocationMessage);
           const base = tool.title.split(": ")[0] || tool.name;
-          return { ...tool, title: said ? `${base}: ${said}` : base };
+          return { ...tool, title: toolTitle(base, said) };
         }),
       );
     case "chat/toolCallComplete":

@@ -93,4 +93,14 @@ describe("the Rich UI chat", () => {
       Object.defineProperty(crypto, "randomUUID", { value: original, configurable: true });
     }
   });
+
+  it("names a tool once when what it says it does is only its name, as OpenCode's MCP tools do", () => {
+    let chat = apply(emptyChat(), { type: "chat/turnStarted", turnId: T, message: { text: "hi" } });
+    chat = apply(chat, { type: "chat/toolCallStart", turnId: T, toolCallId: "c1", toolName: "egzo_get_message", displayName: "Egzo_get_message" });
+    chat = apply(chat, { type: "chat/toolCallReady", turnId: T, toolCallId: "c1", invocationMessage: "Egzo_get_message" });
+    expect(chat.turns[0].parts[0]).toMatchObject({ kind: "tool", tool: { title: "Egzo_get_message" } });
+    const later = fromSnapshot("c", { turns: [{ id: "a", message: { text: "hi" }, state: "complete", responseParts: [
+      { kind: "toolCall", toolCall: { toolCallId: "c", toolName: "egzo_status", displayName: "Egzo_status", invocationMessage: "Egzo_status", status: "completed" } }] }] });
+    expect(later.turns[0].parts[0]).toMatchObject({ kind: "tool", tool: { title: "Egzo_status" } });
+  });
 });
