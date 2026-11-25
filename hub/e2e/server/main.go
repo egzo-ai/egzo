@@ -353,6 +353,9 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			a.AHP = true
 			e.SetAgent(a)
 			server := newScriptedAHP("ses_" + c.Agent)
+			if c.State == "late" { // its server registers the main session a moment after egzo names it
+				server.refuse = 2
+			}
 			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent] = server
 			e.ServeAHP(c.Agent, server.serve)
 		case "ahp-say": // a prompt typed into the agent's terminal: its turn shows in the chat

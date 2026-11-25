@@ -191,3 +191,16 @@ def test_a_prompt_works_on_a_hub_served_over_plain_http(single_hub, page):
     expect(turn.locator(".prompt")).to_have_text("Read the README")
     expect(turn).to_have_attribute("data-state", "complete")
     assert [a["type"] for a in dispatched(hub, "lan")] == ["chat/turnStarted"]
+
+
+def test_the_chat_waits_for_the_harness_to_know_the_main_session(single_hub, page):
+    # opencode-ahp registers a session the TUI made 250 ms after it was made, and egzo may name it the main one before that: a subscribe
+    # then is refused, and the chat tries again rather than staying empty
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="early", state="late")
+    open_chat(page, hub, "early")
+    expect(chat(page).get_by_text("It is a recursive descent parser.")).to_be_visible(timeout=10000)
+    expect(chat(page).get_by_role("alert")).to_have_count(0)
+    subscribes = [m for m in heard(hub, "early") if m.get("method") == "subscribe"]
+    assert len(subscribes) == 3, subscribes
