@@ -14,7 +14,7 @@ FROM ${EGZO_IMAGE} AS egzo
 # Ubuntu 26.04: git >= 2.48 (egzo makes worktrees with relative links, `git worktree add --relative-paths`, and sets the
 # relativeWorktrees repository extension, which an older git refuses), a current Python, and the platform Playwright lists for
 # both architectures. Python comes with venv: an agent installs a project's packages into an environment of its own.
-FROM docker.io/library/ubuntu:26.04@sha256:065aa8626841f16057b78b027b464cd59c4fac36c204c72dcbf48d66f5fa8a96
+FROM docker.io/library/ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl git jq openssh-client procps python3 python3-venv ripgrep xz-utils \
