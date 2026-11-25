@@ -4,7 +4,9 @@
 package ahp
 
 import (
+	"bytes"
 	"encoding/json"
+	"regexp"
 	"sync"
 )
 
@@ -19,8 +21,9 @@ type Filter struct {
 
 	mu   sync.Mutex
 	main MainSession
-	// lists are the ids of listSessions the client asked: their answers are cut down to the main session.
-	lists map[string]bool
+	// pending are the requests the client sent on that the server has not answered, by their id (idKey): the method of each. The answer
+	// to a listSessions is cut down to the main session, and two requests cannot share an id, or one's answer would take the other's cut.
+	pending map[string]string
 }
 
 // The chat actions a client may dispatch: start a turn (send a prompt), cancel one, and set or clear a pending message (steering, queueing).
@@ -34,13 +37,54 @@ var clientActions = map[string]bool{
 // The commands a client may send, whatever their params; the rest are checked one by one in FromClient, or refused.
 var freeCommands = map[string]bool{"ping": true, "reconnect": true}
 
+// message is a JSON-RPC message read as the agent's AHP server reads it, with JSON.parse: names are exact, and of two equal names the last
+// counts. Go's decoder into a struct would match "Method" or "METHOD" too, so a line could say one method to the filter and another to the
+// server. Each object the filter looks into is read into a map, which keeps names as they are and the last of two equal ones.
 type message struct {
-	JSONRPC string          `json:"jsonrpc,omitempty"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   json.RawMessage `json:"error,omitempty"`
+	ID     json.RawMessage
+	Method string
+	Params map[string]json.RawMessage
+	Result json.RawMessage
+	fields map[string]json.RawMessage
+}
+
+func parse(line []byte) (message, bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(line, &fields) != nil || fields == nil {
+		return message{}, false
+	}
+	m := message{ID: fields["id"], Method: stringOf(fields["method"]), Result: fields["result"], fields: fields}
+	_ = json.Unmarshal(fields["params"], &m.Params)
+	return m, true
+}
+
+// field reads one name of an object exactly, as JSON.parse would.
+func field(raw json.RawMessage, name string) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return nil
+	}
+	return fields[name]
+}
+
+// canonicalInteger is how JSON.stringify writes a safe integer: what a number id must look like to come back from the server as it went.
+var canonicalInteger = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,14})$`)
+
+// idKey is a request's id as the server will echo it: a string by its value (escapes do not count), an integer as JSON.stringify writes
+// it. ok is false for an id the filter cannot match its answer to (1.0, 1e3, an object), which it refuses; a notification has the key "".
+func idKey(raw json.RawMessage) (key string, ok bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", true
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return "s:" + s, true
+	}
+	if canonicalInteger.Match(raw) {
+		return "n:" + string(raw), true
+	}
+	return "", false
 }
 
 // errNotAllowed is the JSON-RPC error a refused command gets: method not found, as far as the client can tell.
@@ -49,8 +93,8 @@ const errNotAllowed = -32601
 // FromClient decides about a line from the hub's client. It returns the line to send on to the server, or, for a refused request, nil and
 // the error to answer the client with (nil for a refused notification, which gets nothing).
 func (f *Filter) FromClient(line []byte) (forward []byte, reply []byte) {
-	var m message
-	if json.Unmarshal(line, &m) != nil || m.Method == "" {
+	m, ok := parse(line)
+	if !ok || m.Method == "" {
 		return nil, nil // not a request: a client has nothing else to say
 	}
 	refuse := func(why string) ([]byte, []byte) {
@@ -60,86 +104,95 @@ func (f *Filter) FromClient(line []byte) (forward []byte, reply []byte) {
 		answer, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": errNotAllowed, "message": "egzo: " + why}})
 		return nil, answer
 	}
-	var params map[string]json.RawMessage
-	_ = json.Unmarshal(m.Params, &params)
-	channel := stringOf(params["channel"])
+	key, ok := idKey(m.ID)
+	if !ok {
+		return refuse("an id is a string or an integer")
+	}
+	if why := f.allowed(m); why != "" {
+		return refuse(why)
+	}
+	if key != "" {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if _, taken := f.pending[key]; taken {
+			return refuse("that id is in use by a request not answered yet")
+		}
+		if f.pending == nil {
+			f.pending = map[string]string{}
+		}
+		f.pending[key] = m.Method
+	}
+	return line, nil
+}
+
+// allowed says why the client may not send a request, or "" when it may.
+func (f *Filter) allowed(m message) string {
+	channel := stringOf(m.Params["channel"])
 	switch {
 	case freeCommands[m.Method]:
-		return line, nil
+		return ""
 	case m.Method == "initialize":
 		if channel != RootChannel {
-			return refuse("initialize targets " + RootChannel)
+			return "initialize targets " + RootChannel
 		}
 		var initial []string
-		if raw, ok := params["initialSubscriptions"]; ok && json.Unmarshal(raw, &initial) != nil {
-			return refuse("initialSubscriptions is a list of channels")
+		if raw, ok := m.Params["initialSubscriptions"]; ok && json.Unmarshal(raw, &initial) != nil {
+			return "initialSubscriptions is a list of channels"
 		}
 		for _, uri := range initial {
 			if !f.readable(uri) {
-				return refuse("only the agent's main session can be subscribed to")
+				return "only the agent's main session can be subscribed to"
 			}
 		}
-		return line, nil
+		return ""
 	case m.Method == "subscribe" || m.Method == "unsubscribe":
 		if !f.readable(channel) {
-			return refuse("only the agent's main session can be subscribed to")
+			return "only the agent's main session can be subscribed to"
 		}
-		return line, nil
+		return ""
 	case m.Method == "listSessions":
-		if len(m.ID) > 0 {
-			f.mu.Lock()
-			if f.lists == nil {
-				f.lists = map[string]bool{}
-			}
-			f.lists[string(m.ID)] = true
-			f.mu.Unlock()
-		}
-		return line, nil
+		return ""
 	case m.Method == "fetchTurns":
 		if !f.isMainChat(channel) {
-			return refuse("only the main session's chat")
+			return "only the main session's chat"
 		}
-		return line, nil
+		return ""
 	case m.Method == "dispatchAction":
 		if f.ReadOnly {
-			return refuse("read-only: this client watches the chat")
+			return "read-only: this client watches the chat"
 		}
-		var action struct {
-			Type string `json:"type"`
+		if !f.isMainChat(channel) || !clientActions[stringOf(field(m.Params["action"], "type"))] {
+			return "only prompts, cancels and pending messages in the main session's chat"
 		}
-		_ = json.Unmarshal(params["action"], &action)
-		if !f.isMainChat(channel) || !clientActions[action.Type] {
-			return refuse("only prompts, cancels and pending messages in the main session's chat")
-		}
-		return line, nil
+		return ""
 	}
-	return refuse(m.Method + " is not available through egzo")
+	return m.Method + " is not available through egzo"
 }
 
 // FromServer decides about a line from the agent's AHP server, or from the bridge: what the client may see. It returns the line to send
 // on, possibly cut down, or nil. Notes of the main session update the filter.
 func (f *Filter) FromServer(line []byte) []byte {
-	var m message
-	if json.Unmarshal(line, &m) != nil {
+	m, ok := parse(line)
+	if !ok {
 		return nil
 	}
 	if m.Method == "" {
 		// an answer: a listSessions the client asked is cut down to the main session
+		key, _ := idKey(m.ID)
 		f.mu.Lock()
-		list := f.lists[string(m.ID)]
-		delete(f.lists, string(m.ID))
+		method := f.pending[key]
+		delete(f.pending, key)
 		f.mu.Unlock()
-		if list && len(m.Result) > 0 {
+		if method == "listSessions" && len(m.Result) > 0 {
 			return f.cutList(m)
 		}
 		return line
 	}
-	var params map[string]json.RawMessage
-	_ = json.Unmarshal(m.Params, &params)
+	params := m.Params
 	switch m.Method {
 	case MainSessionMethod:
-		var main MainSession
-		if json.Unmarshal(m.Params, &main) != nil || main.Session == "" || main.Chat == "" {
+		main := MainSession{Session: stringOf(params["session"]), Chat: stringOf(params["chat"])}
+		if main.Session == "" || main.Chat == "" {
 			return nil
 		}
 		f.mu.Lock()
@@ -147,13 +200,7 @@ func (f *Filter) FromServer(line []byte) []byte {
 		f.mu.Unlock()
 		return line
 	case "root/sessionAdded":
-		var added struct {
-			Summary struct {
-				Resource string `json:"resource"`
-			} `json:"summary"`
-		}
-		_ = json.Unmarshal(m.Params, &added)
-		if !f.isMainSession(added.Summary.Resource) {
+		if !f.isMainSession(stringOf(field(params["summary"], "resource"))) {
 			return nil
 		}
 		return line
@@ -194,7 +241,7 @@ func (f *Filter) isMainChat(uri string) bool {
 
 func (f *Filter) cutList(m message) []byte {
 	var result map[string]json.RawMessage
-	if json.Unmarshal(m.Result, &result) != nil {
+	if json.Unmarshal(m.Result, &result) != nil || result == nil {
 		return nil
 	}
 	var items []map[string]json.RawMessage
@@ -207,9 +254,7 @@ func (f *Filter) cutList(m message) []byte {
 	}
 	result["items"], _ = json.Marshal(kept)
 	delete(result, "nextCursor")
-	m.Result, _ = json.Marshal(result)
-	m.JSONRPC = "2.0"
-	out, _ := json.Marshal(m)
+	out, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
 	return out
 }
 
