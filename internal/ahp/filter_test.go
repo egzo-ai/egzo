@@ -140,3 +140,59 @@ func TestSessionURIs(t *testing.T) {
 		t.Fatal("ids")
 	}
 }
+
+// The plugin reads its messages with JSON.parse, where names are exact and the last of two equal names wins. Go's decoder into a struct
+// matches names whatever their case: the filter must read a message as the plugin will, or a refused method passes under an allowed one.
+func TestTheFilterReadsAMessageAsThePluginDoes(t *testing.T) {
+	f := &Filter{}
+	mainKnown(f)
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"resourceRead","params":{"uri":"file:///etc/passwd"},"Method":"ping"}`,
+		`{"jsonrpc":"2.0","id":2,"METHOD":"ping","method":"createTerminal","params":{"channel":"x-term://1"}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"subscribe","params":{"channel":"ahp-chat:/ses_other"},"Params":{"channel":"ahp-chat:/ses_main"}}`,
+		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_main","clientSeq":1,"action":{"type":"chat/truncated","Type":"chat/turnStarted"}}}`,
+		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_main","clientSeq":1,"action":{"TYPE":"chat/turnStarted","type":"chat/truncated"}}}`,
+	} {
+		if fwd, _ := f.FromClient([]byte(line)); fwd != nil {
+			t.Errorf("let through %s", line)
+		}
+	}
+	// two equal names: the last one counts, for the plugin and for the filter
+	if fwd, _ := f.FromClient([]byte(`{"jsonrpc":"2.0","id":4,"method":"ping","method":"resourceRead","params":{"uri":"file:///etc/passwd"}}`)); fwd != nil {
+		t.Error("let through a resourceRead behind an earlier ping")
+	}
+	if fwd, _ := f.FromClient([]byte(`{"jsonrpc":"2.0","id":5,"method":"resourceRead","method":"ping"}`)); fwd == nil {
+		t.Error("refused a ping, the last of two methods")
+	}
+}
+
+// The answer to a listSessions is cut down to the main session. It is known by its id, as the plugin echoes it: an id that comes back
+// written another way (1.0 is 1 to JSON.parse), or one that two requests share, must not let the whole list through.
+func TestTheAnswerToAListSessionsCannotSlipPastItsCut(t *testing.T) {
+	list := `{"jsonrpc":"2.0","id":%s,"result":{"items":[{"resource":"ahp-session:/ses_main"},{"resource":"ahp-session:/ses_other","title":"secret"}]}}`
+	f := &Filter{}
+	mainKnown(f)
+	if fwd, _ := f.FromClient([]byte(`{"jsonrpc":"2.0","id":1.0,"method":"listSessions","params":{}}`)); fwd != nil {
+		if out := f.FromServer([]byte(strings.Replace(list, "%s", "1", 1))); strings.Contains(string(out), "ses_other") {
+			t.Errorf("an id written 1.0 let the whole list through: %s", out)
+		}
+	}
+	f = &Filter{}
+	mainKnown(f)
+	if fwd, reply := f.FromClient([]byte(`{"jsonrpc":"2.0","id":7,"method":"listSessions","params":{}}`)); fwd == nil {
+		t.Fatalf("refused a listSessions: %s", reply)
+	}
+	if fwd, _ := f.FromClient([]byte(`{"jsonrpc":"2.0","id":7,"method":"ping"}`)); fwd != nil {
+		// the ping's answer would take the cut, and the list's would pass whole
+		f.FromServer([]byte(`{"jsonrpc":"2.0","id":7,"result":{}}`))
+		if out := f.FromServer([]byte(strings.Replace(list, "%s", "7", 1))); strings.Contains(string(out), "ses_other") {
+			t.Errorf("a request that reused the list's id let the whole list through: %s", out)
+		}
+	}
+	f = &Filter{}
+	mainKnown(f)
+	f.FromClient([]byte(`{"jsonrpc":"2.0","id":"ab","method":"listSessions","params":{}}`))
+	if out := f.FromServer([]byte(strings.Replace(list, "%s", `"ab"`, 1))); strings.Contains(string(out), "ses_other") {
+		t.Errorf("a string id written with an escape let the whole list through: %s", out)
+	}
+}
