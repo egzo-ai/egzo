@@ -82,6 +82,15 @@ export default {
   id: "egzo",
   async setup(ctx) {
     // The plugin loading is the moment the TUI is up and waiting: OpenCode only creates a session when the first prompt is sent.
+    // In AHP mode, the main session egzo named is made now, if it is not there yet, where the agent works: the TUI starts on it (-s), and
+    // the chat has it before anybody types. OpenCode itself would make a session for a first prompt only.
+    if (ahp && main) {
+      const there = await ctx.session.get({ sessionID: main }).catch(() => null)
+      if (!there) {
+        const location = process.env.EGZO_AHP_DIRECTORY ? { location: { directory: process.env.EGZO_AHP_DIRECTORY } } : {}
+        await ctx.session.create({ id: main, ...location }).catch(() => {})
+      }
+    }
     // It loads once OpenCode's server is up, which can be after the TUI drew its prompt box: egzo types nothing before this file is there.
     try { mkdirSync(dirname(readyFile), { recursive: true }); writeFileSync(readyFile, "ready\n") } catch {}
     state("idle", { reason: "started" })
@@ -184,11 +193,27 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		return plan, nil
 	}
 	token := newAHPToken()
-	plan.Env = map[string]string{"OPENCODE_CONFIG_CONTENT": openCodeAHPConfig(token)}
+	// The main session is named now, not when OpenCode makes its first session: OpenCode makes one for a first prompt only, and an agent
+	// with no task gets none until someone types, so its chat would have nothing to show and nowhere to send the first prompt. egzo's plugin
+	// makes the session under this name once OpenCode's server is up, in the agent's directory, and the TUI starts on it (-s), so the
+	// TUI and the chat are the same session. The name is kept in the home: a restart continues the same session.
+	mainFile := filepath.Join(opts.Home, ".egzo", "main-session")
+	main := ""
+	if opts.ReadFile != nil {
+		if data, err := opts.ReadFile(mainFile); err == nil {
+			main = strings.TrimSpace(string(data))
+		}
+	}
+	if !validOpenCodeSession(main) {
+		main = newOpenCodeSession()
+		plan.Files[mainFile] = File{Content: []byte(main + "\n"), Mode: 0o644}
+	}
+	plan.Command = onSession(plan.Command, main)
+	plan.Env = map[string]string{"OPENCODE_CONFIG_CONTENT": openCodeAHPConfig(token), "EGZO_AHP_DIRECTORY": opts.Workdir}
 	described, _ := json.Marshal(AHPEndpoint{
 		URL:         fmt.Sprintf("ws://127.0.0.1:%d%s", openCodeAHPPort, openCodeAHPPath),
 		Token:       token,
-		MainSession: filepath.Join(opts.Home, ".egzo", "main-session"),
+		MainSession: mainFile,
 	})
 	plan.Files[endpoint] = File{Content: described, Mode: 0o600}
 	return plan, nil
@@ -223,4 +248,45 @@ func openCodeAHPConfig(token string) string {
 	}
 	encoded, _ := json.Marshal(config)
 	return string(encoded)
+}
+
+// validOpenCodeSession takes what OpenCode takes as a session id (Session.ID: it starts with "ses"), in the characters egzo writes and
+// `egzo agent ahp` reads back.
+func validOpenCodeSession(id string) bool {
+	if !strings.HasPrefix(id, "ses") || len(id) > 100 {
+		return false
+	}
+	for _, r := range id {
+		if !(r == '_' || r == '-' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
+// newOpenCodeSession names a main session: OpenCode's own ids are "ses_" and 26 characters; egzo's say they are egzo's.
+func newOpenCodeSession() string {
+	return "ses_egzo" + newAHPToken()[:22]
+}
+
+// openCodeSubcommands are OpenCode's subcommands: a command that runs one is not the TUI, and is left as it is.
+var openCodeSubcommands = map[string]bool{
+	"upgrade": true, "update": true, "uninstall": true, "acp": true, "api": true, "debug": true, "auth": true, "mcp": true, "plugin": true,
+	"models": true, "stats": true, "mini": true, "run": true, "session": true, "service": true, "serve": true, "web": true, "export": true,
+	"import": true, "github": true, "agent": true,
+}
+
+// onSession starts OpenCode's TUI on a session: `opencode -s ID`, the rest of the command after it. A command that is not OpenCode's TUI,
+// or that already says which session (-s, --session, -c, --continue), is left as it is.
+func onSession(command []string, session string) []string {
+	if len(command) == 0 || filepath.Base(command[0]) != "opencode" {
+		return command
+	}
+	for _, arg := range command[1:] {
+		name, _, _ := strings.Cut(arg, "=")
+		if name == "-s" || name == "--session" || name == "-c" || name == "--continue" || openCodeSubcommands[arg] {
+			return command
+		}
+	}
+	return append([]string{command[0], "-s", session}, command[1:]...)
 }

@@ -195,6 +195,7 @@ func runAgent(args []string) error {
 		Bypass:           os.Getenv("EGZO_PERMISSIONS") != "default",
 		AHP:              os.Getenv(harness.AHPEnv) == "1",
 		Exists:           func(path string) bool { _, err := os.Stat(path); return err == nil },
+		ReadFile:         os.ReadFile,
 		ControlURL:       os.Getenv("EGZO_CONTROL_URL"),
 		InstructionsFile: home + "/.egzo/instructions.md",
 		LookPath:         exec.LookPath,

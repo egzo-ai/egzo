@@ -210,7 +210,8 @@ were typed in the agent's terminal; **Stop** cancels the turn that runs. The cho
   terminal.
 - **The terminal stays** for OpenCode: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
   messages announced to the agent) show in the chat as prompts.
-- **One session.** The chat is the agent's main session: the first one its harness created. A session opened later in the terminal (`/new`)
+- **One session.** The chat is the agent's main session, which the terminal starts on too: it is there from the agent's start, so an
+  agent spawned without a task takes its first prompt from the chat. A session opened later in the terminal (`/new`)
   works, but the hub does not show it, and the agent's activity follows the main session only.
 - **What the hub reaches.** The chat and nothing else: through the link, the hub cannot read a file of the agent, open a terminal or touch
   another session ([AHP mode](reference/hub-link.md#ahp-mode)).
