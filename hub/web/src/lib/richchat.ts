@@ -65,7 +65,8 @@ function partOf(part: Json): Part | null {
     case "toolCall":
       return { kind: "tool", tool: toolOf(part.toolCall) };
     case "error":
-      return { kind: "error", id: String(part.id ?? ""), content: text(part.message) || String(part.content ?? "error") };
+      // AHP's ErrorResponsePart: { kind: "error", error: { errorType, message } }
+      return { kind: "error", id: String(part.id ?? ""), content: text(part.error?.message) || text(part.message) || String(part.content ?? "error") };
   }
   return null;
 }
@@ -168,7 +169,8 @@ export function apply(chat: Chat, action: Json): Chat {
     case "chat/turnCancelled":
       return withTurn(chat, id, (t) => ({ ...t, state: "cancelled", parts: t.parts.map((p) => (p.kind === "tool" && p.tool.status === "running" ? { kind: "tool", tool: { ...p.tool, status: "cancelled" } } : p)) }));
     case "chat/error":
-      return withTurn(chat, id, (t) => ({ ...t, state: "error", parts: [...t.parts, { kind: "error", id: "error", content: text(action.error?.message) || text(action.message) || "The turn failed." }] }));
+      // AHP's ChatErrorAction carries the error part to append (part.error.message), then the turn is final
+      return withTurn(chat, id, (t) => ({ ...t, state: "error", parts: [...t.parts, { kind: "error", id: "error", content: text(action.part?.error?.message) || text(action.error?.message) || text(action.message) || "The turn failed." }] }));
   }
   return chat;
 }
