@@ -173,3 +173,21 @@ def test_the_chat_fits_a_phone(single_hub, page):
     expect(box).to_be_in_viewport()
     expect(chat(page).get_by_role("button", name="Send")).to_be_in_viewport()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "the page scrolls sideways on a phone"
+
+
+def test_a_prompt_works_on_a_hub_served_over_plain_http(single_hub, page):
+    # A hub on a private network is often plain http at a LAN address, which is not a secure context: crypto.randomUUID is not there.
+    # The test server is on 127.0.0.1, which is one, so the page is made to look like the other.
+    hub = single_hub
+    page.add_init_script("delete Crypto.prototype.randomUUID")
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="lan")
+    open_chat(page, hub, "lan")
+    assert page.evaluate("typeof crypto.randomUUID") == "undefined"
+    box = chat(page).get_by_label("Prompt")
+    box.fill("Read the README")
+    box.press("Enter")
+    turn = chat(page).locator("article.turn").last
+    expect(turn.locator(".prompt")).to_have_text("Read the README")
+    expect(turn).to_have_attribute("data-state", "complete")
+    assert [a["type"] for a in dispatched(hub, "lan")] == ["chat/turnStarted"]
