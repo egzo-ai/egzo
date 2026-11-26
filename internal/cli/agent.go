@@ -163,6 +163,7 @@ func runAgent(args []string) error {
 	environment := os.Environ()
 	interrupt := "\x03"
 	readyFile := ""
+	var prompt []string
 
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -235,7 +236,7 @@ func runAgent(args []string) error {
 		if err := plan.Write(); err != nil {
 			return fmt.Errorf("prepare %s: %w", integration.Name(), err)
 		}
-		command, interrupt, readyFile = plan.Command, plan.InterruptKey, plan.ReadyFile
+		command, interrupt, readyFile, prompt = plan.Command, plan.InterruptKey, plan.ReadyFile, plan.Prompt
 		for key, value := range plan.Env {
 			environment = append(environment, key+"="+value)
 		}
@@ -287,6 +288,7 @@ func runAgent(args []string) error {
 			RequireRaw:   hasIntegration, // a known TUI: it is ready when it has taken the terminal over
 			ReadyMarkers: readyMarkers,
 			ReadyFile:    readyFile,
+			Submit:       submitter(prompt, environment),
 			BeforeInject: ssh.Check,
 		})
 	}
@@ -428,5 +430,24 @@ func runSetup(commands [][]string, environment []string) {
 			fmt.Fprintf(os.Stderr, "egzo: %s: %v\n", strings.Join(command, " "), err)
 		}
 		cancel()
+	}
+}
+
+// submitter runs a plan's Prompt command with the line, as {"text": line}, appended: nil when the plan has none, and lines are typed.
+func submitter(prompt []string, environment []string) func(string) error {
+	if len(prompt) == 0 {
+		return nil
+	}
+	return func(line string) error {
+		body, err := json.Marshal(map[string]string{"text": line})
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(prompt[0], append(append([]string{}, prompt[1:]...), string(body))...)
+		cmd.Env = environment
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 }

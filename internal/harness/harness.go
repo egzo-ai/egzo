@@ -182,6 +182,10 @@ type Plan struct {
 	// timeout passed). A TUI can draw its prompt box before the server behind it is up, and a line typed then is lost. Write removes it
 	// first, so only this run's harness makes it.
 	ReadyFile string
+	// Prompt, when set, is how a line reaches the harness without its terminal: the command, run with {"text": line} (JSON) as one more
+	// argument, hands the line to the session the TUI shows, as if typed there. Nothing is typed into the TUI then, so nothing waits
+	// for it to draw its prompt box, and a person typing in it is not interrupted: only ReadyFile (the server behind it) is waited for.
+	Prompt []string
 	// Setup are commands run once the files are written, in order, before the harness starts. Each is best effort: one
 	// that fails is reported, and the harness starts anyway.
 	Setup [][]string

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -900,6 +901,44 @@ func TestTheTaskIsTypedFirstAndAReadWriteClientWaitsForIt(t *testing.T) {
 	}
 	if watcher.has("gets its task first") {
 		t.Error("a read-only client is held back")
+	}
+}
+
+// OpenCode in AHP mode takes its lines through its server (harness.Plan.Prompt): the TUI, started on a session, never draws the marker
+// that says it takes input, so a typed task used to wait a minute and then be typed blind, and lost if the TUI was not reading yet.
+func TestATaskSubmittedToTheServerIsNotTypedAndOpensTheTerminalAtOnce(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	fails := 2
+	submit := func(line string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if fails > 0 {
+			fails--
+			return errors.New("server restarting")
+		}
+		got = append(got, line)
+		return nil
+	}
+	ready := filepath.Join(t.TempDir(), "ready")
+	os.WriteFile(ready, []byte("ready\n"), 0o644)
+	holder, path, _ := heldRig(t, "list the open issues", Delivery{HumanQuiet: time.Hour, AckTimeout: time.Minute, IdleSignal: "state",
+		RequireRaw: true, ReadyMarkers: []string{"never drawn"}, ReadyFile: ready, Submit: submit})
+	watcher := connect(t, path, true, 24, 80)
+	deadline := time.Now().Add(10 * time.Second)
+	for holder.AttachHeld() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if holder.AttachHeld() {
+		t.Fatal("the task was submitted, and the terminal is still held")
+	}
+	mu.Lock()
+	if len(got) != 1 || got[0] != "list the open issues" {
+		t.Errorf("submitted %q, want the task once, after the failures were retried", got)
+	}
+	mu.Unlock()
+	if watcher.has("list the open issues") {
+		t.Error("the task was typed into the terminal too")
 	}
 }
 

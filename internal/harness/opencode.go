@@ -221,6 +221,10 @@ func (o openCode) Plan(opts Options, args []string) (Plan, error) {
 		plan.Setup = append(plan.Setup,
 			[]string{"opencode", "service", "start"},
 			[]string{"sh", "-c", `exec opencode api POST /api/session -d "$1" >/dev/null`, "sh", string(body)})
+		// The task and egzo's lines go to the main session through the server, not typed: the TUI on a session draws no "Ask anything"
+		// to say it takes input, and the ready file comes from the server, which starts before the TUI, so typing would be a guess
+		// (a line typed while the TUI still loads the session is lost). The TUI shows the prompt all the same: it is its session.
+		plan.Prompt = []string{"sh", "-c", `exec opencode api POST "/api/session/$1/prompt" -d "$2" >/dev/null`, "sh", main}
 	}
 	plan.Env = map[string]string{"OPENCODE_CONFIG_CONTENT": openCodeAHPConfig(token), "EGZO_AHP_DIRECTORY": opts.Workdir}
 	described, _ := json.Marshal(AHPEndpoint{
