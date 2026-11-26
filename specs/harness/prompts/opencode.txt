@@ -34,7 +34,7 @@ The tools listed below, and `search`, cannot be called directly: they only work 
 
 The catalog is partial. Before calling a tool that is not listed below, find it with the global `search(...)` function. Do not guess tool names. Each result's `path` is the complete call expression: write it out as code, for example `await tools.ns.tool_name({ ... })`. Do not use it as a key such as `tools[path]`.
 
-- search({
+- search(query: string | {
   query?: string,
   namespace?: string,
   /** @integer @exclusiveMinimum 0 */
@@ -58,6 +58,36 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
 ## Code Mode tools (call only inside `execute`)
 
 - opencode (8 tools) // Tools for managing OpenCode itself, such as working with sessions and worktrees, searching the available models, and reading MCP resources.
+  - tools.opencode.session_move({
+  /** Omit to move the current session. @pattern ^ses */
+  sessionID?: string,
+  /** Destination directory, relative to the target session's directory or absolute. Supports ~. @minLength 1 */
+  directory: string,
+}): Promise<{
+  /** @pattern ^ses */
+  sessionID: string,
+  directory: string,
+}> // Move a session to another directory, or omit sessionID to move the current session. The current session moves at the next safe boundary; do not run destination-dependent tools in the same execute call.
+  - tools.opencode.worktree_create({
+  name: string,
+}): Promise<{
+  directory: string,
+}> // Create a named worktree. Returns its directory.
+  - tools.opencode.worktree_list(): Promise<{
+  worktrees: Array<{
+      directory: string,
+      strategy?: string,
+    }>,
+}> // List a repository's worktrees.
+  - tools.opencode.worktree_remove({
+  /** Absolute path of the worktree to remove. @minLength 1 */
+  directory: string,
+  /** Discard modified and untracked files. Only set this when the user has confirmed forced removal. */
+  force?: boolean,
+}): Promise<{
+  directory: string,
+  removed: boolean,
+}> // Remove a worktree. The repository location selects configuration; directory identifies the worktree to remove.
   - tools.opencode.list_mcp_resources({
   /** MCP server name as configured. Omit to list every server. */
   server?: string,
@@ -76,7 +106,7 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
       description?: string,
       mimeType?: string,
     }>,
-}> // List documents, records, and other data exposed by MCP servers. Use this when the user refers to something that is no...
+}> // List documents, records, and other data exposed by MCP servers. Use this when the user refers to something that is not a local file, such as a URI with a custom scheme, then load a match with read_mcp_resource. Each entry names the server to read it from. Templates are resources addressed by a parameter such as a record ID; fill in the uriTemplate placeholders before reading.
   - tools.opencode.models({
   /** Text to search for in model names and IDs. */
   query?: string,
@@ -128,7 +158,7 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
   total: number,
   /** Offset of the next page, or null on the last page. */
   next: number | null,
-}> // Search the models available to use. Use this to turn a model name the user mentions into an exact reference for a too...
+}> // Search the models available to use. Use this to turn a model name the user mentions into an exact reference for a tool that takes a model. Check your own provider first.
   - tools.opencode.read_mcp_resource({
   /** The server field of the discovered resource. */
   server: string,
@@ -148,17 +178,7 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
         blob: string,
         mimeType?: string,
       }>,
-}> // Read one MCP resource by server and URI. Not for local files. Always return the full contents rather than slicing or ...
-  - tools.opencode.session_move({
-  /** Omit to move the current session. @pattern ^ses */
-  sessionID?: string,
-  /** Destination directory, relative to the target session's directory or absolute. Supports ~. @minLength 1 */
-  directory: string,
-}): Promise<{
-  /** @pattern ^ses */
-  sessionID: string,
-  directory: string,
-}> // Move a session to another directory, or omit sessionID to move the current session. The current session moves at the ...
+}> // Read one MCP resource by server and URI. Not for local files. Always return the full contents rather than slicing or filtering them; oversized output is truncated automatically and the full content is saved to a file you can read. Images and PDFs are shown to you directly.
   - tools.opencode.session_rename({
   /** Omit to rename the current session. @pattern ^ses */
   sessionID?: string,
@@ -168,29 +188,36 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
   /** @pattern ^ses */
   sessionID: string,
   title: string,
-}> // Rename a session, or omit sessionID to rename the current session. Use a short, specific title that summarizes the wo...
-  - tools.opencode.worktree_create({
-  name: string,
-}): Promise<{
-  directory: string,
-}> // Create a named worktree. Returns its directory.
-  - tools.opencode.worktree_list(): Promise<{
-  worktrees: Array<{
-      directory: string,
-      strategy?: string,
-    }>,
-}> // List a repository's worktrees.
-  - tools.opencode.worktree_remove({
-  /** Absolute path of the worktree to remove. @minLength 1 */
-  directory: string,
-  /** Discard modified and untracked files. Only set this when the user has confirmed forced removal. */
-  force?: boolean,
-}): Promise<{
-  directory: string,
-  removed: boolean,
-}> // Remove a worktree. The repository location selects configuration; directory identifies the worktree to remove.
-- playwright (25 tools, 11 shown)
+}> // Rename a session, or omit sessionID to rename the current session. Use a short, specific title that summarizes the work being done.
+- playwright (25 tools, 4 shown)
+  - tools.playwright.browser_click({
+  /** Human-readable element description used to obtain permission to interact with the element */
+  element?: string,
+  /** Exact target element reference from the page snapshot, or a unique element selector */
+  target: string,
+  /** Whether to perform a double click instead of a single click */
+  doubleClick?: boolean,
+  /** Button to click, defaults to left */
+  button?: "left" | "right" | "middle",
+  /** Modifier keys to press */
+  modifiers?: Array<"Alt" | "Control" | "ControlOrMeta" | "Meta" | "Shift">,
+}): Promise<unknown> // Perform click on a web page
   - tools.playwright.browser_close(): Promise<unknown> // Close the browser and all open tabs.
+  - tools.playwright.browser_console_messages({
+  /**
+   * Level of the console messages to return. Each level includes the messages of more severe levels. Defaults to "info".
+   * @default "info"
+   */
+  level: "error" | "warning" | "info" | "debug",
+  /**
+   * Return all console messages since the beginning of the session, not just since the last navigation. Defaults to false.
+   */
+  all?: boolean,
+  /**
+   * File name to save the console messages to. Relative file names are resolved against the workspace root. If not provided, messages are returned as text.
+   */
+  filename?: string,
+}): Promise<unknown> // Returns all console messages
   - tools.playwright.browser_drag({
   /** Human-readable source element description used to obtain the permission to interact with the element */
   startElement?: string,
@@ -201,57 +228,6 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
   /** Exact target element reference from the page snapshot, or a unique element selector */
   endTarget: string,
 }): Promise<unknown> // Perform drag and drop between two elements
-  - tools.playwright.browser_file_upload({
-  /**
-   * The absolute paths to the files to upload. Can be single file or multiple files. If omitted, file chooser is cancelled.
-   */
-  paths?: Array<string>,
-}): Promise<unknown> // Upload one or multiple files
-  - tools.playwright.browser_handle_dialog({
-  /** Whether to accept the dialog. */
-  accept: boolean,
-  /** The text of the prompt in case of a prompt dialog. */
-  promptText?: string,
-}): Promise<unknown> // Handle a dialog
-  - tools.playwright.browser_hover({
-  /** Human-readable element description used to obtain permission to interact with the element */
-  element?: string,
-  /** Exact target element reference from the page snapshot, or a unique element selector */
-  target: string,
-}): Promise<unknown> // Hover over element on page
-  - tools.playwright.browser_navigate({
-  /** The URL to navigate to */
-  url: string,
-}): Promise<unknown> // Navigate to a URL
-  - tools.playwright.browser_navigate_back(): Promise<unknown> // Go back to the previous page in the history
-  - tools.playwright.browser_press_key({
-  /** Name of the key to press or a character to generate, such as `ArrowLeft` or `a` */
-  key: string,
-}): Promise<unknown> // Press a key on the keyboard
-  - tools.playwright.browser_resize({
-  /** Width of the browser window */
-  width: number,
-  /** Height of the browser window */
-  height: number,
-}): Promise<unknown> // Resize the browser window
-  - tools.playwright.browser_select_option({
-  /** Human-readable element description used to obtain permission to interact with the element */
-  element?: string,
-  /** Exact target element reference from the page snapshot, or a unique element selector */
-  target: string,
-  /** Array of values to select in the dropdown. This can be a single value or multiple values. */
-  values: Array<string>,
-}): Promise<unknown> // Select an option in a dropdown
-  - tools.playwright.browser_wait_for({
-  /**
-   * The time to wait in seconds, at most 30. When combined with text or textGone, serves as a timeout for them instead of the default action timeout
-   */
-  time?: number,
-  /** The text to wait for */
-  text?: string,
-  /** The text to wait for to disappear */
-  textGone?: string,
-}): Promise<unknown> // Wait for text to appear or disappear or a specified time to pass. When both text and textGone are provided, waits for...
 
 <mcp_instructions>
   <server name="egzo">
