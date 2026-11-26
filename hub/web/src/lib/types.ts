@@ -422,3 +422,13 @@ export interface FileView {
   cutLines: number;
   bidi: number;
 }
+
+/** A message a person sent an agent, as its Rich UI chat shows it in place of egzo's line announcing it. */
+export interface ChatMessage {
+  id: string;
+  /** The person's name on the hub. */
+  from: string;
+  kind: "request" | "question" | "resolution" | "update" | string;
+  text: string;
+  time: string;
+}

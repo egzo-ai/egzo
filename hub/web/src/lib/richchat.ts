@@ -1,42 +1,118 @@
-// The Rich UI chat of an agent spawned in AHP mode: the state of its main session's chat, kept from what the hub relays of the agent's
-// AHP server (https://github.com/microsoft/agent-host-protocol): a snapshot when the chat is subscribed to, then actions. This is the pure
-// part, tested on its own; ChatView.svelte draws it and owns the socket.
+// The Rich UI chat of an agent spawned in AHP mode: the state of its main session and that session's chat, kept from what the hub relays of
+// the agent's AHP server (https://github.com/microsoft/agent-host-protocol). The state is AHP's own, kept by the protocol's reference
+// reducers (chatReducer, sessionReducer): a snapshot when a channel is subscribed to, then the actions the server sends, each with its
+// serverSeq, which a reconnect resumes from. This is the pure part, tested on its own: ChatView.svelte owns the socket and draws the view
+// this file derives from the state (turnsOf, pendingOf, ...).
 
-export interface ToolCall {
-  id: string;
-  name: string;
-  /** What it does, in words: the tool's display name, then what it was called with. */
-  title: string;
-  status: "running" | "done" | "failed" | "cancelled";
-  /** What it says it did, once complete. */
-  outcome: string;
-}
+import { chatReducer, sessionReducer } from "@microsoft/agent-host-protocol";
+import type {
+  ActionEnvelope,
+  ChatAction,
+  ChatState,
+  ResponsePart,
+  SessionAction,
+  SessionState,
+  Snapshot,
+  ToolCallState,
+  UsageInfo,
+} from "@microsoft/agent-host-protocol";
 
-export type Part =
-  | { kind: "markdown"; id: string; content: string }
-  | { kind: "reasoning"; id: string; content: string }
-  | { kind: "tool"; tool: ToolCall }
-  | { kind: "error"; id: string; content: string };
-
-export interface Turn {
-  id: string;
-  /** What started it: the prompt, as the user, or egzo's line, typed it. */
-  prompt: string;
-  parts: Part[];
-  state: "running" | "complete" | "cancelled" | "error";
-}
+export const ROOT = "ahp-root://";
 
 export interface Chat {
-  turns: Turn[];
-  /** The chat's channel, once egzo said which session is the agent's main one. */
+  /** The main session's channel and its chat's, once egzo said which session is the agent's main one. */
+  session: string;
   channel: string;
+  /** The chat as the server holds it, from its snapshot on; null until subscribed. */
+  state: ChatState | null;
+  sessionState: SessionState | null;
+  /** The newest serverSeq applied, of any channel: what a reconnect says it saw. */
+  seq: number;
+  /** Per channel, the serverSeq its snapshot was taken at: an action at or before it is in the snapshot already. */
+  from: Record<string, number>;
 }
 
-export const emptyChat = (): Chat => ({ turns: [], channel: "" });
+export const emptyChat = (session = "", channel = ""): Chat => ({ session, channel, state: null, sessionState: null, seq: 0, from: {} });
+
+/** The chat with a snapshot of one of its channels, as a subscribe or a reconnect answers it. */
+export function withSnapshot(chat: Chat, snapshot: Snapshot): Chat {
+  const from = { ...chat.from, [snapshot.resource]: snapshot.fromSeq };
+  const seq = Math.max(chat.seq, snapshot.fromSeq);
+  if (snapshot.resource === chat.channel) return { ...chat, state: snapshot.state as ChatState, from, seq };
+  if (snapshot.resource === chat.session) return { ...chat, sessionState: snapshot.state as SessionState, from, seq };
+  return { ...chat, seq };
+}
+
+/** The chat after one action the server sent. An action the server rejected changed nothing there, and changes nothing here. */
+export function apply(chat: Chat, envelope: ActionEnvelope): Chat {
+  if (typeof envelope.serverSeq === "number" && envelope.serverSeq <= (chat.from[envelope.channel] ?? -1)) return chat;
+  const seq = typeof envelope.serverSeq === "number" ? Math.max(chat.seq, envelope.serverSeq) : chat.seq;
+  if (envelope.rejectionReason !== undefined) return { ...chat, seq };
+  if (envelope.channel === chat.channel && chat.state) {
+    return { ...chat, seq, state: chatReducer(chat.state, envelope.action as ChatAction) };
+  }
+  if (envelope.channel === chat.session && chat.sessionState) {
+    return { ...chat, seq, sessionState: sessionReducer(chat.sessionState, envelope.action as SessionAction) };
+  }
+  return { ...chat, seq };
+}
+
+// ─── The view ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface ToolView {
+  id: string;
+  name: string;
+  /** The tool's name in words ("Shell", "Read file"). */
+  display: string;
+  /** What it does, in Markdown: the command, the file. */
+  said: string;
+  status: "preparing" | "waiting" | "running" | "done" | "failed" | "cancelled";
+  /** What it says it did, once complete. */
+  outcome: string;
+  /** A shell command it runs, when it runs one. */
+  command: string;
+  /** What it was called with, readable: pretty JSON, or the text. */
+  input: string;
+  /** What it gave back, as text. */
+  output: string;
+  error: string;
+  /** Why it was cancelled, or why it waits. */
+  note: string;
+}
+
+export type PartView =
+  | { kind: "markdown"; key: string; content: string }
+  | { kind: "reasoning"; key: string; content: string }
+  | { kind: "tool"; key: string; tool: ToolView }
+  | { kind: "error"; key: string; message: string }
+  | { kind: "notice"; key: string; content: string }
+  | { kind: "question"; key: string; message: string; open: boolean }
+  | { kind: "resource"; key: string; title: string };
+
+export interface TurnView {
+  id: string;
+  /** What started it, as the user, egzo or another agent typed it. */
+  prompt: string;
+  /** Who: "user", "agent", "tool", "automation", "systemNotification". */
+  origin: string;
+  parts: PartView[];
+  state: "running" | "complete" | "cancelled" | "error";
+  usage?: UsageInfo;
+  /** How long it took, in milliseconds, once it ended. */
+  duration?: number;
+  startedAt?: string;
+}
+
+export interface PendingView {
+  id: string;
+  kind: "steering" | "queued";
+  text: string;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
 
+/** A StringOrMarkdown as text. */
 function text(value: Json): string {
   if (typeof value === "string") return value;
   if (value && typeof value.markdown === "string") return value.markdown;
@@ -44,165 +120,225 @@ function text(value: Json): string {
   return "";
 }
 
-/** A tool's name, then what it says it does: once, when that is only its name again. */
-function toolTitle(name: string, said: string): string {
-  return said && said !== name ? (name ? `${name}: ${said}` : said) : name;
+function pretty(input: Json): { command: string; input: string } {
+  if (typeof input !== "string") return { command: "", input: input?.uri ? String(input.uri) : "" };
+  try {
+    const parsed = JSON.parse(input);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.cmd === "string" ? parsed.cmd : "";
+      return { command, input: JSON.stringify(parsed, null, 2) };
+    }
+  } catch {
+    /* not JSON: as it is */
+  }
+  return { command: "", input };
 }
 
-function toolOf(state: Json): ToolCall {
-  const status = state?.status;
-  const done = status === "completed";
+function contentText(content: Json): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((c: Json) => {
+      switch (c?.type) {
+        case "text":
+          return String(c.text ?? "");
+        case "embeddedResource":
+          return `[${c.contentType ?? "data"}]`;
+        case "resource":
+          return `[${c.title ?? c.uri ?? "resource"}]`;
+        case "fileEdit":
+          return `[edited ${c.after?.uri ?? c.before?.uri ?? "a file"}]`;
+        case "terminal":
+          return `[terminal: ${c.title ?? ""}]`;
+        case "subagent":
+          return `[subagent: ${c.title ?? ""}]`;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+const toolStatus: Record<string, ToolView["status"]> = {
+  streaming: "preparing",
+  "pending-confirmation": "waiting",
+  "auth-required": "waiting",
+  "pending-result-confirmation": "waiting",
+  running: "running",
+  completed: "done",
+  cancelled: "cancelled",
+};
+
+export function toolOf(tc: ToolCallState): ToolView {
+  const t = tc as Json;
+  const status = String(t.status);
+  const { command, input } = pretty(t.toolInput ?? t.partialInput);
+  let view = toolStatus[status] ?? "running";
+  if (view === "done" && t.success === false) view = "failed";
+  let note = "";
+  if (status === "pending-confirmation") note = text(t.confirmationTitle) || "It waits for an approval in the agent's terminal.";
+  else if (status === "auth-required") note = "It waits for a sign-in.";
+  else if (status === "pending-result-confirmation") note = "Its result waits for an approval in the agent's terminal.";
+  else if (status === "cancelled") note = text(t.reasonMessage) || ({ denied: "Denied.", skipped: "Skipped: the turn ended.", "result-denied": "Its result was denied." } as Record<string, string>)[t.reason] || "";
   return {
-    id: String(state?.toolCallId ?? ""),
-    name: String(state?.toolName ?? ""),
-    title: toolTitle(String(state?.displayName || state?.toolName || ""), text(state?.invocationMessage)),
-    status: status === "cancelled" ? "cancelled" : done ? (state?.success === false ? "failed" : "done") : "running",
-    outcome: done ? text(state?.pastTenseMessage) : "",
+    id: String(t.toolCallId ?? ""),
+    name: String(t.toolName ?? ""),
+    display: String(t.displayName || t.toolName || "Tool"),
+    said: text(t.invocationMessage),
+    status: view,
+    outcome: view === "done" || view === "failed" ? text(t.pastTenseMessage) : "",
+    command,
+    input,
+    output: contentText(t.content),
+    error: t.error?.message ? String(t.error.message) : "",
+    note,
   };
 }
 
-function partOf(part: Json): Part | null {
-  switch (part?.kind) {
-    case "markdown":
-      return { kind: "markdown", id: String(part.id), content: String(part.content ?? "") };
-    case "reasoning":
-      return { kind: "reasoning", id: String(part.id), content: String(part.content ?? "") };
-    case "toolCall":
-      return { kind: "tool", tool: toolOf(part.toolCall) };
-    case "error":
-      // AHP's ErrorResponsePart: { kind: "error", error: { errorType, message } }
-      return { kind: "error", id: String(part.id ?? ""), content: text(part.error?.message) || text(part.message) || String(part.content ?? "error") };
+function partsOf(parts: ResponsePart[]): PartView[] {
+  const out: PartView[] = [];
+  parts.forEach((p, i) => {
+    const part = p as Json;
+    switch (String(part.kind)) {
+      case "markdown":
+        if (part.content) out.push({ kind: "markdown", key: `m-${part.id ?? i}`, content: String(part.content) });
+        break;
+      case "reasoning":
+        if (part.content) out.push({ kind: "reasoning", key: `r-${part.id ?? i}`, content: String(part.content) });
+        break;
+      case "toolCall":
+        out.push({ kind: "tool", key: `t-${part.toolCall?.toolCallId ?? i}`, tool: toolOf(part.toolCall) });
+        break;
+      case "error":
+        out.push({ kind: "error", key: `e-${i}`, message: text(part.error?.message) || "The turn failed." });
+        break;
+      case "systemNotification":
+        out.push({ kind: "notice", key: `n-${i}`, content: text(part.content) });
+        break;
+      case "inputRequest":
+        out.push({ kind: "question", key: `q-${part.request?.id ?? i}`, message: text(part.request?.message) || "The agent asks for input.", open: part.response === undefined });
+        break;
+      case "contentRef":
+        out.push({ kind: "resource", key: `c-${i}`, title: String(part.title ?? part.uri ?? "content") });
+        break;
+    }
+  });
+  return out;
+}
+
+/** The chat's turns, oldest first, the one that runs last. */
+export function turnsOf(state: ChatState | null): TurnView[] {
+  if (!state) return [];
+  const turns: TurnView[] = state.turns.map((t) => ({
+    id: t.id,
+    prompt: t.message?.text ?? "",
+    origin: String(t.message?.origin?.kind ?? "user"),
+    parts: partsOf(t.responseParts ?? []),
+    state: String(t.state) as TurnView["state"],
+    usage: t.usage,
+    duration: t.duration,
+    startedAt: t.startedAt,
+  }));
+  const a = state.activeTurn;
+  if (a) {
+    turns.push({ id: a.id, prompt: a.message?.text ?? "", origin: String(a.message?.origin?.kind ?? "user"), parts: partsOf(a.responseParts ?? []), state: "running", usage: a.usage, startedAt: a.startedAt });
   }
-  return null;
+  return turns;
 }
 
-function turnOf(turn: Json, state: Turn["state"]): Turn {
-  return {
-    id: String(turn.id),
-    prompt: String(turn.message?.text ?? ""),
-    parts: (turn.responseParts ?? []).map(partOf).filter((p: Part | null): p is Part => p !== null),
-    state,
-  };
-}
-
-/** The chat as a subscribe's snapshot says it is. */
-export function fromSnapshot(channel: string, state: Json): Chat {
-  const turns: Turn[] = (state?.turns ?? []).map((t: Json) => turnOf(t, (t.state as Turn["state"]) ?? "complete"));
-  if (state?.activeTurn) turns.push(turnOf(state.activeTurn, "running"));
-  return { turns, channel };
-}
-
-function withTurn(chat: Chat, id: string, change: (t: Turn) => Turn): Chat {
-  return { ...chat, turns: chat.turns.map((t) => (t.id === id ? change(t) : t)) };
-}
-
-function withPart(t: Turn, match: (p: Part) => boolean, make: () => Part, change: (p: Part) => Part): Turn {
-  const i = t.parts.findIndex(match);
-  if (i < 0) return { ...t, parts: [...t.parts, make()] };
-  const parts = t.parts.slice();
-  parts[i] = change(parts[i]);
-  return { ...t, parts };
-}
-
-function withTool(t: Turn, id: string, change: (tool: ToolCall) => ToolCall): Turn {
-  return withPart(
-    t,
-    (p) => p.kind === "tool" && p.tool.id === id,
-    () => ({ kind: "tool", tool: change({ id, name: "", title: "", status: "running", outcome: "" }) }),
-    (p) => (p.kind === "tool" ? { kind: "tool", tool: change(p.tool) } : p),
-  );
-}
-
-/** The chat after one action of its channel. Actions of other channels, or that the view does not show, change nothing. */
-export function apply(chat: Chat, action: Json): Chat {
-  const id = String(action?.turnId ?? "");
-  switch (action?.type) {
-    case "chat/turnStarted":
-      if (chat.turns.some((t) => t.id === id)) return chat;
-      return { ...chat, turns: [...chat.turns, { id, prompt: String(action.message?.text ?? ""), parts: [], state: "running" }] };
-    case "chat/responsePart": {
-      const part = partOf(action.part);
-      if (!part) return chat;
-      return withTurn(chat, id, (t) =>
-        part.kind === "tool"
-          ? withTool(t, part.tool.id, () => part.tool)
-          : withPart(t, (p) => p.kind === part.kind && "id" in p && p.id === part.id, () => part, () => part),
-      );
-    }
-    case "chat/delta":
-    case "chat/reasoning": {
-      const kind = action.type === "chat/delta" ? "markdown" : "reasoning";
-      const partId = String(action.partId ?? "");
-      const content = String(action.content ?? "");
-      return withTurn(chat, id, (t) =>
-        withPart(
-          t,
-          (p) => p.kind === kind && p.id === partId,
-          () => ({ kind, id: partId, content }) as Part,
-          (p) => (p.kind === kind ? { ...p, content: p.content + content } : p),
-        ),
-      );
-    }
-    case "chat/toolCallStart":
-      return withTurn(chat, id, (t) =>
-        withTool(t, String(action.toolCallId), (tool) => ({ ...tool, name: String(action.toolName ?? ""), title: String(action.displayName || action.toolName || "") })),
-      );
-    case "chat/toolCallReady":
-      return withTurn(chat, id, (t) =>
-        withTool(t, String(action.toolCallId), (tool) => {
-          const said = text(action.invocationMessage);
-          const base = tool.title.split(": ")[0] || tool.name;
-          return { ...tool, title: toolTitle(base, said) };
-        }),
-      );
-    case "chat/toolCallComplete":
-      return withTurn(chat, id, (t) =>
-        withTool(t, String(action.toolCallId), (tool) => ({
-          ...tool,
-          status: action.result?.success === false ? "failed" : "done",
-          outcome: text(action.result?.pastTenseMessage),
-        })),
-      );
-    case "chat/turnsLoaded": {
-      // older turns, oldest first, from the harness's own store (after a restart): before the ones the chat has
-      const known = new Set(chat.turns.map((t) => t.id));
-      const older = (action.turns ?? []).filter((t: Json) => !known.has(String(t.id))).map((t: Json) => turnOf(t, (t.state as Turn["state"]) ?? "complete"));
-      return older.length ? { ...chat, turns: [...older, ...chat.turns] } : chat;
-    }
-    case "chat/turnComplete":
-      return withTurn(chat, id, (t) => ({ ...t, state: "complete" }));
-    case "chat/turnCancelled":
-      return withTurn(chat, id, (t) => ({ ...t, state: "cancelled", parts: t.parts.map((p) => (p.kind === "tool" && p.tool.status === "running" ? { kind: "tool", tool: { ...p.tool, status: "cancelled" } } : p)) }));
-    case "chat/error":
-      // AHP's ChatErrorAction carries the error part to append (part.error.message), then the turn is final
-      return withTurn(chat, id, (t) => ({ ...t, state: "error", parts: [...t.parts, { kind: "error", id: "error", content: text(action.part?.error?.message) || text(action.error?.message) || text(action.message) || "The turn failed." }] }));
+/** The messages sent while a turn ran: one that steers it, and those queued for after it. */
+export function pendingOf(state: ChatState | null): PendingView[] {
+  if (!state) return [];
+  const out: PendingView[] = [];
+  const seen = new Set<string>();
+  if (state.steeringMessage) {
+    out.push({ id: state.steeringMessage.id, kind: "steering", text: state.steeringMessage.message?.text ?? "" });
+    seen.add(state.steeringMessage.id);
   }
-  return chat;
+  for (const m of state.queuedMessages ?? []) {
+    if (seen.has(m.id)) continue;
+    out.push({ id: m.id, kind: String((m as Json).kind ?? "queued") === "steering" ? "steering" : "queued", text: m.message?.text ?? "" });
+  }
+  return out;
+}
+
+/** The session's title, or the chat's. */
+export function titleOf(chat: Chat): string {
+  return chat.sessionState?.title || chat.state?.title || "";
 }
 
 /** The turn that runs, if any: the one a stop cancels. */
-export function running(chat: Chat): Turn | undefined {
-  return [...chat.turns].reverse().find((t) => t.state === "running");
+export function running(chat: Chat): TurnView | undefined {
+  const a = chat.state?.activeTurn;
+  return a ? turnsOf({ ...chat.state!, turns: [] }).at(-1) : undefined;
 }
+
+// ─── egzo's line ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The messages egzo's line announces, when a prompt is that line ("check egzo message m… and handle the request for me."): their ids.
+ * Null for anything else. */
+export function announced(prompt: string): string[] | null {
+  const line = prompt.trim();
+  if (!/^(check )?egzo messages? m[0-9a-f]+/.test(line)) return null;
+  const ids: string[] = [];
+  for (const sentence of line.matchAll(/(?:^|[.:] )(?:check )?egzo messages? ((?:m[0-9a-f]+)(?:, m[0-9a-f]+)*)/g)) {
+    for (const id of sentence[1].split(", ")) if (!ids.includes(id)) ids.push(id);
+  }
+  return ids.length ? ids : null;
+}
+
+// ─── Words ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A duration in milliseconds, short: "850ms", "12s", "3m 05s". */
+export function formatDuration(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+/** A token count, short: "950", "12.3k", "1.2M". */
+export function formatTokens(n: number | undefined): string {
+  if (n === undefined || !Number.isFinite(n)) return "";
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** A model reference, without its provider: "opencode-go/glm-5.3-flash" says "glm-5.3-flash". */
+export function modelName(model: string | undefined): string {
+  if (!model) return "";
+  return model.split("/").at(-1) ?? model;
+}
+
+// ─── What the view sends ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 let seq = 0;
 
-/** The messages the view sends, as JSON-RPC lines. */
+const dispatch = (channel: string, action: object) => ({ jsonrpc: "2.0", method: "dispatchAction", params: { channel, clientSeq: ++seq, action } });
+
+/** The requests and notifications the view sends, without their ids (ChatView numbers its requests). */
 export const messages = {
-  initialize: () => ({ jsonrpc: "2.0", id: 1, method: "initialize", params: { channel: "ahp-root://", clientId: `egzo-hub-${Math.random().toString(36).slice(2)}`, protocolVersions: ["1.0.0"], initialSubscriptions: ["ahp-root://"] } }),
-  // listing the sessions first makes the harness's AHP server know a session it did not create, after a restart: then it can be subscribed to
-  listSessions: () => ({ jsonrpc: "2.0", id: 3, method: "listSessions", params: {} }),
-  subscribe: (channel: string) => ({ jsonrpc: "2.0", id: 2, method: "subscribe", params: { channel } }),
-  prompt: (channel: string, prompt: string, turnId: string) => ({
-    jsonrpc: "2.0",
-    method: "dispatchAction",
-    params: { channel, clientSeq: ++seq, action: { type: "chat/turnStarted", turnId, startedAt: new Date().toISOString(), message: { text: prompt, origin: { kind: "user" } } } },
+  initialize: (clientId: string) => ({ method: "initialize", params: { channel: ROOT, clientId, protocolVersions: ["1.0.0"], initialSubscriptions: [ROOT] } }),
+  reconnect: (clientId: string, lastSeenServerSeq: number, subscriptions: string[]) => ({
+    method: "reconnect",
+    params: { channel: ROOT, clientId, lastSeenServerSeq, subscriptions },
   }),
-  cancel: (channel: string, turnId: string) => ({ jsonrpc: "2.0", method: "dispatchAction", params: { channel, clientSeq: ++seq, action: { type: "chat/turnCancelled", turnId } } }),
+  // listing the sessions first makes the harness's AHP server know a session it did not create, after a restart: then it can be subscribed to
+  listSessions: () => ({ method: "listSessions", params: {} }),
+  subscribe: (channel: string) => ({ method: "subscribe", params: { channel } }),
+  prompt: (channel: string, prompt: string, turnId: string) =>
+    dispatch(channel, { type: "chat/turnStarted", turnId, startedAt: new Date().toISOString(), message: { text: prompt, origin: { kind: "user" } } }),
+  cancel: (channel: string, turnId: string) => dispatch(channel, { type: "chat/turnCancelled", turnId }),
+  /** A message for the turn that runs: steering goes into it at the next step, queued starts a turn after it. */
+  pending: (channel: string, kind: "steering" | "queued", id: string, prompt: string) =>
+    dispatch(channel, { type: "chat/pendingMessageSet", kind, id, message: { text: prompt, origin: { kind: "user" } } }),
 };
 
-/** A new turn's id: a random UUID. crypto.randomUUID exists in a secure context only (https, or localhost), and a hub on a private
- * network is often plain http, so it is made from getRandomValues, which every page has. */
+/** A new id: a random UUID. crypto.randomUUID exists in a secure context only (https, or localhost), and a hub on a private network is
+ * often plain http, so it is made from getRandomValues, which every page has. */
 export function newTurnId(): string {
   const b = crypto.getRandomValues(new Uint8Array(16));
   b[6] = (b[6] & 0x0f) | 0x40; // version 4

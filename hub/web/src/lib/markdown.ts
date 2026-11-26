@@ -18,8 +18,8 @@ md.renderer.rules.link_open = (tokens, i, options, env, self) => {
 md.renderer.rules.image = (tokens, i) => {
   const token = tokens[i];
   const src = token.attrGet("src") ?? "";
-  const alt = token.children?.map((c) => c.content).join("") || src;
-  return `<a href="${md.utils.escapeHtml(src)}" target="_blank" rel="noopener noreferrer nofollow">${md.utils.escapeHtml(alt)}</a>`;
+  const alt = token.children?.map((c) => c.content).join("") || String(src);
+  return `<a href="${md.utils.escapeHtml(String(src))}" target="_blank" rel="noopener noreferrer nofollow">${md.utils.escapeHtml(alt)}</a>`;
 };
 
 // a table scrolls on its own on a narrow screen instead of widening the chat

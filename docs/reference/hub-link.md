@@ -179,8 +179,8 @@ container, on its loopback. The link carries it to the hub; AHP carries chat onl
   no new path into the container. After the `Done`, the stream is lines of JSON both ways: AHP's JSON-RPC 2.0 messages, and egzo's
   notification of the main session, `x-egzo/mainSession` (`{"session", "chat"}`), sent once the agent's AHP server lists it (so it can be
   subscribed to at once) and whenever it changes.
-- **The filter.** The link lets through only what concerns the main session's chat: `initialize`, `reconnect`, `ping`, `subscribe` and
-  `unsubscribe` of the root channel and of the main session and its chat, `listSessions` (its answer cut to the main session),
+- **The filter.** The link lets through only what concerns the main session's chat: `initialize`, `ping`, `subscribe` and
+  `unsubscribe` of the root channel and of the main session and its chat, `reconnect` naming only those channels, `listSessions` (its answer cut to the main session),
   `fetchTurns` of the main chat, and `dispatchAction` in the main chat of a prompt (`chat/turnStarted`), a cancel (`chat/turnCancelled`)
   or a pending message. Anything else (`resource*`, which reads files, terminals, changesets, creating or disposing sessions and chats) is
   answered by the link with an `egzo:` error and never reaches the agent. With `ReadOnly`, nothing is dispatched. What the server says

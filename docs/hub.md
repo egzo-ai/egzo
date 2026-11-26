@@ -201,10 +201,22 @@ pages, `:` or Ctrl+K opens the command menu; single-key shortcuts can be turned 
 ## Rich UI
 
 An agent spawned with **Rich UI** (a checkbox of the spawn form, offered only for a template whose harness has an AHP mode: OpenCode
-today) has a **Chat** tab, its first section: the conversation of its main session, live, as messages, the agent's answers as it writes
-them, its reasoning (folded) and its tool calls. It works at a phone's width. Typing in the box sends a prompt into that session, as if it
-were typed in the agent's terminal; **Stop** cancels the turn that runs. The choice is made at spawn and kept for the agent's life.
+today) has a **Chat** tab, its first section: the conversation of its main session, live, the agent's answers as it writes them. The
+choice is made at spawn and kept for the agent's life. It works at a phone's width.
 
+- **What it shows.** The session's title; each prompt; the agent's answers, in Markdown (raw HTML is never rendered, images an answer
+  names are links, not fetched); its reasoning, folded; its tool calls, one line each, which open on what the tool was called with (a
+  shell command as the command), what it gave back and how it failed; and under each turn, how it ended, how long it took, the model and
+  the tokens it used. A tool that waits for an approval, or a question the agent asks, says so: they are answered in the terminal for now.
+- **egzo's lines.** A message a person sent the agent reaches it as egzo's line ("check egzo message m… and handle the request for me.").
+  The chat shows the message instead: who sent it and what it says, which the hub knows from the project's events feed for a week. A
+  message the hub never had (from the operator, at the CLI) shows as the line.
+- **Sending.** Typing in the box sends a prompt into that session, as if it were typed in the agent's terminal. While a turn runs, the box
+  steers it (Enter: the agent reads it at its next step) or queues a message for after it (**Queue**, or Alt+Enter); both show above the
+  box until the agent takes them. A queued message cannot be taken back: OpenCode has no way to. **Stop** cancels the turn that runs. A
+  prompt the agent does not take is said, with its reason.
+- **Reconnecting.** A dropped connection (a phone that slept, a network that changed) comes back on its own, and what happened meanwhile
+  is replayed: no reload.
 - **Who sees what.** Whoever may see what the project's agents did (a user or more) may watch the chat; whoever may operate the agent (its
   starter, an administrator) may also send prompts and stop turns. Several people can have it open at once: it is not a seat, unlike the
   terminal.

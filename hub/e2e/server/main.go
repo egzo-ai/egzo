@@ -360,6 +360,23 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			e.ServeAHP(c.Agent, server.serve)
 		case "ahp-say": // a prompt typed into the agent's terminal: its turn shows in the chat
 			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].say(c.Text)
+		case "ahp-reject": // the agent's AHP server rejects the next action a client dispatches, saying c.Text
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].rejectNext(c.Text)
+		case "ahp-drop": // the connections to the agent's AHP server drop, as a network that went away
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].drop()
+		case "ahp-message": // c.User sends the agent a message (c.Text, id c.Code): the hub hears of it from the events feed, and egzo types its line
+			user, err := db.UserByName(ctx, c.User)
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusNotFound)
+				return
+			}
+			e.PushEvent(links.Event{Type: "message", ID: c.Code, Agent: c.Agent, Actor: "user:" + user.ID, To: "agent:" + c.Agent, Kind: "request", Text: c.Text})
+			for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+				if _, err := db.OutboxMessage(ctx, c.Code); err == nil {
+					break
+				}
+			}
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].say("check egzo message " + c.Code + " and handle the request for me.")
 		case "ahp-heard": // what clients sent the agent's AHP server, after the link's filter
 			json.NewEncoder(rw).Encode(w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].heardLines())
 			return

@@ -12,7 +12,8 @@
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import TaskTable from "../components/TaskTable.svelte";
-  import ChatView from "../components/ChatView.svelte";
+  // the chat (AHP's reducers, Markdown) is a chunk of its own, loaded when an agent's chat is first shown
+  const chatView = () => import("../components/ChatView.svelte");
   import ErrorPage from "./ErrorPage.svelte";
 
   let { project, agent, tab }: { project: string; agent: string; tab: AgentTab } = $props();
@@ -136,7 +137,7 @@
     {/if}
 
     {#if shown === "chat" && !overseeing && a.richUI}
-      {#if a.running && !offline}<ChatView {project} {agent} />{:else}<p class="muted">The chat opens while the agent runs.</p>{/if}
+      {#if a.running && !offline}{#await chatView() then m}<m.default {project} {agent} />{/await}{:else}<p class="muted">The chat opens while the agent runs.</p>{/if}
     {:else if shown === "activity" && !overseeing}
       {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network" && !overseeing}
