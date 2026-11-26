@@ -38,12 +38,14 @@
 {/if}
 
 <style>
-  .prompt { align-self: flex-end; max-width: min(88%, 72ch); background: var(--surface-3); color: var(--text); padding: var(--space-2) var(--space-3); border-radius: var(--radius-3) var(--radius-3) var(--radius-1) var(--radius-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
-  .prompt[data-pending] { opacity: 0.6; }
+  .prompt { align-self: flex-end; max-width: min(80%, 40rem); background: var(--bubble); color: var(--text); padding: 10px 16px; border-radius: 20px 20px 6px 20px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: 16px; }
+  .prompt[data-pending] { opacity: 0.55; }
   .prompt[data-origin="agent"], .prompt[data-origin="tool"], .prompt[data-origin="automation"], .prompt[data-origin="systemNotification"] { background: var(--surface-2); color: var(--text-2); }
-  .message { white-space: normal; display: grid; gap: var(--space-1); }
-  .who { font-size: var(--text-2xs); }
-  .from { font-weight: var(--weight-bold); color: var(--text); }
-  .egzo { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-3); font-size: var(--text-xs); }
-  .egzo .from { color: var(--accent-text); margin-right: var(--space-1); }
+  .message { white-space: normal; display: grid; gap: 4px; }
+  .who { font-size: 13px; color: var(--text-2); }
+  .from { font-weight: 600; color: var(--text); }
+  .egzo { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-3); font-size: 14px; border-radius: 14px; }
+  .egzo .from { color: var(--text-2); margin-right: 6px; }
+  .muted { color: var(--text-3); }
+  @media (max-width: 720px) { .prompt { max-width: 88%; } }
 </style>

@@ -80,7 +80,7 @@ def test_a_prompt_starts_a_turn_that_streams_its_thinking_its_tools_and_its_answ
     expect(first.locator("strong")).to_have_text("recursive descent")
     expect(first.get_by_test_id("turn-meta")).to_contain_text("glm-5.3-flash")
     expect(first.get_by_test_id("turn-meta")).to_contain_text("5.4k in · 120 out")
-    expect(chat(page).get_by_test_id("chat-status")).to_have_text("ready")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
 
     box = chat(page).get_by_label("Prompt")
     box.fill("Read the README")
@@ -88,13 +88,18 @@ def test_a_prompt_starts_a_turn_that_streams_its_thinking_its_tools_and_its_answ
     expect(box).to_have_value("")
     turn = chat(page).locator("article.turn").last
     expect(turn.locator(".prompt")).to_have_text("Read the README")
-    expect(chat(page).get_by_test_id("chat-status")).to_have_text("working")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Working")
     expect(turn).to_have_attribute("data-state", "complete")
     # the answer is Markdown: bold, and a code block that can be copied
     answer = turn.locator(".answer")
     expect(answer.locator("strong")).to_have_text("build")
     expect(answer.locator("pre code")).to_have_text("make\n")
     expect(answer.get_by_role("button", name="Copy the code")).to_have_count(1)
+    # what it did between answers folds into one block of steps once the turn is over, and opens
+    steps = turn.locator(".steps")
+    expect(steps.locator(".steps-head")).to_have_text("Thought, used 1 tool")
+    expect(turn.get_by_test_id("tool")).to_have_count(0)
+    steps.locator(".steps-head").click()
     # the tool call says what it did, and opens on what it was called with and what it gave back
     tool = turn.get_by_test_id("tool")
     expect(tool).to_have_attribute("data-status", "done")
@@ -104,9 +109,9 @@ def test_a_prompt_starts_a_turn_that_streams_its_thinking_its_tools_and_its_answ
     tool.locator("summary").click()
     expect(tool.get_by_test_id("tool-input")).to_contain_text('"filePath": "README.md"')
     expect(tool.get_by_test_id("tool-output")).to_contain_text("Build with `make`.")
-    # thinking folds away once the turn is done
-    turn.get_by_text("Thought").click()
-    expect(turn.locator(".reasoning")).to_contain_text("Looking at the repository first.")
+    # and so does its thinking
+    turn.locator(".thought summary").click()
+    expect(turn.locator(".thought")).to_contain_text("Looking at the repository first.")
     expect(turn.get_by_test_id("turn-meta")).to_contain_text("2s")
     expect(turn.get_by_test_id("turn-meta")).to_contain_text("12k in · 310 out")
     # the session got a title from its first turn
@@ -126,6 +131,8 @@ def test_a_shell_command_shows_what_it_ran_its_output_and_how_it_failed(single_h
     box.press("Enter")
     turn = chat(page).locator("article.turn").last
     expect(turn).to_have_attribute("data-state", "complete")
+    expect(turn.locator(".steps-head")).to_contain_text("one failed")
+    turn.locator(".steps-head").click()
     shell = turn.get_by_test_id("tool").first
     expect(shell).to_have_attribute("data-status", "failed")
     expect(shell.locator("summary code")).to_have_text("go test ./...")
@@ -145,10 +152,11 @@ def test_stop_cancels_the_turn_that_runs(single_hub, page):
     box.press("Enter")
     turn = chat(page).locator("article.turn").last
     expect(turn.get_by_test_id("tool")).to_contain_text("README.md")
-    expect(turn.get_by_text("Working…")).to_be_visible()
+    expect(turn).to_have_attribute("data-state", "running")
     chat(page).get_by_role("button", name="Stop").click()
     expect(turn).to_have_attribute("data-state", "cancelled")
     expect(turn.get_by_test_id("turn-meta")).to_contain_text("Stopped")
+    turn.locator(".steps-head").click()
     expect(turn.get_by_test_id("tool")).to_have_attribute("data-status", "cancelled")
     expect(chat(page).get_by_role("button", name="Stop")).to_have_count(0)
     assert [a["type"] for a in dispatched(hub, "slow")][-1] == "chat/turnCancelled"
@@ -188,7 +196,7 @@ def test_a_prompt_the_agent_does_not_take_says_why(single_hub, page):
     sign_in(page, hub, "admin")
     hub.world("rich-agent", project="web", agent="picky")
     open_chat(page, hub, "picky")
-    expect(chat(page).get_by_test_id("chat-status")).to_have_text("ready")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
     hub.world("ahp-reject", project="web", agent="picky", text="a turn is already active")
     box = chat(page).get_by_label("Prompt")
     box.fill("a prompt")
@@ -228,7 +236,7 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     sign_in(page, hub, "admin")
     hub.world("rich-agent", project="web", agent="inbox")
     open_chat(page, hub, "inbox")
-    expect(chat(page).get_by_test_id("chat-status")).to_have_text("ready")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
     hub.world("ahp-message", project="web", agent="inbox", user="admin", code="m0a1b2c3d4", text="Please **fix** the login page")
     turn = chat(page).locator("article.turn").last
     message = turn.get_by_test_id("prompt-message")
@@ -247,7 +255,7 @@ def test_the_chat_comes_back_on_its_own_after_the_connection_drops(single_hub, p
     sign_in(page, hub, "admin")
     hub.world("rich-agent", project="web", agent="flaky")
     open_chat(page, hub, "flaky")
-    expect(chat(page).get_by_test_id("chat-status")).to_have_text("ready")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
     hub.world("ahp-drop", project="web", agent="flaky")
     # what happens while it is away is replayed when it is back, without a reload
     hub.world("ahp-say", project="web", agent="flaky", text="tidy up the tests")
@@ -255,7 +263,7 @@ def test_the_chat_comes_back_on_its_own_after_the_connection_drops(single_hub, p
     expect(turn.locator(".prompt")).to_have_text("tidy up the tests", timeout=10000)
     expect(turn).to_have_attribute("data-state", "complete")
     expect(turn.locator(".answer strong")).to_have_text("build")
-    expect(chat(page).get_by_test_id("chat-status")).to_have_text("ready")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
     reconnects = [m for m in heard(hub, "flaky") if m.get("method") == "reconnect"]
     assert reconnects, " ".join(m.get("method") for m in heard(hub, "flaky"))
     assert reconnects[-1]["params"]["subscriptions"] == ["ahp-root://", "ahp-session:/ses_flaky", "ahp-chat:/ses_flaky"], reconnects
@@ -272,7 +280,7 @@ def test_a_person_who_may_only_watch_sees_the_chat_live_and_cannot_prompt(hub, p
     box = chat(page).get_by_label("Prompt")
     box.fill("wait while bob looks")
     box.press("Enter")
-    expect(chat(page).get_by_text("Working…")).to_be_visible()
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Working")
 
     open_chat(bob, hub, "shared")
     expect(bob.get_by_test_id("chat-readonly")).to_be_visible()

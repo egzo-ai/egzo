@@ -73,6 +73,9 @@
     }
   }
 
+  // the chat takes the whole page under the agent's header, as a chat does
+  const chatMode = $derived(shown === "chat" && !!a?.richUI && !overseeing);
+
   function attach() {
     roomMade(openTerm(project, agent));
   }
@@ -81,7 +84,7 @@
 {#if failure}
   <ErrorPage error={failure} />
 {:else if data && a}
-  <div class="page">
+  <div class="page" data-chat={chatMode || undefined}>
     <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(project)}>{data.project.name}</a> / <a href={href.project(project)}>Agents</a> /</nav>
     <div class="phead">
       <h1 class="h-page">{a.name}</h1>
@@ -101,12 +104,12 @@
       </span>
     </div>
 
-    <div class="metaline" data-testid="details">
+    {#if !chatMode}<div class="metaline" data-testid="details">
       <span><span class="k">template</span> <a href={href.project(project, "templates")}>{a.template}</a></span>
       <span><span class="k">spawned by</span> {a.creator}</span>
       <span title={stamp(a.createdAt)}><span class="k">created</span> {ago(a.createdAt)}</span>
       {#if a.holder}<span class="presence" data-live data-testid="presence"><span class="k">terminal held by</span> <span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{/if}
-    </div>
+    </div>{/if}
 
     {#if a.task && busy}
       <div class="statusline"><span data-testid="task-step">{a.task.step || "…"}</span> <span class="muted">· {a.task.creator}, started {ago(a.task.startedAt)}</span></div>
@@ -137,7 +140,7 @@
     {/if}
 
     {#if shown === "chat" && !overseeing && a.richUI}
-      {#if a.running && !offline}{#await chatView() then m}<m.default {project} {agent} />{/await}{:else}<p class="muted">The chat opens while the agent runs.</p>{/if}
+      {#if a.running && !offline}<div class="chat-host">{#await chatView() then m}<m.default {project} {agent} />{/await}</div>{:else}<p class="muted">The chat opens while the agent runs.</p>{/if}
     {:else if shown === "activity" && !overseeing}
       {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network" && !overseeing}
