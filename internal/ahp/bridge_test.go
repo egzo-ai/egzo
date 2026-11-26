@@ -20,7 +20,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-// an AHP server that wants the token: it answers listSessions with the sessions it knows, and every other message with itself
+// an AHP server that wants the token: it answers a connection only once it initialized, as the plugin does; then listSessions with the
+// sessions it knows, and every other message with itself
 type fakeServer struct {
 	mu    sync.Mutex
 	known []string // ids of the sessions it lists
@@ -50,6 +51,7 @@ func sessionServer(t *testing.T, token string) (string, *fakeServer) {
 			return
 		}
 		defer conn.CloseNow()
+		initialized := false
 		for {
 			kind, data, err := conn.Read(r.Context())
 			if err != nil {
@@ -60,6 +62,21 @@ func sessionServer(t *testing.T, token string) (string, *fakeServer) {
 				Method string          `json:"method"`
 			}
 			_ = json.Unmarshal(data, &m)
+			if m.Method == "initialize" || m.Method == "reconnect" {
+				initialized = true
+				answer, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{"protocolVersion": "1.0.0"}})
+				if err := conn.Write(r.Context(), kind, answer); err != nil {
+					return
+				}
+				continue
+			}
+			if m.Method == "listSessions" && !initialized {
+				answer, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": m.ID, "error": map[string]any{"code": -32600, "message": "not initialized"}})
+				if err := conn.Write(r.Context(), kind, answer); err != nil {
+					return
+				}
+				continue
+			}
 			if m.Method == "listSessions" {
 				f.mu.Lock()
 				f.lists++
@@ -128,7 +145,8 @@ func TestBridgeRefusedWithoutTheToken(t *testing.T) {
 
 // egzo names the main session before OpenCode makes it, and the AHP server learns of a session it did not make late, or when it is
 // listed: the bridge says which session is the main one only once the server lists it, so a client can subscribe to it as soon as it
-// hears, and the lists the bridge asks for its own sake never reach the client.
+// hears. It asks on a connection of its own: the client, which has not initialized (a page that reconnects waits for the main session
+// before it does), sees none of it.
 func TestBridgeSaysTheMainSessionOnceTheServerKnowsIt(t *testing.T) {
 	url, server := sessionServer(t, "tok")
 	mainFile := filepath.Join(t.TempDir(), "main-session")
@@ -160,8 +178,8 @@ func TestBridgeSaysTheMainSessionOnceTheServerKnowsIt(t *testing.T) {
 	if !strings.Contains(got, `"chat":"ahp-chat:/ses_main"`) {
 		t.Fatalf("the main session was not said once the server knew it: %s", got)
 	}
-	if strings.Contains(got, "items") || strings.Contains(got, "x-egzo/list") {
-		t.Errorf("the bridge's own lists reached the client: %s", got)
+	if strings.Contains(got, "items") || strings.Contains(got, "protocolVersion") || strings.Contains(got, "not initialized") {
+		t.Errorf("what the bridge asked for its own sake reached the client: %s", got)
 	}
 }
 

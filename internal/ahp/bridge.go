@@ -45,6 +45,11 @@ func SessionURIs(id string) MainSession {
 
 // Bridge connects to the AHP server at url with token and copies messages between it and in and out until either ends. mainFile is
 // where the harness writes its main session's id; the bridge reads it now and then, and says what it finds.
+//
+// The client's connection carries the client's messages and the server's, nothing else: the bridge learns whether the server knows the
+// main session on a connection of its own. The server answers a connection only once it initialized, and the client must hear of the main
+// session before it can reconnect (the link lets a reconnect name the main session's channels only once it knows it): asking on the
+// client's connection would wait for the client, which waits for the bridge.
 func Bridge(ctx context.Context, url, token, mainFile string, in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -62,13 +67,6 @@ func Bridge(ctx context.Context, url, token, mainFile string, in io.Reader, out 
 		_, err := out.Write(append(line, '\n'))
 		return err
 	}
-	var writing sync.Mutex // the client's lines and the bridge's own requests share the connection
-	send := func(line []byte) error {
-		writing.Lock()
-		defer writing.Unlock()
-		return conn.Write(ctx, websocket.MessageText, line)
-	}
-	lists := make(chan []string, 1) // the sessions the server listed, for the bridge's own listSessions
 	errs := make(chan error, 3)
 	go func() {
 		for {
@@ -76,13 +74,6 @@ func Bridge(ctx context.Context, url, token, mainFile string, in io.Reader, out 
 			if err != nil {
 				errs <- nil
 				return
-			}
-			if listed, ours := ownList(data); ours {
-				select {
-				case lists <- listed:
-				default:
-				}
-				continue
 			}
 			if err := emit(compact(data)); err != nil {
 				errs <- err
@@ -98,7 +89,7 @@ func Bridge(ctx context.Context, url, token, mainFile string, in io.Reader, out 
 			if len(strings.TrimSpace(string(line))) == 0 {
 				continue
 			}
-			if err := send(line); err != nil {
+			if err := conn.Write(ctx, websocket.MessageText, line); err != nil {
 				errs <- nil
 				return
 			}
@@ -106,33 +97,8 @@ func Bridge(ctx context.Context, url, token, mainFile string, in io.Reader, out 
 		errs <- scanner.Err()
 	}()
 	go func() {
-		// The main session is said once the server lists it: egzo names it before the harness makes it, and the server learns of a
-		// session it did not make late, or when it is listed. Then a client can subscribe to it as soon as it hears.
-		said, asked := "", 0
-		for {
-			if id := readMain(mainFile); id != "" && id != said {
-				asked++
-				request, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": fmt.Sprintf("%s%d", ownListID, asked), "method": "listSessions", "params": map[string]any{}})
-				if send(request) == nil && listedIn(ctx, lists, SessionURIs(id).Session) {
-					said = id
-					note, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": MainSessionMethod, "params": SessionURIs(id)})
-					if err := emit(note); err != nil {
-						errs <- err
-						return
-					}
-				}
-			}
-			// until it is said, ask again soon: the server answers a list only once the client initialized, a moment after the bridge
-			// connected
-			wait := time.Second
-			if said == "" {
-				wait = 250 * time.Millisecond
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(wait):
-			}
+		if err := watchMain(ctx, url, token, mainFile, emit); err != nil {
+			errs <- err
 		}
 	}()
 	err = <-errs
@@ -140,43 +106,108 @@ func Bridge(ctx context.Context, url, token, mainFile string, in io.Reader, out 
 	return err
 }
 
-// ownListID starts the id of the listSessions the bridge asks for its own sake: their answers stay in the bridge.
-const ownListID = "x-egzo/list-"
+// bridgeClientID is the client the bridge is to the server on its own connection: one name for every bridge of the container, so the
+// server's record of its clients does not grow with each connection a hub makes.
+const bridgeClientID = "egzo-bridge"
 
-// ownList says whether a message from the server answers one of the bridge's own listSessions, and which sessions it listed.
-func ownList(data []byte) (sessions []string, ours bool) {
-	var m struct {
-		ID     string `json:"id"`
-		Result struct {
-			Items []struct {
-				Resource string `json:"resource"`
-			} `json:"items"`
-		} `json:"result"`
+// watchMain says the main session once the server lists it, and again whenever it changes: egzo names it before the harness makes it,
+// and the server learns of a session it did not make late, or when it is listed. Then a client can subscribe to it as soon as it hears.
+// It asks on a connection of its own, made again if it drops. An error is what emit returned.
+func watchMain(ctx context.Context, url, token, mainFile string, emit func([]byte) error) error {
+	said := ""
+	for ctx.Err() == nil {
+		var err error
+		said, err = watchOn(ctx, url, token, mainFile, said, emit)
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+		}
 	}
-	if json.Unmarshal(data, &m) != nil || !strings.HasPrefix(m.ID, ownListID) {
-		return nil, false
-	}
-	for _, item := range m.Result.Items {
-		sessions = append(sessions, item.Resource)
-	}
-	return sessions, true
+	return nil
 }
 
-// listedIn waits a while for the answer to the bridge's listSessions, and says whether it lists session.
-func listedIn(ctx context.Context, lists <-chan []string, session string) bool {
-	select {
-	case listed := <-lists:
-		for _, s := range listed {
-			if s == session {
-				return true
+// watchOn is watchMain on one connection, until it drops: it answers what was said last.
+func watchOn(ctx context.Context, url, token, mainFile, said string, emit func([]byte) error) (string, error) {
+	conn, _, err := dial(ctx, url, token)
+	if err != nil {
+		return said, nil
+	}
+	conn.SetReadLimit(MaxMessage)
+	defer conn.CloseNow()
+	next := 0
+	// ask sends a request and waits for its answer, skipping what else the server says
+	ask := func(method string, params any) (json.RawMessage, bool) {
+		next++
+		request, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": next, "method": method, "params": params})
+		askCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if conn.Write(askCtx, websocket.MessageText, request) != nil {
+			return nil, false
+		}
+		for {
+			_, data, err := conn.Read(askCtx)
+			if err != nil {
+				return nil, false
+			}
+			var m struct {
+				ID     *int            `json:"id"`
+				Result json.RawMessage `json:"result"`
+			}
+			if json.Unmarshal(data, &m) == nil && m.ID != nil && *m.ID == next {
+				return m.Result, true
 			}
 		}
-		return false
-	case <-time.After(5 * time.Second):
-		return false
-	case <-ctx.Done():
+	}
+	if _, ok := ask("initialize", map[string]any{"channel": RootChannel, "clientId": bridgeClientID, "protocolVersions": []string{"1.0.0"},
+		"initialSubscriptions": []string{}}); !ok {
+		return said, nil
+	}
+	for {
+		if id := readMain(mainFile); id != "" && id != said {
+			result, ok := ask("listSessions", map[string]any{})
+			if !ok {
+				return said, nil
+			}
+			if listed(result, SessionURIs(id).Session) {
+				said = id
+				note, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": MainSessionMethod, "params": SessionURIs(id)})
+				if err := emit(note); err != nil {
+					return said, err
+				}
+			}
+		}
+		// until it is said, ask again soon
+		wait := time.Second
+		if said == "" {
+			wait = 250 * time.Millisecond
+		}
+		select {
+		case <-ctx.Done():
+			return said, nil
+		case <-time.After(wait):
+		}
+	}
+}
+
+// listed says whether a listSessions result lists session.
+func listed(result json.RawMessage, session string) bool {
+	var r struct {
+		Items []struct {
+			Resource string `json:"resource"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(result, &r) != nil {
 		return false
 	}
+	for _, item := range r.Items {
+		if item.Resource == session {
+			return true
+		}
+	}
+	return false
 }
 
 func dial(ctx context.Context, url, token string) (*websocket.Conn, *http.Response, error) {
