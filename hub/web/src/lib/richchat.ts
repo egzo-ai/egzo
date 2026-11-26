@@ -261,9 +261,11 @@ export function pendingOf(state: ChatState | null): PendingView[] {
   return out;
 }
 
-/** The session's title, or the chat's. */
+/** The session's title, or the chat's. A harness titles a session from its first prompt, which is often egzo's line announcing a message:
+ * a title that names one says nothing, and is none. */
 export function titleOf(chat: Chat): string {
-  return chat.sessionState?.title || chat.state?.title || "";
+  const title = chat.sessionState?.title || chat.state?.title || "";
+  return /\bm[0-9a-f]{12,}\b/i.test(title) ? "" : title;
 }
 
 /** The turn that runs, if any: the one a stop cancels. */

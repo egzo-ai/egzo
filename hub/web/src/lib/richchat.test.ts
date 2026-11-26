@@ -106,6 +106,9 @@ describe("the Rich UI chat, kept by AHP's reducers", () => {
     expect(titleOf(chat)).toBe("New session");
     chat = apply(chat, env({ type: "session/titleChanged", title: "Fix the login page" }, { channel: S }));
     expect(titleOf(chat)).toBe("Fix the login page");
+    // titled from egzo's line: no title
+    chat = apply(chat, env({ type: "session/titleChanged", title: "Egzo message m9d56df56661977b63d5d26dc4e3a7a19" }, { channel: S }));
+    expect(titleOf(chat)).toBe("");
   });
 
   it("lists the messages that steer the running turn or wait for the next one", () => {
