@@ -402,11 +402,12 @@ def test_a_scripted_model_drives_the_real_tui_through_a_shell_command_and_an_egz
     offered = turns[0]["tools"]
     assert any(t.endswith("list_messages") for t in offered), f"the egzo MCP tools are offered to the model: {offered}"
     # the browser's tools are not on the tool list: they are behind the harness's own way to the tools it defers, which names them to the
-    # model (OpenCode's Code Mode catalog in the system prompt, Claude Code's list of deferred tools); egzo's own instructions never name one
+    # model (OpenCode's Code Mode catalog in the system prompt, Claude Code's list of deferred tools); egzo's own instructions never name one.
+    # OpenCode's catalog is partial and names only some of them (the model finds the others with its search), so any one of them will do.
     told = (turns[0]["system"] or "") + "\n" + (turns[0]["prompt"] or "")
     around = told[max(told.find("browser_"), 0):][:1500]
     assert not any(t.endswith("browser_navigate") for t in offered), f"the browser's tools are kept off the tool list: {offered}"
-    assert DEFERRING[harness] in offered and "browser_navigate" in told, f"the browser's tools are behind {DEFERRING[harness]}: {around or told[-3000:]}"
+    assert DEFERRING[harness] in offered and "browser_" in told, f"the browser's tools are behind {DEFERRING[harness]}: {around or told[-3000:]}"
     placeholder = env_of(engine, p, name)["ANTHROPIC_API_KEY"]
     assert {r["key"] for r in turns} == {placeholder}, "every call to the model carries the placeholder egzo gave the harness"
 
