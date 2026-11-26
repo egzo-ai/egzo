@@ -1,10 +1,14 @@
 package hub
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
@@ -86,4 +90,52 @@ func (h *Hub) agentOf(ctx context.Context, id, agent string) (creator string, ah
 		return "", false, ErrNotFound
 	}
 	return creator, ahp, err
+}
+
+// ChatMessage is a message a person sent an agent, as its Rich UI chat shows it: egzo announces a message to the agent with a line that
+// names it ("check egzo message m… and handle the request for me."), and the chat shows what the line stands for.
+type ChatMessage struct {
+	ID   string    `json:"id"`
+	From string    `json:"from"` // the person's name on the hub
+	Kind string    `json:"kind"` // request, question, resolution, update
+	Text string    `json:"text"`
+	Time time.Time `json:"time"`
+}
+
+// ChatMessageOf is a message a hub user sent an agent, for someone who may watch its chat: what the message said reached the agent, which
+// fetched it in its chat or its terminal, both of which they may see. The hub knows it from the project's events feed, which carries the
+// text of what a user and an agent say to each other, and keeps it as long as its outbox does. ErrNotFound for anything else: a message
+// to another agent, one an agent or the operator sent, or one the outbox no longer has.
+func (h *Hub) ChatMessageOf(ctx context.Context, user store.User, project, agent, id string) (ChatMessage, error) {
+	role, err := h.access(ctx, user, project)
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	creator, _, err := h.agentOf(ctx, project, agent)
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	if !rbac.Can(user.Subject(), role, rbac.Inspect, creator) {
+		return ChatMessage{}, ErrForbidden
+	}
+	o, err := h.store.OutboxMessage(ctx, id)
+	if errors.Is(err, store.ErrNotFound) || err == nil && (o.Project != project || o.Agent != agent) {
+		return ChatMessage{}, ErrNotFound
+	}
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	var e BridgeEvent
+	if json.Unmarshal(o.Body, &e) != nil || e.Type != EventMessage || e.ID != id {
+		return ChatMessage{}, ErrNotFound
+	}
+	from, ok := strings.CutPrefix(e.From, "user:")
+	if !ok {
+		return ChatMessage{}, ErrNotFound
+	}
+	m := ChatMessage{ID: e.ID, From: "someone", Kind: e.Kind, Text: e.Text, Time: e.Time}
+	if u, err := h.store.User(ctx, from); err == nil {
+		m.From = cmp.Or(u.Name, u.Username)
+	}
+	return m, nil
 }

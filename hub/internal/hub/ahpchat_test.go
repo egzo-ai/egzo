@@ -9,6 +9,7 @@ import (
 
 	"github.com/egzo-ai/egzo/hub/internal/links"
 	"github.com/egzo-ai/egzo/hub/internal/rbac"
+	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
 // richPublished is what a link pushes for a project with one template whose harness has an AHP mode (oc) and one without (coder).
@@ -119,6 +120,50 @@ func TestTheChatCarriesLinesAndTheLinkHearsWhetherItIsReadOnly(t *testing.T) {
 		}
 		if ro := <-seen; ro != who.readOnly {
 			t.Errorf("%s: the link heard read-only=%v", who.name, ro)
+		}
+	}
+}
+
+func TestTheChatShowsWhatAPersonSentTheAgentToWhoeverMayWatchIt(t *testing.T) {
+	r := newRig(t)
+	web := r.link("web", "oc")
+	id := r.id("web")
+	alice, bob, carol := r.login("alice"), r.login("bob"), r.login("carol")
+	r.store.SetRole(ctx, id, alice.ID, rbac.User)
+	r.store.SetRole(ctx, id, bob.ID, rbac.User)
+	r.store.SetRole(ctx, id, carol.ID, rbac.Overseer)
+	rich := agent("oc-1", rbac.Actor(alice.ID))
+	rich.AHP = true
+	web.SetAgent(rich)
+	web.SetAgent(agent("oc-2", rbac.Actor(alice.ID)))
+	for i, e := range []links.Event{
+		{Type: "message", ID: "m1", Agent: "oc-1", Actor: "user:" + alice.ID, To: "agent:oc-1", Kind: "request", Text: "Fix the login page"},
+		{Type: "message", ID: "m2", Agent: "oc-1", Actor: "agent:oc-1", To: "user:" + alice.ID, Kind: "update", Text: "Done"},
+		{Type: "message", ID: "m3", Agent: "oc-2", Actor: "user:" + alice.ID, To: "agent:oc-2", Kind: "request", Text: "Not this agent's"},
+	} {
+		e.Seq = i + 1
+		if err := r.hub.handleEvent(ctx, id, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, who := range []store.User{alice, bob} {
+		m, err := r.hub.ChatMessageOf(ctx, who, id, "oc-1", "m1")
+		if err != nil || m.Text != "Fix the login page" || m.From != "alice" || m.Kind != "request" {
+			t.Errorf("%s: %+v %v", who.Username, m, err)
+		}
+	}
+	if _, err := r.hub.ChatMessageOf(ctx, carol, id, "oc-1", "m1"); !errors.Is(err, ErrForbidden) && !errors.Is(err, ErrNotFound) {
+		t.Errorf("an overseer does not see the chat, nor what it was sent: %v", err)
+	}
+	for _, c := range []struct{ agent, msg, why string }{
+		{"oc-1", "m2", "what the agent said is not a message it was sent"},
+		{"oc-1", "m3", "a message to another agent"},
+		{"oc-2", "m1", "a message to another agent, asked through that one"},
+		{"oc-1", "m9", "a message the hub never had"},
+	} {
+		if _, err := r.hub.ChatMessageOf(ctx, alice, id, c.agent, c.msg); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: %v", c.why, err)
 		}
 	}
 }

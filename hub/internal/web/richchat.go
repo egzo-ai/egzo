@@ -98,3 +98,13 @@ func (s *Server) richChat(w http.ResponseWriter, r *http.Request, user store.Use
 	}
 	conn.Close(websocket.StatusNormalClosure, "")
 }
+
+// chatMessage is a message a person sent the agent, which its chat names in egzo's line announcing it.
+func (s *Server) chatMessage(w http.ResponseWriter, r *http.Request, user store.User) {
+	m, err := s.hub.ChatMessageOf(r.Context(), user, r.PathValue("project"), r.PathValue("agent"), r.PathValue("id"))
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
