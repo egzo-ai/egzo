@@ -190,7 +190,7 @@ The catalog is partial. Before calling a tool that is not listed below, find it 
   removed: boolean,
 }> // Remove a worktree. The repository location selects configuration; directory identifies the worktree to remove.
 - playwright (25 tools, 11 shown)
-  - tools.playwright.browser_close(): Promise<unknown> // Close the page
+  - tools.playwright.browser_close(): Promise<unknown> // Close the browser and all open tabs.
   - tools.playwright.browser_drag({
   /** Human-readable source element description used to obtain the permission to interact with the element */
   startElement?: string,
