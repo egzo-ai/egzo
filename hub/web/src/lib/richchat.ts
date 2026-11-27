@@ -67,6 +67,8 @@ export interface ToolView {
   /** What it does, in Markdown: the command, the file. */
   said: string;
   status: "preparing" | "waiting" | "running" | "done" | "failed" | "cancelled";
+  /** It waits for the person to approve it (or deny it) before it runs. */
+  confirm: boolean;
   /** What it says it did, once complete. */
   outcome: string;
   /** A shell command it runs, when it runs one. */
@@ -86,7 +88,7 @@ export type PartView =
   | { kind: "tool"; key: string; tool: ToolView }
   | { kind: "error"; key: string; message: string }
   | { kind: "notice"; key: string; content: string }
-  | { kind: "question"; key: string; message: string; open: boolean }
+  | { kind: "question"; key: string; request: QuestionRequest; open: boolean; response?: string }
   | { kind: "resource"; key: string; title: string };
 
 export interface TurnView {
@@ -101,6 +103,36 @@ export interface TurnView {
   /** How long it took, in milliseconds, once it ended. */
   duration?: number;
   startedAt?: string;
+}
+
+/** What the agent asks the person (an AHP chat input request: OpenCode's question tool, a consent it needs, …). */
+export interface QuestionRequest {
+  id: string;
+  message: string;
+  /** A page to open, for a question answered elsewhere (a sign-in). */
+  url: string;
+  questions: QuestionView[];
+  /** The answers given, by question id (AHP ChatInputAnswer). */
+  answers: Record<string, Json>;
+}
+
+export interface QuestionView {
+  id: string;
+  kind: "text" | "number" | "integer" | "boolean" | "single-select" | "multi-select";
+  title: string;
+  message: string;
+  required: boolean;
+  options: { id: string; label: string; description: string; recommended: boolean }[];
+  /** Free text besides (or instead of) the options. */
+  freeform: boolean;
+  defaultValue?: string | number | boolean;
+}
+
+/** A steering message the agent took while a turn ran: shown in the turn after `at` of its parts. */
+export interface SteerView {
+  key: string;
+  at: number;
+  text: string;
 }
 
 export interface PendingView {
@@ -175,7 +207,7 @@ export function toolOf(tc: ToolCallState): ToolView {
   let view = toolStatus[status] ?? "running";
   if (view === "done" && t.success === false) view = "failed";
   let note = "";
-  if (status === "pending-confirmation") note = text(t.confirmationTitle) || "It waits for an approval in the agent's terminal.";
+  if (status === "pending-confirmation") note = text(t.confirmationTitle) || "It waits for your approval.";
   else if (status === "auth-required") note = "It waits for a sign-in.";
   else if (status === "pending-result-confirmation") note = "Its result waits for an approval in the agent's terminal.";
   else if (status === "cancelled") note = text(t.reasonMessage) || ({ denied: "Denied.", skipped: "Skipped: the turn ended.", "result-denied": "Its result was denied." } as Record<string, string>)[t.reason] || "";
@@ -185,12 +217,40 @@ export function toolOf(tc: ToolCallState): ToolView {
     display: String(t.displayName || t.toolName || "Tool"),
     said: text(t.invocationMessage),
     status: view,
+    confirm: status === "pending-confirmation",
     outcome: view === "done" || view === "failed" ? text(t.pastTenseMessage) : "",
     command,
     input,
     output: contentText(t.content),
     error: t.error?.message ? String(t.error.message) : "",
     note,
+  };
+}
+
+function questionOf(request: Json): QuestionRequest {
+  const kinds = ["text", "number", "integer", "boolean", "single-select", "multi-select"];
+  return {
+    id: String(request?.id ?? ""),
+    message: text(request?.message),
+    url: typeof request?.url === "string" ? request.url : "",
+    questions: (Array.isArray(request?.questions) ? request.questions : [])
+      .filter((q: Json) => kinds.includes(String(q?.kind)))
+      .map((q: Json) => ({
+        id: String(q.id ?? ""),
+        kind: String(q.kind) as QuestionView["kind"],
+        title: text(q.title),
+        message: text(q.message),
+        required: q.required === true,
+        options: (Array.isArray(q.options) ? q.options : []).map((o: Json) => ({
+          id: String(o?.id ?? ""),
+          label: String(o?.label ?? o?.id ?? ""),
+          description: text(o?.description),
+          recommended: o?.recommended === true,
+        })),
+        freeform: q.allowFreeformInput === true,
+        ...(["string", "number", "boolean"].includes(typeof q.defaultValue) ? { defaultValue: q.defaultValue } : {}),
+      })),
+    answers: request?.answers && typeof request.answers === "object" ? request.answers : {},
   };
 }
 
@@ -215,7 +275,13 @@ function partsOf(parts: ResponsePart[]): PartView[] {
         out.push({ kind: "notice", key: `n-${i}`, content: text(part.content) });
         break;
       case "inputRequest":
-        out.push({ kind: "question", key: `q-${part.request?.id ?? i}`, message: text(part.request?.message) || "The agent asks for input.", open: part.response === undefined });
+        out.push({
+          kind: "question",
+          key: `q-${part.request?.id ?? i}`,
+          request: questionOf(part.request),
+          open: part.response === undefined,
+          ...(part.response !== undefined ? { response: String(part.response) } : {}),
+        });
         break;
       case "contentRef":
         out.push({ kind: "resource", key: `c-${i}`, title: String(part.title ?? part.uri ?? "content") });
@@ -337,6 +403,12 @@ export const messages = {
   /** A message for the turn that runs: steering goes into it at the next step, queued starts a turn after it. */
   pending: (channel: string, kind: "steering" | "queued", id: string, prompt: string) =>
     dispatch(channel, { type: "chat/pendingMessageSet", kind, id, message: { text: prompt, origin: { kind: "user" } } }),
+  /** Answers what the agent asks (accept), or dismisses it (decline). */
+  answer: (channel: string, requestId: string, response: "accept" | "decline", answers?: Record<string, Json>) =>
+    dispatch(channel, { type: "chat/inputCompleted", requestId, response, ...(answers ? { answers } : {}) }),
+  /** Lets a tool call that waits for an approval run, or denies it. */
+  confirm: (channel: string, turnId: string, toolCallId: string, approved: boolean) =>
+    dispatch(channel, { type: "chat/toolCallConfirmed", turnId, toolCallId, approved, ...(approved ? { confirmed: "user-action" } : { reason: "denied" }) }),
 };
 
 /** A new id: a random UUID. crypto.randomUUID exists in a secure context only (https, or localhost), and a hub on a private network is

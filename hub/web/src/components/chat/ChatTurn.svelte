@@ -2,19 +2,43 @@
   // One turn: what started it, then what the agent did and said, in the order it happened, and a line saying how it ended. What it did
   // between two answers (its thinking and its tool calls) is one block of steps, which folds away once the turn is over.
   import { copyText } from "../../lib/clipboard";
-  import { formatDuration, formatTokens, modelName, type PartView, type TurnView } from "../../lib/richchat";
+  import { formatDuration, formatTokens, modelName, type PartView, type SteerView, type TurnView } from "../../lib/richchat";
   import type { ChatMessage } from "../../lib/types";
   import ChatPrompt from "./ChatPrompt.svelte";
+  import ChatQuestion from "./ChatQuestion.svelte";
   import Markdown from "./Markdown.svelte";
   import ToolCall from "./ToolCall.svelte";
 
-  let { turn, resolve, activity = "", now = Date.now() }: { turn: TurnView; resolve: (id: string) => Promise<ChatMessage | null>; activity?: string; now?: number } = $props();
+  let {
+    turn,
+    resolve,
+    activity = "",
+    now = Date.now(),
+    steers = [],
+    readOnly = true,
+    onAnswer,
+    onConfirm,
+  }: {
+    turn: TurnView;
+    resolve: (id: string) => Promise<ChatMessage | null>;
+    activity?: string;
+    now?: number;
+    steers?: SteerView[];
+    readOnly?: boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onAnswer?: (requestId: string, response: "accept" | "decline", answers?: Record<string, any>) => void;
+    onConfirm?: (toolCallId: string, approved: boolean) => void;
+  } = $props();
 
-  type Segment = { kind: "steps"; key: string; parts: PartView[] } | { kind: "part"; key: string; part: PartView };
-  // the parts, with the steps between two answers gathered
+  type Segment = { kind: "steps"; key: string; parts: PartView[] } | { kind: "part"; key: string; part: PartView } | { kind: "steer"; key: string; text: string };
+  // the parts, with the steps between two answers gathered, and where the person steered the turn
   const segments = $derived.by(() => {
     const out: Segment[] = [];
-    for (const p of turn.parts) {
+    const steerAt = (i: number) => {
+      for (const st of steers) if (st.at === i) out.push({ kind: "steer", key: st.key, text: st.text });
+    };
+    turn.parts.forEach((p, i) => {
+      steerAt(i);
       if (p.kind === "tool" || p.kind === "reasoning") {
         const last = out.at(-1);
         if (last?.kind === "steps") last.parts.push(p);
@@ -22,7 +46,8 @@
       } else {
         out.push({ kind: "part", key: p.key, part: p });
       }
-    }
+    });
+    for (const st of steers) if (st.at >= turn.parts.length) out.push({ kind: "steer", key: st.key, text: st.text });
     return out;
   });
   const running = $derived(turn.state === "running");
@@ -65,7 +90,8 @@
     {#each segments as seg, i (seg.key)}
       {#if seg.kind === "steps"}
         {@const live = running && i === segments.length - 1}
-        {@const open = opened[seg.key] ?? live}
+        {@const asks = seg.parts.some((p) => p.kind === "tool" && p.tool.confirm)}
+        {@const open = asks || (opened[seg.key] ?? live)}
         <div class="steps" data-live={live || undefined} data-open={open || undefined}>
           <button type="button" class="steps-head" aria-expanded={open} onclick={() => (opened = { ...opened, [seg.key]: !open })}>
             {#if live}<span><span class="shimmer">{activity || "Working"}…</span>{#if formatDuration(elapsed)}<span class="elapsed">{formatDuration(elapsed)}</span>{/if}</span>{:else}<span>{summary(seg.parts)}</span>{/if}
@@ -75,7 +101,7 @@
             <div class="steps-body">
               {#each seg.parts as p (p.key)}
                 {#if p.kind === "tool"}
-                  <ToolCall tool={p.tool} />
+                  <ToolCall tool={p.tool} onConfirm={!readOnly && onConfirm ? (approved) => onConfirm(p.tool.id, approved) : undefined} />
                 {:else if p.kind === "reasoning"}
                   <details class="thought" open={live && p === seg.parts.at(-1)}>
                     <summary><span class="ic" aria-hidden="true">✦</span>{live && p === seg.parts.at(-1) ? "Thinking" : "Thought"}</summary>
@@ -86,6 +112,8 @@
             </div>
           {/if}
         </div>
+      {:else if seg.kind === "steer"}
+        <div class="steer" data-testid="chat-steer"><span class="arrow" aria-hidden="true">↪</span><span class="who">You steered:</span> <span class="t">{seg.text}</span></div>
       {:else if seg.part.kind === "markdown"}
         <div class="answer"><Markdown source={seg.part.content} /></div>
       {:else if seg.part.kind === "error"}
@@ -93,7 +121,8 @@
       {:else if seg.part.kind === "notice"}
         <div class="notice"><Markdown source={seg.part.content} inline /></div>
       {:else if seg.part.kind === "question"}
-        <div class="question" data-open={seg.part.open || undefined}><span class="q" aria-hidden="true">?</span><span><Markdown source={seg.part.message} inline />{#if seg.part.open}<span class="muted"> Answer it in the agent's terminal.</span>{/if}</span></div>
+        {@const q = seg.part}
+        <ChatQuestion request={q.request} open={q.open} response={q.response} {readOnly} onAnswer={onAnswer ? (response, answers) => onAnswer(q.request.id, response, answers) : undefined} />
       {:else if seg.part.kind === "resource"}
         <div class="notice">{seg.part.title}</div>
       {/if}
@@ -137,9 +166,10 @@
 
   .error { color: var(--text); background: var(--status-error-soft); border: 1px solid color-mix(in srgb, var(--status-error) 40%, transparent); padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
   .notice { color: var(--text-3); font-size: 14px; font-style: italic; }
-  .question { display: flex; gap: 10px; align-items: baseline; font-size: 15px; padding: 10px 14px; border-radius: 12px; background: var(--status-waiting-soft); }
-  .question .q { color: var(--status-waiting); font-weight: 800; }
-  .muted { color: var(--text-3); }
+  .steer { align-self: flex-end; max-width: 85%; display: flex; gap: 6px; align-items: baseline; font-size: 14px; color: var(--text-2); padding: 6px 12px; border-radius: 12px; border: 1px dashed var(--border-strong); }
+  .steer .arrow { color: var(--accent-text, var(--accent)); }
+  .steer .who { color: var(--text-3); flex: none; }
+  .steer .t { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 
   .typing { display: inline-flex; gap: 5px; padding: 6px 0; }
   .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); animation: bounce 1.2s infinite ease-in-out; }

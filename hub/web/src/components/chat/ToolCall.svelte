@@ -3,7 +3,17 @@
   import type { ToolView } from "../../lib/richchat";
   import Markdown from "./Markdown.svelte";
 
-  let { tool }: { tool: ToolView } = $props();
+  // onConfirm, when given, answers a tool that waits for the person's approval: it runs (true) or is denied (false)
+  let { tool, onConfirm }: { tool: ToolView; onConfirm?: (approved: boolean) => void } = $props();
+  let answered = $state(false);
+  $effect(() => {
+    if (!tool.confirm) answered = false;
+  });
+  function confirm(approved: boolean) {
+    if (answered || !onConfirm) return;
+    answered = true;
+    onConfirm(approved);
+  }
   // a long output shows its end: the part that says how it went
   const maxLines = 40;
   let full = $state(false);
@@ -40,8 +50,24 @@
     {#if !hasDetails}<p class="note">{tool.status === "running" || tool.status === "preparing" ? "Nothing yet." : "No details."}</p>{/if}
   </div>
 </details>
+{#if tool.confirm}
+  <div class="approve" data-testid="tool-approval">
+    <span class="ask">{tool.note || "It waits for your approval."}</span>
+    {#if onConfirm}
+      <button type="button" class="yes" onclick={() => confirm(true)} disabled={answered}>Approve</button>
+      <button type="button" class="no" onclick={() => confirm(false)} disabled={answered}>Deny</button>
+    {:else}
+      <span class="dim">The person operating the agent approves it.</span>
+    {/if}
+  </div>
+{/if}
 
 <style>
+  .approve { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px 36px; padding: 8px 12px; border-radius: 10px; background: var(--status-waiting-soft); border: 1px solid color-mix(in srgb, var(--status-waiting) 45%, transparent); font-size: 14px; }
+  .approve .ask { flex: 1 1 12em; color: var(--text); }
+  .approve button { font: inherit; font-size: 14px; padding: 6px 14px; border-radius: 10px; cursor: pointer; border: 1px solid var(--border-strong); background: var(--card); color: var(--text); }
+  .approve .yes { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast, #fff); }
+  .approve button:disabled { opacity: 0.55; cursor: default; }
   .tool { border: 0; padding: 0; display: block; font-size: 14px; }
   .tool > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; color: var(--text-2); font-size: 14px; min-width: 0; cursor: pointer; }
   .tool > summary::-webkit-details-marker { display: none; }

@@ -171,16 +171,18 @@ def test_while_a_turn_runs_a_message_steers_it_or_waits_for_the_next_one(single_
     box.fill("wait for the build")
     box.press("Enter")
     expect(chat(page).get_by_role("button", name="Steer")).to_be_visible()
-    # Enter steers the running turn
+    # Enter steers the running turn: the agent takes it at its next step, and the turn shows where
     box.fill("use the v2 API")
     box.press("Enter")
     waiting = chat(page).get_by_test_id("chat-pending")
-    expect(waiting.locator("li[data-kind=steering]:not([data-pending])")).to_contain_text("use the v2 API")
+    running_turn = chat(page).locator("article.turn").nth(1)
+    expect(running_turn.get_by_test_id("chat-steer")).to_contain_text("use the v2 API")
+    expect(waiting.locator("li[data-kind=steering]")).to_have_count(0)
     # Queue waits for the turn to end
     box.fill("then read the README")
     chat(page).get_by_role("button", name="Queue").click()
     expect(waiting.locator("li[data-kind=queued]:not([data-pending])")).to_contain_text("then read the README")
-    # when the turn ends, the steering message is gone, and the queued one starts the next turn
+    # when the turn ends, the queued message starts the next turn
     chat(page).get_by_role("button", name="Stop").click()
     expect(chat(page).locator("article.turn")).to_have_count(3)
     nxt = chat(page).locator("article.turn").last
@@ -189,6 +191,74 @@ def test_while_a_turn_runs_a_message_steers_it_or_waits_for_the_next_one(single_
     expect(waiting).to_have_count(0)
     kinds = [(a["type"], a.get("kind")) for a in dispatched(hub, "steer")]
     assert kinds == [("chat/turnStarted", None), ("chat/pendingMessageSet", "steering"), ("chat/pendingMessageSet", "queued"), ("chat/turnCancelled", None)], kinds
+
+
+def test_what_the_agent_asks_shows_in_its_turn_and_one_click_answers_it(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="asks")
+    open_chat(page, hub, "asks")
+    box = chat(page).get_by_label("Prompt")
+    box.fill("search the web for egzo")
+    box.press("Enter")
+    turn = chat(page).locator("article.turn").last
+    question = turn.get_by_test_id("chat-question")
+    expect(question).to_contain_text("Allow OpenCode to search the web for up-to-date information?")
+    expect(question.get_by_role("button")).to_have_text(["Allow search via Exa", "Choose another provider", "Disable web search", "Dismiss"])
+    question.get_by_role("button", name="Allow search via Exa").click()
+    expect(question.get_by_test_id("question-outcome")).to_have_text("Answered: Allow search via Exa")
+    expect(turn.locator(".answer")).to_contain_text("Searched the web (allow)")
+    expect(turn).to_have_attribute("data-state", "complete")
+    answers = [a for a in dispatched(hub, "asks") if a["type"] == "chat/inputCompleted"]
+    assert answers == [{"type": "chat/inputCompleted", "requestId": "frm-ws", "response": "accept",
+                        "answers": {"choice": {"state": "submitted", "value": {"kind": "selected", "value": "allow"}}}}], answers
+
+
+def test_a_question_can_be_dismissed(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="dismiss")
+    open_chat(page, hub, "dismiss")
+    box = chat(page).get_by_label("Prompt")
+    box.fill("search the web for egzo")
+    box.press("Enter")
+    turn = chat(page).locator("article.turn").last
+    turn.get_by_test_id("chat-question").get_by_role("button", name="Dismiss").click()
+    expect(turn.get_by_test_id("question-outcome")).to_have_text("Dismissed.")
+    expect(turn.locator(".answer")).to_contain_text("The search was declined.")
+
+
+def test_a_tool_that_waits_for_an_approval_runs_when_approved(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="approve")
+    open_chat(page, hub, "approve")
+    box = chat(page).get_by_label("Prompt")
+    box.fill("approve deleting the build directory")
+    box.press("Enter")
+    turn = chat(page).locator("article.turn").last
+    approval = turn.get_by_test_id("tool-approval")
+    expect(approval).to_contain_text("Delete the build directory?")
+    approval.get_by_role("button", name="Approve").click()
+    expect(turn.locator(".answer")).to_contain_text("Deleted the build directory.")
+    expect(turn.get_by_test_id("tool-approval")).to_have_count(0)
+    confirmed = [a for a in dispatched(hub, "approve") if a["type"] == "chat/toolCallConfirmed"]
+    assert confirmed == [{"type": "chat/toolCallConfirmed", "turnId": confirmed[0]["turnId"], "toolCallId": "call-rm", "approved": True, "confirmed": "user-action"}], confirmed
+
+
+def test_a_tool_that_waits_for_an_approval_can_be_denied(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="deny")
+    open_chat(page, hub, "deny")
+    box = chat(page).get_by_label("Prompt")
+    box.fill("approve deleting the build directory")
+    box.press("Enter")
+    turn = chat(page).locator("article.turn").last
+    turn.get_by_test_id("tool-approval").get_by_role("button", name="Deny").click()
+    expect(turn.locator(".answer")).to_contain_text("It was denied")
+    expect(turn.get_by_test_id("tool-approval")).to_have_count(0)
+    assert [a["approved"] for a in dispatched(hub, "deny") if a["type"] == "chat/toolCallConfirmed"] == [False]
 
 
 def test_a_prompt_the_agent_does_not_take_says_why(single_hub, page):

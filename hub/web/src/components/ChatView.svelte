@@ -5,7 +5,7 @@
   // was missed, from the last serverSeq seen.
   import type { ActionEnvelope, Snapshot } from "@microsoft/agent-host-protocol";
   import { api, chatURL } from "../lib/api";
-  import { apply, emptyChat, messages, modelName, newTurnId, pendingOf, ROOT, running, titleOf, turnsOf, withSnapshot, type Chat } from "../lib/richchat";
+  import { apply, emptyChat, messages, modelName, newTurnId, pendingOf, ROOT, running, titleOf, turnsOf, withSnapshot, type Chat, type SteerView } from "../lib/richchat";
   import type { ChatMessage } from "../lib/types";
   import "@fontsource-variable/inter/wght.css";
   import ChatPrompt from "./chat/ChatPrompt.svelte";
@@ -25,6 +25,9 @@
   let box: HTMLTextAreaElement | undefined = $state();
   let stuck = $state(true); // the view follows the newest turn while the reader is at the bottom
   let now = $state(Date.now());
+  /** Where the agent took the steering messages, by turn: AHP keeps no trace of them in the turn, so this page does (for its tab). */
+  let steers = $state<Record<string, SteerView[]>>({});
+  const steersKey = $derived(`egzo-steers:${project}/${agent}`);
 
   // one id for this page, kept across reconnects: the server knows what it sent it
   const clientId = `egzo-hub-${newTurnId()}`;
@@ -185,6 +188,31 @@
       outgoing = outgoing.filter((o) => o.id !== id);
       if (envelope.rejectionReason !== undefined) notice = `The agent did not take it: ${envelope.rejectionReason}`;
     }
+    const mine = (envelope as Json).origin?.clientId === clientId;
+    if (mine && envelope.rejectionReason !== undefined && (action?.type === "chat/inputCompleted" || action?.type === "chat/toolCallConfirmed")) {
+      notice = `The agent did not take the answer: ${envelope.rejectionReason}`;
+    }
+    // the agent took a steering message into the turn that runs: mark the place
+    const steering = chat.state?.steeringMessage;
+    const runningTurn = running(chat);
+    if (
+      envelope.channel === chat.channel &&
+      envelope.rejectionReason === undefined &&
+      action?.type === "chat/pendingMessageRemoved" &&
+      action.kind === "steering" &&
+      steering?.id === action.id &&
+      runningTurn
+    ) {
+      const list = steers[runningTurn.id] ?? [];
+      if (!list.some((x) => x.key === action.id)) {
+        steers = { ...steers, [runningTurn.id]: [...list, { key: String(action.id), at: runningTurn.parts.length, text: steering?.message?.text ?? "" }] };
+        try {
+          sessionStorage.setItem(steersKey, JSON.stringify(steers));
+        } catch {
+          /* kept for this page only */
+        }
+      }
+    }
     chat = apply(chat, envelope);
   }
 
@@ -201,6 +229,11 @@
     void agent;
     alive = true;
     chat = emptyChat();
+    try {
+      steers = JSON.parse(sessionStorage.getItem(`egzo-steers:${project}/${agent}`) ?? "{}") ?? {};
+    } catch {
+      steers = {};
+    }
     status = "connecting";
     failure = "";
     connect();
@@ -273,6 +306,19 @@
     toBottom();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function answer(requestId: string, response: "accept" | "decline", answers?: Record<string, any>) {
+    if (!canSend || readOnly) return;
+    send(messages.answer(chat.channel, requestId, response, answers));
+    notice = "";
+  }
+
+  function confirm(turnId: string, toolCallId: string, approved: boolean) {
+    if (!canSend || readOnly) return;
+    send(messages.confirm(chat.channel, turnId, toolCallId, approved));
+    notice = "";
+  }
+
   function stop() {
     if (turn) send(messages.cancel(chat.channel, turn.id));
   }
@@ -317,7 +363,16 @@
         </div>
       {/if}
       {#each turns as t (t.id)}
-        <ChatTurn turn={t} {resolve} {now} activity={t.state === "running" ? (chat.state?.activity ?? "") : ""} />
+        <ChatTurn
+          turn={t}
+          {resolve}
+          {now}
+          activity={t.state === "running" ? (chat.state?.activity ?? "") : ""}
+          steers={steers[t.id] ?? []}
+          readOnly={readOnly || !canSend}
+          onAnswer={answer}
+          onConfirm={(toolCallId, approved) => confirm(t.id, toolCallId, approved)}
+        />
       {/each}
       {#each shownOutgoing as o (o.id)}
         <ChatPrompt prompt={o.text} origin="user" {resolve} pending />

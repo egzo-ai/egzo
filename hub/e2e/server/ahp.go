@@ -35,6 +35,9 @@ type scriptedAHP struct {
 	refuse int
 	// reject is why the next dispatched action is rejected, if it is
 	reject string
+	// asked are the questions and the tool approvals the running turn waits for, by request or tool call id: what a client answers goes
+	// there (the chat/inputCompleted or chat/toolCallConfirmed it dispatched)
+	asked map[string]chan map[string]any
 }
 
 type envelope struct {
@@ -77,6 +80,7 @@ func newScriptedAHP(session string) *scriptedAHP {
 		title:   "Explain the parser",
 		conns:   map[*ahpConn]struct{}{},
 		clients: map[string]bool{},
+		asked:   map[string]chan map[string]any{},
 		// what the agent did before the page was opened: a turn the chat's history holds
 		turns: []map[string]any{{
 			"id": "turn-before", "message": map[string]any{"text": "Explain the parser", "origin": map[string]any{"kind": "user"}}, "state": "complete",
@@ -302,14 +306,37 @@ func (s *scriptedAHP) dispatch(action map[string]any, origin map[string]any) {
 		text, _ := message["text"].(string)
 		s.mu.Lock()
 		busy := s.live != nil
-		if busy {
+		turn, _ := s.live["id"].(string)
+		if busy && kind == "queued" {
 			s.pending = append(s.pending, map[string]any{"id": id, "kind": kind, "message": message})
 		}
 		s.mu.Unlock()
 		s.publish(s.main.Chat, action, origin, "")
 		if !busy { // no turn runs: it starts one now
 			s.start(fmt.Sprintf("turn-%d", time.Now().UnixNano()), text, map[string]any{"queuedMessageId": id}, nil)
+		} else if kind == "steering" { // OpenCode takes it at the turn's next step, and the plugin says so then
+			go func() {
+				time.Sleep(400 * time.Millisecond)
+				if s.running(turn) {
+					s.chatAction(map[string]any{"type": "chat/pendingMessageRemoved", "kind": "steering", "id": id})
+				}
+			}()
 		}
+	case "chat/inputCompleted", "chat/toolCallConfirmed":
+		key, _ := action["requestId"].(string)
+		if action["type"] == "chat/toolCallConfirmed" {
+			key, _ = action["toolCallId"].(string)
+		}
+		s.mu.Lock()
+		answer := s.asked[key]
+		delete(s.asked, key)
+		s.mu.Unlock()
+		if answer == nil {
+			s.publish(s.main.Chat, action, origin, "nothing waits for that answer")
+			return
+		}
+		s.publish(s.main.Chat, action, origin, "")
+		answer <- action
 	case "chat/pendingMessageRemoved":
 		s.publish(s.main.Chat, action, origin, "cannot remove a pending message: opencode has no inbox cancel")
 	}
@@ -397,7 +424,29 @@ func (s *scriptedAHP) part(id string, action map[string]any) {
 		}
 	case "chat/usage":
 		s.live["usage"] = action["usage"]
+	case "chat/inputRequested":
+		s.live["responseParts"] = append(parts, map[string]any{"kind": "inputRequest", "request": action["request"]})
 	}
+}
+
+// ask waits for a client's answer to what the running turn id asks (a question, or a tool call's approval), under key; nil when the turn
+// ended first.
+func (s *scriptedAHP) ask(id, key string) map[string]any {
+	answer := make(chan map[string]any, 1)
+	s.mu.Lock()
+	s.asked[key] = answer
+	s.mu.Unlock()
+	for s.running(id) {
+		select {
+		case a := <-answer:
+			return a
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	s.mu.Lock()
+	delete(s.asked, key)
+	s.mu.Unlock()
+	return nil
 }
 
 // run plays a turn the way OpenCode's events become actions in the plugin.
@@ -414,6 +463,65 @@ func (s *scriptedAHP) run(id, text string) {
 	}
 	if !step(map[string]any{"type": "chat/responsePart", "part": map[string]any{"kind": "reasoning", "id": "r1", "content": "Looking at the "}}) ||
 		!step(map[string]any{"type": "chat/reasoning", "partId": "r1", "content": "repository first."}) {
+		return
+	}
+	if strings.Contains(text, "search") { // the web-search consent OpenCode asks before its first search
+		if !step(map[string]any{"type": "chat/toolCallStart", "toolCallId": "call-ws", "toolName": "websearch", "displayName": "Web search"}) ||
+			!step(map[string]any{"type": "chat/toolCallReady", "toolCallId": "call-ws", "invocationMessage": "egzo agent sandbox", "toolInput": `{"query":"egzo agent sandbox"}`, "confirmed": "not-needed"}) ||
+			!step(map[string]any{"type": "chat/inputRequested", "request": map[string]any{"id": "frm-ws", "message": "Web Search", "questions": []any{map[string]any{
+				"id": "choice", "kind": "single-select", "message": "Allow OpenCode to search the web for up-to-date information?", "required": true,
+				"options": []any{
+					map[string]any{"id": "allow", "label": "Allow search via Exa"},
+					map[string]any{"id": "choose", "label": "Choose another provider"},
+					map[string]any{"id": "disable", "label": "Disable web search"},
+				}}}}}) {
+			return
+		}
+		answer := s.ask(id, "frm-ws")
+		if answer == nil {
+			return
+		}
+		choice := ""
+		if answers, ok := answer["answers"].(map[string]any); ok {
+			if a, ok := answers["choice"].(map[string]any); ok {
+				if v, ok := a["value"].(map[string]any); ok {
+					choice, _ = v["value"].(string)
+				}
+			}
+		}
+		said := "The search was declined."
+		if answer["response"] == "accept" {
+			said = "Searched the web (" + choice + "): egzo is an agent sandbox."
+		}
+		if !step(map[string]any{"type": "chat/toolCallComplete", "toolCallId": "call-ws", "result": map[string]any{"success": answer["response"] == "accept", "pastTenseMessage": "Searched the web"}}) ||
+			!step(map[string]any{"type": "chat/responsePart", "part": map[string]any{"kind": "markdown", "id": "m-ws", "content": said}}) {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+		s.finish(id, "complete", map[string]any{"type": "chat/turnComplete", "turnId": id, "duration": 900})
+		return
+	}
+	if strings.Contains(text, "approve") { // a tool call that waits for the person's approval
+		if !step(map[string]any{"type": "chat/toolCallStart", "toolCallId": "call-rm", "toolName": "bash", "displayName": "Shell"}) ||
+			!step(map[string]any{"type": "chat/toolCallReady", "toolCallId": "call-rm", "invocationMessage": "Run `rm -rf build`", "toolInput": `{"command":"rm -rf build"}`, "confirmationTitle": "Delete the build directory?"}) {
+			return
+		}
+		answer := s.ask(id, "call-rm")
+		if answer == nil {
+			return
+		}
+		said := "It was denied: the build directory stays."
+		if answer["approved"] == true {
+			said = "Deleted the build directory."
+			if !step(map[string]any{"type": "chat/toolCallComplete", "toolCallId": "call-rm", "result": map[string]any{"success": true, "pastTenseMessage": "Ran `rm -rf build`"}}) {
+				return
+			}
+		}
+		if !step(map[string]any{"type": "chat/responsePart", "part": map[string]any{"kind": "markdown", "id": "m-rm", "content": said}}) {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+		s.finish(id, "complete", map[string]any{"type": "chat/turnComplete", "turnId": id, "duration": 900})
 		return
 	}
 	if strings.Contains(text, "test") {

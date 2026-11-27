@@ -207,18 +207,21 @@ choice is made at spawn and kept for the agent's life. It works at a phone's wid
 - **What it shows.** The session's title; each prompt; the agent's answers, in Markdown (raw HTML is never rendered, images an answer
   names are links, not fetched); its reasoning, folded; its tool calls, one line each, which open on what the tool was called with (a
   shell command as the command), what it gave back and how it failed; and under each turn, how it ended, how long it took, the model and
-  the tokens it used. A tool that waits for an approval, or a question the agent asks, says so: they are answered in the terminal for now.
+  the tokens it used. A tool that waits for an approval has **Approve** and **Deny** buttons. A question the agent asks (OpenCode's question tool, or a
+  consent a tool needs, such as using a web search provider) shows in its turn with its choices: one click answers a single choice,
+  otherwise **Submit** sends the answers, and **Dismiss** declines it. It can still be answered in the terminal instead; the chat then
+  says it was answered.
 - **egzo's lines.** A message a person sent the agent reaches it as egzo's line ("check egzo message m… and handle the request for me.").
   The chat shows the message instead: who sent it and what it says, which the hub knows from the project's events feed for a week. A
   message the hub never had (from the operator, at the CLI) shows as the line.
 - **Sending.** Typing in the box sends a prompt into that session, as if it were typed in the agent's terminal. While a turn runs, the box
   steers it (Enter: the agent reads it at its next step) or queues a message for after it (**Queue**, or Alt+Enter); both show above the
-  box until the agent takes them. A queued message cannot be taken back: OpenCode has no way to. **Stop** cancels the turn that runs. A
+  box until the agent takes them. A steering message the agent took shows in the turn, where it took it. A queued message cannot be taken back: OpenCode has no way to. **Stop** cancels the turn that runs. A
   prompt the agent does not take is said, with its reason.
 - **Reconnecting.** A dropped connection (a phone that slept, a network that changed) comes back on its own, and what happened meanwhile
   is replayed: no reload.
 - **Who sees what.** Whoever may see what the project's agents did (a user or more) may watch the chat; whoever may operate the agent (its
-  starter, an administrator) may also send prompts and stop turns. Several people can have it open at once: it is not a seat, unlike the
+  starter, an administrator) may also send prompts, stop turns, approve tools and answer questions. Several people can have it open at once: it is not a seat, unlike the
   terminal.
 - **The terminal stays** for OpenCode: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
   messages announced to the agent) show in the chat as prompts.

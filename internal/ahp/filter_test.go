@@ -30,6 +30,8 @@ func TestClientMayOnlyReachTheMainSessionsChat(t *testing.T) {
 		`{"jsonrpc":"2.0","id":6,"method":"fetchTurns","params":{"channel":"ahp-chat:/ses_main"}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"reconnect","params":{"channel":"ahp-root://","clientId":"hub","lastSeenServerSeq":4,"subscriptions":["ahp-root://","ahp-session:/ses_main","ahp-chat:/ses_main"]}}`,
 		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_main","clientSeq":3,"action":{"type":"chat/pendingMessageSet","kind":"steering","id":"p","message":{"text":"hi"}}}}`,
+		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_main","clientSeq":4,"action":{"type":"chat/toolCallConfirmed","turnId":"t","toolCallId":"c","approved":true,"confirmed":"user-action"}}}`,
+		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_main","clientSeq":5,"action":{"type":"chat/inputCompleted","requestId":"q","response":"accept"}}}`,
 	}
 	for _, line := range allowed {
 		if fwd, reply := f.FromClient([]byte(line)); fwd == nil {
@@ -48,6 +50,7 @@ func TestClientMayOnlyReachTheMainSessionsChat(t *testing.T) {
 		`{"jsonrpc":"2.0","id":18,"method":"initialize","params":{"channel":"ahp-root://","initialSubscriptions":["ahp-chat:/ses_other"]}}`,
 		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_other","clientSeq":3,"action":{"type":"chat/turnStarted"}}}`,
 		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_main","clientSeq":4,"action":{"type":"chat/truncated"}}}`,
+		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-chat:/ses_other","clientSeq":6,"action":{"type":"chat/inputCompleted","requestId":"q","response":"accept"}}}`,
 		`{"jsonrpc":"2.0","method":"dispatchAction","params":{"channel":"ahp-session:/ses_main","clientSeq":5,"action":{"type":"session/titleChanged","title":"x"}}}`,
 		`{"jsonrpc":"2.0","id":19,"method":"fetchTurns","params":{"channel":"ahp-chat:/ses_other"}}`,
 		// a reconnect subscribes to what it names and answers with its snapshots: only what a subscribe may reach

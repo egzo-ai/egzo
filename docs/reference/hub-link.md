@@ -181,8 +181,8 @@ container, on its loopback. The link carries it to the hub; AHP carries chat onl
   subscribed to at once) and whenever it changes.
 - **The filter.** The link lets through only what concerns the main session's chat: `initialize`, `ping`, `subscribe` and
   `unsubscribe` of the root channel and of the main session and its chat, `reconnect` naming only those channels, `listSessions` (its answer cut to the main session),
-  `fetchTurns` of the main chat, and `dispatchAction` in the main chat of a prompt (`chat/turnStarted`), a cancel (`chat/turnCancelled`)
-  or a pending message. Anything else (`resource*`, which reads files, terminals, changesets, creating or disposing sessions and chats) is
+  `fetchTurns` of the main chat, and `dispatchAction` in the main chat of a prompt (`chat/turnStarted`), a cancel (`chat/turnCancelled`),
+  a pending message, an approval of a tool call (`chat/toolCallConfirmed`) or an answer to what the agent asks (`chat/inputCompleted`). Anything else (`resource*`, which reads files, terminals, changesets, creating or disposing sessions and chats) is
   answered by the link with an `egzo:` error and never reaches the agent. With `ReadOnly`, nothing is dispatched. What the server says
   about another session does not reach the hub.
 - **The version** stays 1: the change is additive. An older link sends no `AHP` in `published`, so a hub never offers it.

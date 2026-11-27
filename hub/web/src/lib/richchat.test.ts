@@ -126,16 +126,62 @@ describe("the Rich UI chat, kept by AHP's reducers", () => {
     expect(running(next)?.prompt).toBe("then write a test");
   });
 
-  it("shows a question and a tool that waits for an approval, which the terminal answers", () => {
+  it("shows a tool that waits for an approval, and what the agent asks with its questions, until it is answered", () => {
     const chat = play(subscribed(), [
       started(),
       { type: "chat/toolCallStart", turnId: T, toolCallId: "c1", toolName: "shell", displayName: "Shell" },
       { type: "chat/toolCallReady", turnId: T, toolCallId: "c1", invocationMessage: "Run `rm -rf build`", toolInput: '{"command":"rm -rf build"}' },
-      { type: "chat/inputRequested", turnId: T, request: { id: "q1", message: "Which branch?" } },
+      {
+        type: "chat/inputRequested",
+        turnId: T,
+        request: {
+          id: "q1",
+          message: "Web Search",
+          questions: [
+            {
+              id: "choice",
+              kind: "single-select",
+              message: "Allow OpenCode to search the web?",
+              required: true,
+              options: [{ id: "allow", label: "Allow" }, { id: "disable", label: "Disable", recommended: true }],
+            },
+            { id: "why", kind: "text", message: "Why?", defaultValue: "because" },
+            { id: "odd", kind: "slider", message: "unknown kinds are left out" },
+          ],
+        },
+      },
     ]);
     const [turn] = turnsOf(chat.state);
-    expect(turn.parts[0]).toMatchObject({ tool: { status: "waiting", note: "It waits for an approval in the agent's terminal." } });
-    expect(turn.parts[1]).toMatchObject({ kind: "question", message: "Which branch?", open: true });
+    expect(turn.parts[0]).toMatchObject({ tool: { status: "waiting", confirm: true, note: "It waits for your approval." } });
+    expect(turn.parts[1]).toMatchObject({
+      kind: "question",
+      open: true,
+      request: {
+        id: "q1",
+        message: "Web Search",
+        url: "",
+        questions: [
+          {
+            id: "choice",
+            kind: "single-select",
+            required: true,
+            freeform: false,
+            options: [
+              { id: "allow", label: "Allow", description: "", recommended: false },
+              { id: "disable", label: "Disable", description: "", recommended: true },
+            ],
+          },
+          { id: "why", kind: "text", required: false, defaultValue: "because" },
+        ],
+      },
+    });
+    const answered = play(chat, [
+      { type: "chat/toolCallConfirmed", turnId: T, toolCallId: "c1", approved: true, confirmed: "user-action" },
+      { type: "chat/inputCompleted", requestId: "q1", response: "accept", answers: { choice: { state: "submitted", value: { kind: "selected", value: "allow" } } } },
+    ]);
+    const [after] = turnsOf(answered.state);
+    expect(after.parts[0]).toMatchObject({ tool: { status: "running", confirm: false } });
+    expect(after.parts[1]).toMatchObject({ kind: "question", open: false, response: "accept", request: { answers: { choice: { value: { value: "allow" } } } } });
   });
 
   it("ignores the actions of another channel", () => {
@@ -170,6 +216,15 @@ describe("what the view sends", () => {
     expect(messages.reconnect("hub-1", 7, ["ahp-root://", S, C])).toEqual({ method: "reconnect", params: { channel: "ahp-root://", clientId: "hub-1", lastSeenServerSeq: 7, subscriptions: ["ahp-root://", S, C] } });
     expect(messages.prompt(C, "hi", T).params.action).toMatchObject({ type: "chat/turnStarted", turnId: T, message: { text: "hi", origin: { kind: "user" } } });
     expect(messages.pending(C, "steering", "p1", "hi").params.action).toMatchObject({ type: "chat/pendingMessageSet", kind: "steering", id: "p1", message: { text: "hi" } });
+    expect(messages.answer(C, "q1", "accept", { choice: { state: "submitted", value: { kind: "selected", value: "allow" } } }).params.action).toEqual({
+      type: "chat/inputCompleted",
+      requestId: "q1",
+      response: "accept",
+      answers: { choice: { state: "submitted", value: { kind: "selected", value: "allow" } } },
+    });
+    expect(messages.answer(C, "q1", "decline").params.action).toEqual({ type: "chat/inputCompleted", requestId: "q1", response: "decline" });
+    expect(messages.confirm(C, T, "c1", true).params.action).toEqual({ type: "chat/toolCallConfirmed", turnId: T, toolCallId: "c1", approved: true, confirmed: "user-action" });
+    expect(messages.confirm(C, T, "c1", false).params.action).toEqual({ type: "chat/toolCallConfirmed", turnId: T, toolCallId: "c1", approved: false, reason: "denied" });
     const a = messages.cancel(C, T).params.clientSeq;
     expect(messages.cancel(C, T).params.clientSeq).toBe(a + 1);
   });

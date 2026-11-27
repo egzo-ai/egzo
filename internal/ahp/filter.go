@@ -26,12 +26,15 @@ type Filter struct {
 	pending map[string]string
 }
 
-// The chat actions a client may dispatch: start a turn (send a prompt), cancel one, and set or clear a pending message (steering, queueing).
+// The chat actions a client may dispatch: start a turn (send a prompt), cancel one, set or clear a pending message (steering, queueing),
+// approve or deny a tool call that waits for it, and answer what the agent asks (an input request: OpenCode's question tool, a consent).
 var clientActions = map[string]bool{
 	"chat/turnStarted":           true,
 	"chat/turnCancelled":         true,
 	"chat/pendingMessageSet":     true,
 	"chat/pendingMessageRemoved": true,
+	"chat/toolCallConfirmed":     true,
+	"chat/inputCompleted":        true,
 }
 
 // The commands a client may send, whatever their params; the rest are checked one by one in FromClient, or refused.
