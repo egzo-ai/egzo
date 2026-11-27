@@ -166,8 +166,8 @@ your `opencode.json` is left alone, and its own plugins still load. The TUI stay
 named when it first starts and kept in `~/.egzo/main-session`: egzo starts OpenCode's background server, makes the session in it, then
 starts the TUI on it (`opencode -s`), so an agent spawned without a task has a chat to send its first prompt to, and the TUI shows what is
 said there. A restart continues it. The task and egzo's lines (the announcements of messages) are not typed into the TUI in AHP mode:
-egzo hands them to the main session through OpenCode's server (`opencode api POST /api/session/<id>/prompt`), as soon as the server is up,
-and the TUI shows them, since it is on that session. In AHP
+egzo starts them as turns of the main session through the AHP server (`egzo agent ahp --prompt`), as soon as it is up, queued when a
+turn is under way. The chat has them from their first event, and the TUI shows them, since it is on that session. In AHP
 mode the plugin reports the agent's state from that session only. A template whose command already picks a session (`-s`,
 `--continue`) keeps its own choice.
 `egzo agent ahp`, inside the container, carries the chat over stdin and stdout; the project's link runs it for the hub

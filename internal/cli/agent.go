@@ -88,6 +88,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	var prompt bool
 	ahpCommand := &cobra.Command{
 		Use:    "ahp",
 		Short:  "Carry the chat of this agent's AHP server over stdin and stdout",
@@ -96,7 +97,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 			"JSON each, between it and stdin and stdout. It also says, as the notification " + ahp.MainSessionMethod + ", which\n" +
 			"session is the agent's main one, once the harness has one. What the project's link runs in the agent's container for the\n" +
 			"hub. It fails when the agent was not spawned in AHP mode (`egzo agent spawn --ahp`).",
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home := os.Getenv("HOME")
 			if home == "" {
@@ -107,6 +108,25 @@ func newAgentCommand(opts *options) *cobra.Command {
 				fmt.Fprintln(os.Stderr, "egzo:", err)
 				return ExitError{Code: 1}
 			}
+			if prompt {
+				// what the session holder runs to hand a line to the main session (harness.Plan.Prompt): {"text": line}
+				var body struct {
+					Text string `json:"text"`
+				}
+				if len(args) != 1 || json.Unmarshal([]byte(args[0]), &body) != nil || body.Text == "" {
+					return fmt.Errorf(`--prompt takes {"text": ...}`)
+				}
+				ctx, cancel := context.WithTimeout(cmd.Context(), time.Minute)
+				defer cancel()
+				if err := ahp.Prompt(ctx, endpoint.URL, endpoint.Token, endpoint.MainSession, body.Text); err != nil {
+					fmt.Fprintln(os.Stderr, "egzo:", err)
+					return ExitError{Code: 1}
+				}
+				return nil
+			}
+			if len(args) > 0 {
+				return fmt.Errorf("unexpected argument %q", args[0])
+			}
 			if err := ahp.Bridge(cmd.Context(), endpoint.URL, endpoint.Token, endpoint.MainSession, os.Stdin, os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "egzo:", err)
 				return ExitError{Code: 1}
@@ -114,6 +134,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	ahpCommand.Flags().BoolVar(&prompt, "prompt", false, `start a turn of the main session with {"text": ...} (the argument), as a person's prompt, and wait for the server to take it`)
 	forward.Flags().BoolVar(&announce, "announce", false, "say on stderr when the server has been reached")
 	forward.Flags().BoolVar(&closeOnEOF, "close-on-eof", false, "end at the end of stdin")
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
