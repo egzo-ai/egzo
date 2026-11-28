@@ -73,7 +73,7 @@
     }
   }
 
-  // the chat takes the whole page under the agent's header, as a chat does
+  // the chat fills the page under the agent's header, as a chat does
   const chatMode = $derived(shown === "chat" && !!a?.richUI && !overseeing);
 
   function attach() {
@@ -84,47 +84,52 @@
 {#if failure}
   <ErrorPage error={failure} />
 {:else if data && a}
-  <div class="page" data-chat={chatMode || undefined}>
-    <nav class="crumbs" aria-label="Breadcrumb"><a href={href.home()}>Projects</a> / <a href={href.project(project)}>{data.project.name}</a> / <a href={href.project(project)}>Agents</a> /</nav>
-    <div class="phead">
-      <h1 class="h-page">{a.name}</h1>
-      {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />{/if}
-      {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
-      {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting">waiting for an answer</span>{/if}
-      {#if a.stale}<span class="pill" data-s="warn" title="its template changed in a way the running container cannot follow (an egress change only reloads the proxy): remove it and spawn again">stale</span>{/if}
-      {#if a.denied}<a class="pill" data-s="error" href={href.agent(project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}
-      <span class="grow"></span>
-      <span class="btn-group">
-        {#if a.canOperate && a.running && !offline}<button class="btn" data-variant="primary" data-key="a" aria-label={isOpen ? "Go to terminal" : "Attach"} aria-keyshortcuts="a" disabled={busy} onclick={attach}><Icon name="attach" />{isOpen ? "Go to terminal" : "Attach"} <span class="kbd">a</span></button>{/if}
-        {#if a.canOperate && made && !offline}
-          {#if a.running}<button class="btn" disabled={busy} onclick={() => act("stop")}><Icon name="stop" />Stop</button>
-          {:else}<button class="btn" disabled={busy} onclick={() => act("start")}><Icon name="play" />Start</button>{/if}
-          <button class="btn" data-variant="danger" disabled={busy} onclick={() => act("rm")}><Icon name="trash" />Remove</button>
+  <div class="page agent" data-chat={chatMode || undefined}>
+    <!-- one dense header for every section: where it is, the agent and its state, what it is about, and what can be done to it -->
+    <header class="ahead">
+      <div class="arow">
+        <div class="who">
+          <nav class="crumbs" aria-label="Breadcrumb"><a href={href.project(project)}>{data.project.name}</a> / <a href={href.project(project)}>Agents</a> /</nav>
+          <h1 class="h-page">{a.name}</h1>
+          {#if made}<Pill kind={activityKind(a.activity, a.waiting)} label={activityLabel(a.activity, a.waiting)} testid="activity" />{/if}
+          {#if a.task}{#if busy}<Pill kind="starting" label={taskDoing(a.task.verb)} testid="task" />{:else}<Pill kind="error" label={taskFailedLabel(a.task.verb, a.task.state)} testid="task" />{/if}{/if}
+          {#if a.waiting}<span class="pill" data-s="waiting" data-testid="waiting">waiting for an answer</span>{/if}
+          {#if a.stale}<span class="pill" data-s="warn" title="its template changed in a way the running container cannot follow (an egress change only reloads the proxy): remove it and spawn again">stale</span>{/if}
+          {#if a.denied}<a class="pill" data-s="error" href={href.agent(project, agent, "network")} title="hosts the proxy refused this agent in the last hour">{a.denied} denied</a>{/if}
+        </div>
+        <span class="btn-group">
+          {#if a.canOperate && a.running && !offline}<button class="btn" data-size="sm" data-variant="primary" data-key="a" aria-label={isOpen ? "Go to terminal" : "Attach"} aria-keyshortcuts="a" disabled={busy} onclick={attach}><Icon name="attach" size="sm" /><span class="lbl">{isOpen ? "Go to terminal" : "Attach"}</span> <span class="kbd">a</span></button>{/if}
+          {#if a.canOperate && made && !offline}
+            {#if a.running}<button class="btn" data-size="sm" aria-label="Stop" disabled={busy} onclick={() => act("stop")}><Icon name="stop" size="sm" /><span class="lbl">Stop</span></button>
+            {:else}<button class="btn" data-size="sm" aria-label="Start" disabled={busy} onclick={() => act("start")}><Icon name="play" size="sm" /><span class="lbl">Start</span></button>{/if}
+            <button class="btn" data-size="sm" data-variant="danger" aria-label="Remove" disabled={busy} onclick={() => act("rm")}><Icon name="trash" size="sm" /><span class="lbl">Remove</span></button>
+          {/if}
+        </span>
+      </div>
+      <div class="sub">
+        {#if a.task && busy}
+          <span class="now" data-testid="task-step">{a.task.step || "…"}</span><span class="muted">· {a.task.creator}, started {ago(a.task.startedAt)}</span>
         {/if}
-      </span>
-    </div>
+        {#if a.status}
+          <span class="now" data-testid="status" class:q={a.waiting} title={a.status}>{a.status}</span>
+        {/if}
+        <span class="metaline" data-testid="details">
+          <span><span class="k">template</span> <a href={href.project(project, "templates")}>{a.template}</a></span>
+          <span><span class="k">by</span> {a.creator}</span>
+          <span title={stamp(a.createdAt)}><span class="k">created</span> {ago(a.createdAt)}</span>
+          {#if a.holder}<span class="presence" data-live data-testid="presence"><span class="k">terminal held by</span> <span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{/if}
+        </span>
+      </div>
+    </header>
 
-    {#if !chatMode}<div class="metaline" data-testid="details">
-      <span><span class="k">template</span> <a href={href.project(project, "templates")}>{a.template}</a></span>
-      <span><span class="k">spawned by</span> {a.creator}</span>
-      <span title={stamp(a.createdAt)}><span class="k">created</span> {ago(a.createdAt)}</span>
-      {#if a.holder}<span class="presence" data-live data-testid="presence"><span class="k">terminal held by</span> <span class="avatar" data-me={a.holder === app.user?.username ? "" : undefined}>{initials(a.holder)}</span>{a.holder === app.user?.username ? "you" : a.holder}</span>{/if}
-    </div>{/if}
-
-    {#if a.task && busy}
-      <div class="statusline"><span data-testid="task-step">{a.task.step || "…"}</span> <span class="muted">· {a.task.creator}, started {ago(a.task.startedAt)}</span></div>
-    {:else if a.task}
+    {#if a.task && !busy}
       <div class="banner" role="alert"><span class="tag">! {taskFailedLabel(a.task.verb, a.task.state)}</span>
         <div class="body" data-testid="task-error">{a.task.error}</div>
         {#if a.task.canDismiss}<button class="btn" data-size="sm" onclick={dismiss}>Dismiss</button>{/if}</div>
     {/if}
-    {#if a.status}
-      <div class="statusline"><span data-testid="status" class:q={a.waiting}>{a.status}</span></div>
-    {/if}
     {#if a.waiting}
       <div class="banner" data-tone="info" role="status"><span class="tag">? Waiting for an answer</span><div class="body">The agent asked a question and nobody has answered it. Answer it in the terminal, or from a messaging client.</div></div>
     {/if}
-
 
     {#if a.previews?.length}<Previews agent={a.name} previews={a.previews} />{/if}
 
