@@ -6,7 +6,8 @@
 `ahp`, which runs `egzo agent ahp` in the container, the way attach runs `egzo agent attach`: no new port, no new path into the container.
 
 Only a harness that has an AHP mode takes it: OpenCode, through egzo's fork of the opencode-ahp plugin, which runs inside OpenCode's own
-server and so sees the TUI's sessions; the terminal stays. The link lets through only what concerns the chat of the agent's main session (the
+server and so sees the TUI's sessions, and Claude Code (issue #233), through egzo's own adapter, which runs next to the TUI, follows the main
+session's transcript and types what the hub sends into the TUI. For both, the terminal stays. The link lets through only what concerns the chat of the agent's main session (the
 first session its harness created): no file, no terminal, no changeset, no other session, and nothing that acts in the chat for a client that
 only watches. The images are the real ones; no model answers (the turn a message starts fails at the proxy), which is enough for a session and
 a turn to exist."""
@@ -19,7 +20,7 @@ import pexpect
 import pytest
 
 from hubkit import eventually
-from support import agent, spec
+from support import agent, custom, spec
 
 API_KEY = "sk-ant-egzo-spec-not-a-real-key-0000000000"
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -38,7 +39,8 @@ def ahp(shared_project, engine, egzo, fake_hub):
             egress={"default": {"allow": ["platform.claude.com"], "services": {"anthropic": "env/ANTHROPIC_API_KEY"}}},
             agents={
                 "oc": agent(harness="opencode", image=oc, model="anthropic/claude-sonnet-5-5", **quick),
-                "cc": agent(harness="claude-code", image=cc),
+                "cc": agent(harness="claude-code", image=cc, **quick),
+                "plain": custom(engine.agent_image()),
             },
         ),
         timeout=900,
@@ -66,10 +68,11 @@ def answer_to(found, id_):
 
 
 def test_only_a_harness_with_an_ahp_mode_takes_it_and_nothing_is_made_for_one_without(ahp, engine):
-    refused = ahp.run("agent", "spawn", "cc", "cc-ahp", "--ahp", timeout=300)
+    refused = ahp.run("agent", "spawn", "plain", "plain-ahp", "--ahp", timeout=300)
     assert refused.returncode != 0
-    assert "has no AHP mode" in refused.stderr and "opencode" in refused.stderr, refused.stderr
-    assert "cc-ahp" not in ahp.instance_names(), "a refused spawn makes nothing"
+    assert "has no AHP mode" in refused.stderr, refused.stderr
+    assert "opencode" in refused.stderr and "claude-code" in refused.stderr, "it says which harnesses have one: " + refused.stderr
+    assert "plain-ahp" not in ahp.instance_names(), "a refused spawn makes nothing"
 
 
 def test_an_agent_spawned_in_ahp_mode_serves_ahp_inside_its_container(ahp, engine):
@@ -109,7 +112,8 @@ def test_the_link_says_which_templates_have_an_ahp_mode_and_which_agents_are_in_
     if "oc-ahp" not in ahp.instance_names():
         ahp.spawn("oc", "oc-ahp", "--ahp", timeout=900)
     published = fake_hub.must(ahp.name, "published")
-    assert published["AHP"] == {"oc": {"Terminal": True}}, "OpenCode keeps its terminal in AHP mode; Claude Code has no AHP mode"
+    assert published["AHP"] == {"oc": {"Terminal": True}, "cc": {"Terminal": True}}, \
+        "OpenCode and Claude Code keep their terminal in AHP mode; the custom harness has no AHP mode"
     agents = {a["Name"]: a for a in fake_hub.must(ahp.name, "project")["Agents"]}
     assert agents["oc-ahp"].get("AHP") is True
     assert not agents.get("oc-plain", {}).get("AHP")
@@ -260,3 +264,103 @@ def test_an_agent_spawned_in_ahp_mode_with_a_task_starts_on_it_in_its_main_sessi
     assert found == [task], f"the task is the chat's first turn, within 40s of the spawn ({time.time() - started:.0f}s): {found}"
     assert task in tui_text(ahp, name, seconds=4), "the TUI shows the task: it is on the main session"
     assert sessions_in(engine, ahp, name) == [f"ahp-session:/{main}"], "the task went to the main session, not to one of its own"
+
+
+# ─── Claude Code ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def chat_state(ahp, fake_hub, name, chat):
+    got = ask_hub(ahp, fake_hub, name, INIT, {"jsonrpc": "2.0", "id": 2, "method": "subscribe", "params": {"channel": chat}}, seconds=2)
+    return (((answer_to(got, 2) or {}).get("result") or {}).get("snapshot") or {}).get("state")
+
+
+def test_claude_code_in_ahp_mode_serves_ahp_through_egzos_adapter(ahp, engine):
+    # Claude Code has no AHP server: egzo's adapter is one, started next to the TUI, on the container's loopback, with a token of its own.
+    name = "cc-ahp"
+    ahp.ok("agent spawn", "cc", name, "--ahp", timeout=900)
+    instance = engine.instance(ahp.name, name)
+    assert instance.labels.get("ai.egzo.agent.ahp") == "1"
+    endpoint = json.loads(in_instance(engine, ahp, name, "cat $HOME/.egzo/ahp.json").stdout)
+    assert endpoint["url"].startswith("ws://127.0.0.1:"), "the adapter listens on the container's loopback only"
+    assert endpoint["token"] and in_instance(engine, ahp, name, "stat -c %a $HOME/.egzo/ahp.json").stdout.strip() == "600"
+    main = in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session").stdout.strip()
+    assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", main), \
+        f"egzo names the main session before Claude Code starts, as a session id Claude Code takes: {main!r}"
+
+    def initialized():
+        answer = answer_to(messages(bridge(engine, ahp, name, INIT, seconds=3).stdout), 1)
+        return answer and answer.get("result")
+
+    result = eventually(initialized, seconds=120)
+    assert result, "egzo agent ahp reaches the adapter: " + bridge(engine, ahp, name, INIT, seconds=3).stderr
+    assert result["protocolVersion"] == "1.0.0"
+    assert result["serverInfo"]["name"] == "egzo-claude-ahp"
+    # the main session is there before anybody types: the hub can open the chat of an agent with no task
+    assert sessions_in(engine, ahp, name) == [f"ahp-session:/{main}"]
+    # the TUI runs on it: Claude Code was started with the main session's id
+    cmdlines = in_instance(engine, ahp, name, "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0' ' '").stdout
+    assert f"--session-id {main}" in cmdlines, "the TUI starts on the main session"
+
+
+def test_the_hub_reaches_claude_codes_chat_and_what_it_sends_is_typed_into_the_tui(ahp, engine, fake_hub):
+    name = "cc-ahp"
+    if name not in ahp.instance_names():
+        ahp.ok("agent spawn", "cc", name, "--ahp", timeout=900)
+    main = eventually(lambda: in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session 2>/dev/null").stdout.strip(), seconds=120)
+    chat = f"ahp-chat:/{main}"
+    eventually(lambda: f"ahp-session:/{main}" in sessions_in(engine, ahp, name), seconds=60)
+
+    # the hub's first prompt starts a turn, with the hub's id, and is typed into the TUI
+    got = ask_hub(ahp, fake_hub, name, INIT,
+                  {"jsonrpc": "2.0", "id": 2, "method": "subscribe", "params": {"channel": chat}},
+                  {"jsonrpc": "2.0", "method": "dispatchAction", "params": {"channel": chat, "clientSeq": 1, "action": {
+                      "type": "chat/turnStarted", "turnId": "hub-cc", "message": {"text": "say hello from the hub", "origin": {"kind": "user"}}}}},
+                  seconds=10)
+    assert (answer_to(got, 2) or {}).get("result"), f"the main session's chat can be subscribed to before any prompt: {answer_to(got, 2)}"
+    started = [m for m in got if m.get("method") == "action" and m["params"]["action"].get("type") == "chat/turnStarted"]
+    assert any(m["params"]["action"].get("turnId") == "hub-cc" and not m["params"].get("rejectionReason") for m in started), \
+        f"the hub's prompt starts a turn: {got}"
+    shown = eventually(lambda: (lambda t: t if "say hello from the hub" in t else None)(tui_text(ahp, name)), seconds=90)
+    assert shown, "the TUI shows the prompt the hub sent: it was typed there"
+    # Claude Code took it into the main session: its transcript has it, and the chat's turn is that one (no model answers: the proxy refuses
+    # the spec's key, and the turn ends in an error, or still runs while Claude Code retries)
+    transcript = f"$HOME/.claude/projects/*/{main}.jsonl"
+    eventually(lambda: "say hello from the hub" in in_instance(engine, ahp, name, f"cat {transcript} 2>/dev/null").stdout, seconds=60)
+
+    def hub_turn():
+        state = chat_state(ahp, fake_hub, name, chat) or {}
+        turns = state.get("turns", []) + ([state["activeTurn"]] if state.get("activeTurn") else [])
+        return [t for t in turns if t["id"] == "hub-cc"] or None
+
+    turn = eventually(hub_turn, seconds=60)
+    assert turn and turn[0]["message"]["text"] == "say hello from the hub", turn
+
+    # a message is announced by egzo typing its line into the terminal: that line is a turn of the same chat
+    eventually(lambda: (chat_state(ahp, fake_hub, name, chat) or {}).get("activeTurn") is None, seconds=180)
+    ahp.ok("message send", name, "and one from the terminal")
+
+    def typed_turn():
+        state = chat_state(ahp, fake_hub, name, chat) or {}
+        turns = state.get("turns", []) + ([state["activeTurn"]] if state.get("activeTurn") else [])
+        return [t for t in turns if t["message"]["text"].startswith("check egzo message m")] or None
+
+    assert eventually(typed_turn, seconds=180), "what is typed into the TUI is in the chat"
+
+
+def test_a_claude_code_agent_in_ahp_mode_keeps_its_main_session_and_its_chat_across_a_restart(ahp, engine, fake_hub):
+    name = "cc-ahp"
+    if name not in ahp.instance_names():
+        ahp.ok("agent spawn", "cc", name, "--ahp", timeout=900)
+        ahp.ok("message send", name, "say hello")
+    main = eventually(lambda: in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session 2>/dev/null").stdout.strip(), seconds=120)
+    chat = f"ahp-chat:/{main}"
+    before = eventually(lambda: (lambda s: s["turns"] if s and s.get("turns") else None)(chat_state(ahp, fake_hub, name, chat)), seconds=240)
+
+    ahp.ok("agent stop", name, timeout=300)
+    ahp.ok("agent start", name, timeout=300)
+    assert in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session").stdout.strip() == main
+    after = eventually(lambda: (lambda s: s["turns"] if s and s.get("turns") else None)(chat_state(ahp, fake_hub, name, chat)), seconds=120)
+    assert [t["message"]["text"] for t in after[:len(before)]] == [t["message"]["text"] for t in before], \
+        "the adapter reads the main session's transcript again: the chat has its turns"
+    cmdlines = in_instance(engine, ahp, name, "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0' ' '").stdout
+    assert f"--resume {main}" in cmdlines, "the TUI resumes the main session"
