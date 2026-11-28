@@ -56,7 +56,7 @@ func TestTheHTTPVerbsWalkARequestFromQueuedToResolved(t *testing.T) {
 	if len(others) != 1 || others[0].Agent != "reviewer" {
 		t.Errorf("agents = %+v", others)
 	}
-	sent := r.asAgent("coder", "POST", "/v1/messages", `{"to":"agent:reviewer","text":"take a look"}`)
+	sent := r.asAgent("coder", "POST", "/v1/messages", `{"subject":"A subject","to":"agent:reviewer","text":"take a look"}`)
 	if sent.StatusCode != http.StatusCreated {
 		t.Errorf("send: %d %s", sent.StatusCode, body(t, sent))
 	}
@@ -114,7 +114,7 @@ func TestTheOperatorVerbs(t *testing.T) {
 	}
 
 	// an agent asks the operator, the operator answers
-	r.srv.sendFromAgent("coder", "operator", "which one?", "")
+	r.srv.sendFromAgent("coder", "operator", "A subject", "which one?", "")
 	var rows []Message
 	decode(t, r.asOperator("GET", "/v1/messages?kind=request", ""), &rows)
 	if len(rows) != 1 {

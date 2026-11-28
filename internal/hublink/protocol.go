@@ -221,6 +221,7 @@ type Request struct {
 	Port      int               `json:",omitempty"` // forward
 	Workspace string            `json:",omitempty"` // files
 	Instance  string            `json:",omitempty"` // files: the instance whose worktree, for a git workspace
+	Subject   string            `json:",omitempty"` // send: "" takes the start of the text's first line
 	Text      string            `json:",omitempty"` // send, resolve; undelivered: why
 	Key       string            `json:",omitempty"` // send, resolve: makes it idempotent, the platform's id of the message or the click
 	Interrupt bool              `json:",omitempty"` // send

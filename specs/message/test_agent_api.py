@@ -86,7 +86,7 @@ def test_nothing_can_bury_a_person_or_an_agent_or_flood_the_status_line(pair, te
     a, b = pair
 
     # a person: at most 20 open messages (the limit is the person's, so the answers below keep the other specs clear of it)
-    results = a.calls(*[("POST", "/v1/messages", {"to": "operator", "text": f"look {n}"}) for n in range(25)])
+    results = a.calls(*[("POST", "/v1/messages", {"subject": "A request", "to": "operator", "text": f"look {n}"}) for n in range(25)])
     codes = [code for code, _ in results]
     for code, body in results:
         if code == 201:
@@ -94,13 +94,13 @@ def test_nothing_can_bury_a_person_or_an_agent_or_flood_the_status_line(pair, te
     assert codes.count(201) == 20 and set(codes) - {201} <= {409, 429}, codes
 
     # an agent: at most 20 open requests from one sender, and the refusal says why
-    results = b.calls(*[("POST", "/v1/messages", {"to": a.address, "text": f"request {n}"}) for n in range(21)])
+    results = b.calls(*[("POST", "/v1/messages", {"subject": "A request", "to": a.address, "text": f"request {n}"}) for n in range(21)])
     assert [code for code, _ in results[:20]] == [201] * 20
     code, text = results[20]
     assert code in (409, 429) and "open" in json.dumps(text)
 
     # a sender: at most 30 messages a minute, to whoever (here ten different people), counted on the sender
-    results = b.calls(*[("POST", "/v1/messages", {"to": f"user:u{n % 10}", "text": f"note {n}"}) for n in range(12)])
+    results = b.calls(*[("POST", "/v1/messages", {"subject": "A request", "to": f"user:u{n % 10}", "text": f"note {n}"}) for n in range(12)])
     code, text = results[-1]
     assert code == 429 and "minute" in json.dumps(text), [code for code, _ in results]
 
@@ -245,8 +245,8 @@ def test_the_mcp_endpoint_offers_exactly_the_tools_and_acts_as_the_calling_agent
     assert not coder.tool("resolve", id=message_id, text="it is a Go project", outcome="done").get("isError")
     assert team.messages("--all")[message_id]["STATE"] == "resolved"
 
-    assert coder.tool("message", to="agent:ghost", text="x").get("isError")
-    assert not coder.tool("message", to=reviewer.address, text="from the tool").get("isError")
+    assert coder.tool("message", to="agent:ghost", subject="x", text="x").get("isError")
+    assert not coder.tool("message", to=reviewer.address, subject="From the tool", text="from the tool").get("isError")
     message = next(e for e in team.events() if e["type"] == "message" and e["text"] == "from the tool")
     assert message["actor"] == coder.address and message["data"]["to"] == reviewer.address
 

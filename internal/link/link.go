@@ -644,7 +644,7 @@ func (l *Link) answer(ctx context.Context, stream net.Conn) {
 		}, stream, portforward.Connected)
 		return
 	case hublink.VerbSend:
-		result, err = engine.Send(ctx, project, request.Agent, request.Actor, request.Text, request.Key, request.Interrupt)
+		result, err = engine.Send(ctx, project, request.Agent, request.Actor, request.Subject, request.Text, request.Key, request.Interrupt)
 	case hublink.VerbResolve:
 		result, err = engine.Resolve(ctx, project, request.Message, request.Actor, request.Text, request.Outcome, request.Key)
 	case hublink.VerbUndelivered:

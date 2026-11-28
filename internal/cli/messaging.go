@@ -25,6 +25,7 @@ const operatorActor = "operator"
 
 func newSendCommand(opts *options) *cobra.Command {
 	var interrupt, wait bool
+	var subject string
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "send INSTANCE MESSAGE...",
@@ -43,7 +44,7 @@ func newSendCommand(opts *options) *cobra.Command {
 				return err
 			}
 			defer s.close()
-			queued, err := queueMessage(ctx, s, args[0], strings.Join(args[1:], " "), interrupt)
+			queued, err := queueMessage(ctx, s, args[0], subject, strings.Join(args[1:], " "), interrupt)
 			if err != nil {
 				return err
 			}
@@ -56,6 +57,7 @@ func newSendCommand(opts *options) *cobra.Command {
 			return waitForResolution(ctx, cmd, s, args[0], queued.ID, queued.Seq, timeout)
 		},
 	}
+	cmd.Flags().StringVar(&subject, "subject", "", "what it is about, on one line; without it, the start of the message's first line")
 	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "stop what the agent is doing first, so the message is announced right away")
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the agent to resolve the request and print its answer")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "with --wait, give up after this long (exit code 5); the message stays open")
@@ -69,14 +71,14 @@ type queued struct {
 }
 
 // queueMessage sends a request from the operator to an instance.
-func queueMessage(ctx context.Context, s *session, agent, text string, interrupt bool) (queued, error) {
+func queueMessage(ctx context.Context, s *session, agent, subject, text string, interrupt bool) (queued, error) {
 	if instance, isInstance := s.observed.Instance(agent); !isInstance || instance.State == "missing" {
 		if _, isTemplate := s.Resolved.Agents[agent]; isTemplate {
 			return queued{}, fmt.Errorf("%s is a template; spawn it first: egzo agent spawn %s", agent, agent)
 		}
 		return queued{}, fmt.Errorf("no instance %q in this project (instances: %s)", agent, strings.Join(s.observed.InstanceNames(), ", "))
 	}
-	body, _ := json.Marshal(map[string]any{"to": "agent:" + agent, "from": operatorActor, "text": text, "interrupt": interrupt})
+	body, _ := json.Marshal(map[string]any{"to": "agent:" + agent, "from": operatorActor, "subject": subject, "text": text, "interrupt": interrupt})
 	reply, err := stack.ControlRequest(ctx, s.engine, s.Resolved.Name, "POST", "/v1/messages", body)
 	if err != nil {
 		return queued{}, err
@@ -203,16 +205,17 @@ func newEventsCommand(opts *options) *cobra.Command {
 
 // messageRow is a message as the operator API lists it.
 type messageRow struct {
-	ID, From, To, Kind, State, Text string
+	ID, From, To, Kind, State, Subject, Text string
 }
 
 func writeMessages(cmd *cobra.Command, rows []messageRow) error {
 	table := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "ID\tFROM\tTO\tKIND\tSTATE\tTEXT")
+	fmt.Fprintln(table, "ID\tFROM\tTO\tKIND\tSTATE\tSUBJECT\tTEXT")
 	for _, m := range rows {
 		// what the agent wrote is data, never something the terminal may act on
-		text := termsafe.Truncate(termsafe.Line(m.Text), 60)
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n", termsafe.Line(m.ID), termsafe.Line(m.From), termsafe.Line(m.To), termsafe.Line(m.Kind), termsafe.Line(m.State), text)
+		subject := termsafe.Truncate(termsafe.Line(m.Subject), 50)
+		text := termsafe.Truncate(termsafe.Line(m.Text), 50)
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", termsafe.Line(m.ID), termsafe.Line(m.From), termsafe.Line(m.To), termsafe.Line(m.Kind), termsafe.Line(m.State), subject, text)
 	}
 	return table.Flush()
 }

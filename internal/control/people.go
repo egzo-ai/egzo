@@ -115,7 +115,7 @@ func (s *server) tellStarted(id string, p Person) error {
 			return err
 		}
 		// a full inbox is not an error: the agent sees it at its next `agents`
-		if _, _, err := s.send(sendRequest{From: egzoSender, To: to, Text: text, Notice: noticeStarter}); err != nil {
+		if _, _, err := s.send(sendRequest{From: egzoSender, To: to, Subject: "Whether the person who started you can be reached changed", Text: text, Notice: noticeStarter}); err != nil {
 			var failure *apiError
 			if !errors.As(err, &failure) {
 				return err

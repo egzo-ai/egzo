@@ -112,29 +112,26 @@ func TestOnlyAPortOpenForTheHubIsRememberedForForwarding(t *testing.T) {
 	}
 }
 
-func TestTheEventsFeedKeepsTheTextAndChoicesOfAMessageOnlyWhenAUserIsOneEndOfIt(t *testing.T) {
-	line := func(actor, to, kind, text string) []byte {
-		return []byte(fmt.Sprintf(`{"seq":9,"type":"message","agent":"coder","actor":%q,"id":"m1","text":%q,"data":{"to":%q,"kind":%q,"re":"m0","choices":["a"]}}`, actor, text, to, kind))
+func TestTheEventsFeedKeepsWhatEveryMessageSaysAndTheWebUIsEventsNothing(t *testing.T) {
+	line := func(actor, to string) []byte {
+		return []byte(fmt.Sprintf(`{"seq":9,"type":"message","agent":"coder","actor":%q,"id":"m1","text":"the text","data":{"to":%q,"kind":"question","subject":"Re: a subject","re":"m0","choices":["a"]}}`, actor, to))
 	}
 	for _, c := range []struct {
 		actor, to string
 		feed      bool
-		want      string
 	}{
-		{"user:7", "agent:coder", true, "from a user"},
-		{"agent:coder", "user:7", true, "to a user"},
-		{"agent:coder", "agent:peer", true, ""},
-		{"agent:coder", "operator", true, ""},
-		{"operator", "agent:coder", true, ""},
-		{"agent:coder", "user:7", false, ""}, // the events verb, for the web UI
+		{"user:7", "agent:coder", true},
+		{"agent:coder", "user:7", true},
+		{"agent:coder", "agent:peer", true},
+		{"agent:coder", "operator", true},
+		{"operator", "agent:coder", true},
+		{"egzo", "agent:coder", true},
+		{"agent:coder", "user:7", false}, // the events verb, for the web UI
 	} {
-		event, seq, ok := parseEvent(line(c.actor, c.to, "question", c.want+"x"), c.feed)
-		want := c.want
-		if want != "" {
-			want += "x"
-		}
-		if !ok || seq != 9 || event.Text != want || event.To != c.to || event.Kind != "question" || event.Re != "m0" || event.ID != "m1" ||
-			(len(event.Choices) == 1) != (want != "") {
+		event, seq, ok := parseEvent(line(c.actor, c.to), c.feed)
+		says := event.Text == "the text" && event.Subject == "Re: a subject" && len(event.Choices) == 1
+		if !ok || seq != 9 || event.To != c.to || event.Kind != "question" || event.Re != "m0" || event.ID != "m1" || says != c.feed ||
+			!c.feed && (event.Text != "" || event.Subject != "" || event.Choices != nil) {
 			t.Errorf("%s -> %s (feed %v): %+v", c.actor, c.to, c.feed, event)
 		}
 	}

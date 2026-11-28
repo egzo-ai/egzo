@@ -11,6 +11,7 @@ contains can be typed into the terminal, so a message cannot pretend to be you. 
 
 ```console
 $ egzo message send coder-1 "Fix the flaky checkout test, then open a PR"
+$ egzo message send coder-1 --subject "Flaky checkout test" "It fails one run in ten on CI: ..."
 $ egzo message send coder-1 "Stop, use the v2 API instead" --interrupt    # stops what it is doing first
 $ egzo message send reviewer-1 "Review PR 88" --wait                      # block until it answers
 $ egzo agent spawn coder issue-412 -m "..." --wait                      # spawn, send, and wait
@@ -21,6 +22,12 @@ and the harness is ready. Only keys count as typing: what a terminal sends on it
 the focus, mouse reports, answers to the program's queries) does not. Then a line like `check egzo message m3f... and handle the request for me.` is typed in, and
 the agent fetches and answers it. If it does not fetch it within a minute, the line is typed again, up to three
 times, after which the message is marked `unconfirmed`. A message for a stopped agent waits until it runs again.
+
+**A subject.** Every message has one: a short line people read in `egzo message ls`, in the hub's Activity tab and in a Rich UI chat,
+without opening the message. An agent names every request it sends (the `message` tool requires a `subject`, one line of plain text, at
+most 120 characters). A person may leave it out (`--subject` is optional, and so is a chat platform's subject line): egzo takes the
+start of the message's first line. What answers a request (a question, an update, the result) carries its subject as `Re: ...`. The
+subject is the sender's words like the text, so it is never typed into the terminal either.
 
 `--wait` prints progress notes to stderr and the answer to stdout. Exit codes: 0 done, 3 declined, 4 failed, 5 the
 `--timeout` passed (the message stays open).
@@ -36,7 +43,7 @@ Agents get an `egzo` MCP server with these tools:
 | `resolve` | close a request or question with a result (`done`, `declined`, `failed`) |
 | `update` | a progress note for whoever asked |
 | `ask` | ask the sender a question; the answer comes back as a reply |
-| `message` | send a new request to the operator, a person or another agent |
+| `message` | send a new request to the operator, a person or another agent, with a `subject` |
 | `status` | one line on what it is doing, shown by `egzo ps` and in the hub; also how it says it is stuck (below) |
 | `agents` | the other agents, with their template, harness and activity; under `you`, who started it and whether they can be reached |
 | `access` | what it may reach: its egress profile, the hosts it allows, each service and how to use its credential, the ssh servers (`egzo agent access` says the same) |

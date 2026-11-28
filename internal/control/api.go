@@ -354,6 +354,7 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		To        string `json:"to"`
 		From      string `json:"from"`
+		Subject   string `json:"subject"`
 		Text      string `json:"text"`
 		Interrupt bool   `json:"interrupt"`
 		Key       string `json:"key"`
@@ -369,7 +370,7 @@ func (s *server) enqueue(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "from must be operator or user:<id>", http.StatusBadRequest)
 		return
 	}
-	message, event, err := s.send(sendRequest{From: body.From, To: body.To, Text: body.Text, Interrupt: body.Interrupt, Key: body.Key})
+	message, event, err := s.send(sendRequest{From: body.From, To: body.To, Subject: body.Subject, Text: body.Text, Interrupt: body.Interrupt, Key: body.Key})
 	if err != nil {
 		fail(w, err)
 		return

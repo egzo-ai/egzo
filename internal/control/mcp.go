@@ -61,9 +61,10 @@ type askArgs struct {
 }
 
 type messageArgs struct {
-	To   string `json:"to" jsonschema:"operator, user:<id> or agent:<name>"`
-	Text string `json:"text" jsonschema:"what you need, with everything the recipient needs to know"`
-	Re   string `json:"re,omitempty" jsonschema:"optional: the id of the request this one is part of"`
+	To      string `json:"to" jsonschema:"operator, user:<id> or agent:<name>"`
+	Subject string `json:"subject" jsonschema:"what it is about, in a few words on one line (at most 120 characters): what people read in a list"`
+	Text    string `json:"text" jsonschema:"what you need, with everything the recipient needs to know"`
+	Re      string `json:"re,omitempty" jsonschema:"optional: the id of the request this one is part of"`
 }
 
 type textArgs struct {
@@ -204,7 +205,7 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 		if err != nil {
 			return nil, idResult{}, err
 		}
-		id, err := a.server.sendFromAgent(agent, in.To, in.Text, in.Re)
+		id, err := a.server.sendFromAgent(agent, in.To, in.Subject, in.Text, in.Re)
 		return nil, idResult{ID: id}, err
 	})
 

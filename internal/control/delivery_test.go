@@ -186,7 +186,7 @@ func TestUpdatesAreNeverAnnounced(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
 	r.idle("coder")
-	sent, _ := r.srv.sendFromAgent("coder", "agent:reviewer", "review", "")
+	sent, _ := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "review", "")
 	r.srv.fetch("reviewer", sent)
 	r.srv.update("reviewer", sent, "reading")
 	if got := r.claim("coder", time.Minute); got.Line != "" {
@@ -292,7 +292,7 @@ func TestAnInterruptIsHandedOverOnceAndMarksTheAgentIdle(t *testing.T) {
 func TestAMessageToAnAgentThatIsAHumanDoesNotInterrupt(t *testing.T) {
 	r := newRig(t)
 	r.project("coder")
-	if _, err := r.srv.sendFromAgent("coder", "operator", "report", ""); err != nil {
+	if _, err := r.srv.sendFromAgent("coder", "operator", "A subject", "report", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range r.srv.events.all() {

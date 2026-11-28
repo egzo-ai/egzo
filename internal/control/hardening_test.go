@@ -408,7 +408,7 @@ func TestTheOpenLimitHoldsUnderConcurrentSenders(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r.srv.sendFromAgent(name, "agent:target", "please", "")
+			r.srv.sendFromAgent(name, "agent:target", "A subject", "please", "")
 		}()
 	}
 	wg.Wait()
@@ -424,7 +424,7 @@ func TestPeopleAreProtectedFromAFloodToo(t *testing.T) {
 	accepted := 0
 	for i := 0; i < 100; i++ {
 		sender := []string{"coder", "b", "c", "d"}[i%4]
-		if _, err := r.srv.sendFromAgent(sender, "operator", "look", ""); err == nil {
+		if _, err := r.srv.sendFromAgent(sender, "operator", "A subject", "look", ""); err == nil {
 			accepted++
 		}
 	}
@@ -436,7 +436,7 @@ func TestPeopleAreProtectedFromAFloodToo(t *testing.T) {
 		t.Fatal("no message reached the operator")
 	}
 	r.srv.resolveForPerson("operator", answered[0].ID, "ok", "done", "")
-	if _, err := r.srv.sendFromAgent("b", "operator", "again", ""); err != nil {
+	if _, err := r.srv.sendFromAgent("b", "operator", "A subject", "again", ""); err != nil {
 		t.Errorf("a slot freed by an answer was not reusable: %v", err)
 	}
 }

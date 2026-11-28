@@ -337,9 +337,9 @@ func (p *Peer) People(ctx context.Context, people map[string]Person) error {
 
 // SendMessage sends what one of the hub's users said to an agent. actor is user:<id>; key is the platform's id of the message, and the
 // same key is the same message.
-func (p *Peer) SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error) {
+func (p *Peer) SendMessage(ctx context.Context, agent, actor, subject, text, key string, interrupt bool) (Sent, error) {
 	var sent Sent
-	return sent, p.ask(ctx, Request{Verb: VerbSend, Agent: agent, Actor: actor, Text: text, Key: key, Interrupt: interrupt}, nil, &sent)
+	return sent, p.ask(ctx, Request{Verb: VerbSend, Agent: agent, Actor: actor, Subject: subject, Text: text, Key: key, Interrupt: interrupt}, nil, &sent)
 }
 
 // Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done. key, the platform's id of the

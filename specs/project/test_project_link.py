@@ -320,18 +320,24 @@ def test_a_message_the_hub_could_not_deliver_is_told_to_the_agent_by_a_notice(li
     assert hub.verb(p, "undelivered", Message=body["id"], Text="x")["error"], "the hub delivers to its users only"
 
 
-def test_the_events_feed_never_carries_what_agents_say_to_each_other_or_the_operator(linked, fake_hub, engine):
+def test_the_events_feed_carries_every_message_with_its_subject_and_text_for_the_hubs_record(linked, fake_hub, engine):
+    """What agents say to each other and to the operator goes to the hub too: it keeps every message of the project, as a record of who
+    asked what, and shows it in the agent's activity and its chat."""
     p, hub = linked.name, fake_hub
     hub.must(p, "spawn", Template="web", Name="peer", Actor="user:7")
     agent = Agent(engine, linked, "fromhub")
-    assert agent.send("agent:peer", "a secret between agents")[0] in (200, 201)
-    assert agent.send("operator", "a word for the operator")[0] in (200, 201)
-    marker = hub.must(p, "send", Agent="fromhub", Actor="user:7", Text="after them", Key="chat-20")["ID"]
+    assert agent.send("agent:peer", "between agents, with the details", subject="A word between agents")[0] in (200, 201)
+    assert agent.send("operator", "for the operator, with the details", subject="A word for the operator")[0] in (200, 201)
+    from_operator = linked.ok("message send", "--subject", "From the operator", "fromhub", "the operator asks").stdout.split()[1]
+    marker = hub.must(p, "send", Agent="fromhub", Actor="user:7", Subject="From a person", Text="after them", Key="chat-20")["ID"]
     assert eventually(lambda: [e for e in message_events(hub, p) if e["ID"] == marker])
-    for event in hub.feed(p, "events"):
-        assert "a secret between agents" not in json.dumps(event) and "a word for the operator" not in json.dumps(event)
-    between = [e for e in message_events(hub, p) if e.get("To") == "agent:peer"]
-    assert between and not between[0]["Text"], "that a message went is said, never what it says"
+    by_text = {e["Text"]: e for e in message_events(hub, p)}
+    between, to_operator = by_text["between agents, with the details"], by_text["for the operator, with the details"]
+    assert (between["Actor"], between["To"], between["Subject"]) == ("agent:fromhub", "agent:peer", "A word between agents")
+    assert (to_operator["Actor"], to_operator["To"], to_operator["Subject"]) == ("agent:fromhub", "operator", "A word for the operator")
+    (operator,) = [e for e in message_events(hub, p) if e["ID"] == from_operator]
+    assert (operator["Actor"], operator["Subject"], operator["Text"]) == ("operator", "From the operator", "the operator asks")
+    assert by_text["after them"]["Subject"] == "From a person", "the hub names what a person sends from a chat, when the chat has a subject"
     hub.must(p, "remove", Agent="peer")
 
 

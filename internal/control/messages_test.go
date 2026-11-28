@@ -120,7 +120,7 @@ func TestResolveNeedsAFetchedRequestAValidOutcomeAndHappensOnce(t *testing.T) {
 func TestOnlyRequestsAndQuestionsCanBeResolved(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
-	sent, _ := r.srv.sendFromAgent("coder", "agent:reviewer", "review this", "")
+	sent, _ := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "review this", "")
 	r.srv.fetch("reviewer", sent)
 	resolution, _ := r.srv.resolve("reviewer", sent, "fine", "done")
 	r.srv.fetch("coder", resolution)
@@ -203,18 +203,18 @@ func TestAPersonCanOnlyResolveWhatIsAddressedToAPerson(t *testing.T) {
 func TestMessagesBetweenAgentsNeedARealRecipientAndAnAddress(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
-	if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "hello", ""); err != nil {
+	if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "hello", ""); err != nil {
 		t.Fatal(err)
 	}
 	for to, want := range map[string]int{"agent:ghost": 404, "agent:coder": 400, "reviewer": 400, "": 400, "nobody": 400} {
-		if _, err := r.srv.sendFromAgent("coder", to, "x", ""); statusOf(t, err) != want {
+		if _, err := r.srv.sendFromAgent("coder", to, "A subject", "x", ""); statusOf(t, err) != want {
 			t.Errorf("to %q: %v, want status %d", to, err, want)
 		}
 	}
-	if _, err := r.srv.sendFromAgent("coder", "operator", "report", ""); err != nil {
+	if _, err := r.srv.sendFromAgent("coder", "operator", "A subject", "report", ""); err != nil {
 		t.Errorf("a message to the operator: %v", err)
 	}
-	if _, err := r.srv.sendFromAgent("coder", "user:alice", "hello", ""); err != nil {
+	if _, err := r.srv.sendFromAgent("coder", "user:alice", "A subject", "hello", ""); err != nil {
 		t.Errorf("a message to a user: %v", err)
 	}
 }
@@ -223,28 +223,28 @@ func TestAThreadIsThreadedMustBelongToTheSenderAndHasADepthLimit(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
 	root := r.request("coder", "start")
-	child, err := r.srv.sendFromAgent("coder", "agent:reviewer", "child", root)
+	child, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "child", root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m, _ := r.srv.events.message(child); m.Re != root || m.Hops != 1 {
 		t.Errorf("child = %+v", m)
 	}
-	if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "x", "m"+strings.Repeat("0", 32)); statusOf(t, err) != http.StatusNotFound {
+	if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "x", "m"+strings.Repeat("0", 32)); statusOf(t, err) != http.StatusNotFound {
 		t.Errorf("an unknown parent: %v", err)
 	}
-	if _, err := r.srv.sendFromAgent("reviewer", "agent:coder", "x", root); statusOf(t, err) != http.StatusNotFound {
+	if _, err := r.srv.sendFromAgent("reviewer", "agent:coder", "A subject", "x", root); statusOf(t, err) != http.StatusNotFound {
 		t.Errorf("a thread the sender is not part of: %v", err)
 	}
 	current, sender, receiver := child, "reviewer", "coder"
 	for hop := 2; hop < maxThreadDepth; hop++ {
-		next, err := r.srv.sendFromAgent(sender, "agent:"+receiver, "hop", current)
+		next, err := r.srv.sendFromAgent(sender, "agent:"+receiver, "A subject", "hop", current)
 		if err != nil {
 			t.Fatalf("hop %d: %v", hop, err)
 		}
 		current, sender, receiver = next, receiver, sender
 	}
-	_, err = r.srv.sendFromAgent(sender, "agent:"+receiver, "one too many", current)
+	_, err = r.srv.sendFromAgent(sender, "agent:"+receiver, "A subject", "one too many", current)
 	if statusOf(t, err) != http.StatusBadRequest || !strings.Contains(err.Error(), "deep") {
 		t.Errorf("past the depth limit: %v", err)
 	}
@@ -254,17 +254,17 @@ func TestARecipientHasAtMostTwentyOpenRequests(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
 	for n := 0; n < maxOpenPerRecipient; n++ {
-		if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "request", ""); err != nil {
+		if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "request", ""); err != nil {
 			t.Fatalf("request %d: %v", n, err)
 		}
 	}
-	_, err := r.srv.sendFromAgent("coder", "agent:reviewer", "one too many", "")
+	_, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "one too many", "")
 	if statusOf(t, err) != http.StatusConflict || !strings.Contains(err.Error(), "open") {
 		t.Errorf("err = %v", err)
 	}
 	r.srv.fetch("reviewer", r.firstOpen("agent:reviewer"))
 	r.srv.resolve("reviewer", r.firstOpen("agent:reviewer"), "done", "done")
-	if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "room again", ""); err == nil {
+	if _, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "room again", ""); err == nil {
 		t.Log("room made by a resolution is only freed once it is resolved; the sender's rate is also limited")
 	}
 }
@@ -280,15 +280,15 @@ func TestAnAgentMayNotSendMoreThanThirtyMessagesAMinuteButAPersonMay(t *testing.
 	r := newRig(t)
 	r.project("coder")
 	for n := 0; n < maxSendsPerMinute; n++ {
-		if _, err := r.srv.sendFromAgent("coder", fmt.Sprintf("user:u%d", n%10), "note", ""); err != nil {
+		if _, err := r.srv.sendFromAgent("coder", fmt.Sprintf("user:u%d", n%10), "A note", "note", ""); err != nil {
 			t.Fatalf("message %d: %v", n, err)
 		}
 	}
-	_, err := r.srv.sendFromAgent("coder", "operator", "one too many", "")
+	_, err := r.srv.sendFromAgent("coder", "operator", "A subject", "one too many", "")
 	if statusOf(t, err) != http.StatusTooManyRequests || !strings.Contains(err.Error(), "minute") {
 		t.Errorf("err = %v", err)
 	}
-	if _, err := r.srv.sendFromAgent("coder", "operator", "later", ""); err == nil {
+	if _, err := r.srv.sendFromAgent("coder", "operator", "A subject", "later", ""); err == nil {
 		t.Error("the limit lifted without time passing")
 	}
 	// the window slides
@@ -298,7 +298,7 @@ func TestAnAgentMayNotSendMoreThanThirtyMessagesAMinuteButAPersonMay(t *testing.
 		r.srv.sends["agent:coder"][i] = old
 	}
 	r.srv.rateMu.Unlock()
-	if _, err := r.srv.sendFromAgent("coder", "operator", "a minute later", ""); err != nil {
+	if _, err := r.srv.sendFromAgent("coder", "operator", "A subject", "a minute later", ""); err != nil {
 		t.Errorf("after the window: %v", err)
 	}
 	for n := 0; n < 3*maxSendsPerMinute; n++ {
@@ -442,7 +442,7 @@ func TestTheMessageViewSurvivesARestartOfTheSidecar(t *testing.T) {
 func TestResolutionsGoToWhoeverSentTheRequestAndCanBeFetchedByThem(t *testing.T) {
 	r := newRig(t)
 	r.project("coder", "reviewer")
-	sent, _ := r.srv.sendFromAgent("coder", "agent:reviewer", "review", "")
+	sent, _ := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "review", "")
 	r.srv.fetch("reviewer", sent)
 	resolution, _ := r.srv.resolve("reviewer", sent, "lgtm", "done")
 	got, err := r.srv.fetch("coder", resolution)
@@ -480,7 +480,7 @@ func TestASenderSeesWhereWhatItSentStandsAndItsLatestUpdateUntilItIsResolved(t *
 		decode(t, r.asAgent("lead", "GET", "/v1/messages?sent=1", ""), &out)
 		return out
 	}
-	response := r.asAgent("lead", "POST", "/v1/messages", `{"to":"agent:helper","text":"count the files"}`)
+	response := r.asAgent("lead", "POST", "/v1/messages", `{"subject":"A subject","to":"agent:helper","text":"count the files"}`)
 	var created struct{ ID string }
 	decode(t, response, &created)
 	if got := sent(); len(got) != 1 || got[0].ID != created.ID || got[0].State != stateQueued || got[0].LatestUpdate != nil {
@@ -507,7 +507,7 @@ func TestASenderSeesWhereWhatItSentStandsAndItsLatestUpdateUntilItIsResolved(t *
 func TestAnAnswerToAQuestionSaysSoAndNamesTheRequest(t *testing.T) {
 	r := newRig(t)
 	r.project("lead", "helper")
-	response := r.asAgent("lead", "POST", "/v1/messages", `{"to":"agent:helper","text":"report a constant"}`)
+	response := r.asAgent("lead", "POST", "/v1/messages", `{"subject":"A subject","to":"agent:helper","text":"report a constant"}`)
 	var request struct{ ID string }
 	decode(t, response, &request)
 	r.asAgent("helper", "GET", "/v1/messages/"+request.ID, "").Body.Close()

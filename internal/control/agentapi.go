@@ -163,14 +163,15 @@ func (a *agentAPI) list(w http.ResponseWriter, r *http.Request, agent string) {
 
 func (a *agentAPI) send(w http.ResponseWriter, r *http.Request, agent string) {
 	var body struct {
-		To   string `json:"to"`
-		Text string `json:"text"`
-		Re   string `json:"re"`
+		To      string `json:"to"`
+		Subject string `json:"subject"`
+		Text    string `json:"text"`
+		Re      string `json:"re"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	id, err := a.server.sendFromAgent(agent, body.To, body.Text, body.Re)
+	id, err := a.server.sendFromAgent(agent, body.To, body.Subject, body.Text, body.Re)
 	if err != nil {
 		fail(w, err)
 		return

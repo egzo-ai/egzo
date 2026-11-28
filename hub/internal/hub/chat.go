@@ -25,6 +25,7 @@ import (
 type Inbound struct {
 	Via     string
 	Account string
+	Subject string // a platform's subject line, if it has one: "" takes the start of the text's first line
 	Text    string
 	// Key is the platform's id for the message, or for the answer (a click, a reply): the same key is the same message. The hub puts the
 	// bridge's name before it, so two bridges' ids never meet.
@@ -86,7 +87,7 @@ func (h *Hub) Deliver(ctx context.Context, project, agent string, in Inbound) (s
 			already = resolved.Already
 			return err
 		}
-		sent, err := e.SendMessage(ctx, agent, rbac.Actor(user.ID), in.Text, key, in.Interrupt)
+		sent, err := e.SendMessage(ctx, agent, rbac.Actor(user.ID), in.Subject, in.Text, key, in.Interrupt)
 		id = sent.ID
 		return err
 	})
