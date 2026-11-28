@@ -335,14 +335,14 @@ def test_the_hub_reaches_claude_codes_chat_and_what_it_sends_is_typed_into_the_t
     turn = eventually(hub_turn, seconds=60)
     assert turn and turn[0]["message"]["text"] == "say hello from the hub", turn
 
-    # a message typed into the terminal by egzo is a turn of the same chat
+    # a message is announced by egzo typing its line into the terminal: that line is a turn of the same chat
     eventually(lambda: (chat_state(ahp, fake_hub, name, chat) or {}).get("activeTurn") is None, seconds=180)
     ahp.ok("message send", name, "and one from the terminal")
 
     def typed_turn():
         state = chat_state(ahp, fake_hub, name, chat) or {}
         turns = state.get("turns", []) + ([state["activeTurn"]] if state.get("activeTurn") else [])
-        return [t for t in turns if "and one from the terminal" in t["message"]["text"]] or None
+        return [t for t in turns if t["message"]["text"].startswith("check egzo message m")] or None
 
     assert eventually(typed_turn, seconds=180), "what is typed into the TUI is in the chat"
 
