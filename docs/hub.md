@@ -224,8 +224,9 @@ choice is made at spawn and kept for the agent's life. It works at a phone's wid
   starter, an administrator) may also send prompts, stop turns, approve tools and answer questions. Several people can have it open at once: it is not a seat, unlike the
   terminal.
 - **The terminal stays** for OpenCode: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
-  messages announced to the agent) show in the chat as prompts: a message from a person or from another agent shows as what they sent,
-  with who sent it (an agent's is marked so); one the hub does not have (from the operator, or older than a week) shows as what egzo
+  messages announced to the agent) show in the chat as prompts: a message shows as a card saying who sent it (an agent is marked so), its kind and
+  the start of what it says, which opens on all of it. What another agent sent shows who sent it but not its text, which stays in the
+  project; one the hub does not have (from the operator, or older than a week) shows as what egzo
   announced, in a person's words, with the message's id cut short.
 - **One session.** The chat is the agent's main session, which the terminal starts on too: it is there from the agent's start, so an
   agent spawned without a task takes its first prompt from the chat. A session opened later in the terminal (`/new`)

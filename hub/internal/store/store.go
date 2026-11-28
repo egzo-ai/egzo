@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS outbox_message ON outbox (json_extract(body, '$.id')); -- a message a bridge says it could not deliver
 -- What an agent sent another agent, for the Rich UI chat of the one it was sent to (agentmessages.go): egzo's line announcing it names
--- it, and the chat shows what it says. Kept as long as the outbox keeps its messages. Its own table: the bridges never read it.
+-- it, and the chat shows who sent it. Its text is not here: what agents say to each other stays in the project. Kept as long as the outbox keeps its messages. Its own table: the bridges never read it.
 CREATE TABLE IF NOT EXISTS agent_messages (
 	id TEXT PRIMARY KEY,                 -- the message's id
 	at INTEGER NOT NULL,                 -- Unix milliseconds

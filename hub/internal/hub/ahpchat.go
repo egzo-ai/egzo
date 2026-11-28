@@ -106,7 +106,8 @@ type ChatMessage struct {
 
 // ChatMessageOf is a message a hub user or another agent sent an agent, for someone who may watch its chat: what the message said reached
 // the agent, which fetched it in its chat or its terminal, both of which they may see. The hub knows it from the project's events feed,
-// which carries the text of what is said, and keeps it as long as its outbox keeps messages. ErrNotFound for anything else: a message to
+// and keeps it as long as its outbox keeps messages. The feed carries the text of what people and agents say to each other, not of what
+// agents say to each other: a message from another agent has no text. ErrNotFound for anything else: a message to
 // another agent, one the agent or the operator sent, or one the hub no longer has.
 func (h *Hub) ChatMessageOf(ctx context.Context, user store.User, project, agent, id string) (ChatMessage, error) {
 	role, err := h.access(ctx, user, project)

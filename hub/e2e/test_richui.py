@@ -310,8 +310,10 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     hub.world("ahp-message", project="web", agent="inbox", user="admin", code="m0a1b2c3d4", text="Please **fix** the login page")
     turn = chat(page).locator("article.turn").last
     message = turn.get_by_test_id("prompt-message")
-    expect(message).to_contain_text("admin")
-    expect(message).to_contain_text("asks, through egzo")
+    expect(message.locator(".from")).to_have_text("admin")
+    expect(message).to_contain_text("From:")
+    expect(message.locator(".kind")).to_have_text("· request")
+    expect(message.locator(".tag")).to_have_count(0)
     expect(message.locator("strong")).to_have_text("fix")
     expect(turn).not_to_contain_text("check egzo message")
     expect(turn).to_have_attribute("data-state", "complete")
@@ -323,23 +325,43 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     expect(line.locator(".id")).to_have_attribute("title", "m384b9c214b8eda15ae885bd930cce178")
 
 
-def test_a_message_from_another_agent_shows_who_sent_it_and_what_it_says(single_hub, page):
+def test_a_message_from_another_agent_shows_who_sent_it(single_hub, page):
     hub = single_hub
     sign_in(page, hub, "admin")
     hub.world("rich-agent", project="web", agent="peer")
     open_chat(page, hub, "peer")
     expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
     code = "m5d0c3b2a19f8e7d6c5b4a39281706f5e"
-    hub.world("ahp-message", project="web", agent="peer", actor="agent:reviewer", code=code, text="Can you **rebase** your branch?")
+    hub.world("ahp-message", project="web", agent="peer", actor="agent:reviewer", code=code)
     turn = chat(page).locator("article.turn").last
     message = turn.get_by_test_id("prompt-message")
     expect(message).to_have_attribute("data-from-agent", "true")
-    expect(message.locator(".tag")).to_have_text("agent")
+    expect(message).to_contain_text("From:")
     expect(message.locator(".from")).to_have_text("reviewer")
-    expect(message).to_contain_text("asks, through egzo")
-    expect(message.locator("strong")).to_have_text("rebase")
+    expect(message.locator(".tag")).to_have_text("agent")
+    expect(message.locator(".kind")).to_have_text("· request")
     expect(message.locator(".id")).to_have_text("m5d0c3b2a")
+    # what agents say to each other never reaches the hub
+    expect(message).to_contain_text("What it says stays in the project")
     expect(turn).not_to_contain_text("from another agent is waiting")
+
+
+def test_a_long_message_shows_its_start_and_opens_on_all_of_it(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="inbox")
+    open_chat(page, hub, "inbox")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
+    text = "\n\n".join(f"Step {i}: do the thing number {i}." for i in range(1, 9))
+    hub.world("ahp-message", project="web", agent="inbox", user="admin", code="m0a1b2c3d4e5f6a7b8", text=text)
+    message = chat(page).locator("article.turn").last.get_by_test_id("prompt-message")
+    body = message.get_by_test_id("prompt-message-text")
+    expect(body).to_have_attribute("data-clamped", "")
+    expect(body.get_by_text("Step 1:")).to_be_visible()
+    expect(body.get_by_text("Step 8:")).not_to_be_in_viewport()
+    message.get_by_role("button", name="Show all").click()
+    expect(body).not_to_have_attribute("data-clamped", "")
+    expect(body.get_by_text("Step 8:")).to_be_visible()
 
 
 def test_the_chat_comes_back_on_its_own_after_the_connection_drops(single_hub, page):

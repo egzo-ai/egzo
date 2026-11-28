@@ -367,7 +367,8 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 		case "ahp-message": // c.User (or c.Actor, another agent: agent:<name>) sends the agent a message (c.Text, id c.Code): the hub hears of it
 			// from the events feed, and egzo types its line
 			if from, ok := strings.CutPrefix(c.Actor, "agent:"); ok {
-				e.PushEvent(links.Event{Type: "message", ID: c.Code, Agent: c.Agent, Actor: "agent:" + from, To: "agent:" + c.Agent, Kind: "request", Text: c.Text})
+				// as a link sends it: what agents say to each other stays in the project, so no text
+				e.PushEvent(links.Event{Type: "message", ID: c.Code, Agent: c.Agent, Actor: "agent:" + from, To: "agent:" + c.Agent, Kind: "request"})
 				for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
 					if _, err := db.AgentMessageOf(ctx, c.Code); err == nil {
 						break
