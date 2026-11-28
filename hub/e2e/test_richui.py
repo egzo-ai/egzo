@@ -316,8 +316,11 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     expect(turn).not_to_contain_text("check egzo message")
     expect(turn).to_have_attribute("data-state", "complete")
     # a message the hub does not know (from the operator, at the CLI) shows as egzo's line
-    hub.world("ahp-say", project="web", agent="inbox", text="check egzo message m99999999 and handle the request for me.")
-    expect(chat(page).locator("article.turn").last.get_by_test_id("prompt-egzo")).to_contain_text("check egzo message m99999999")
+    hub.world("ahp-say", project="web", agent="inbox", text="check egzo message m384b9c214b8eda15ae885bd930cce178 and handle the request for me.")
+    line = chat(page).locator("article.turn").last.get_by_test_id("prompt-egzo")
+    expect(line).to_contain_text("A message from a person.")
+    expect(line.locator(".id")).to_have_text("m384b9c21")
+    expect(line.locator(".id")).to_have_attribute("title", "m384b9c214b8eda15ae885bd930cce178")
 
 
 def test_the_chat_comes_back_on_its_own_after_the_connection_drops(single_hub, page):

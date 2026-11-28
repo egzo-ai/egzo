@@ -354,6 +354,44 @@ export function announced(prompt: string): string[] | null {
   return ids.length ? ids : null;
 }
 
+/** One sentence of egzo's line, as a person reads it: what it announces, and the messages it names. */
+export interface Announcement {
+  text: string;
+  ids: string[];
+}
+
+/** egzo's line in a person's words, one entry per sentence (internal/control/delivery.go words the line for the agent: "egzo message m…
+ * from another agent is waiting: fetch it and decide whether it fits your work."). A sentence it does not know keeps its words. Null
+ * for a prompt that is not egzo's line. */
+export function announcement(prompt: string): Announcement[] | null {
+  const line = prompt.trim();
+  if (!announced(line)) return null;
+  const out: Announcement[] = [];
+  const sentence = /(?:check )?egzo messages? ((?:m[0-9a-f]+)(?:, m[0-9a-f]+)*)(.*?)(?=\s+(?:check )?egzo messages? m[0-9a-f]|$)/g;
+  for (const m of line.matchAll(sentence)) {
+    const ids = m[1]!.split(", ");
+    const rest = m[2]!;
+    const n = ids.length;
+    const many = (one: string, more: string) => (n === 1 ? one : `${n} ${more}`);
+    let text: string;
+    if (rest.includes("network access changed")) text = "Its network access changed.";
+    else if (rest.includes("did not reach")) text = n === 1 ? "A message it sent a person did not reach them." : `${n} messages it sent people did not reach them.`;
+    else if (rest.includes("who started you can be reached")) text = "Whether the person who started it can be reached changed.";
+    else if (rest.includes("handle the request") || rest.includes("handle each one")) text = many("A message from a person.", "messages from people.");
+    else if (rest.includes("from another agent") || rest.includes("from other agents")) text = many("A message from another agent.", "messages from other agents.");
+    else if (rest.includes("reply to your earlier request") || rest.includes("replies to your earlier requests")) text = many("A reply to what it asked.", "replies to what it asked.");
+    else if (rest.includes("answers your question")) text = many("An answer to its question.", "answers to its questions.");
+    else text = `egzo ${n === 1 ? "message" : "messages"} ${ids.join(", ")}${rest}`.replace(/\bm([0-9a-f]{8})[0-9a-f]+/g, "m$1…");
+    out.push({ text, ids });
+  }
+  return out.length ? out : null;
+}
+
+/** A message id short enough to read: its first eight hex digits. */
+export function shortId(id: string): string {
+  return /^m[0-9a-f]{9,}$/.test(id) ? id.slice(0, 9) : id;
+}
+
 // ─── Words ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A duration in milliseconds, short: "850ms", "12s", "3m 05s". */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActionEnvelope, Snapshot } from "@microsoft/agent-host-protocol";
-import { announced, apply, emptyChat, formatDuration, formatTokens, messages, modelName, newTurnId, pendingOf, running, titleOf, turnsOf, withSnapshot, type Chat } from "./richchat";
+import { announced, announcement, apply, emptyChat, formatDuration, formatTokens, messages, modelName, newTurnId, pendingOf, running, titleOf, turnsOf, withSnapshot, type Chat } from "./richchat";
 
 const S = "ahp-session:/ses_1";
 const C = "ahp-chat:/ses_1";
@@ -195,6 +195,28 @@ describe("egzo's line", () => {
     expect(announced("check egzo message m1a2b3c and handle the request for me.")).toEqual(["m1a2b3c"]);
     expect(announced("check egzo messages m01, m02 and handle each one.")).toEqual(["m01", "m02"]);
     expect(announced("egzo message m0f: your network access changed; fetch it. check egzo message m1a and handle the request for me.")).toEqual(["m0f", "m1a"]);
+  });
+
+  it("says in a person's words what it announces", () => {
+    const id = "m384b9c214b8eda15ae885bd930cce178";
+    expect(announcement(`egzo message ${id} from another agent is waiting: fetch it and decide whether it fits your work.`)).toEqual([
+      { text: "A message from another agent.", ids: [id] },
+    ]);
+    expect(
+      announcement(
+        "egzo message m0f: your network access changed; fetch it. check egzo messages m01, m02 and handle each one. egzo message m3 answers your question on request m9: fetch it.",
+      ),
+    ).toEqual([
+      { text: "Its network access changed.", ids: ["m0f"] },
+      { text: "2 messages from people.", ids: ["m01", "m02"] },
+      { text: "An answer to its question.", ids: ["m3"] },
+    ]);
+    expect(announcement("egzo message m1 is the reply to your earlier request: fetch it.")).toEqual([{ text: "A reply to what it asked.", ids: ["m1"] }]);
+    expect(announcement("Read README.md")).toBeNull();
+  });
+
+  it("keeps the words of a sentence it does not know, with its ids short", () => {
+    expect(announcement("egzo message m0123456789abcdef: something new.")).toEqual([{ text: "egzo message m01234567…: something new.", ids: ["m0123456789abcdef"] }]);
   });
 
   it("is not a prompt someone typed", () => {
