@@ -227,6 +227,7 @@ func (h *Hub) Run(ctx context.Context) {
 		_ = h.store.PurgeInvites(ctx, now)
 		_ = h.store.PurgePreviewTickets(ctx, now)
 		_ = h.store.PurgeOutbox(ctx, now.Add(-outboxRetention))
+		_ = h.store.PurgeAgentMessages(ctx, now.Add(-outboxRetention))
 		select {
 		case <-ctx.Done():
 			return

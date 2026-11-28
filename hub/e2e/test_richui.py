@@ -323,6 +323,25 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     expect(line.locator(".id")).to_have_attribute("title", "m384b9c214b8eda15ae885bd930cce178")
 
 
+def test_a_message_from_another_agent_shows_who_sent_it_and_what_it_says(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="peer")
+    open_chat(page, hub, "peer")
+    expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
+    code = "m5d0c3b2a19f8e7d6c5b4a39281706f5e"
+    hub.world("ahp-message", project="web", agent="peer", actor="agent:reviewer", code=code, text="Can you **rebase** your branch?")
+    turn = chat(page).locator("article.turn").last
+    message = turn.get_by_test_id("prompt-message")
+    expect(message).to_have_attribute("data-from-agent", "true")
+    expect(message.locator(".tag")).to_have_text("agent")
+    expect(message.locator(".from")).to_have_text("reviewer")
+    expect(message).to_contain_text("asks, through egzo")
+    expect(message.locator("strong")).to_have_text("rebase")
+    expect(message.locator(".id")).to_have_text("m5d0c3b2a")
+    expect(turn).not_to_contain_text("from another agent is waiting")
+
+
 def test_the_chat_comes_back_on_its_own_after_the_connection_drops(single_hub, page):
     hub = single_hub
     sign_in(page, hub, "admin")

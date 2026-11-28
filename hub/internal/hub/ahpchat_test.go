@@ -124,7 +124,7 @@ func TestTheChatCarriesLinesAndTheLinkHearsWhetherItIsReadOnly(t *testing.T) {
 	}
 }
 
-func TestTheChatShowsWhatAPersonSentTheAgentToWhoeverMayWatchIt(t *testing.T) {
+func TestTheChatShowsWhatAPersonOrAnotherAgentSentTheAgentToWhoeverMayWatchIt(t *testing.T) {
 	r := newRig(t)
 	web := r.link("web", "oc")
 	id := r.id("web")
@@ -140,6 +140,8 @@ func TestTheChatShowsWhatAPersonSentTheAgentToWhoeverMayWatchIt(t *testing.T) {
 		{Type: "message", ID: "m1", Agent: "oc-1", Actor: "user:" + alice.ID, To: "agent:oc-1", Kind: "request", Text: "Fix the login page"},
 		{Type: "message", ID: "m2", Agent: "oc-1", Actor: "agent:oc-1", To: "user:" + alice.ID, Kind: "update", Text: "Done"},
 		{Type: "message", ID: "m3", Agent: "oc-2", Actor: "user:" + alice.ID, To: "agent:oc-2", Kind: "request", Text: "Not this agent's"},
+		{Type: "message", ID: "m4", Agent: "oc-1", Actor: "agent:oc-2", To: "agent:oc-1", Kind: "question", Re: "m1", Text: "Which **page**?"},
+		{Type: "message", ID: "m5", Agent: "oc-2", Actor: "agent:oc-1", To: "agent:oc-2", Kind: "resolution", Re: "m4", Text: "The login one"},
 	} {
 		e.Seq = i + 1
 		if err := r.hub.handleEvent(ctx, id, e); err != nil {
@@ -153,6 +155,21 @@ func TestTheChatShowsWhatAPersonSentTheAgentToWhoeverMayWatchIt(t *testing.T) {
 			t.Errorf("%s: %+v %v", who.Username, m, err)
 		}
 	}
+	// what another agent sent it: kept apart, never for a bridge
+	m, err := r.hub.ChatMessageOf(ctx, bob, id, "oc-1", "m4")
+	if err != nil || m.From != "oc-2" || !m.FromAgent || m.Kind != "question" || m.Re != "m1" || m.Text != "Which **page**?" {
+		t.Errorf("a message from another agent: %+v %v", m, err)
+	}
+	if out, _ := r.store.OutboxAfter(ctx, 0, 100); len(out) != 2 {
+		t.Errorf("the bridges read only what people and agents said to each other: %d entries", len(out))
+	}
+	// read again after a restart: nothing changes
+	if err := r.hub.handleEvent(ctx, id, links.Event{Seq: 4, Type: "message", ID: "m4", Agent: "oc-1", Actor: "agent:oc-2", To: "agent:oc-1", Kind: "question", Text: "Which **page**?"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.hub.ChatMessageOf(ctx, carol, id, "oc-1", "m4"); !errors.Is(err, ErrForbidden) && !errors.Is(err, ErrNotFound) {
+		t.Errorf("an overseer does not see what another agent sent it either: %v", err)
+	}
 	if _, err := r.hub.ChatMessageOf(ctx, carol, id, "oc-1", "m1"); !errors.Is(err, ErrForbidden) && !errors.Is(err, ErrNotFound) {
 		t.Errorf("an overseer does not see the chat, nor what it was sent: %v", err)
 	}
@@ -160,6 +177,7 @@ func TestTheChatShowsWhatAPersonSentTheAgentToWhoeverMayWatchIt(t *testing.T) {
 		{"oc-1", "m2", "what the agent said is not a message it was sent"},
 		{"oc-1", "m3", "a message to another agent"},
 		{"oc-2", "m1", "a message to another agent, asked through that one"},
+		{"oc-1", "m5", "what the agent sent another agent"},
 		{"oc-1", "m9", "a message the hub never had"},
 	} {
 		if _, err := r.hub.ChatMessageOf(ctx, alice, id, c.agent, c.msg); !errors.Is(err, ErrNotFound) {

@@ -35,8 +35,12 @@
 
 {#if ids && shown.length}
   {#each shown as m (m.id)}
-    <div class="prompt message" data-testid="prompt-message" data-pending={pending || undefined}>
-      <div class="who"><span class="from">{m.from}</span> <span class="muted">{kinds[m.kind] ?? "says"}, through egzo</span></div>
+    <div class="prompt message" data-testid="prompt-message" data-pending={pending || undefined} data-from-agent={m.fromAgent || undefined}>
+      <div class="who">
+        {#if m.fromAgent}<span class="tag">agent</span>{/if}<span class="from">{m.from}</span>
+        <span class="muted">{kinds[m.kind] ?? "says"}{#if m.re}<span title={m.re}> on {shortId(m.re)}</span>{/if}, through egzo</span>
+        <code class="id" title={m.id}>{shortId(m.id)}</code>
+      </div>
       <Markdown source={m.text} />
     </div>
   {/each}
@@ -59,5 +63,7 @@
   .egzo .said + .said::before { content: " "; }
   .id { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); }
   .muted { color: var(--text-3); }
+  .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; margin-right: 6px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); }
+  .message[data-from-agent] { background: var(--surface-2); }
   @media (max-width: 720px) { .prompt { max-width: 88%; } }
 </style>

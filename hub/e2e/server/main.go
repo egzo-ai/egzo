@@ -364,7 +364,18 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].rejectNext(c.Text)
 		case "ahp-drop": // the connections to the agent's AHP server drop, as a network that went away
 			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].drop()
-		case "ahp-message": // c.User sends the agent a message (c.Text, id c.Code): the hub hears of it from the events feed, and egzo types its line
+		case "ahp-message": // c.User (or c.Actor, another agent: agent:<name>) sends the agent a message (c.Text, id c.Code): the hub hears of it
+			// from the events feed, and egzo types its line
+			if from, ok := strings.CutPrefix(c.Actor, "agent:"); ok {
+				e.PushEvent(links.Event{Type: "message", ID: c.Code, Agent: c.Agent, Actor: "agent:" + from, To: "agent:" + c.Agent, Kind: "request", Text: c.Text})
+				for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+					if _, err := db.AgentMessageOf(ctx, c.Code); err == nil {
+						break
+					}
+				}
+				w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].say("egzo message " + c.Code + " from another agent is waiting: fetch it and decide whether it fits your work.")
+				break
+			}
 			user, err := db.UserByName(ctx, c.User)
 			if err != nil {
 				http.Error(rw, err.Error(), http.StatusNotFound)

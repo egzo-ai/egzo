@@ -151,8 +151,8 @@ const cursorEvery = 10 * time.Second
 
 // handleEvent is one event of a project's events feed. What an agent and a user said to each other goes in the outbox for the bridges, and
 // the cursor moves past the event in the same step. A message to a user goes to one bridge: the one of the account they linked last. With
-// none, or to someone who may not hear from the project, it is not kept, and the agent is told. An error is an event that was not kept:
-// the feed must not go past it.
+// none, or to someone who may not hear from the project, it is not kept, and the agent is told. What an agent sent another agent is kept
+// apart, for the Rich UI chat of the one it was sent to. An error is an event that was not kept: the feed must not go past it.
 func (h *Hub) handleEvent(ctx context.Context, project string, event links.Event) error {
 	var body []byte
 	keep := forUsers(event)
@@ -183,6 +183,14 @@ func (h *Hub) handleEvent(ctx context.Context, project string, event links.Event
 	if keep {
 		body, _ = json.Marshal(BridgeEvent{Type: EventMessage, Time: event.Time, Project: project, Agent: event.Agent, ID: event.ID, From: event.Actor, To: event.To,
 			Kind: event.Kind, Re: event.Re, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome, Bridge: bridge, Account: account})
+	}
+	if betweenAgents(event) {
+		// for the Rich UI chat of the agent it was sent to, never for a bridge
+		kept, _ := json.Marshal(BridgeEvent{Type: EventMessage, Time: event.Time, Project: project, Agent: event.Agent, ID: event.ID, From: event.Actor, To: event.To,
+			Kind: event.Kind, Re: event.Re, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome})
+		if err := h.store.KeepAgentMessage(ctx, store.AgentMessage{ID: event.ID, At: event.Time, Project: project, Agent: event.Agent, Body: kept}); err != nil {
+			return err
+		}
 	}
 	if body == nil && event.Type != "start" && !h.cursorDue(project) {
 		return nil
@@ -231,6 +239,11 @@ func (h *Hub) cursorMoved(project string) {
 	h.cursorMu.Lock()
 	defer h.cursorMu.Unlock()
 	h.cursorAt[project] = time.Now()
+}
+
+// betweenAgents reports whether an event is a message an agent sent another agent of the project.
+func betweenAgents(event links.Event) bool {
+	return event.Type == "message" && event.ID != "" && strings.HasPrefix(event.Actor, "agent:") && event.To == "agent:"+event.Agent
 }
 
 // forUsers reports whether an event is a message one end of which is a hub user.
