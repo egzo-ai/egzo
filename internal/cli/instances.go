@@ -108,7 +108,7 @@ func newSpawnCommand(opts *options) *cobra.Command {
 				}
 				return nil
 			}
-			queued, err := queueMessage(ctx, s, spawned.Name, message, false)
+			queued, err := queueMessage(ctx, s, spawned.Name, "", message, false)
 			if err != nil {
 				return fmt.Errorf("%s was spawned, but its first message could not be sent: %w", spawned.Name, err)
 			}

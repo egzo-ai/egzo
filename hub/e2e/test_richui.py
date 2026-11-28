@@ -307,12 +307,15 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     hub.world("rich-agent", project="web", agent="inbox")
     open_chat(page, hub, "inbox")
     expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
-    hub.world("ahp-message", project="web", agent="inbox", user="admin", code="m0a1b2c3d4", text="Please **fix** the login page")
+    hub.world("ahp-message", project="web", agent="inbox", user="admin", code="m0a1b2c3d4", subject="The login page", text="Please **fix** the login page")
     turn = chat(page).locator("article.turn").last
     message = turn.get_by_test_id("prompt-message")
-    expect(message).to_contain_text("admin")
-    expect(message).to_contain_text("asks, through egzo")
-    expect(message.locator("strong")).to_have_text("fix")
+    expect(message.locator(".from")).to_have_text("admin")
+    expect(message).to_contain_text("From:")
+    expect(message.locator(".kind")).to_have_text("· request")
+    expect(message.locator(".tag")).to_have_count(0)
+    expect(message.get_by_test_id("prompt-message-subject")).to_have_text("The login page")
+    expect(message).not_to_contain_text("Please fix", ignore_case=True)  # the subject only: the agent's tool call shows the text
     expect(turn).not_to_contain_text("check egzo message")
     expect(turn).to_have_attribute("data-state", "complete")
     # a message the hub does not know (from the operator, at the CLI) shows as egzo's line
@@ -323,23 +326,48 @@ def test_a_message_egzo_announces_shows_as_what_the_person_sent(single_hub, page
     expect(line.locator(".id")).to_have_attribute("title", "m384b9c214b8eda15ae885bd930cce178")
 
 
-def test_a_message_from_another_agent_shows_who_sent_it_and_what_it_says(single_hub, page):
+def test_a_message_from_another_agent_shows_who_sent_it_and_its_subject(single_hub, page):
     hub = single_hub
     sign_in(page, hub, "admin")
     hub.world("rich-agent", project="web", agent="peer")
     open_chat(page, hub, "peer")
     expect(chat(page).get_by_test_id("chat-status")).to_have_text("Ready")
     code = "m5d0c3b2a19f8e7d6c5b4a39281706f5e"
-    hub.world("ahp-message", project="web", agent="peer", actor="agent:reviewer", code=code, text="Can you **rebase** your branch?")
+    hub.world("ahp-message", project="web", agent="peer", actor="agent:reviewer", code=code, subject="Rebase your branch", text="It conflicts with main")
     turn = chat(page).locator("article.turn").last
     message = turn.get_by_test_id("prompt-message")
     expect(message).to_have_attribute("data-from-agent", "true")
-    expect(message.locator(".tag")).to_have_text("agent")
+    expect(message).to_contain_text("From:")
     expect(message.locator(".from")).to_have_text("reviewer")
-    expect(message).to_contain_text("asks, through egzo")
-    expect(message.locator("strong")).to_have_text("rebase")
+    expect(message.locator(".tag")).to_have_text("agent")
+    expect(message.locator(".kind")).to_have_text("· request")
     expect(message.locator(".id")).to_have_text("m5d0c3b2a")
+    expect(message.get_by_test_id("prompt-message-subject")).to_have_text("Rebase your branch")
     expect(turn).not_to_contain_text("from another agent is waiting")
+
+
+def test_the_activity_tab_lists_what_the_agent_sent_and_was_sent(single_hub, page):
+    hub = single_hub
+    sign_in(page, hub, "admin")
+    hub.world("rich-agent", project="web", agent="worker")
+    hub.world("message-event", project="web", agent="worker", code="m1aaaaaaaaaaaaaaa", actor="operator", role="agent:worker", subject="Check the logs", text="the logs of last night")
+    hub.world("message-event", project="web", agent="helper", code="m2bbbbbbbbbbbbbbb", actor="agent:worker", role="agent:helper", subject="Count the files", text="in src/, please")
+    page.goto(hub.url + hub.p("web") + "/a/worker/activity")
+    rows = page.get_by_test_id("messages").locator("tbody tr[data-message]")
+    expect(rows).to_have_count(2)
+    sent, received = rows.nth(0), rows.nth(1)
+    expect(sent).to_have_attribute("data-out", "true")
+    expect(sent).to_contain_text("→")
+    expect(sent).to_contain_text("helper")
+    expect(sent).to_contain_text("Count the files")
+    expect(sent).to_contain_text("open")
+    expect(received).to_contain_text("←")
+    expect(received).to_contain_text("operator")
+    received.get_by_role("button", name="Check the logs").click()
+    expect(page.get_by_test_id("message-text")).to_contain_text("the logs of last night")
+    # resolved: where it stands follows
+    hub.world("message-event", project="web", agent="helper", code="m2bbbbbbbbbbbbbbb", actor="agent:helper", state="done")
+    expect(sent).to_contain_text("done", timeout=10000)
 
 
 def test_the_chat_comes_back_on_its_own_after_the_connection_drops(single_hub, page):

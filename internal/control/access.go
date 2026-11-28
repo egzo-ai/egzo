@@ -154,7 +154,7 @@ func (s *server) storeAccess(agent string, before access.Access, known bool, aft
 		return err
 	}
 	// a full inbox is not an error: the access is stored, the agent sees it at its next `access`
-	_, _, _ = s.send(sendRequest{From: egzoSender, To: "agent:" + agent, Text: text, Notice: noticeAccess})
+	_, _, _ = s.send(sendRequest{From: egzoSender, To: "agent:" + agent, Subject: "Your network access changed", Text: text, Notice: noticeAccess})
 	return nil
 }
 

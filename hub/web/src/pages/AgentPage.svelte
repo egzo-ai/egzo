@@ -6,12 +6,13 @@
   import { activityKind, activityLabel, ago, initials, stamp, taskDoing, taskFailedLabel } from "../lib/format";
   import { poll } from "../lib/live";
   import { href, navigate, type AgentTab } from "../lib/router.svelte";
-  import type { AgentAnswer, Task } from "../lib/types";
+  import type { AgentAnswer, ChatMessage, Task } from "../lib/types";
   import { openTerm, roomMade, termId, workspace } from "../lib/workspace.svelte";
   import Icon from "../components/Icon.svelte";
   import NetworkView from "../components/NetworkView.svelte";
   import Pill from "../components/Pill.svelte";
   import TaskTable from "../components/TaskTable.svelte";
+  import MessageTable from "../components/MessageTable.svelte";
   // the chat (AHP's reducers, Markdown) is a chunk of its own, loaded when an agent's chat is first shown
   const chatView = () => import("../components/ChatView.svelte");
   import ErrorPage from "./ErrorPage.svelte";
@@ -25,6 +26,7 @@
   let failure = $state<unknown>(null);
   let logs = $state<string | null>(null);
   let activity = $state<Task[] | null>(null);
+  let sent = $state<ChatMessage[] | null>(null);
 
   const a = $derived(data?.agent);
   // the project does not have the agent while it is being made, or once a spawn failed: it has a task and no state
@@ -48,7 +50,7 @@
   $effect(() => {
     if (shown !== "activity") return;
     return poll(async () => {
-      activity = await api.tasks(project, agent);
+      [activity, sent] = await Promise.all([api.tasks(project, agent), api.agentMessages(project, agent)]);
     }, 5000);
   });
   $effect(() => {
@@ -147,7 +149,10 @@
     {#if shown === "chat" && !overseeing && a.richUI}
       {#if a.running && !offline}<div class="chat-host">{#await chatView() then m}<m.default {project} {agent} />{/await}</div>{:else}<p class="muted">The chat opens while the agent runs.</p>{/if}
     {:else if shown === "activity" && !overseeing}
-      {#if activity}<TaskTable {project} tasks={activity} agentColumn={false} />{:else}<p class="muted">Loading…</p>{/if}
+      {#if activity && sent}
+        <section class="activity" aria-label="Messages"><h2 class="h-section">Messages</h2><MessageTable {agent} messages={sent} /></section>
+        <section class="activity" aria-label="Tasks"><h2 class="h-section">Tasks from the hub</h2><TaskTable {project} tasks={activity} agentColumn={false} /></section>
+      {:else}<p class="muted">Loading…</p>{/if}
     {:else if tab === "network" && !overseeing}
       <NetworkView {project} {agent} />
     {:else if overseeing}

@@ -161,7 +161,7 @@ func TestWhatAnAgentAskedAndWhatWasOnItsWayToItDiesWithIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	// reviewer replies to coder: a resolution that coder has not read
-	reviewerRequest, err := r.srv.sendFromAgent("coder", "agent:reviewer", "look at this", "")
+	reviewerRequest, err := r.srv.sendFromAgent("coder", "agent:reviewer", "A subject", "look at this", "")
 	if err != nil {
 		t.Fatal(err)
 	}

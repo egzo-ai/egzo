@@ -74,9 +74,12 @@ class Agent:
         assert code == 200, body
         return body
 
-    def send(self, to, text, **fields):
-        """`POST /v1/messages`: a new message from this agent. Returns (status, body)."""
-        return self.call("POST", "/v1/messages", {"to": to, "text": text, **fields})
+    def send(self, to, text, subject="A request", **fields):
+        """`POST /v1/messages`: a new message from this agent, with a subject unless it is None. Returns (status, body)."""
+        body = {"to": to, "text": text, **fields}
+        if subject is not None:
+            body["subject"] = subject
+        return self.call("POST", "/v1/messages", body)
 
     def resolve(self, message_id, text="done", outcome="done"):
         return self.call("POST", f"/v1/messages/{message_id}/resolve", {"text": text, "outcome": outcome})

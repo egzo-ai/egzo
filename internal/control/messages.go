@@ -4,6 +4,7 @@
 package control
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egzo-ai/egzo/internal/names"
 )
@@ -100,8 +102,11 @@ type Message struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Kind string `json:"kind"`
-	Text string `json:"text"`
-	Re   string `json:"re,omitempty"`
+	// Subject is one short line a person reads without opening the message: the sender's, the start of its text's first line when it
+	// gave none, or "Re: " and the subject of the request it answers.
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
+	Re      string `json:"re,omitempty"`
 	// ReKind is, for a resolution, the kind of the message it closes (request or question), and On, for the answer to a
 	// question, the request the question was asked about: the reader knows an answer from a result.
 	ReKind  string    `json:"re_kind,omitempty"`
@@ -123,6 +128,7 @@ type Message struct {
 type messageData struct {
 	To      string   `json:"to"`
 	Kind    string   `json:"kind"`
+	Subject string   `json:"subject,omitempty"`
 	Re      string   `json:"re,omitempty"`
 	Hops    int      `json:"hops"`
 	Outcome string   `json:"outcome,omitempty"`
@@ -167,7 +173,7 @@ func (s *store) index(event Event) {
 			return
 		}
 		m := &Message{
-			ID: event.ID, From: event.Actor, To: data.To, Kind: data.Kind, Text: event.Text, Re: data.Re,
+			ID: event.ID, From: event.Actor, To: data.To, Kind: data.Kind, Subject: cmp.Or(data.Subject, subjectOf(event.Text)), Text: event.Text, Re: data.Re,
 			State: stateQueued, Outcome: data.Outcome, Choices: data.Choices, Time: event.Time, Hops: data.Hops, Notice: data.Notice,
 		}
 		if closed := s.messages[data.Re]; data.Kind == kindResolution && closed != nil {
@@ -395,10 +401,12 @@ func (s *server) rateLimit(from string, now time.Time) error {
 // sendRequest is what the verbs that create messages take.
 type sendRequest struct {
 	From, To, Text, Re, Kind string
-	Key                      string // a person's: a message with the same sender and key is not sent again
-	Choices                  []string
-	Interrupt                bool
-	Notice                   string // egzo's: which notice it is
+	// Subject is the sender's: "" takes the start of the text's first line, or, for what answers a request, the request's
+	Subject   string
+	Key       string // a person's: a message with the same sender and key is not sent again
+	Choices   []string
+	Interrupt bool
+	Notice    string // egzo's: which notice it is
 }
 
 // send creates a message after checking who it is for, its thread and the limits. It is the one way a
@@ -413,7 +421,7 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 		}
 		if id, ok := s.events.keyedMessage(req.From, req.Key); ok {
 			m, _ := s.events.message(id)
-			if m.To != req.To || m.Text != req.Text || m.Kind != kindRequest || m.Re != req.Re {
+			if m.To != req.To || m.Text != req.Text || m.Kind != kindRequest || m.Re != req.Re || req.Subject != "" && m.Subject != req.Subject {
 				return Message{}, Event{}, keyReused(req.Key)
 			}
 			return m, Event{}, nil // sent before: this is a retry
@@ -421,6 +429,9 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 	}
 	if !validText(req.Text) {
 		return Message{}, Event{}, badRequest("%s", textTooLong)
+	}
+	if req.Subject != "" && !validSubject(req.Subject) {
+		return Message{}, Event{}, badRequest("%s", badSubject)
 	}
 	kind, name, ok := parseAddress(req.To)
 	if !ok || kind == egzoSender {
@@ -441,6 +452,9 @@ func (s *server) send(req sendRequest) (Message, Event, error) {
 			return Message{}, Event{}, errNoSuchMessage
 		}
 		hops = parent.Hops + 1
+		if req.Kind == kindUpdate || req.Kind == kindQuestion {
+			req.Subject = reSubject(parent.Subject)
+		}
 		if hops >= maxThreadDepth {
 			return Message{}, Event{}, badRequest("this thread is already %d messages deep: finish it or start a new one", maxThreadDepth)
 		}
@@ -514,7 +528,11 @@ func (s *server) write(req sendRequest, hops int) (Message, Event, error) {
 	if kind == "" {
 		kind = kindRequest
 	}
-	data, _ := json.Marshal(messageData{To: req.To, Kind: kind, Re: req.Re, Hops: hops, Choices: req.Choices, Key: req.Key, Notice: req.Notice})
+	subject := req.Subject
+	if subject == "" {
+		subject = subjectOf(req.Text)
+	}
+	data, _ := json.Marshal(messageData{To: req.To, Kind: kind, Subject: subject, Re: req.Re, Hops: hops, Choices: req.Choices, Key: req.Key, Notice: req.Notice})
 	id := newMessageID()
 	event, err := s.events.append(Event{Type: "message", Agent: involved(req.From, req.To), Actor: req.From, ID: id, Text: req.Text, Data: data})
 	if err != nil {
@@ -586,7 +604,7 @@ func (s *server) resolveMessage(actor string, m Message, text, outcome, key stri
 	if !validText(text) {
 		return "", badRequest("%s", textTooLong)
 	}
-	data, _ := json.Marshal(messageData{To: m.From, Kind: kindResolution, Re: m.ID, Hops: m.Hops, Outcome: outcome, Key: key})
+	data, _ := json.Marshal(messageData{To: m.From, Kind: kindResolution, Subject: reSubject(m.Subject), Re: m.ID, Hops: m.Hops, Outcome: outcome, Key: key})
 	id := newMessageID()
 	if _, err := s.events.append(Event{Type: "message", Agent: involved(actor, m.From), Actor: actor, ID: id, Text: text, Data: data}); err != nil {
 		return "", err
@@ -658,7 +676,7 @@ func (s *server) update(agent, id, text string) (string, error) {
 	if !s.takeBudget(agent, "update", time.Now()) {
 		return "", tooMany("updates")
 	}
-	message, _, err := s.write(sendRequest{From: "agent:" + agent, To: m.From, Text: text, Re: id, Kind: kindUpdate}, m.Hops)
+	message, _, err := s.write(sendRequest{From: "agent:" + agent, To: m.From, Subject: reSubject(m.Subject), Text: text, Re: id, Kind: kindUpdate}, m.Hops)
 	return message.ID, err
 }
 
@@ -672,9 +690,12 @@ func (s *server) ask(agent, id, text string, choices []string) (string, error) {
 	return message.ID, err
 }
 
-// sendFromAgent is the message tool: a new request from an agent.
-func (s *server) sendFromAgent(agent, to, text, re string) (string, error) {
-	message, _, err := s.send(sendRequest{From: "agent:" + agent, To: to, Text: text, Re: re})
+// sendFromAgent is the message tool: a new request from an agent, which names it.
+func (s *server) sendFromAgent(agent, to, subject, text, re string) (string, error) {
+	if !validSubject(subject) {
+		return "", badRequest("%s", badSubject)
+	}
+	message, _, err := s.send(sendRequest{From: "agent:" + agent, To: to, Subject: subject, Text: text, Re: re})
 	return message.ID, err
 }
 
@@ -765,4 +786,49 @@ func (s *server) retire(agent string) error {
 	}
 	_, err := s.events.append(Event{Type: "retired", Agent: agent, Actor: "operator"})
 	return err
+}
+
+// maxSubject is the longest subject, in characters: one line of a list.
+const maxSubject = 120
+
+const badSubject = "a subject is one line of plain text, 1 to 120 characters: say in a few words what the message is about"
+
+// validSubject reports whether a sender's subject is one line of plain text a list can show.
+func validSubject(subject string) bool {
+	if strings.TrimSpace(subject) == "" || utf8.RuneCountInString(subject) > maxSubject || !utf8.ValidString(subject) {
+		return false
+	}
+	for _, r := range subject {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return false
+		}
+	}
+	return true
+}
+
+// subjectOf is the subject of a text whose sender gave none: the start of its first line, plain, cut at a word with an ellipsis when it
+// is longer than a subject.
+func subjectOf(text string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	line = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return ' '
+		}
+		return r
+	}, strings.TrimSpace(line))
+	line = strings.Join(strings.Fields(line), " ")
+	runes := []rune(line)
+	if len(runes) <= maxSubject {
+		return line
+	}
+	cut := string(runes[:maxSubject-1])
+	if i := strings.LastIndex(cut, " "); i > maxSubject/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,.;:") + "…"
+}
+
+// reSubject is the subject of what answers a request: "Re: " and its subject, never "Re: Re: ".
+func reSubject(subject string) string {
+	return "Re: " + strings.TrimPrefix(subject, "Re: ")
 }

@@ -261,7 +261,7 @@ func (e *Engine) PushEvent(event links.Event) {
 
 // SendMessage is a message from one of the hub's users; the same actor and key are the same message. The message is pushed on the events
 // feed, as control would.
-func (e *Engine) SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (links.Sent, error) {
+func (e *Engine) SendMessage(ctx context.Context, agent, actor, subject, text, key string, interrupt bool) (links.Sent, error) {
 	e.mu.Lock()
 	if err := e.dropped(); err != nil {
 		e.mu.Unlock()

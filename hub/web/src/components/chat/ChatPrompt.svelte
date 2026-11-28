@@ -1,9 +1,10 @@
 <script lang="ts">
   // What started a turn. A prompt someone typed shows as they typed it. egzo's line announcing a message ("check egzo message m… and handle
-  // the request for me.") shows the message it stands for, from the hub, when the hub has it: who sent it and what it says.
+  // the request for me.") shows the message it stands for, from the hub, when the hub has it: who sent it and its subject (the agent's
+  // tool call that fetches it shows what it says; the agent's Activity tab has it too).
   import { announced, announcement, shortId } from "../../lib/richchat";
   import type { ChatMessage } from "../../lib/types";
-  import Markdown from "./Markdown.svelte";
+  import Icon from "../Icon.svelte";
 
   let { prompt, origin, resolve, pending = false }: { prompt: string; origin: string; resolve: (id: string) => Promise<ChatMessage | null>; pending?: boolean } = $props();
 
@@ -20,7 +21,8 @@
     return () => (live = false);
   });
 
-  const kinds: Record<string, string> = { request: "asks", question: "asks", resolution: "answers", update: "says" };
+  const kinds: Record<string, string> = { request: "request", question: "question", resolution: "reply", update: "update" };
+
   const shown = $derived(found?.filter((m): m is ChatMessage => m !== null) ?? []);
 </script>
 
@@ -36,12 +38,14 @@
 {#if ids && shown.length}
   {#each shown as m (m.id)}
     <div class="prompt message" data-testid="prompt-message" data-pending={pending || undefined} data-from-agent={m.fromAgent || undefined}>
-      <div class="who">
-        {#if m.fromAgent}<span class="tag">agent</span>{/if}<span class="from">{m.from}</span>
-        <span class="muted">{kinds[m.kind] ?? "says"}{#if m.re}<span title={m.re}> on {shortId(m.re)}</span>{/if}, through egzo</span>
-        <code class="id" title={m.id}>{shortId(m.id)}</code>
+      <div class="mhead">
+        <span class="env" aria-hidden="true"><Icon name="mail" /></span>
+        <span class="k">From:</span>
+        <span class="from">{m.from}</span>{#if m.fromAgent}<span class="tag">agent</span>{/if}
+        <span class="muted kind">· {kinds[m.kind] ?? "message"}{#if m.re}<span title={m.re}> on {shortId(m.re)}</span>{/if}</span>
+        <code class="id" title="{m.id}, through egzo">{shortId(m.id)}</code>
       </div>
-      <Markdown source={m.text} />
+      <div class="subject" data-testid="prompt-message-subject">{m.subject || m.text.split("\n")[0]}</div>
     </div>
   {/each}
   {#if shown.length < ids.length}{@render line(said.filter((a) => a.ids.some((id) => !shown.some((m) => m.id === id))))}{/if}
@@ -55,15 +59,19 @@
   .prompt { align-self: flex-end; max-width: min(80%, 40rem); background: var(--bubble); color: var(--text); padding: 10px 16px; border-radius: 20px 20px 6px 20px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; font-size: 16px; }
   .prompt[data-pending] { opacity: 0.55; }
   .prompt[data-origin="agent"], .prompt[data-origin="tool"], .prompt[data-origin="automation"], .prompt[data-origin="systemNotification"] { background: var(--surface-2); color: var(--text-2); }
-  .message { white-space: normal; display: grid; gap: 4px; }
-  .who { font-size: 13px; color: var(--text-2); }
+  .message { white-space: normal; display: grid; gap: 6px; border-radius: 16px 16px 6px 16px; }
+  .mhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 13px; color: var(--text-2); }
+  .env { display: inline-flex; color: var(--text-2); }
+  .mhead .k { color: var(--text-3); }
+  .mhead .id { margin-left: auto; }
+  .subject { font-weight: 600; overflow-wrap: anywhere; }
   .from { font-weight: 600; color: var(--text); }
   .egzo { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-3); font-size: 14px; border-radius: 14px; }
   .egzo .from { color: var(--text-2); margin-right: 6px; }
   .egzo .said + .said::before { content: " "; }
   .id { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); }
   .muted { color: var(--text-3); }
-  .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; margin-right: 6px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); }
+  .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; margin-left: 2px; border-radius: 6px; background: var(--surface-3); color: var(--text-2); }
   .message[data-from-agent] { background: var(--surface-2); }
   @media (max-width: 720px) { .prompt { max-width: 88%; } }
 </style>

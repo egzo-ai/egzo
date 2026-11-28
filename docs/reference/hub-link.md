@@ -137,7 +137,7 @@ link: linked to https://my-egzo.example.org as p1a2b3c4d5e6, owned by alice
 
 The hub relays what its users say to agents, and what agents say to them, for the chat bridges (#145). It never speaks as the operator.
 
-- **`send`** is a message from a hub user to an agent: `Agent`, `Actor` (`user:<id>`, nothing else), `Text`, `Interrupt`, and a `Key`,
+- **`send`** is a message from a hub user to an agent: `Agent`, `Actor` (`user:<id>`, nothing else), `Text`, an optional `Subject` (none takes the start of the text's first line), `Interrupt`, and a `Key`,
   the chat platform's id for the message. The key is required: the same key from the same user is the same message, so a retry after a
   dropped connection sends nothing twice. The same key with another text or agent is an error. It answers the message's id. While the project is offline there is no link to ask, and nothing
   queues: the hub drops the message.
@@ -162,8 +162,9 @@ The hub relays what its users say to agents, and what agents say to them, for th
   events to come, and the first is a `start` event whose `Seq` says where that is, which the hub keeps like any other, so a feed opened
   again before anything else came misses nothing either. A hub that cannot tell where it is ends the feed rather than guess. An event of a
   log that began again (the control volume made anew) has a smaller number than the hub's: the link sends the whole new log.
-- **What the feed carries.** Every event worth showing (no `state`). A message says who it went from and to, its kind and what it is
-  about, and its text and choices **only when a user is one end of it**: what agents say to each other or to the operator stays in the project.
+- **What the feed carries.** Every event worth showing (no `state`). A message says who it went from and to, its kind, what it is
+  about (`Re`), and its `Subject`, text and choices, **whoever sent it**: what agents say to each other and to the operator goes to the
+  hub too, which keeps every message of the project as its record of who asked what ([the hub](../hub.md#the-record-of-messages)).
   The `events` verb, which the web UI's timelines ask, carries no message text at all.
 
 ## AHP mode
