@@ -233,3 +233,30 @@ def test_an_agent_spawned_in_ahp_mode_without_a_task_takes_its_first_prompt_from
     eventually(lambda: f"ahp-session:/{main}" in sessions_in(engine, ahp, name), seconds=120)
     assert in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session").stdout.strip() == main
     assert sessions_in(engine, ahp, name) == [f"ahp-session:/{main}"]
+
+
+def test_an_agent_spawned_in_ahp_mode_with_a_task_starts_on_it_in_its_main_session(ahp, engine, fake_hub):
+    # The hub's spawn with a task, in AHP mode: the TUI is started on the main session, where OpenCode draws no "Ask anything" to say it
+    # takes input. The task starts a turn of the main session through the AHP server, at once: the chat has it, even one the hub opened
+    # while it started, and the TUI shows it, being on that session. It used to be typed blind after a minute, and was lost when the TUI
+    # was not reading yet; a prompt that reached OpenCode while the chat was first opened was missing from the chat.
+    name, task = "oc-tasked", "list the files of the workspace"
+    started = time.time()
+    fake_hub.must(ahp.name, "spawn", Template="oc", Name=name, Actor="user:7", StarterName="Joe", Task=task, AHP=True)
+    main = eventually(lambda: in_instance(engine, ahp, name, "cat $HOME/.egzo/main-session 2>/dev/null").stdout.strip(), seconds=120)
+    chat = f"ahp-chat:/{main}"
+
+    def turns():
+        # what the hub's chat page does when it opens: list the sessions, then subscribe to the main chat
+        got = ask_hub(ahp, fake_hub, name, INIT, {"jsonrpc": "2.0", "id": 2, "method": "listSessions", "params": {}},
+                      {"jsonrpc": "2.0", "id": 3, "method": "subscribe", "params": {"channel": chat}}, seconds=2)
+        state = (((answer_to(got, 3) or {}).get("result") or {}).get("snapshot") or {}).get("state") or {}
+        texts = [t["message"]["text"] for t in state.get("turns", [])]
+        if state.get("activeTurn"):
+            texts.append(state["activeTurn"]["message"]["text"])
+        return texts if task in texts else None
+
+    found = eventually(turns, seconds=40)
+    assert found == [task], f"the task is the chat's first turn, within 40s of the spawn ({time.time() - started:.0f}s): {found}"
+    assert task in tui_text(ahp, name, seconds=4), "the TUI shows the task: it is on the main session"
+    assert sessions_in(engine, ahp, name) == [f"ahp-session:/{main}"], "the task went to the main session, not to one of its own"

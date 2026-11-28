@@ -77,7 +77,7 @@ func TestAnAgentReadsItsOwnAccessAndIsToldOnlyWhenItChanges(t *testing.T) {
 
 func TestNobodyCanSendAsOrToEgzoAndARemovedAgentForgetsItsAccess(t *testing.T) {
 	r := newRig(t)
-	response := r.asAgent("coder", "POST", "/v1/messages", `{"to":"egzo","text":"hi"}`)
+	response := r.asAgent("coder", "POST", "/v1/messages", `{"subject":"A subject","to":"egzo","text":"hi"}`)
 	response.Body.Close()
 	if response.StatusCode != http.StatusBadRequest {
 		t.Errorf("an agent messaging egzo: %d", response.StatusCode)

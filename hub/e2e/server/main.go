@@ -194,6 +194,7 @@ type command struct {
 	Role    string `json:"role"`
 	State   string `json:"state"`
 	Text    string `json:"text"`
+	Subject string `json:"subject"`
 	Port    int    `json:"port"`
 	Waiting bool   `json:"waiting"`
 	Actor   string `json:"actor"`
@@ -360,6 +361,35 @@ func control(w *world, h *hub.Hub, db *store.Store) http.Handler {
 			e.ServeAHP(c.Agent, server.serve)
 		case "ahp-say": // a prompt typed into the agent's terminal: its turn shows in the chat
 			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].say(c.Text)
+		case "ahp-reject": // the agent's AHP server rejects the next action a client dispatches, saying c.Text
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].rejectNext(c.Text)
+		case "ahp-drop": // the connections to the agent's AHP server drop, as a network that went away
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].drop()
+		case "ahp-message": // c.User (or c.Actor, another agent: agent:<name>) sends the agent a message (c.Subject, c.Text, id c.Code): the hub
+			// hears of it from the events feed, and egzo types its line
+			from, line := c.Actor, "egzo message "+c.Code+" from another agent is waiting: fetch it and decide whether it fits your work."
+			if !strings.HasPrefix(from, "agent:") {
+				user, err := db.UserByName(ctx, c.User)
+				if err != nil {
+					http.Error(rw, err.Error(), http.StatusNotFound)
+					return
+				}
+				from, line = "user:"+user.ID, "check egzo message "+c.Code+" and handle the request for me."
+			}
+			e.PushEvent(links.Event{Type: "message", ID: c.Code, Agent: c.Agent, Actor: from, To: "agent:" + c.Agent, Kind: "request", Subject: c.Subject, Text: c.Text})
+			for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+				if _, err := db.MessageOf(ctx, idOf(), c.Code); err == nil {
+					break
+				}
+			}
+			w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].say(line)
+		case "message-event": // the events feed carries a message (c.Code) from c.Actor to c.Role (an address), with c.Subject and c.Text, or the resolution of
+			// one (c.State: its outcome)
+			if c.State != "" {
+				e.PushEvent(links.Event{Type: "resolved", ID: c.Code, Agent: c.Agent, Actor: c.Actor, Outcome: c.State})
+				break
+			}
+			e.PushEvent(links.Event{Type: "message", ID: c.Code, Agent: c.Agent, Actor: c.Actor, To: c.Role, Kind: "request", Subject: c.Subject, Text: c.Text})
 		case "ahp-heard": // what clients sent the agent's AHP server, after the link's filter
 			json.NewEncoder(rw).Encode(w.ahps[orDefault(c.Machine, "local")+"/"+c.Project+"/"+c.Agent].heardLines())
 			return

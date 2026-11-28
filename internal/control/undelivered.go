@@ -65,7 +65,7 @@ func (s *server) undelivered(id, reason string) error {
 	}
 	text += fmt.Sprintf(" If it still matters, send it again with message(to %q, re %q), now or later. Resolve this once you have read it.", m.To, m.ID)
 	// the notice first: told again after a failure in between, the notice is not sent twice, and what is still open is closed
-	if _, _, err := s.send(sendRequest{From: egzoSender, To: "agent:" + agent, Text: text, Key: "undelivered:" + m.ID, Notice: noticeUndelivered}); err != nil {
+	if _, _, err := s.send(sendRequest{From: egzoSender, To: "agent:" + agent, Subject: "Not delivered: " + strings.TrimPrefix(m.Subject, "Re: "), Text: text, Key: "undelivered:" + m.ID, Notice: noticeUndelivered}); err != nil {
 		return err
 	}
 	if closing {

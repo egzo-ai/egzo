@@ -152,6 +152,8 @@ func (s *Server) Handler() http.Handler {
 	api("GET "+project+"/a/{agent}/logs", s.logs)
 	api("GET "+project+"/a/{agent}/terminal", s.terminal)
 	api("GET "+project+"/a/{agent}/chat", s.richChat)
+	api("GET "+project+"/a/{agent}/messages", s.agentMessages)
+	api("GET "+project+"/a/{agent}/messages/{id}", s.chatMessage)
 	api("GET "+project+"/workspaces", s.workspaces)
 	api("GET "+project+"/files/{workspace}/{path...}", s.files)
 	api("GET "+project+"/worktrees/{workspace}/{instance}/{path...}", s.files)

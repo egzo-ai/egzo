@@ -201,15 +201,30 @@ pages, `:` or Ctrl+K opens the command menu; single-key shortcuts can be turned 
 ## Rich UI
 
 An agent spawned with **Rich UI** (a checkbox of the spawn form, offered only for a template whose harness has an AHP mode: OpenCode
-today) has a **Chat** tab, its first section: the conversation of its main session, live, as messages, the agent's answers as it writes
-them, its reasoning (folded) and its tool calls. It works at a phone's width. Typing in the box sends a prompt into that session, as if it
-were typed in the agent's terminal; **Stop** cancels the turn that runs. The choice is made at spawn and kept for the agent's life.
+today) has a **Chat** tab, its first section: the conversation of its main session, live, the agent's answers as it writes them. The
+choice is made at spawn and kept for the agent's life. It works at a phone's width.
 
+- **What it shows.** The session's title; each prompt; the agent's answers, in Markdown (raw HTML is never rendered, images an answer
+  names are links, not fetched); its reasoning, folded; its tool calls, one line each, which open on what the tool was called with (a
+  shell command as the command), what it gave back and how it failed; and under each turn, how it ended, how long it took, the model and
+  the tokens it used. A tool that waits for an approval has **Approve** and **Deny** buttons. A question the agent asks (OpenCode's question tool, or a
+  consent a tool needs, such as using a web search provider) shows in its turn with its choices: one click answers a single choice,
+  otherwise **Submit** sends the answers, and **Dismiss** declines it. It can still be answered in the terminal instead; the chat then
+  says it was answered.
+- **egzo's lines.** A message reaches the agent as egzo's line ("check egzo message m… and handle the request for me."). The chat shows
+  the message instead, as a card: who sent it, its kind and its subject ([the record of messages](#the-record-of-messages)). A message
+  the hub never had shows as what the line announces, in a person's words, with the message's id cut short.
+- **Sending.** Typing in the box sends a prompt into that session, as if it were typed in the agent's terminal. While a turn runs, the box
+  steers it (Enter: the agent reads it at its next step) or queues a message for after it (**Queue**, or Alt+Enter); both show above the
+  box until the agent takes them. A steering message the agent took shows in the turn, where it took it. A queued message cannot be taken back: OpenCode has no way to. **Stop** cancels the turn that runs. A
+  prompt the agent does not take is said, with its reason.
+- **Reconnecting.** A dropped connection (a phone that slept, a network that changed) comes back on its own, and what happened meanwhile
+  is replayed: no reload.
 - **Who sees what.** Whoever may see what the project's agents did (a user or more) may watch the chat; whoever may operate the agent (its
-  starter, an administrator) may also send prompts and stop turns. Several people can have it open at once: it is not a seat, unlike the
+  starter, an administrator) may also send prompts, stop turns, approve tools and answer questions. Several people can have it open at once: it is not a seat, unlike the
   terminal.
 - **The terminal stays** for OpenCode: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
-  messages announced to the agent) show in the chat as prompts.
+  messages announced to the agent) show in the chat as prompts, as above.
 - **One session.** The chat is the agent's main session, which the terminal starts on too: it is there from the agent's start, so an
   agent spawned without a task takes its first prompt from the chat. A session opened later in the terminal (`/new`)
   works, but the hub does not show it, and the agent's activity follows the main session only.
@@ -221,6 +236,21 @@ were typed in the agent's terminal; **Stop** cancels the turn that runs. The cho
 The hub only knows the terminals it opened. `egzo agent attach` goes straight to the agent's session and the hub neither sees it nor can
 end it. Attaching with the CLI to an agent that is open in the hub is risky: the session has one screen size, so each side's window
 resize changes it for the other, and what both type reaches the program. Avoid it. Nothing in the hub prevents it.
+
+## The record of messages
+
+The hub keeps every message of a project, whoever sent it: a person, the operator, egzo or an agent, to whoever. Each project's link
+pushes them with its events ([what the feed carries](reference/hub-link.md#messages)), and the hub keeps who sent each, to whom, its kind,
+[subject](messaging.md#sending-a-task), text and choices, and how a request or question was resolved, for as long as it knows the
+project: it is the record of who asked what.
+
+- **An agent's Activity tab** lists what it sent (→) and received (←), newest first: when, with whom, the kind, the subject and, for a
+  request or question, whether it is open or how it was resolved. A subject opens on the message's text. The tasks the hub ran on the
+  agent are listed under it.
+- **Its chat** ([Rich UI](#rich-ui)) shows a message egzo announced to it as a card: an envelope, who it is from, the kind, the subject and
+  the short id. The text is in the agent's tool call that fetches it.
+- **Who sees it:** whoever may see what the agent did (a user or more), as for its chat and its activity. The chat bridges still carry
+  only what people and agents say to each other ([bridges](hub-bridges.md)).
 
 ## Network
 

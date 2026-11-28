@@ -145,8 +145,8 @@ type Exposure struct {
 }
 
 // Event is one entry of the control sidecar's event stream, as the web UI shows it and as the events feed carries it. A message
-// (Type "message") says who it went from (Actor) and to, its kind and what it is about; its Text is there only when a user is one end
-// of it, the sender or the recipient: what agents say to each other or to the operator stays in the project.
+// (Type "message") says who it went from (Actor) and to, its kind and what it is about; in the events feed it also has its Subject,
+// Text and Choices, whoever sent it: the hub keeps every message of the project as its record of who asked what.
 type Event struct {
 	Seq   int
 	Time  time.Time
@@ -158,6 +158,7 @@ type Event struct {
 	ID      string   `json:",omitempty"`
 	To      string   `json:",omitempty"`
 	Kind    string   `json:",omitempty"` // request, question, resolution, update
+	Subject string   `json:",omitempty"`
 	Re      string   `json:",omitempty"`
 	Outcome string   `json:",omitempty"`
 	Choices []string `json:",omitempty"`

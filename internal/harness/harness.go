@@ -182,6 +182,10 @@ type Plan struct {
 	// timeout passed). A TUI can draw its prompt box before the server behind it is up, and a line typed then is lost. Write removes it
 	// first, so only this run's harness makes it.
 	ReadyFile string
+	// Prompt, when set, is how a line reaches the harness without its terminal: the command, run with {"text": line} (JSON) as one more
+	// argument, hands the line to the session the TUI shows, as if typed there. Nothing is typed into the TUI then, so nothing waits
+	// for it to draw its prompt box, and a person typing in it is not interrupted: only ReadyFile (the server behind it) is waited for.
+	Prompt []string
 	// Setup are commands run once the files are written, in order, before the harness starts. Each is best effort: one
 	// that fails is reported, and the harness starts anyway.
 	Setup [][]string
@@ -329,7 +333,7 @@ When a message asks something of you:
 - Close it with resolve(id, text, outcome). The outcome is done, declined (you will not do it) or failed (you tried and could not). Put the answer or the result in text: that is what the sender reads, not your terminal. A request is not finished until you resolve it.
 - If it will take a while, send update(id, text) now and then: one short line on how it is going, never a copy of the result.
 - If you need an answer before you can finish, call ask(id, text). It returns at once and leaves the request open; the answer arrives later as another message, announced the same way.
-- If you need something done by another agent, send it message(to, text) and wait for its reply, which arrives as a message too; then resolve your own request. Usually you end your turn and the reply is announced to you. To check on it without ending your turn, call list_messages: it shows under sent whether the other agent fetched it and its latest update; to wait inside your turn, sleep in your shell between checks. You cannot hand a request over, only send a new one. agents lists who exists.
+- If you need something done by another agent, send it message(to, subject, text) and wait for its reply, which arrives as a message too; then resolve your own request. To wait, end your turn: the reply is announced to you when it comes. Do not sleep or loop in your turn to wait for it. To check on it while you still have other work, call list_messages: under sent it shows whether the other agent fetched it, its latest update, and once it is resolved the reply to fetch with get_message. You cannot hand a request over, only send a new one. agents lists who exists.
 - message(to, text) also reaches the person who started you, or the operator ("operator"), when you have something to report that no request asked for.
 - status(text) sets the line shown next to your name. When you cannot go on without an answer, set it to what you are waiting for, so the people who watch the project see it, for example "Waiting for decision on what branch name to push. Joe is unreachable."
 

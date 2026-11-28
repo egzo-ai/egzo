@@ -1,70 +1,170 @@
 <script lang="ts">
   // The Rich UI: the chat of an agent spawned with it, live from its harness through the project's link. What is typed here is a prompt in
-  // the agent's main session, as if typed in its terminal; Stop cancels the turn that runs. Someone who may only watch sees the chat and no box.
-  import { chatURL } from "../lib/api";
-  import { apply, emptyChat, fromSnapshot, messages, newTurnId, running, type Chat } from "../lib/richchat";
+  // the agent's main session, as if typed in its terminal; while a turn runs, it steers that turn or waits for the next one; Stop cancels
+  // the turn. Someone who may only watch sees the chat and no box. A dropped connection comes back on its own: AHP's reconnect replays what
+  // was missed, from the last serverSeq seen.
+  import type { ActionEnvelope, Snapshot } from "@microsoft/agent-host-protocol";
+  import { api, chatURL } from "../lib/api";
+  import { apply, emptyChat, messages, modelName, newTurnId, pendingOf, ROOT, running, titleOf, turnsOf, withSnapshot, type Chat, type SteerView } from "../lib/richchat";
+  import type { ChatMessage } from "../lib/types";
+  import "@fontsource-variable/inter/wght.css";
+  import ChatPrompt from "./chat/ChatPrompt.svelte";
+  import ChatTurn from "./chat/ChatTurn.svelte";
 
   let { project, agent }: { project: string; agent: string } = $props();
 
   let chat = $state<Chat>(emptyChat());
   let readOnly = $state(true);
-  let status = $state<"connecting" | "waiting" | "live" | "closed">("connecting");
+  let status = $state<"connecting" | "waiting" | "live" | "reconnecting">("connecting");
   let failure = $state("");
+  let notice = $state("");
   let draft = $state("");
-  let socket: WebSocket | null = null;
-  // subscribes refused since the last snapshot: the harness's AHP server may not know the main session yet (opencode-ahp registers a
-  // session the TUI made 250 ms after it was made, and egzo can name it before that), so the chat asks again a little later
-  let refused = 0;
-  const maxRefused = 10;
+  /** What this page sent that the agent has not taken yet: shown, faded, until it does. */
+  let outgoing = $state<{ id: string; text: string; kind: "prompt" | "steering" | "queued" }[]>([]);
   let scroller: HTMLElement | undefined = $state();
+  let box: HTMLTextAreaElement | undefined = $state();
+  let stuck = $state(true); // the view follows the newest turn while the reader is at the bottom
+  let now = $state(Date.now());
+  /** Where the agent took the steering messages, by turn: AHP keeps no trace of them in the turn, so this page does (for its tab). */
+  let steers = $state<Record<string, SteerView[]>>({});
+  const steersKey = $derived(`egzo-steers:${project}/${agent}`);
+
+  // one id for this page, kept across reconnects: the server knows what it sent it
+  const clientId = `egzo-hub-${newTurnId()}`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Json = any;
+
+  // ─── The connection ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  let socket: WebSocket | null = null;
+  let alive = true;
+  let attempts = 0;
+  let retry: ReturnType<typeof setTimeout> | undefined;
 
   function send(message: object) {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
 
-  function handle(m: any) {
-    switch (m.method) {
-      case "x-egzo/chatOpened":
-        readOnly = !!m.params?.readOnly;
-        send(messages.initialize());
-        return;
-      case "x-egzo/chatError":
-        failure = String(m.params?.message ?? "The chat failed.");
-        return;
-      case "x-egzo/mainSession":
-        if (m.params?.chat && m.params.chat !== chat.channel) {
-          chat = { ...emptyChat(), channel: m.params.chat };
-          refused = 0;
-          send(messages.listSessions()); // its answer subscribes to the chat
-        }
-        return;
-      case "action":
-        if (m.params?.channel === chat.channel) chat = apply(chat, m.params.action);
-        return;
-    }
-    if (m.id === 1 && m.result) status = chat.channel ? "live" : "waiting";
-    if (m.id === 3 && chat.channel) send(messages.subscribe(chat.channel));
-    if (m.id === 2 && m.result?.snapshot) {
-      chat = fromSnapshot(chat.channel, m.result.snapshot.state);
-      status = "live";
-      refused = 0;
-    }
-    if (m.id === 2 && m.error && chat.channel && refused < maxRefused) {
-      refused++;
-      const ws = socket;
-      setTimeout(() => socket === ws && send(messages.listSessions()), 300 * refused); // its answer subscribes again
-      return;
-    }
-    if (m.error && m.id !== undefined) failure = String(m.error.message ?? "refused");
-  }
-
-  $effect(() => {
+  function connect() {
+    clearTimeout(retry);
     const ws = new WebSocket(chatURL(project, agent));
     socket = ws;
-    status = "connecting";
-    failure = "";
-    chat = emptyChat();
+    let next = 1;
+    const waiting = new Map<number, (m: Json) => void>();
+    // what this connection did: initialize or reconnect first, then the main session's channels
+    let started = false;
+    let subscribing = false;
+    const request = (m: object): Promise<Json> => {
+      const id = next++;
+      if (socket === ws) send({ jsonrpc: "2.0", id, ...m });
+      return new Promise((resolve) => waiting.set(id, resolve));
+    };
+    const mine = () => socket === ws;
+
+    async function subscribeAll() {
+      if (subscribing || !chat.channel) return;
+      subscribing = true;
+      try {
+        // the server may not know the main session yet (opencode-ahp registers a session the TUI made 250 ms after it was made): listing
+        // the sessions registers it, and a refused subscribe is asked again a little later
+        for (let refused = 0; mine(); refused++) {
+          await request(messages.listSessions());
+          const r = await request(messages.subscribe(chat.channel));
+          if (!mine()) return;
+          if (r.result?.snapshot) {
+            chat = withSnapshot(chat, r.result.snapshot as Snapshot);
+            status = "live";
+            attempts = 0;
+            break;
+          }
+          if (refused >= 10) {
+            failure = String(r.error?.message ?? "The agent's chat cannot be opened.");
+            return;
+          }
+          await new Promise((res) => setTimeout(res, 300 * (refused + 1)));
+        }
+        const s = await request(messages.subscribe(chat.session));
+        if (mine() && s.result?.snapshot) chat = withSnapshot(chat, s.result.snapshot as Snapshot);
+      } finally {
+        subscribing = false;
+      }
+    }
+
+    async function initialize() {
+      started = true;
+      const r = await request(messages.initialize(clientId));
+      if (!mine()) return;
+      if (r.error) {
+        failure = String(r.error.message ?? "The agent refused the chat.");
+        return;
+      }
+      if (chat.channel) await subscribeAll();
+      else status = "waiting";
+    }
+
+    async function resume() {
+      started = true;
+      const r = await request(messages.reconnect(clientId, chat.seq, [ROOT, chat.session, chat.channel]));
+      if (!mine()) return;
+      const result = r.result;
+      if (!result) return initialize();
+      let have = false;
+      if (result.type === "replay") {
+        for (const envelope of result.actions ?? []) handleAction(envelope);
+        have = !(result.missing ?? []).includes(chat.channel);
+      } else {
+        for (const s of result.snapshots ?? []) {
+          chat = withSnapshot(chat, s as Snapshot);
+          have ||= s.resource === chat.channel;
+        }
+      }
+      if (have) {
+        status = "live";
+        attempts = 0;
+      } else {
+        await subscribeAll();
+      }
+    }
+
+    function handle(m: Json) {
+      if (m.id !== undefined && m.method === undefined) {
+        waiting.get(m.id)?.(m);
+        waiting.delete(m.id);
+        return;
+      }
+      switch (m.method) {
+        case "x-egzo/chatOpened":
+          readOnly = !!m.params?.readOnly;
+          failure = "";
+          // a chat this page had can be resumed where it was: once egzo says which session is the main one, the link lets the reconnect through
+          if (!(chat.state && chat.channel)) void initialize();
+          return;
+        case "x-egzo/chatError":
+          failure = String(m.params?.message ?? "The chat failed.");
+          return;
+        case "x-egzo/mainSession": {
+          const session = String(m.params?.session ?? "");
+          const channel = String(m.params?.chat ?? "");
+          if (!channel) return;
+          if (channel !== chat.channel) {
+            chat = emptyChat(session, channel);
+            if (!started) void initialize();
+            else void subscribeAll();
+          } else if (!started) {
+            void resume();
+          } else if (!chat.state) {
+            void subscribeAll();
+          }
+          return;
+        }
+        case "action":
+          handleAction(m.params as ActionEnvelope);
+          return;
+      }
+    }
+
     ws.onmessage = (e) => {
+      if (!mine()) return;
       try {
         handle(JSON.parse(e.data));
       } catch {
@@ -72,101 +172,337 @@
       }
     };
     ws.onclose = () => {
-      if (socket === ws) status = "closed";
-    };
-    return () => {
+      if (!mine() || !alive) return;
       socket = null;
-      ws.close();
+      for (const resolve of waiting.values()) resolve({ error: { message: "closed" } });
+      status = "reconnecting";
+      const delay = Math.min(15000, 500 * 2 ** attempts++);
+      retry = setTimeout(() => alive && connect(), delay);
+    };
+  }
+
+  function handleAction(envelope: ActionEnvelope) {
+    const action = envelope.action as Json;
+    const id = action?.turnId ?? action?.id;
+    if (envelope.channel === chat.channel && id !== undefined && outgoing.some((o) => o.id === id)) {
+      outgoing = outgoing.filter((o) => o.id !== id);
+      if (envelope.rejectionReason !== undefined) notice = `The agent did not take it: ${envelope.rejectionReason}`;
+    }
+    const mine = (envelope as Json).origin?.clientId === clientId;
+    if (mine && envelope.rejectionReason !== undefined && (action?.type === "chat/inputCompleted" || action?.type === "chat/toolCallConfirmed")) {
+      notice = `The agent did not take the answer: ${envelope.rejectionReason}`;
+    }
+    // the agent took a steering message into the turn that runs: mark the place
+    const steering = chat.state?.steeringMessage;
+    const runningTurn = running(chat);
+    if (
+      envelope.channel === chat.channel &&
+      envelope.rejectionReason === undefined &&
+      action?.type === "chat/pendingMessageRemoved" &&
+      action.kind === "steering" &&
+      steering?.id === action.id &&
+      runningTurn
+    ) {
+      const list = steers[runningTurn.id] ?? [];
+      if (!list.some((x) => x.key === action.id)) {
+        steers = { ...steers, [runningTurn.id]: [...list, { key: String(action.id), at: runningTurn.parts.length, text: steering?.message?.text ?? "" }] };
+        try {
+          sessionStorage.setItem(steersKey, JSON.stringify(steers));
+        } catch {
+          /* kept for this page only */
+        }
+      }
+    }
+    chat = apply(chat, envelope);
+  }
+
+  /** Back now rather than at the end of the wait: the page is shown again, or the network came back. */
+  function soon() {
+    if (status === "reconnecting" && alive) {
+      attempts = 0;
+      connect();
+    }
+  }
+
+  $effect(() => {
+    void project;
+    void agent;
+    alive = true;
+    chat = emptyChat();
+    try {
+      steers = JSON.parse(sessionStorage.getItem(`egzo-steers:${project}/${agent}`) ?? "{}") ?? {};
+    } catch {
+      steers = {};
+    }
+    status = "connecting";
+    failure = "";
+    connect();
+    const visible = () => document.visibilityState === "visible" && soon();
+    document.addEventListener("visibilitychange", visible);
+    window.addEventListener("online", soon);
+    return () => {
+      alive = false;
+      clearTimeout(retry);
+      document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("online", soon);
+      const ws = socket;
+      socket = null;
+      ws?.close();
     };
   });
 
-  // the newest turn stays in view while the agent writes
+  // ─── The messages egzo's line announces ─────────────────────────────────────────────────────────────────────────────────────────
+
+  const found = new Map<string, Promise<ChatMessage | null>>();
+  function resolve(id: string): Promise<ChatMessage | null> {
+    let p = found.get(id);
+    if (!p) {
+      p = api.chatMessage(project, agent, id).catch(() => null);
+      found.set(id, p);
+    }
+    return p;
+  }
+
+  // ─── The view ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  const turns = $derived(turnsOf(chat.state));
+  const turn = $derived(running(chat));
+  const pending = $derived(pendingOf(chat.state));
+  const title = $derived(titleOf(chat));
+  const model = $derived(modelName([...turns].reverse().find((t) => t.usage?.model)?.usage?.model));
+  const canSend = $derived(!!chat.channel && status === "live");
+
+  // the clock of the turn that runs
   $effect(() => {
-    void chat.turns.length;
-    void chat.turns.at(-1)?.parts.length;
-    queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+    if (!turn) return;
+    now = Date.now();
+    const t = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(t);
   });
 
-  const turn = $derived(running(chat));
+  function onScroll() {
+    if (scroller) stuck = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+  }
+  function toBottom() {
+    scroller?.scrollTo({ top: scroller.scrollHeight });
+    stuck = true;
+  }
+  // the newest turn stays in view while the agent writes, unless the reader scrolled up
+  $effect(() => {
+    void chat.state;
+    void outgoing.length;
+    if (stuck) queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+  });
 
-  function submit(e: Event) {
-    e.preventDefault();
+  function submit(kind: "prompt" | "steering" | "queued") {
     const text = draft.trim();
-    if (!text || !chat.channel) return;
-    send(messages.prompt(chat.channel, text, newTurnId()));
+    if (!text || !canSend) return;
+    const id = newTurnId();
+    if (kind === "prompt" && !turn) send(messages.prompt(chat.channel, text, id));
+    else send(messages.pending(chat.channel, kind === "queued" ? "queued" : "steering", id, text));
+    outgoing = [...outgoing, { id, text, kind: kind === "prompt" && turn ? "steering" : kind }];
+    notice = "";
     draft = "";
+    toBottom();
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function answer(requestId: string, response: "accept" | "decline", answers?: Record<string, any>) {
+    if (!canSend || readOnly) return;
+    send(messages.answer(chat.channel, requestId, response, answers));
+    notice = "";
+  }
+
+  function confirm(turnId: string, toolCallId: string, approved: boolean) {
+    if (!canSend || readOnly) return;
+    send(messages.confirm(chat.channel, turnId, toolCallId, approved));
+    notice = "";
   }
 
   function stop() {
     if (turn) send(messages.cancel(chat.channel, turn.id));
   }
 
+  // the box grows with what is typed, up to a third of the screen
+  $effect(() => {
+    void draft;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${Math.min(box.scrollHeight, Math.round(window.innerHeight * 0.33))}px`;
+  });
+
   function keydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) submit(e);
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    submit(turn && e.altKey ? "queued" : turn ? "steering" : "prompt");
   }
+
+  const liveWord = $derived(status === "live" ? (turn ? "Working" : "Ready") : status === "reconnecting" ? "Reconnecting" : status === "waiting" ? "Waiting" : "Connecting");
+  const liveTone = $derived(status === "live" ? (turn ? "working" : "ready") : status === "reconnecting" ? "down" : "starting");
+  const shownOutgoing = $derived(outgoing.filter((o) => o.kind === "prompt"));
+  const waitingOutgoing = $derived(outgoing.filter((o) => o.kind === "steering" || o.kind === "queued"));
 </script>
 
 <section class="chat" data-testid="rich-chat" aria-label="Chat with {agent}">
-  <div class="turns" bind:this={scroller} aria-live="polite">
-    {#if status === "connecting"}
-      <p class="muted">Connecting to the agent…</p>
-    {:else if status === "waiting" && !chat.turns.length}
-      <p class="muted">The agent has no conversation yet: it starts with its first prompt.</p>
-    {:else if status === "live" && !chat.turns.length}
-      <p class="muted">Nothing said yet.</p>
-    {/if}
-    {#each chat.turns as t (t.id)}
-      <article class="turn" data-state={t.state}>
-        <div class="prompt">{t.prompt}</div>
-        {#each t.parts as p, i (i)}
-          {#if p.kind === "markdown"}
-            <div class="answer">{p.content}</div>
-          {:else if p.kind === "reasoning"}
-            <details class="reasoning"><summary>Thinking</summary><div>{p.content}</div></details>
-          {:else if p.kind === "tool"}
-            <div class="tool" data-status={p.tool.status}><span class="dot" aria-hidden="true"></span><span class="title">{p.tool.title || p.tool.name}</span>{#if p.tool.status === "failed"}<span class="tag">failed</span>{:else if p.tool.status === "cancelled"}<span class="tag">cancelled</span>{/if}</div>
-          {:else if p.kind === "error"}
-            <div class="error" role="alert">{p.content}</div>
-          {/if}
-        {/each}
-        {#if t.state === "running"}<div class="working muted">Working…</div>{:else if t.state === "cancelled"}<div class="muted">Stopped.</div>{/if}
-      </article>
-    {/each}
+  <header class="head">
+    <div class="col headrow">
+      <span class="title" data-testid="chat-title">{title || agent}</span>
+      {#if model}<span class="model" data-testid="chat-model" title="the model of the last turn">{model}</span>{/if}
+      <span class="status" data-tone={liveTone} data-testid="chat-status"><span class="dot" aria-hidden="true"></span>{liveWord}</span>
+    </div>
+  </header>
+
+  <div class="scroll" bind:this={scroller} onscroll={onScroll}>
+    <div class="col turns" aria-live="polite">
+      {#if status === "connecting" && !turns.length}
+        <div class="empty"><div class="spin" aria-hidden="true"></div><p>Connecting to {agent}…</p></div>
+      {:else if !turns.length && !shownOutgoing.length}
+        <div class="empty">
+          <h2>What should {agent} do?</h2>
+          <p>{readOnly ? "Nothing said yet. What it does shows here as it happens." : status === "waiting" ? "It starts with its first prompt: type it below." : "Ask anything. It works in its own workspace, and what it does shows here as it happens."}</p>
+        </div>
+      {/if}
+      {#each turns as t (t.id)}
+        <ChatTurn
+          turn={t}
+          {resolve}
+          {now}
+          activity={t.state === "running" ? (chat.state?.activity ?? "") : ""}
+          steers={steers[t.id] ?? []}
+          readOnly={readOnly || !canSend}
+          onAnswer={answer}
+          onConfirm={(toolCallId, approved) => confirm(t.id, toolCallId, approved)}
+        />
+      {/each}
+      {#each shownOutgoing as o (o.id)}
+        <ChatPrompt prompt={o.text} origin="user" {resolve} pending />
+      {/each}
+    </div>
   </div>
-  {#if failure}<div class="banner" role="alert"><div class="body">{failure}</div></div>{/if}
-  {#if status === "closed"}<div class="banner" data-tone="info" role="status"><div class="body">The chat is closed: the agent stopped, or the connection ended. Reload to reconnect.</div></div>{/if}
-  {#if readOnly}
-    <p class="muted foot" data-testid="chat-readonly">You watch this chat: sending a prompt takes the right to operate the agent.</p>
-  {:else}
-    <form class="compose" onsubmit={submit}>
-      <textarea class="textarea" rows="2" placeholder={chat.channel ? "Ask the agent…" : "Waiting for the agent's first session…"} bind:value={draft} onkeydown={keydown} disabled={!chat.channel || status === "closed"} aria-label="Prompt"></textarea>
-      <div class="actions">
-        {#if turn}<button type="button" class="btn" data-variant="danger" onclick={stop}>Stop</button>{/if}
-        <button type="submit" class="btn" data-variant="primary" disabled={!draft.trim() || !chat.channel}>Send</button>
-      </div>
-    </form>
-  {/if}
+
+  <div class="dock">
+    <div class="col dockcol">
+      {#if !stuck}<button type="button" class="jump" onclick={toBottom} aria-label="Scroll to the latest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg></button>{/if}
+      {#if failure}<div class="note" data-tone="error" role="alert">{failure}</div>{/if}
+      {#if status === "reconnecting"}<div class="note" data-tone="down" role="status" data-testid="chat-reconnecting"><span>Connection lost. Reconnecting…</span><button type="button" onclick={soon}>Retry now</button></div>{/if}
+      {#if notice}<div class="note" data-tone="warn" role="status"><span>{notice}</span><button type="button" onclick={() => (notice = "")}>Dismiss</button></div>{/if}
+
+      {#if readOnly}
+        <p class="readonly" data-testid="chat-readonly">You are watching this chat. Sending a prompt takes the right to operate the agent.</p>
+      {:else}
+        <form class="composer" data-busy={turn ? "" : undefined} onsubmit={(e) => { e.preventDefault(); submit(turn ? "steering" : "prompt"); }}>
+          {#if pending.length || waitingOutgoing.length}
+            <ul class="pending" data-testid="chat-pending" aria-label="Messages waiting">
+              {#each pending as p (p.id)}
+                <li data-kind={p.kind}><span class="k">{p.kind === "steering" ? "Steering" : "Next"}</span><span class="t">{p.text}</span></li>
+              {/each}
+              {#each waitingOutgoing as o (o.id)}
+                <li data-kind={o.kind} data-pending><span class="k">{o.kind === "steering" ? "Steering" : "Next"}</span><span class="t">{o.text}</span></li>
+              {/each}
+            </ul>
+          {/if}
+          <textarea
+            rows="1"
+            bind:this={box}
+            bind:value={draft}
+            onkeydown={keydown}
+            disabled={!canSend}
+            aria-label="Prompt"
+            placeholder={!chat.channel ? "Waiting for the agent's first session…" : turn ? "Steer the running turn, or queue what comes next…" : `Message ${agent}…`}
+          ></textarea>
+          <div class="bar">
+            <span class="hint">{turn ? "Enter steers · Alt+Enter queues" : "Enter to send · Shift+Enter for a new line"}</span>
+            {#if turn}
+              <button type="button" class="ghost" disabled={!draft.trim() || !canSend} onclick={() => submit("queued")}>Queue</button>
+              <button type="submit" class="round send" disabled={!draft.trim() || !canSend} aria-label="Steer" title="Steer the running turn (Enter)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg></button>
+              <button type="button" class="round stop" onclick={stop} aria-label="Stop" title="Stop the running turn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg></button>
+            {:else}
+              <button type="submit" class="round send" disabled={!draft.trim() || !canSend} aria-label="Send" title="Send (Enter)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg></button>
+            {/if}
+          </div>
+        </form>
+      {/if}
+    </div>
+  </div>
 </section>
 
 <style>
-  .chat { display: flex; flex-direction: column; gap: var(--space-2, 8px); min-height: 60vh; max-height: 78vh; }
-  .turns { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3, 12px); padding-block: var(--space-2, 8px); }
-  .turn { display: flex; flex-direction: column; gap: 6px; }
-  .prompt { align-self: flex-end; max-width: min(90%, 60ch); background: var(--surface-3); color: var(--text); padding: 8px 12px; border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .answer { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
-  .reasoning { color: var(--text-3); font-size: 0.92em; }
-  .reasoning div { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 12px; border-left: 2px solid var(--border); }
-  .tool { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono, monospace); font-size: 0.88em; color: var(--text-2); overflow-wrap: anywhere; }
-  .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-running); flex: none; }
-  .tool[data-status="running"] .dot { animation: pulse 1s infinite alternate; }
-  .tool[data-status="failed"] .dot { background: var(--status-error); }
-  .tool[data-status="cancelled"] .dot { background: var(--status-stopped); }
-  .tool .tag { color: var(--text-3); }
-  .error { color: var(--status-error); white-space: pre-wrap; }
-  .working { font-size: 0.9em; }
-  .compose { display: flex; flex-direction: column; gap: 6px; }
-  .compose .actions { display: flex; justify-content: flex-end; gap: 8px; }
-  .foot { margin: 0; }
-  @keyframes pulse { from { opacity: 0.35; } to { opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { .tool[data-status="running"] .dot { animation: none; } }
+  .chat {
+    --chat-font: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --chat-col: 48rem;
+    --chat-gutter: 24px;
+    --bubble: var(--surface-3);
+    --card: var(--surface-1);
+    position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0;
+    font-family: var(--chat-font); font-size: 16px; line-height: 1.65; font-variant-numeric: normal; font-variant-ligatures: normal;
+    font-feature-settings: "cv11", "ss01"; letter-spacing: -0.006em;
+    margin-inline: calc(-1 * max(var(--space-5), env(safe-area-inset-left, 0px)));
+  }
+  .col { width: 100%; max-width: calc(var(--chat-col) + 2 * var(--chat-gutter)); margin-inline: auto; padding-inline: var(--chat-gutter); }
+
+  .head { flex: none; position: relative; z-index: 1; }
+  .head::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 20px; background: linear-gradient(to top, transparent, var(--bg)); pointer-events: none; }
+  .headrow { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+  .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .model { flex: none; font-size: 12.5px; color: var(--text-2); background: var(--surface-2); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+  .status { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-stopped); }
+  .status[data-tone="ready"] .dot { background: var(--status-running); }
+  .status[data-tone="working"] .dot { background: var(--accent); animation: breathe 1.2s ease-in-out infinite; }
+  .status[data-tone="down"] .dot { background: var(--status-error); }
+
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
+  .turns { display: flex; flex-direction: column; gap: 40px; padding-top: 32px; padding-bottom: 48px; }
+  .empty { margin: 14vh auto 0; text-align: center; max-width: 34rem; color: var(--text-2); }
+  .empty h2 { font-family: var(--chat-font); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); margin: 0 0 10px; }
+  .empty p { margin: 0; font-size: 15px; }
+  .spin { width: 22px; height: 22px; margin: 0 auto 12px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: rot 0.9s linear infinite; }
+
+  .dock { flex: none; position: relative; padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)); }
+  .dock::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 28px; background: linear-gradient(to bottom, transparent, var(--bg)); pointer-events: none; }
+  .dockcol { position: relative; display: grid; gap: 8px; }
+  .jump { position: absolute; left: 50%; top: -52px; transform: translateX(-50%); width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-float); z-index: 2; }
+  .jump svg, .round svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .note { display: flex; align-items: center; gap: 12px; font-size: 14px; padding: 8px 14px; border-radius: 12px; background: var(--status-warn-soft); color: var(--text); }
+  .note span { flex: 1; }
+  .note[data-tone="error"] { background: var(--status-error-soft); }
+  .note[data-tone="down"] { background: var(--status-unreachable-soft); }
+  .note button { font: inherit; font-size: 13px; color: var(--text); background: transparent; border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 12px; cursor: pointer; }
+  .readonly { margin: 0; text-align: center; font-size: 14px; color: var(--text-3); padding: 14px 0 4px; }
+
+  .composer { display: grid; gap: 4px; background: var(--card); border: 1px solid var(--border-strong); border-radius: 24px; padding: 10px 10px 10px 18px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.10), 0 1px 2px rgb(0 0 0 / 0.06); transition: border-color var(--dur-fast); }
+  .composer:focus-within { border-color: var(--text-3); }
+  .composer textarea { width: 100%; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 16px; line-height: 1.55; padding: 6px 0 2px; min-height: 30px; max-height: 33vh; overflow-y: auto; }
+  .composer textarea::placeholder { color: var(--text-3); }
+  .composer textarea:disabled { cursor: not-allowed; }
+  .bar { display: flex; align-items: center; gap: 8px; }
+  .hint { flex: 1; font-size: 12.5px; color: var(--text-3); }
+  .round { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; transition: background var(--dur-fast), opacity var(--dur-fast); }
+  .round.send { background: var(--accent); color: var(--on-accent); }
+  .round.send:hover:not(:disabled) { background: var(--accent-hover); }
+  .round.send:disabled { background: var(--surface-3); color: var(--text-3); cursor: default; }
+  .round.stop { background: var(--text); color: var(--bg); }
+  .round.stop svg { fill: currentColor; stroke: none; }
+  .ghost { font: inherit; font-size: 14px; color: var(--text); background: transparent; border: 1px solid var(--border-strong); border-radius: 999px; height: 36px; padding: 0 16px; cursor: pointer; }
+  .ghost:hover:not(:disabled) { background: var(--surface-2); }
+  .ghost:disabled { color: var(--text-3); cursor: default; }
+
+  .pending { list-style: none; margin: 0 0 4px; padding: 0 0 8px; display: grid; gap: 6px; border-bottom: 1px solid var(--border); }
+  .pending li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-2); min-width: 0; }
+  .pending li[data-pending] { opacity: 0.55; }
+  .pending .k { flex: none; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent-text); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; }
+  .pending li[data-kind="queued"] .k { color: var(--text-2); }
+  .pending .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  @keyframes breathe { 50% { opacity: 0.35; } }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .status .dot, .spin { animation: none !important; } }
+  @media (max-width: 720px) {
+    .chat { --chat-gutter: 14px; }
+    .hint { display: none; }
+    .turns { gap: 28px; padding-top: 20px; }
+    .empty { margin-top: 8vh; }
+    .empty h2 { font-size: 22px; }
+    .bar { justify-content: flex-end; }
+  }
 </style>

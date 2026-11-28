@@ -25,6 +25,7 @@ import (
 type Inbound struct {
 	Via     string
 	Account string
+	Subject string // a platform's subject line, if it has one: "" takes the start of the text's first line
 	Text    string
 	// Key is the platform's id for the message, or for the answer (a click, a reply): the same key is the same message. The hub puts the
 	// bridge's name before it, so two bridges' ids never meet.
@@ -86,7 +87,7 @@ func (h *Hub) Deliver(ctx context.Context, project, agent string, in Inbound) (s
 			already = resolved.Already
 			return err
 		}
-		sent, err := e.SendMessage(ctx, agent, rbac.Actor(user.ID), in.Text, key, in.Interrupt)
+		sent, err := e.SendMessage(ctx, agent, rbac.Actor(user.ID), in.Subject, in.Text, key, in.Interrupt)
 		id = sent.ID
 		return err
 	})
@@ -121,6 +122,7 @@ type BridgeEvent struct {
 	To      string   `json:"to,omitempty"`
 	Kind    string   `json:"kind,omitempty"` // request, question, resolution, update
 	Re      string   `json:"re,omitempty"`
+	Subject string   `json:"subject,omitempty"`
 	Text    string   `json:"text,omitempty"`
 	Choices []string `json:"choices,omitempty"`
 	Outcome string   `json:"outcome,omitempty"`
@@ -151,8 +153,9 @@ const cursorEvery = 10 * time.Second
 
 // handleEvent is one event of a project's events feed. What an agent and a user said to each other goes in the outbox for the bridges, and
 // the cursor moves past the event in the same step. A message to a user goes to one bridge: the one of the account they linked last. With
-// none, or to someone who may not hear from the project, it is not kept, and the agent is told. An error is an event that was not kept:
-// the feed must not go past it.
+// none, or to someone who may not hear from the project, it is not kept, and the agent is told. Every message, whoever sent it, is also
+// kept as the project's record (messages), and a resolution marks what it resolved. An error is an event that was not kept: the feed must
+// not go past it.
 func (h *Hub) handleEvent(ctx context.Context, project string, event links.Event) error {
 	var body []byte
 	keep := forUsers(event)
@@ -182,7 +185,20 @@ func (h *Hub) handleEvent(ctx context.Context, project string, event links.Event
 	}
 	if keep {
 		body, _ = json.Marshal(BridgeEvent{Type: EventMessage, Time: event.Time, Project: project, Agent: event.Agent, ID: event.ID, From: event.Actor, To: event.To,
-			Kind: event.Kind, Re: event.Re, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome, Bridge: bridge, Account: account})
+			Kind: event.Kind, Re: event.Re, Subject: event.Subject, Text: event.Text, Choices: event.Choices, Outcome: event.Outcome, Bridge: bridge, Account: account})
+	}
+	// every message, whoever sent it, is the hub's record of who asked what: an agent's activity and its chat show it
+	if event.Type == "message" && event.ID != "" {
+		m := store.Message{ID: event.ID, Project: project, At: event.Time, From: event.Actor, To: event.To, Kind: event.Kind, Subject: event.Subject,
+			Text: event.Text, Re: event.Re, Choices: event.Choices, Outcome: event.Outcome}
+		if err := h.store.KeepMessage(ctx, m); err != nil {
+			return err
+		}
+	}
+	if event.Type == "resolved" && event.ID != "" {
+		if err := h.store.MessageResolved(ctx, project, event.ID, event.Outcome, event.Time); err != nil {
+			return err
+		}
 	}
 	if body == nil && event.Type != "start" && !h.cursorDue(project) {
 		return nil

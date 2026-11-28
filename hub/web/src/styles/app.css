@@ -9,3 +9,30 @@ details[open] > summary { margin-bottom: var(--space-3); }
 .side-head .close-nav { display: none; }
 body { overflow: hidden; }
 .grid2 { align-items: start; }
+
+/* An agent's pages: every section has the same width and one dense header (where, who, state, actions on one row; what it does and its
+   details on a second), and the tabs under it. */
+.page.agent { gap: var(--space-3); padding-top: var(--space-3); }
+.ahead { display: grid; gap: var(--space-1); min-width: 0; }
+.ahead .arow { display: flex; align-items: center; gap: var(--space-2) var(--space-3); flex-wrap: wrap; min-width: 0; }
+.ahead .who { flex: 1 1 auto; display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
+.ahead .crumbs { flex-wrap: nowrap; }
+.ahead .h-page { font-size: var(--text-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ahead .sub { display: flex; align-items: baseline; gap: var(--space-1) var(--space-4); flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-2); min-width: 0; }
+.ahead .now { color: var(--text); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 100%; }
+.ahead .now.q { color: var(--status-waiting); }
+.ahead .metaline { gap: var(--space-3); }
+.page.agent > .tabs { margin-top: calc(-1 * var(--space-1)); }
+
+/* The chat: the page is a frame the chat fills, under the header and the tabs. */
+.page[data-chat] { height: 100%; display: flex; flex-direction: column; padding-bottom: 0; }
+.page[data-chat] > * { flex: none; }
+.page[data-chat] > .chat-host { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: calc(-1 * var(--space-3)); }
+@media (max-width: 720px) {
+  .page.agent { padding-top: var(--space-2); gap: var(--space-2); }
+  .ahead .crumbs, .ahead .metaline { display: none; }
+  .ahead .arow { flex-wrap: nowrap; }
+  .ahead .btn .lbl, .ahead .btn .kbd { display: none; }
+  .ahead .btn { width: var(--control-h-sm); padding: 0; justify-content: center; }
+}
+.page.agent .activity { display: grid; gap: var(--space-2); min-width: 0; }

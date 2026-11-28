@@ -1,7 +1,7 @@
 import type {
   ChatAccount,
   ChatLinkPreview,
-  AgentAnswer, AuditEntry, FileView, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Listing, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, Template, UserRow, WorkspaceRow,
+  AgentAnswer, AuditEntry, ChatMessage, FileView, HubAuditEntry, Invite, InvitePreview, Link, LinkCode, Listing, Members, Network, NewInvite, NewLinkCode, Project, ProjectList, Session, SignInOptions, Task, Template, UserRow, WorkspaceRow,
 } from "./types";
 
 /** An error answer of the hub: {code, message} with a status. */
@@ -119,6 +119,10 @@ export const api = {
   /** Answered at once: the hub runs it as a task, shown on the agent. */
   operate: (id: string, a: string, verb: "start" | "stop" | "rm") =>
     request<{ task: Task }>("POST", `${agent(id, a)}/${verb}`).then((r) => r.task),
+  /** A message a person sent the agent, which egzo's line in its chat announces: whoever may watch the chat. */
+  chatMessage: (id: string, a: string, message: string) => request<ChatMessage>("GET", `${agent(id, a)}/messages/${enc(message)}`),
+  /** What an agent sent and was sent, newest first: its activity. */
+  agentMessages: (id: string, a: string) => request<{ messages: ChatMessage[] }>("GET", `${agent(id, a)}/messages`).then((r) => r.messages),
   logs: (id: string, a: string) => request<{ text: string }>("GET", `${agent(id, a)}/logs`).then((r) => r.text),
 
   /** The project's workspace volumes: directories, and git workspaces with the worktrees their agents left. */

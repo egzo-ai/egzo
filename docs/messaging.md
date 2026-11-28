@@ -11,6 +11,7 @@ contains can be typed into the terminal, so a message cannot pretend to be you. 
 
 ```console
 $ egzo message send coder-1 "Fix the flaky checkout test, then open a PR"
+$ egzo message send coder-1 --subject "Flaky checkout test" "It fails one run in ten on CI: ..."
 $ egzo message send coder-1 "Stop, use the v2 API instead" --interrupt    # stops what it is doing first
 $ egzo message send reviewer-1 "Review PR 88" --wait                      # block until it answers
 $ egzo agent spawn coder issue-412 -m "..." --wait                      # spawn, send, and wait
@@ -22,6 +23,12 @@ the focus, mouse reports, answers to the program's queries) does not. Then a lin
 the agent fetches and answers it. If it does not fetch it within a minute, the line is typed again, up to three
 times, after which the message is marked `unconfirmed`. A message for a stopped agent waits until it runs again.
 
+**A subject.** Every message has one: a short line people read in `egzo message ls`, in the hub's Activity tab and in a Rich UI chat,
+without opening the message. An agent names every request it sends (the `message` tool requires a `subject`, one line of plain text, at
+most 120 characters). A person may leave it out (`--subject` is optional, and so is a chat platform's subject line): egzo takes the
+start of the message's first line. What answers a request (a question, an update, the result) carries its subject as `Re: ...`. The
+subject is the sender's words like the text, so it is never typed into the terminal either.
+
 `--wait` prints progress notes to stderr and the answer to stdout. Exit codes: 0 done, 3 declined, 4 failed, 5 the
 `--timeout` passed (the message stays open).
 
@@ -31,12 +38,12 @@ Agents get an `egzo` MCP server with these tools:
 
 | tool | use |
 |---|---|
-| `list_messages` | what the agent owes: open requests and questions, unread replies; and under `sent`, what it asked of others and is not resolved, with its state (`queued`, `announced`, `fetched`, `unconfirmed`) and the latest update, since updates are never announced |
+| `list_messages` | what the agent owes: open requests and questions, unread replies; and under `sent`, what it asked of others and still waits on, with its state (`queued`, `announced`, `fetched`, `unconfirmed`, `resolved`), the latest update, since updates are never announced, and once resolved the reply to read. What is said on what the agent asked (the reply, a question back) is listed at once; new work only once it was announced |
 | `get_message` | read a message addressed to it |
 | `resolve` | close a request or question with a result (`done`, `declined`, `failed`) |
 | `update` | a progress note for whoever asked |
 | `ask` | ask the sender a question; the answer comes back as a reply |
-| `message` | send a new request to the operator, a person or another agent |
+| `message` | send a new request to the operator, a person or another agent, with a `subject` |
 | `status` | one line on what it is doing, shown by `egzo ps` and in the hub; also how it says it is stuck (below) |
 | `agents` | the other agents, with their template, harness and activity; under `you`, who started it and whether they can be reached |
 | `access` | what it may reach: its egress profile, the hosts it allows, each service and how to use its credential, the ssh servers (`egzo agent access` says the same) |
@@ -64,7 +71,8 @@ what branch name to push. Joe is unreachable.`, so the people who watch the proj
 - Typed as its first prompt, once, as soon as the agent takes input, as if the person had typed it in its terminal. It does not wait
   for a quiet terminal: until it is typed, whoever attaches read-write waits (`egzo: the agent is starting and gets its task
   first...`), at most two minutes, so the task is always the first prompt. Read-only clients watch as usual.
-  It is the one free text egzo ever types, kept apart from the event log; nothing goes to chat.
+  It is the one free text egzo ever types, kept apart from the event log; nothing goes to chat. (OpenCode in AHP mode gets it, like
+  the other lines, through its server, in its main session: see [AHP mode](harnesses.md#ahp-mode).)
 - **Unattended:** sent as a request from the person, and the agent is told they indicated they will not attend the session directly
   (a checkbox, not a lock: they may still attach): it answers them with its egzo tools, on their chat account. An unattended agent
   needs a task, and the person a linked chat account.
@@ -73,8 +81,9 @@ An attended agent is told nothing about being attended: it is the normal case. E
 prompt and its first prompt, attended or not, with a task or not, is written out in the spec `specs/project/test_project_start.py`,
 and what each harness adds around it in `specs/harness/prompts` ([pinned harness prompts](../specs/README.md#pinned-harness-prompts)).
 
-So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
-request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
+So agents can hand work to each other (`message` to `agent:reviewer-1`, end the turn until the reply is announced, then resolve
+their own request). An agent is told not to sleep or loop inside its turn to wait: an agent that never ends its turn is never idle,
+so nothing is announced to it; `list_messages` still shows it the reply if it checks. Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
 paths between them. Each agent is told its own [workspaces](workspaces.md#what-an-agent-is-told) and how to hand over code;
 `agents` gives the other agents' names, templates, harnesses and activity, nothing more, and each agent is told its own name, template and harness. What an agent needs to know about the others (for example "to
 reach service X, ask agent Y") belongs in its prompt.

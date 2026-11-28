@@ -26,16 +26,19 @@ type Filter struct {
 	pending map[string]string
 }
 
-// The chat actions a client may dispatch: start a turn (send a prompt), cancel one, and set or clear a pending message (steering, queueing).
+// The chat actions a client may dispatch: start a turn (send a prompt), cancel one, set or clear a pending message (steering, queueing),
+// approve or deny a tool call that waits for it, and answer what the agent asks (an input request: OpenCode's question tool, a consent).
 var clientActions = map[string]bool{
 	"chat/turnStarted":           true,
 	"chat/turnCancelled":         true,
 	"chat/pendingMessageSet":     true,
 	"chat/pendingMessageRemoved": true,
+	"chat/toolCallConfirmed":     true,
+	"chat/inputCompleted":        true,
 }
 
 // The commands a client may send, whatever their params; the rest are checked one by one in FromClient, or refused.
-var freeCommands = map[string]bool{"ping": true, "reconnect": true}
+var freeCommands = map[string]bool{"ping": true}
 
 // message is a JSON-RPC message read as the agent's AHP server reads it, with JSON.parse: names are exact, and of two equal names the last
 // counts. Go's decoder into a struct would match "Method" or "METHOD" too, so a line could say one method to the filter and another to the
@@ -140,6 +143,21 @@ func (f *Filter) allowed(m message) string {
 			return "initialSubscriptions is a list of channels"
 		}
 		for _, uri := range initial {
+			if !f.readable(uri) {
+				return "only the agent's main session can be subscribed to"
+			}
+		}
+		return ""
+	case m.Method == "reconnect":
+		// the server subscribes the connection to every channel it names, and its answer holds their snapshots or the actions it missed
+		if channel != RootChannel {
+			return "reconnect targets " + RootChannel
+		}
+		var subscriptions []string
+		if json.Unmarshal(m.Params["subscriptions"], &subscriptions) != nil {
+			return "subscriptions is a list of channels"
+		}
+		for _, uri := range subscriptions {
 			if !f.readable(uri) {
 				return "only the agent's main session can be subscribed to"
 			}

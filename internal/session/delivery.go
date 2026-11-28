@@ -58,6 +58,9 @@ type Delivery struct {
 	// AttachHold is the longest HoldAttach keeps read-write clients out waiting for the task to be typed: a harness that never gets ready
 	// must not lock its terminal for good. It defaults to two minutes.
 	AttachHold time.Duration
+	// Submit, when set, hands a line to the harness instead of typing it (harness.Plan.Prompt): readiness is then only ReadyFile, and
+	// the TUI's terminal is left alone. An error means the line did not get there; it is tried again a few times.
+	Submit func(line string) error
 	// BeforeInject runs right before a line is typed, so what the line may send the agent to look at is in place
 	// (the ssh servers of an access that changed). Nil does nothing.
 	BeforeInject func()
@@ -182,6 +185,12 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 
 		if !ready {
 			switch {
+			case cfg.Submit != nil:
+				// the line goes to the server, not the TUI: the server being up is all it takes
+				if cfg.ReadyFile != "" && time.Since(started) < cfg.ReadyTimeout && !exists(cfg.ReadyFile) {
+					continue
+				}
+				ready = true
 			case cfg.RequireRaw:
 				// the TUI has the terminal; a moment more for it to start reading
 				if !h.Raw() {
@@ -237,10 +246,29 @@ func (h *Holder) RunDelivery(ctx context.Context, api *agentclient.Client, cfg D
 		// The line is fixed words and ids from the control sidecar, never message text, with one exception: the task the person who
 		// started the agent gave it, typed once as its first prompt, which they could type themselves. Sanitize keeps any of it from
 		// leaving the bracketed paste, even if the sidecar were wrong.
-		h.Inject(Sanitize(work.Line))
+		if cfg.Submit != nil {
+			submit(ctx, cfg.Submit, work.Line)
+		} else {
+			h.Inject(Sanitize(work.Line))
+		}
 		if taskPending {
 			taskPending = false
 			h.OpenAttach() // the task is typed: whoever waited comes in, and finds it as the first prompt
+		}
+	}
+}
+
+// submit hands a line to the harness, trying again a few times: the server may be restarting. A line that never gets there is lost
+// like a typed one the TUI dropped (an announcement is made again; the task is not).
+func submit(ctx context.Context, send func(string) error, line string) {
+	for attempt := 0; attempt < 5; attempt++ {
+		if send(line) == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
 		}
 	}
 }

@@ -86,7 +86,7 @@ def test_nothing_can_bury_a_person_or_an_agent_or_flood_the_status_line(pair, te
     a, b = pair
 
     # a person: at most 20 open messages (the limit is the person's, so the answers below keep the other specs clear of it)
-    results = a.calls(*[("POST", "/v1/messages", {"to": "operator", "text": f"look {n}"}) for n in range(25)])
+    results = a.calls(*[("POST", "/v1/messages", {"subject": "A request", "to": "operator", "text": f"look {n}"}) for n in range(25)])
     codes = [code for code, _ in results]
     for code, body in results:
         if code == 201:
@@ -94,13 +94,13 @@ def test_nothing_can_bury_a_person_or_an_agent_or_flood_the_status_line(pair, te
     assert codes.count(201) == 20 and set(codes) - {201} <= {409, 429}, codes
 
     # an agent: at most 20 open requests from one sender, and the refusal says why
-    results = b.calls(*[("POST", "/v1/messages", {"to": a.address, "text": f"request {n}"}) for n in range(21)])
+    results = b.calls(*[("POST", "/v1/messages", {"subject": "A request", "to": a.address, "text": f"request {n}"}) for n in range(21)])
     assert [code for code, _ in results[:20]] == [201] * 20
     code, text = results[20]
     assert code in (409, 429) and "open" in json.dumps(text)
 
     # a sender: at most 30 messages a minute, to whoever (here ten different people), counted on the sender
-    results = b.calls(*[("POST", "/v1/messages", {"to": f"user:u{n % 10}", "text": f"note {n}"}) for n in range(12)])
+    results = b.calls(*[("POST", "/v1/messages", {"subject": "A request", "to": f"user:u{n % 10}", "text": f"note {n}"}) for n in range(12)])
     code, text = results[-1]
     assert code == 429 and "minute" in json.dumps(text), [code for code, _ in results]
 
@@ -141,7 +141,7 @@ def test_agents_lists_the_others_with_their_activity_and_open_counts_and_status_
     assert "refactoring the parser" not in next(line for line in lines if b.name in line.split())
 
 
-def test_a_sender_sees_whether_what_it_sent_was_fetched_and_its_latest_update_until_it_is_resolved(pair):
+def test_a_sender_sees_whether_what_it_sent_was_fetched_and_its_latest_update_until_it_reads_the_reply(pair):
     a, b = pair
     code, body = a.send(b.address, "count the files")
     assert code in (200, 201)
@@ -160,8 +160,30 @@ def test_a_sender_sees_whether_what_it_sent_was_fetched_and_its_latest_update_un
     listed = a.tool("list_messages")["structuredContent"]
     assert [item["id"] for item in listed["sent"]] == [sent], "list_messages lists what the agent sent, under sent"
     assert sent not in {item["id"] for item in b.call("GET", "/v1/messages?sent=1")[1]}, "the recipient does not see it as sent"
+
+    # resolved: it stays under sent, saying so and naming the reply, until the sender reads the reply. A sender that waits inside its
+    # turn, checking list_messages, is never idle, so the reply is not announced to it: this is where it sees it
     b.resolve(sent, "230")
-    assert sent not in mine(), "a resolved request leaves the sender's list"
+    resolved = mine()[sent]
+    assert resolved["state"] == "resolved" and resolved["outcome"] == "done", resolved
+    reply = resolved["reply"]
+    assert ID.match(reply["id"]) and reply["outcome"] == "done"
+    listed = a.tool("list_messages")["structuredContent"]
+    assert reply["id"] in {item["id"] for item in listed["messages"]}, "the reply is listed before it is announced: the sender waits for it"
+    assert a.get(reply["id"])["text"] == "230"
+    assert sent not in mine(), "once the reply is read, the request leaves the sender's list"
+
+
+def test_a_question_back_to_the_sender_is_listed_before_it_is_announced(pair):
+    a, b = pair
+    code, body = a.send(b.address, "deploy it")
+    assert code in (200, 201)
+    request = body["id"]
+    b.get(request)
+    code, question = b.call("POST", f"/v1/messages/{request}/ask", {"text": "which branch?"})
+    assert code == 201, question
+    listed = {item["id"] for item in a.tool("list_messages")["structuredContent"]["messages"]}
+    assert question["id"] in listed, "the sender waits for what is said on its request: a question on it is listed at once"
 
 
 def test_agents_names_each_others_template_and_harness_and_nothing_else_of_it(pair, team):
@@ -245,8 +267,8 @@ def test_the_mcp_endpoint_offers_exactly_the_tools_and_acts_as_the_calling_agent
     assert not coder.tool("resolve", id=message_id, text="it is a Go project", outcome="done").get("isError")
     assert team.messages("--all")[message_id]["STATE"] == "resolved"
 
-    assert coder.tool("message", to="agent:ghost", text="x").get("isError")
-    assert not coder.tool("message", to=reviewer.address, text="from the tool").get("isError")
+    assert coder.tool("message", to="agent:ghost", subject="x", text="x").get("isError")
+    assert not coder.tool("message", to=reviewer.address, subject="From the tool", text="from the tool").get("isError")
     message = next(e for e in team.events() if e["type"] == "message" and e["text"] == "from the tool")
     assert message["actor"] == coder.address and message["data"]["to"] == reviewer.address
 

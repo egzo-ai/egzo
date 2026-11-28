@@ -131,9 +131,17 @@ func TestOpenCodeInAHPModeMakesTheMainSessionBeforeTheTUIStarts(t *testing.T) {
 	if len(again.Setup) != 2 {
 		t.Errorf("after a restart, setup = %v", again.Setup)
 	}
-	// a command that is not the TUI on the main session gets no setup
+	// a command that is not the TUI on the main session gets no setup, and its lines are typed
 	other, _ := openCode{}.Plan(ahpOptions(t), []string{"opencode", "--continue"})
-	if len(other.Setup) != 0 {
-		t.Errorf("setup = %v for a command that picks its own session", other.Setup)
+	if len(other.Setup) != 0 || other.Prompt != nil {
+		t.Errorf("setup = %v, prompt = %v for a command that picks its own session", other.Setup, other.Prompt)
+	}
+	// the task and egzo's lines go to the main session through the server, not typed into a TUI that never says it is ready
+	if !reflect.DeepEqual(plan.Prompt, []string{"egzo", "agent", "ahp", "--prompt"}) {
+		t.Errorf("prompt = %v, want a turn started through the AHP server", plan.Prompt)
+	}
+	o.AHP = false
+	if typed, _ := (openCode{}).Plan(o, nil); typed.Prompt != nil {
+		t.Errorf("out of AHP mode, prompt = %v: lines are typed", typed.Prompt)
 	}
 }

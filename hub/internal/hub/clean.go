@@ -149,15 +149,18 @@ func cleanStatus(line links.StatusLine) links.StatusLine {
 	return line
 }
 
-// maxMessageText is the longest text of a message an agent sends, as control limits it; maxChoices and maxChoice, its quick answers.
+// maxMessageText is the longest text of a message an agent sends, as control limits it; maxSubject, its subject (control allows 120
+// characters: this is in bytes); maxChoices and maxChoice, its quick answers.
 const (
 	maxMessageText = 16 << 10
+	maxSubject     = 512
 	maxChoices     = 10
 	maxChoice      = 64
 	maxMessageID   = 64
 )
 
-// cleanEvent keeps of an event what the hub relays: a message's text keeps its line breaks, everything else is a word.
+// cleanEvent keeps of an event what the hub relays: a message's text keeps its line breaks, its subject is one line, everything else is a
+// word.
 func cleanEvent(e links.Event) links.Event {
 	out := links.Event{Seq: e.Seq, Time: e.Time, Type: word(e.Type, maxWord), Actor: word(e.Actor, maxActor), To: word(e.To, maxActor),
 		Kind: word(e.Kind, maxWord), ID: word(e.ID, maxMessageID), Re: word(e.Re, maxMessageID), Outcome: word(e.Outcome, maxWord)}
@@ -165,6 +168,7 @@ func cleanEvent(e links.Event) links.Event {
 		out.Agent = e.Agent
 	}
 	if e.Type == "message" {
+		out.Subject = termsafe.Truncate(termsafe.Line(e.Subject), maxSubject)
 		out.Text = termsafe.Truncate(termsafe.Block(e.Text), maxMessageText)
 	} else {
 		out.Text = word(e.Text, maxText)

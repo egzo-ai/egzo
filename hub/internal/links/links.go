@@ -47,7 +47,7 @@ type Engine interface {
 	DialAHP(ctx context.Context, agent string, readOnly bool) (net.Conn, error)
 	// SendMessage is what one of the hub's users said to an agent: actor is "user:<id>", and key the chat platform's id for the message,
 	// which makes it idempotent.
-	SendMessage(ctx context.Context, agent, actor, text, key string, interrupt bool) (Sent, error)
+	SendMessage(ctx context.Context, agent, actor, subject, text, key string, interrupt bool) (Sent, error)
 	// Resolve answers a question, or closes a request, addressed to one of the hub's users. outcome "" is done. key, the chat platform's
 	// id for the answer, makes it idempotent as for SendMessage. Resolved.Already says the user had answered before: nothing changed.
 	Resolve(ctx context.Context, message, actor, text, outcome, key string) (Resolved, error)
