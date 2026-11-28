@@ -426,12 +426,22 @@ export interface FileView {
 /** A message a person sent an agent, as its Rich UI chat shows it in place of egzo's line announcing it. */
 export interface ChatMessage {
   id: string;
-  /** The person's name on the hub, or the agent's when another agent sent it. */
+  /** Who sent it, in words: a person's name on the hub, an agent's, "operator" or "egzo". */
   from: string;
   fromAgent?: boolean;
+  /** Who it went to, in the same words. */
+  to: string;
+  toAgent?: boolean;
   kind: "request" | "question" | "resolution" | "update" | string;
-  /** What it answers: the message's id. */
-  re?: string;
+  /** One short line: what it is about. */
+  subject: string;
   text: string;
+  /** What it answers or is part of: the message's id. */
+  re?: string;
+  choices?: string[];
+  /** A resolution's outcome, or how a request or question was resolved. */
+  outcome?: string;
+  /** A request or question that was resolved. */
+  resolved?: boolean;
   time: string;
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/egzo-ai/egzo/hub/internal/hub"
 	"github.com/egzo-ai/egzo/hub/internal/store"
 )
 
@@ -99,7 +100,7 @@ func (s *Server) richChat(w http.ResponseWriter, r *http.Request, user store.Use
 	conn.Close(websocket.StatusNormalClosure, "")
 }
 
-// chatMessage is a message a person sent the agent, which its chat names in egzo's line announcing it.
+// chatMessage is a message sent to the agent, which its chat names in egzo's line announcing it.
 func (s *Server) chatMessage(w http.ResponseWriter, r *http.Request, user store.User) {
 	m, err := s.hub.ChatMessageOf(r.Context(), user, r.PathValue("project"), r.PathValue("agent"), r.PathValue("id"))
 	if err != nil {
@@ -107,4 +108,23 @@ func (s *Server) chatMessage(w http.ResponseWriter, r *http.Request, user store.
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+// agentMessages is what the agent sent and was sent, newest first: its activity. ?before= (RFC 3339) pages back.
+func (s *Server) agentMessages(w http.ResponseWriter, r *http.Request, user store.User) {
+	var before time.Time
+	if b := r.URL.Query().Get("before"); b != "" {
+		t, err := time.Parse(time.RFC3339Nano, b)
+		if err != nil {
+			http.Error(w, "before is an RFC 3339 time", http.StatusBadRequest)
+			return
+		}
+		before = t
+	}
+	list, err := s.hub.AgentMessages(r.Context(), user, r.PathValue("project"), r.PathValue("agent"), before, 100)
+	if err != nil {
+		s.problem(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]hub.ChatMessage{"messages": list})
 }

@@ -47,10 +47,8 @@ the same chat account again moves it to whoever confirms last.
   - The project's cursor moves past the event in the same step. An event the hub could not keep holds the feed, and the hub tries it
     again: it never goes past one. Events with nothing for the outbox move the cursor at most every ten seconds; reading them again costs
     nothing.
-  - The outbox keeps a message for a week. What agents say to the operator never leaves the project, and what they say to each other
-    never reaches a bridge, and its text never leaves the project: of a message one agent sent another, the hub keeps who sent it, its
-    kind and what it answers, apart from the outbox and for a week too, only to show it in the [Rich UI chat](hub.md#rich-ui) of the
-    agent it was sent to.
+  - The outbox keeps a message for a week. What agents say to each other or to the operator never reaches a bridge: the hub keeps it,
+    apart from the outbox, as its [record of messages](hub.md#the-record-of-messages).
 - **Not delivered.** The agent is told by a notice from egzo, which says why and how to send it again ([undelivered](#not-delivered)).
 - **In.** A bridge posts what a user says, with the hub user id the person is linked to. The hub checks it, then hands it to the project's
   link with `send` (or `resolve`, for an answer) as `user:<id>`.

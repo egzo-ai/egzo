@@ -176,16 +176,24 @@ CREATE TABLE IF NOT EXISTS outbox (
 	body TEXT NOT NULL                   -- the event as bridges read it, JSON
 );
 CREATE INDEX IF NOT EXISTS outbox_message ON outbox (json_extract(body, '$.id')); -- a message a bridge says it could not deliver
--- What an agent sent another agent, for the Rich UI chat of the one it was sent to (agentmessages.go): egzo's line announcing it names
--- it, and the chat shows who sent it. Its text is not here: what agents say to each other stays in the project. Kept as long as the outbox keeps its messages. Its own table: the bridges never read it.
-CREATE TABLE IF NOT EXISTS agent_messages (
+-- Every message of a project the events feed carried (messages.go): the hub's record of who asked what, shown in an agent's activity and
+-- its chat. Kept as long as the hub knows the project.
+CREATE TABLE IF NOT EXISTS messages (
 	id TEXT PRIMARY KEY,                 -- the message's id
-	at INTEGER NOT NULL,                 -- Unix milliseconds
 	project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-	agent TEXT NOT NULL,                 -- the agent it was sent to
-	body TEXT NOT NULL                   -- the event, as the outbox keeps a message: JSON
+	at INTEGER NOT NULL,                 -- Unix milliseconds
+	sender TEXT NOT NULL,                -- agent:<name>, user:<id>, operator or egzo
+	recipient TEXT NOT NULL,
+	kind TEXT NOT NULL,                  -- request, question, resolution, update
+	subject TEXT NOT NULL,
+	text TEXT NOT NULL,
+	re TEXT NOT NULL DEFAULT '',         -- the message it answers or is part of
+	choices TEXT NOT NULL DEFAULT '',    -- JSON
+	outcome TEXT NOT NULL DEFAULT '',    -- a resolution's; for a request or question, how it was resolved
+	resolved_at INTEGER                  -- a request or question, once resolved
 );
-CREATE INDEX IF NOT EXISTS agent_messages_at ON agent_messages (at);
+CREATE INDEX IF NOT EXISTS messages_sender ON messages (project, sender, at);
+CREATE INDEX IF NOT EXISTS messages_recipient ON messages (project, recipient, at);
 -- The chat accounts people linked to their hub user, one bridge each (bridgeaccounts.go). An account is one user's; a user may have
 -- several.
 CREATE TABLE IF NOT EXISTS bridge_accounts (

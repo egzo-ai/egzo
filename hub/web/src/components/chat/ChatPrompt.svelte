@@ -1,9 +1,9 @@
 <script lang="ts">
   // What started a turn. A prompt someone typed shows as they typed it. egzo's line announcing a message ("check egzo message m… and handle
-  // the request for me.") shows the message it stands for, from the hub, when the hub has it: who sent it and what it says.
+  // the request for me.") shows the message it stands for, from the hub, when the hub has it: who sent it and its subject (the agent's
+  // tool call that fetches it shows what it says; the agent's Activity tab has it too).
   import { announced, announcement, shortId } from "../../lib/richchat";
   import type { ChatMessage } from "../../lib/types";
-  import Markdown from "./Markdown.svelte";
   import Icon from "../Icon.svelte";
 
   let { prompt, origin, resolve, pending = false }: { prompt: string; origin: string; resolve: (id: string) => Promise<ChatMessage | null>; pending?: boolean } = $props();
@@ -22,9 +22,7 @@
   });
 
   const kinds: Record<string, string> = { request: "request", question: "question", resolution: "reply", update: "update" };
-  // a long message shows its start; the whole of it is a click away
-  let opened = $state<Record<string, boolean>>({});
-  const long = (text: string) => text.length > 280 || text.split("\n").length > 4;
+
   const shown = $derived(found?.filter((m): m is ChatMessage => m !== null) ?? []);
 </script>
 
@@ -47,12 +45,7 @@
         <span class="muted kind">· {kinds[m.kind] ?? "message"}{#if m.re}<span title={m.re}> on {shortId(m.re)}</span>{/if}</span>
         <code class="id" title="{m.id}, through egzo">{shortId(m.id)}</code>
       </div>
-      {#if m.text}
-        <div class="mtext" data-clamped={long(m.text) && !opened[m.id] ? "" : undefined} data-testid="prompt-message-text"><Markdown source={m.text} /></div>
-        {#if long(m.text)}<button type="button" class="more" onclick={() => (opened[m.id] = !opened[m.id])}>{opened[m.id] ? "Show less" : "Show all"}</button>{/if}
-      {:else}
-        <div class="muted none">What it says stays in the project: the agent reads it in its chat.</div>
-      {/if}
+      <div class="subject" data-testid="prompt-message-subject">{m.subject || m.text.split("\n")[0]}</div>
     </div>
   {/each}
   {#if shown.length < ids.length}{@render line(said.filter((a) => a.ids.some((id) => !shown.some((m) => m.id === id))))}{/if}
@@ -71,11 +64,7 @@
   .env { display: inline-flex; color: var(--text-2); }
   .mhead .k { color: var(--text-3); }
   .mhead .id { margin-left: auto; }
-  .mtext[data-clamped] { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-  .mtext :global(> :first-child) { margin-top: 0; }
-  .mtext :global(> :last-child) { margin-bottom: 0; }
-  .more { justify-self: start; font: inherit; font-size: 13px; color: var(--text-2); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
-  .none { font-size: 14px; }
+  .subject { font-weight: 600; overflow-wrap: anywhere; }
   .from { font-weight: 600; color: var(--text); }
   .egzo { background: transparent; border: 1px dashed var(--border-strong); color: var(--text-3); font-size: 14px; border-radius: 14px; }
   .egzo .from { color: var(--text-2); margin-right: 6px; }
