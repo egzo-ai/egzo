@@ -173,7 +173,7 @@ serves the chat of its main session over the [Agent Host Protocol](https://githu
 container, on its loopback. The link carries it to the hub; AHP carries chat only, and egzo's verbs stay as they are.
 
 - **`published`** says, in `AHP`, which templates' harnesses have an AHP mode, and whether the terminal stays in it (`{"oc":
-  {"Terminal": true}}`). Only these take `AHP` on **`spawn`**. A spawn in AHP mode gives the instance `EGZO_AHP=1` and the label
+  {"Terminal": true}, "cc": {"Terminal": true}}`). Only these take `AHP` on **`spawn`**. A spawn in AHP mode gives the instance `EGZO_AHP=1` and the label
   `ai.egzo.agent.ahp`, and the project's agents say `AHP`.
 - **`ahp`** (`Agent`, `ReadOnly`) runs `egzo agent ahp` in the agent's container, as `attach` runs `egzo agent attach`: no new port,
   no new path into the container. After the `Done`, the stream is lines of JSON both ways: AHP's JSON-RPC 2.0 messages, and egzo's

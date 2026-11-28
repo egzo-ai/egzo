@@ -157,7 +157,14 @@ agents:
 - `model:` is passed as `-c model=...`; effort is Codex's `model_reasoning_effort`, which `env` cannot set: put it in the
   agent's `~/.codex/config.toml`.
 
-### AHP mode
+## AHP mode
+
+`egzo agent spawn <template> --ahp` (or **Rich UI** in the hub) serves the chat of the agent's main session over the Agent Host Protocol,
+inside its container, on its loopback, with a token made anew at each start. `egzo agent ahp`, inside the container, carries it over stdin
+and stdout; the project's link runs it for the hub ([AHP mode](reference/hub-link.md#ahp-mode)). OpenCode and Claude Code have an AHP
+mode, and keep their terminal in it; the hub sees the same protocol from both. A harness without one (Codex, custom) refuses `--ahp`.
+
+### OpenCode
 
 `egzo agent spawn open --ahp` (or **Rich UI** in the hub) starts OpenCode with egzo's fork of the
 [opencode-ahp](https://github.com/egzo-ai/opencode-ahp) plugin, which serves the agent's chat over the Agent Host Protocol inside
@@ -170,9 +177,30 @@ egzo starts them as turns of the main session through the AHP server (`egzo agen
 turn is under way. The chat has them from their first event, and the TUI shows them, since it is on that session. In AHP
 mode the plugin reports the agent's state from that session only. A template whose command already picks a session (`-s`,
 `--continue`) keeps its own choice.
-`egzo agent ahp`, inside the container, carries the chat over stdin and stdout; the project's link runs it for the hub
-([AHP mode](reference/hub-link.md#ahp-mode)). The stock image carries the plugin; an image without it has no AHP server, and
-`egzo agent ahp` says so. A harness without an AHP mode refuses `--ahp`.
+The stock image carries the plugin; an image without it has no AHP server, and `egzo agent ahp` says so.
+
+### Claude Code
+
+Claude Code has no AHP server: egzo's adapter is one ([#233](https://github.com/egzo-ai/egzo/issues/233)). It is part of the `egzo`
+binary (`egzo agent claude-ahp`), which `egzo agent run` starts next to the TUI and starts again if it stops. The TUI stays, and is the
+agent: the adapter puts the chat together from what Claude Code leaves behind, and acts in it as a person at the terminal would.
+
+- **The main session** is named when the agent first starts and kept in `~/.egzo/main-session`. The TUI is started on it
+  (`claude --session-id`), and continues it after a restart (`claude --resume`). A template whose command already picks a session
+  (`--continue`, `--resume`, `--session-id`) or does not run the TUI (`-p`, a subcommand) keeps its own choice. A session started later in
+  the terminal (`/clear`) works, but the chat does not follow it.
+- **The chat** comes from the main session's transcript (`~/.claude/projects/<dir>/<session>.jsonl`), which the adapter follows: each
+  prompt (typed in the terminal, by egzo, or sent from the hub), the answers, the reasoning Claude Code keeps, the tool calls and their
+  results, the tokens, steering and interrupts, the end of each turn and the session's title. After a restart the adapter reads it again,
+  and the chat has its history back. Answers arrive a block at a time, as Claude Code writes them, not streamed.
+- **Approvals and questions.** egzo adds hooks to Claude Code's settings that reach the adapter (`egzo agent claude-ahp hook`). A tool
+  call that waits for a permission (without `permissions: bypass`), and every question Claude Code asks (`AskUserQuestion`, in any
+  mode), wait in the chat and in the TUI at once: the first answer wins. One answered in the terminal shows in the chat as answered. The
+  Stop hooks end a turn the transcript did not, and the SessionStart hook says the TUI started.
+- **Sending.** A prompt from the hub is typed into the TUI, as one paste, once the TUI shows it takes a prompt; a steering message is
+  typed during the turn, and Claude Code takes it at the turn's next step (its own steering); a queued message waits in the adapter
+  until the turn ends, and is typed then. **Stop** presses Esc. egzo's own lines (the task, the announcements of messages) are typed as
+  they are without AHP mode, and are in the chat the same way.
 
 ## Trying two side by side
 

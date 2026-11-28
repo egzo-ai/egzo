@@ -201,14 +201,14 @@ pages, `:` or Ctrl+K opens the command menu; single-key shortcuts can be turned 
 ## Rich UI
 
 An agent spawned with **Rich UI** (a checkbox of the spawn form, offered only for a template whose harness has an AHP mode: OpenCode
-today) has a **Chat** tab, its first section: the conversation of its main session, live, the agent's answers as it writes them. The
+and Claude Code) has a **Chat** tab, its first section: the conversation of its main session, live, the agent's answers as it writes them. The
 choice is made at spawn and kept for the agent's life. It works at a phone's width.
 
 - **What it shows.** The session's title; each prompt; the agent's answers, in Markdown (raw HTML is never rendered, images an answer
   names are links, not fetched); its reasoning, folded; its tool calls, one line each, which open on what the tool was called with (a
   shell command as the command), what it gave back and how it failed; and under each turn, how it ended, how long it took, the model and
-  the tokens it used. A tool that waits for an approval has **Approve** and **Deny** buttons. A question the agent asks (OpenCode's question tool, or a
-  consent a tool needs, such as using a web search provider) shows in its turn with its choices: one click answers a single choice,
+  the tokens it used. A tool that waits for an approval has **Approve** and **Deny** buttons. A question the agent asks (OpenCode's question tool, Claude Code's
+  AskUserQuestion, or a consent a tool needs, such as using a web search provider) shows in its turn with its choices: one click answers a single choice,
   otherwise **Submit** sends the answers, and **Dismiss** declines it. It can still be answered in the terminal instead; the chat then
   says it was answered.
 - **egzo's lines.** A message a person sent the agent reaches it as egzo's line ("check egzo message m… and handle the request for me.").
@@ -216,20 +216,21 @@ choice is made at spawn and kept for the agent's life. It works at a phone's wid
   message the hub never had (from the operator, at the CLI) shows as the line.
 - **Sending.** Typing in the box sends a prompt into that session, as if it were typed in the agent's terminal. While a turn runs, the box
   steers it (Enter: the agent reads it at its next step) or queues a message for after it (**Queue**, or Alt+Enter); both show above the
-  box until the agent takes them. A steering message the agent took shows in the turn, where it took it. A queued message cannot be taken back: OpenCode has no way to. **Stop** cancels the turn that runs. A
+  box until the agent takes them. A steering message the agent took shows in the turn, where it took it. With OpenCode, a queued message cannot be taken back: OpenCode has no way to; with Claude Code, a queued message can, a steering message cannot. **Stop** cancels the turn that runs. A
   prompt the agent does not take is said, with its reason.
 - **Reconnecting.** A dropped connection (a phone that slept, a network that changed) comes back on its own, and what happened meanwhile
   is replayed: no reload.
 - **Who sees what.** Whoever may see what the project's agents did (a user or more) may watch the chat; whoever may operate the agent (its
   starter, an administrator) may also send prompts, stop turns, approve tools and answer questions. Several people can have it open at once: it is not a seat, unlike the
   terminal.
-- **The terminal stays** for OpenCode: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
+- **The terminal stays** for OpenCode and Claude Code: the same session is open in both, and what is typed in one shows in the other. egzo's own lines (the
   messages announced to the agent) show in the chat as prompts: a message from a person or from another agent shows as what they sent,
   with who sent it (an agent's is marked so); one the hub does not have (from the operator, or older than a week) shows as what egzo
   announced, in a person's words, with the message's id cut short.
 - **One session.** The chat is the agent's main session, which the terminal starts on too: it is there from the agent's start, so an
   agent spawned without a task takes its first prompt from the chat. A session opened later in the terminal (`/new`)
-  works, but the hub does not show it, and the agent's activity follows the main session only.
+  works, but the hub does not show it, and the agent's activity follows the main session only. With Claude Code, the agent's answers
+  arrive a block at a time rather than as it writes them ([Claude Code in AHP mode](harnesses.md#claude-code-1)).
 - **What the hub reaches.** The chat and nothing else: through the link, the hub cannot read a file of the agent, open a terminal or touch
   another session ([AHP mode](reference/hub-link.md#ahp-mode)).
 

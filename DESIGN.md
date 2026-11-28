@@ -1079,8 +1079,12 @@ What it shows is in [docs/hub.md](docs/hub.md). The decisions behind it:
   terminal stays. One session per agent, by ignoring the others: the main session is named when the agent first starts, the harness makes it then and its
   TUI starts on it (OpenCode's TUI shows a session it is started on only if the session is there before it), so the chat has a session
   before anybody types. Below the hub's
-  chat interface, the code says "AHP mode", never "Rich UI". Claude Code (AHP emulated over its hooks, as a separate helper) and an ACP
-  fallback (no terminal) come later.
+  chat interface, the code says "AHP mode", never "Rich UI". Claude Code ([#233](https://github.com/egzo-ai/egzo/issues/233)) has no AHP
+  server: egzo's adapter (internal/claudeahp, `egzo agent claude-ahp`) is one, run next to the TUI (a plan's `Background` command). It
+  follows the main session's transcript for the chat, takes approvals and questions through Claude Code's PermissionRequest hook (the
+  TUI's dialog and the chat at once, the first answer wins), and types what the hub sends into the TUI through the session holder, so the
+  terminal stays and the TUI remains the one agent. The Agent SDK would stream, but would replace the TUI. An ACP fallback (no
+  terminal) comes later.
 - What is rarely needed (health, the spec) is under **Advanced**.
 - **Messaging** comes to the hub for 1.0 as an audit view of messages and the questions agents wait on
   ([#145](https://github.com/egzo-ai/egzo/issues/145)). Until then an agent's "waiting" state shows on its row and its page.
