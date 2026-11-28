@@ -251,8 +251,9 @@ def test_claude_code_is_configured_to_bypass_permissions_trust_its_workspaces_re
     assert "Always answer in rhyme." in text and "get_message" in text, "the prompt file is added to the instructions"
 
     asked = read_json(engine, p, asks, "$HOME/.claude/settings.json")
-    assert asked["permissions"].get("defaultMode", "default") == "default" and not asked.get("skipDangerousModePermissionPrompt")
-    assert "--permission-mode" not in cmdline(engine, p, asks, "claude")
+    # the default mode comes from the flag too: permissions.defaultMode, even "default", makes Claude Code ask about auto mode
+    assert "defaultMode" not in asked.get("permissions", {}) and not asked.get("skipDangerousModePermissionPrompt")
+    assert "--permission-mode default" in cmdline(engine, p, asks, "claude")
     assert "IS_SANDBOX=1" not in engine.instance(p.name, asks).raw["Config"]["Env"], "permissions: default keeps the harness prompts"
 
 

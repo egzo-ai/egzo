@@ -66,7 +66,7 @@ You are the agent alone, an instance of the template starter, running on the har
 You were started by Joe (user:7): message "user:7" when you need a person. agents shows under you whether they can be reached now, and egzo tells you when that changes. The user indicated they will not attend this session directly. They gave you a task, which arrives as a request from them: reach them with your egzo tools, and resolve the request when the task is done.
 """
 UNATTENDED_TASK_FIRST_PROMPT = "check egzo message <id> and handle the request for me."
-UNATTENDED_TASK_REQUEST = '{"from":"user:7","id":"<id>","kind":"request","state":"fetched","text":"list the open issues","time":"<time>","to":"agent:alone"}'
+UNATTENDED_TASK_REQUEST = '{"from":"user:7","id":"<id>","kind":"request","state":"fetched","subject":"list the open issues","text":"list the open issues","time":"<time>","to":"agent:alone"}'
 
 # Spawned at the CLI: the operator started it, and nothing is typed.
 OPERATOR = PLATFORM + """
