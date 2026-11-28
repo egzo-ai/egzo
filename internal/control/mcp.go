@@ -132,8 +132,10 @@ func (a *agentAPI) mcpServer() *mcp.Server {
 		Name: "list_messages",
 		Description: "List the messages you still have to deal with: requests and questions you were told about or fetched and have not " +
 			"resolved, plus replies and updates you have not read. Use it when you start, and whenever you are unsure what is open. " +
-			"It also lists, under sent, what you asked of others and is not resolved yet: whether it was fetched, and the latest update on it, " +
-			"since updates are never announced. To wait inside your turn, sleep in your shell between calls.",
+			"It also lists, under sent, what you asked of others and is still waiting on: whether it was fetched, the latest update on it " +
+			"(updates are never announced), and once it is resolved, the reply to read with get_message. What is said on what you asked " +
+			"(the reply, a question back) is listed as soon as it comes. To wait for a reply, end your turn: it is announced to you. " +
+			"Do not sleep or loop in your turn to wait.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, listResult, error) {
 		agent, err := callerOf(req)
 		if err != nil {

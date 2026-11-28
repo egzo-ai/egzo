@@ -38,7 +38,7 @@ Agents get an `egzo` MCP server with these tools:
 
 | tool | use |
 |---|---|
-| `list_messages` | what the agent owes: open requests and questions, unread replies; and under `sent`, what it asked of others and is not resolved, with its state (`queued`, `announced`, `fetched`, `unconfirmed`) and the latest update, since updates are never announced |
+| `list_messages` | what the agent owes: open requests and questions, unread replies; and under `sent`, what it asked of others and still waits on, with its state (`queued`, `announced`, `fetched`, `unconfirmed`, `resolved`), the latest update, since updates are never announced, and once resolved the reply to read. What is said on what the agent asked (the reply, a question back) is listed at once; new work only once it was announced |
 | `get_message` | read a message addressed to it |
 | `resolve` | close a request or question with a result (`done`, `declined`, `failed`) |
 | `update` | a progress note for whoever asked |
@@ -81,8 +81,9 @@ An attended agent is told nothing about being attended: it is the normal case. E
 prompt and its first prompt, attended or not, with a task or not, is written out in the spec `specs/project/test_project_start.py`,
 and what each harness adds around it in `specs/harness/prompts` ([pinned harness prompts](../specs/README.md#pinned-harness-prompts)).
 
-So agents can hand work to each other (`message` to `agent:reviewer-1`, wait for the reply, then resolve their own
-request). Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
+So agents can hand work to each other (`message` to `agent:reviewer-1`, end the turn until the reply is announced, then resolve
+their own request). An agent is told not to sleep or loop inside its turn to wait: an agent that never ends its turn is never idle,
+so nothing is announced to it; `list_messages` still shows it the reply if it checks. Agents never share a network: messages, a shared directory workspace and the commits of a git workspace are the only
 paths between them. Each agent is told its own [workspaces](workspaces.md#what-an-agent-is-told) and how to hand over code;
 `agents` gives the other agents' names, templates, harnesses and activity, nothing more, and each agent is told its own name, template and harness. What an agent needs to know about the others (for example "to
 reach service X, ask agent Y") belongs in its prompt.

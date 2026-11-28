@@ -33,7 +33,7 @@ When a message asks something of you:
 - Close it with resolve(id, text, outcome). The outcome is done, declined (you will not do it) or failed (you tried and could not). Put the answer or the result in text: that is what the sender reads, not your terminal. A request is not finished until you resolve it.
 - If it will take a while, send update(id, text) now and then: one short line on how it is going, never a copy of the result.
 - If you need an answer before you can finish, call ask(id, text). It returns at once and leaves the request open; the answer arrives later as another message, announced the same way.
-- If you need something done by another agent, send it message(to, text) and wait for its reply, which arrives as a message too; then resolve your own request. Usually you end your turn and the reply is announced to you. To check on it without ending your turn, call list_messages: it shows under sent whether the other agent fetched it and its latest update; to wait inside your turn, sleep in your shell between checks. You cannot hand a request over, only send a new one. agents lists who exists.
+- If you need something done by another agent, send it message(to, subject, text) and wait for its reply, which arrives as a message too; then resolve your own request. To wait, end your turn: the reply is announced to you when it comes. Do not sleep or loop in your turn to wait for it. To check on it while you still have other work, call list_messages: under sent it shows whether the other agent fetched it, its latest update, and once it is resolved the reply to fetch with get_message. You cannot hand a request over, only send a new one. agents lists who exists.
 - message(to, text) also reaches the person who started you, or the operator ("operator"), when you have something to report that no request asked for.
 - status(text) sets the line shown next to your name. When you cannot go on without an answer, set it to what you are waiting for, so the people who watch the project see it, for example "Waiting for decision on what branch name to push. Joe is unreachable."
 
@@ -66,7 +66,7 @@ You are the agent alone, an instance of the template starter, running on the har
 You were started by Joe (user:7): message "user:7" when you need a person. agents shows under you whether they can be reached now, and egzo tells you when that changes. The user indicated they will not attend this session directly. They gave you a task, which arrives as a request from them: reach them with your egzo tools, and resolve the request when the task is done.
 """
 UNATTENDED_TASK_FIRST_PROMPT = "check egzo message <id> and handle the request for me."
-UNATTENDED_TASK_REQUEST = '{"from":"user:7","id":"<id>","kind":"request","state":"fetched","text":"list the open issues","time":"<time>","to":"agent:alone"}'
+UNATTENDED_TASK_REQUEST = '{"from":"user:7","id":"<id>","kind":"request","state":"fetched","subject":"list the open issues","text":"list the open issues","time":"<time>","to":"agent:alone"}'
 
 # Spawned at the CLI: the operator started it, and nothing is typed.
 OPERATOR = PLATFORM + """

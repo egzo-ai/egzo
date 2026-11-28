@@ -472,7 +472,7 @@ func TestEventsOfAConversationAreFiledUnderTheAgentInvolved(t *testing.T) {
 	}
 }
 
-func TestASenderSeesWhereWhatItSentStandsAndItsLatestUpdateUntilItIsResolved(t *testing.T) {
+func TestASenderSeesWhereWhatItSentStandsAndItsLatestUpdateUntilItReadsTheReply(t *testing.T) {
 	r := newRig(t)
 	r.project("lead", "helper")
 	sent := func() []Sent {
@@ -499,8 +499,37 @@ func TestASenderSeesWhereWhatItSentStandsAndItsLatestUpdateUntilItIsResolved(t *
 		t.Errorf("the recipient sees the sender's request as its own: %+v", others)
 	}
 	r.asAgent("helper", "POST", "/v1/messages/"+created.ID+"/resolve", `{"text":"230","outcome":"done"}`).Body.Close()
+	got = sent()
+	if len(got) != 1 || got[0].State != stateResolved || got[0].Outcome != "done" || got[0].Reply == nil || got[0].Reply.Outcome != "done" {
+		t.Fatalf("a resolved request stays, naming its reply, until the sender reads it: %+v", got)
+	}
+	reply := got[0].Reply.ID
+	listed := false
+	for _, m := range r.srv.listFor("lead") {
+		listed = listed || m.ID == reply
+	}
+	if !listed {
+		t.Errorf("the reply %s is listed before it is announced: the sender waits for it", reply)
+	}
+	r.asAgent("lead", "GET", "/v1/messages/"+reply, "").Body.Close()
 	if got := sent(); len(got) != 0 {
-		t.Errorf("a resolved request is still listed: %+v", got)
+		t.Errorf("once the reply is read, the request leaves the list: %+v", got)
+	}
+}
+
+func TestARequestToARemovedAgentShowsItsFailedReplyToTheSender(t *testing.T) {
+	r := newRig(t)
+	r.project("lead", "helper")
+	id, err := r.srv.sendFromAgent("lead", "agent:helper", "A subject", "count", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.srv.retire("helper"); err != nil {
+		t.Fatal(err)
+	}
+	got := r.srv.sentBy("lead")
+	if len(got) != 1 || got[0].ID != id || got[0].Reply == nil || got[0].Reply.Outcome != "failed" {
+		t.Errorf("the sender sees its request failed, and the reply that says why: %+v", got)
 	}
 }
 

@@ -249,6 +249,16 @@ func (s *store) index(event Event) {
 	}
 }
 
+// replyUnread reports whether a resolved request's reply was not read yet: its sender still sees it under sent. It runs under the
+// store's lock.
+func (s *store) replyUnread(m *Message) bool {
+	if m.State != stateResolved || m.Resolution == "" {
+		return false
+	}
+	reply := s.messages[m.Resolution]
+	return reply != nil && reply.State != stateFetched
+}
+
 // message returns a copy of one message.
 func (s *store) message(id string) (Message, bool) {
 	s.mu.Lock()
@@ -282,7 +292,7 @@ func (s *store) messagesOf(address string, match func(Message) bool) []Message {
 	live := s.byAddress[address][:0]
 	for _, id := range s.byAddress[address] {
 		m := s.messages[id]
-		if terminal(m) {
+		if terminal(m) && !s.replyUnread(m) {
 			continue // nothing asks about it any more: forget it here, so the list stays as long as what is open
 		}
 		live = append(live, id)
@@ -699,23 +709,38 @@ func (s *server) sendFromAgent(agent, to, subject, text, re string) (string, err
 	return message.ID, err
 }
 
-// listFor is list_messages: what an agent owes and has not read, never what has not been announced.
+// listFor is list_messages: what an agent owes and has not read. New work (a request, a question on what someone else asked of it)
+// is listed once it was announced, at the end of a turn. What is said on what the agent asked itself (the reply, a question back,
+// an update) is listed at once: the agent is waiting for it, and an agent that waits inside its turn, checking this list, is never idle
+// and so is never told by an announcement.
 func (s *server) listFor(agent string) []Message {
 	to := "agent:" + agent
-	return s.events.messagesOf(to, func(m Message) bool {
+	candidates := s.events.messagesOf(to, func(m Message) bool {
 		if m.To != to {
 			return false
 		}
+		unread := m.State == stateQueued || m.State == stateAnnounced || m.State == stateUnconfirmed
 		switch m.Kind {
-		case kindRequest, kindQuestion:
+		case kindRequest:
 			return m.State == stateAnnounced || m.State == stateFetched || m.State == stateUnconfirmed
-		case kindResolution:
-			return m.State == stateAnnounced || m.State == stateUnconfirmed
+		case kindQuestion, kindResolution:
+			return unread || m.Kind == kindQuestion && m.State == stateFetched
 		case kindUpdate:
 			return m.State == stateQueued
 		}
 		return false
 	})
+	// a question not announced yet is listed only when it is on what the agent asked (found outside the store's lock)
+	out := candidates[:0]
+	for _, m := range candidates {
+		if m.Kind == kindQuestion && m.State == stateQueued {
+			if asked, ok := s.events.message(m.Re); !ok || asked.From != to {
+				continue
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // Sent is a request or question an agent sent and that is not resolved, as its sender sees it: where it stands
@@ -723,6 +748,14 @@ func (s *server) listFor(agent string) []Message {
 type Sent struct {
 	Message
 	LatestUpdate *Note `json:"latest_update,omitempty"`
+	// Reply is, for a resolved request, the message that resolved it, until the sender reads it: get_message it.
+	Reply *Reply `json:"reply,omitempty"`
+}
+
+// Reply names the message that resolved what an agent sent.
+type Reply struct {
+	ID      string `json:"id"`
+	Outcome string `json:"outcome"`
 }
 
 // Note is an update as a sender sees it on what it sent.
@@ -732,15 +765,19 @@ type Note struct {
 }
 
 // sentBy is what an agent asked of others and is still waiting for: updates are never announced, so this is where the
-// sender sees them, and whether its request was fetched at all.
+// sender sees them, and whether its request was fetched at all. A resolved request stays, naming its reply, until the sender reads
+// the reply: an agent that checks this list inside its turn sees its request resolved where it was looking.
 func (s *server) sentBy(agent string) []Sent {
 	from := "agent:" + agent
 	out := []Sent{}
 	open := s.events.messagesOf(from, func(m Message) bool {
-		return m.From == from && (m.Kind == kindRequest || m.Kind == kindQuestion) && m.State != stateResolved
+		return m.From == from && (m.Kind == kindRequest || m.Kind == kindQuestion)
 	})
 	for _, m := range open {
-		sent := Sent{Message: m}
+		sent := Sent{Message: m, Reply: s.unreadReply(m)}
+		if m.State == stateResolved && sent.Reply == nil {
+			continue
+		}
 		updates := s.events.messagesOf(from, func(u Message) bool { return u.To == from && u.Kind == kindUpdate && u.Re == m.ID })
 		if len(updates) > 0 {
 			latest := updates[len(updates)-1]
@@ -749,6 +786,19 @@ func (s *server) sentBy(agent string) []Sent {
 		out = append(out, sent)
 	}
 	return out
+}
+
+// unreadReply is the reply to a resolved request its sender has not read yet; nil when there is none (open, read, or closed without a
+// reply, as when the agent it went to was removed).
+func (s *server) unreadReply(m Message) *Reply {
+	if m.State != stateResolved || m.Resolution == "" {
+		return nil
+	}
+	reply, ok := s.events.message(m.Resolution)
+	if !ok || reply.State == stateFetched {
+		return nil
+	}
+	return &Reply{ID: reply.ID, Outcome: m.Outcome}
 }
 
 // overlay is what an agent owes: the requests it fetched and has not resolved, and whether a question
