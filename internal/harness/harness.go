@@ -189,6 +189,9 @@ type Plan struct {
 	// Setup are commands run once the files are written, in order, before the harness starts. Each is best effort: one
 	// that fails is reported, and the harness starts anyway.
 	Setup [][]string
+	// Background is a command that runs next to the harness for as long as it runs, started once its terminal is up (it may type into
+	// it, through the session holder's socket), started again if it stops, and stopped with the harness: Claude Code's AHP adapter.
+	Background []string
 }
 
 // File is a file the integration writes.

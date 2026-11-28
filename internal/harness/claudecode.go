@@ -5,6 +5,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -146,18 +147,30 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 		notifications = append(notifications, map[string]any{"matcher": n.matcher, "hooks": []any{map[string]any{"type": "command", "command": stateCommand(n.state, reason)}}})
 	}
 	hooks["Notification"] = notifications
-	// Bypass mode comes from the command line, not from `permissions.defaultMode` in the settings: with
-	// that setting Claude Code asks on its first start "Make auto mode your default permission mode?", a
-	// question nobody is there to answer in an unattended agent. The key is removed (null deletes it when
-	// merging) so a home an earlier run configured does not keep asking either.
+	if o.AHP {
+		// the AHP adapter hears of approvals and questions (it answers them from the chat too), of the end of a turn, and of the TUI's start
+		for _, name := range claudeAHPHooks {
+			hook := map[string]any{"type": "command", "command": claudeAHPHookCommand}
+			if name == "PermissionRequest" {
+				hook["timeout"] = claudeAHPPermissionTimeout
+			}
+			if groups, ok := hooks[name].([]any); ok && len(groups) > 0 {
+				group := groups[0].(map[string]any)
+				group["hooks"] = append(group["hooks"].([]any), hook)
+				continue
+			}
+			hooks[name] = []any{map[string]any{"hooks": []any{hook}}}
+		}
+	}
+	// The permission mode comes from the command line, not from `permissions.defaultMode` in the settings:
+	// with that setting (even "default") Claude Code asks on its first start "Make auto mode your default
+	// permission mode?", a question nobody is there to answer in an unattended agent. The key is removed
+	// (null deletes it when merging) so a home an earlier run configured does not keep asking either.
 	permissions := map[string]any{"defaultMode": nil}
 	settings := map[string]any{
 		"hooks":                             hooks,
 		"permissions":                       permissions,
 		"skipDangerousModePermissionPrompt": o.Bypass,
-	}
-	if !o.Bypass {
-		permissions["defaultMode"] = "default"
 	}
 	if len(o.Workspaces) > 1 {
 		extra := make([]any, 0, len(o.Workspaces))
@@ -177,6 +190,9 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	}
 	if o.Bypass {
 		command = append(command, "--permission-mode", "bypassPermissions")
+	} else {
+		// explicit: Claude Code would otherwise make auto mode its default
+		command = append(command, "--permission-mode", "default")
 	}
 	if o.Model != "" {
 		command = append(command, "--model", o.Model)
@@ -190,7 +206,7 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 	}
 
 	encode := func(value any) []byte { out, _ := json.MarshalIndent(value, "", "  "); return out }
-	return Plan{
+	plan := Plan{
 		Setup: setup,
 		Files: map[string]File{
 			statePath: {Content: encode(state), Mode: 0o600, Merge: true, Replace: replace},
@@ -199,5 +215,123 @@ func (c claudeCode) Plan(o Options, args []string) (Plan, error) {
 		},
 		Command:      command,
 		InterruptKey: "\x1b",
-	}, nil
+	}
+	c.planAHP(o, &plan)
+	return plan, nil
+}
+
+// AHP mode: Claude Code has no AHP server, and egzo's adapter is one (internal/claudeahp, run as `egzo agent claude-ahp serve` next to
+// the TUI). It follows the main session's transcript, hears of approvals and questions through the hooks, and types what the hub sends into
+// the TUI: the terminal stays.
+func (claudeCode) AHP() AHPMode { return AHPMode{Terminal: true} }
+
+// The adapter's hooks, the command they run, and how long an approval may wait in the chat: Claude Code shows its own dialog meanwhile, and
+// the first answer wins.
+var claudeAHPHooks = []string{"SessionStart", "PermissionRequest", "Stop", "StopFailure"}
+
+const (
+	claudeAHPHookCommand       = "egzo agent claude-ahp hook"
+	claudeAHPPermissionTimeout = 86400
+	claudeAHPPort              = 8766
+)
+
+// ClaudeAHPPath is where the adapter serves AHP, under its address.
+const ClaudeAHPPath = "/ahp"
+
+func (c claudeCode) planAHP(o Options, plan *Plan) {
+	endpoint := filepath.Join(o.Home, AHPEndpointFile)
+	if !o.AHP {
+		plan.Remove = append(plan.Remove, endpoint)
+		return
+	}
+	// The main session is named now, and the TUI started on it (--session-id), or continues it after a restart (--resume): Claude Code
+	// makes a session when it starts, and egzo shows that one. The name is kept in the home.
+	mainFile := filepath.Join(o.Home, ".egzo", "main-session")
+	main := ""
+	if o.ReadFile != nil {
+		if data, err := o.ReadFile(mainFile); err == nil {
+			main = strings.TrimSpace(string(data))
+		}
+	}
+	if !validClaudeSession(main) {
+		main = newClaudeSession()
+		plan.Files[mainFile] = File{Content: []byte(main + "\n"), Mode: 0o644}
+	}
+	transcript := ClaudeTranscript(o.Home, o.Workdir, main)
+	resume := o.Exists != nil && o.Exists(transcript)
+	plan.Command = onClaudeSession(plan.Command, main, resume)
+	plan.Background = []string{"egzo", "agent", "claude-ahp", "serve", "--transcript", transcript}
+	described, _ := json.Marshal(AHPEndpoint{
+		URL:         fmt.Sprintf("ws://127.0.0.1:%d%s", claudeAHPPort, ClaudeAHPPath),
+		Token:       newAHPToken(),
+		MainSession: mainFile,
+	})
+	plan.Files[endpoint] = File{Content: described, Mode: 0o600}
+}
+
+// ClaudeTranscript is where Claude Code keeps a session started in dir: ~/.claude/projects/<dir, every character but letters and digits
+// made a dash>/<session>.jsonl.
+func ClaudeTranscript(home, dir, session string) string {
+	project := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return '-'
+	}, dir)
+	return filepath.Join(home, ".claude", "projects", project, session+".jsonl")
+}
+
+// validClaudeSession takes what Claude Code takes as a session id: a UUID.
+func validClaudeSession(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, r := range id {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func newClaudeSession() string {
+	b := []byte(newAHPToken()[:32])
+	b[12] = '4'
+	b[16] = "89ab"[b[16]%4]
+	s := string(b)
+	return s[0:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:32]
+}
+
+// claudeSubcommands are Claude Code's subcommands: a command that runs one is not the TUI.
+var claudeSubcommands = map[string]bool{"auth": true, "mcp": true, "plugin": true, "plugins": true, "doctor": true, "update": true,
+	"install": true, "migrate-installer": true, "setup-token": true, "config": true}
+
+// onClaudeSession starts Claude Code's TUI on the main session: --session-id the first time, --resume once its transcript is there. A
+// command that is not the TUI, or that already says which session (or prints and exits), is left as it is.
+func onClaudeSession(command []string, session string, resume bool) []string {
+	if len(command) == 0 || filepath.Base(command[0]) != "claude" {
+		return command
+	}
+	for i, arg := range command[1:] {
+		name, _, _ := strings.Cut(arg, "=")
+		switch name {
+		case "-c", "--continue", "-r", "--resume", "--session-id", "-p", "--print", "--fork-session":
+			return command
+		}
+		if i == 0 && claudeSubcommands[arg] {
+			return command
+		}
+	}
+	flag := "--session-id"
+	if resume {
+		flag = "--resume"
+	}
+	return append([]string{command[0], flag, session}, command[1:]...)
 }

@@ -139,7 +139,7 @@ func newAgentCommand(opts *options) *cobra.Command {
 	forward.Flags().BoolVar(&closeOnEOF, "close-on-eof", false, "end at the end of stdin")
 	cmd.AddCommand(newSpawnCommand(opts), newAgentListCommand(opts), newAgentRmCommand(opts),
 		newLifecycleCommand(opts, "start", "Start an agent's container"), newLifecycleCommand(opts, "stop", "Stop an agent's container"),
-		newAttachCommand(opts), run, browserCommand, forward, ahpCommand, newSSHSetupCommand(), newAgentAccessCommand())
+		newAttachCommand(opts), run, browserCommand, forward, ahpCommand, newClaudeAHPCommand(), newSSHSetupCommand(), newAgentAccessCommand())
 	return group(cmd)
 }
 
@@ -184,7 +184,7 @@ func runAgent(args []string) error {
 	environment := os.Environ()
 	interrupt := "\x03"
 	readyFile := ""
-	var prompt []string
+	var prompt, background []string
 
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -257,7 +257,7 @@ func runAgent(args []string) error {
 		if err := plan.Write(); err != nil {
 			return fmt.Errorf("prepare %s: %w", integration.Name(), err)
 		}
-		command, interrupt, readyFile, prompt = plan.Command, plan.InterruptKey, plan.ReadyFile, plan.Prompt
+		command, interrupt, readyFile, prompt, background = plan.Command, plan.InterruptKey, plan.ReadyFile, plan.Prompt, plan.Background
 		for key, value := range plan.Env {
 			environment = append(environment, key+"="+value)
 		}
@@ -289,6 +289,9 @@ func runAgent(args []string) error {
 	}
 	go holder.Serve(listener)
 	holder.ForwardSignals()
+	if len(background) > 0 {
+		go runBackground(holder.Done(), background, environment)
+	}
 
 	idle := "quiescence"
 	var readyMarkers []string
@@ -451,6 +454,42 @@ func runSetup(commands [][]string, environment []string) {
 			fmt.Fprintf(os.Stderr, "egzo: %s: %v\n", strings.Join(command, " "), err)
 		}
 		cancel()
+	}
+}
+
+// runBackground keeps a plan's Background command running until done: started again a little after it stops, and stopped when the
+// harness exits. Its output goes to the container's log.
+func runBackground(done <-chan struct{}, command []string, environment []string) {
+	delay := time.Second
+	for {
+		started := time.Now()
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Env, cmd.Stdout, cmd.Stderr = environment, os.Stderr, os.Stderr
+		cmd.SysProcAttr = backgroundAttr()
+		exited := make(chan error, 1)
+		if err := cmd.Start(); err != nil {
+			exited <- err
+		} else {
+			go func() { exited <- cmd.Wait() }()
+		}
+		select {
+		case <-done:
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			return
+		case err := <-exited:
+			fmt.Fprintf(os.Stderr, "egzo: %s stopped: %v\n", strings.Join(command, " "), err)
+		}
+		if time.Since(started) > time.Minute {
+			delay = time.Second
+		}
+		select {
+		case <-done:
+			return
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, 30*time.Second)
 	}
 }
 

@@ -101,11 +101,13 @@ func TestClaudeCodeOptOutOfBypassIsExplicitSoItUndoesAnEarlierRun(t *testing.T) 
 	o.Bypass = false
 	plan, _ := claudeCode{}.Plan(o, nil)
 	settings := decode(t, plan, filepath.Join(o.Home, ".claude", "settings.json"))
-	if get(t, settings, "permissions", "defaultMode") != "default" || settings["skipDangerousModePermissionPrompt"] != false {
-		t.Errorf("settings = %v", settings)
+	if permissions, _ := settings["permissions"].(map[string]any); permissions == nil || permissions["defaultMode"] != nil ||
+		settings["skipDangerousModePermissionPrompt"] != false {
+		t.Errorf("settings = %v: defaultMode is deleted (it makes Claude Code ask about auto mode)", settings)
 	}
-	if strings.Contains(strings.Join(plan.Command, " "), "permission-mode") {
-		t.Errorf("an opt-out must not pass the bypass flag: %q", plan.Command)
+	line := strings.Join(plan.Command, " ")
+	if strings.Contains(line, "bypassPermissions") || !strings.Contains(line, "--permission-mode default") {
+		t.Errorf("an opt-out asks for the default mode on the command line, not bypass: %q", plan.Command)
 	}
 	if env := (claudeCode{}).ContainerEnv(false, Providers{}); env["IS_SANDBOX"] != "" {
 		t.Errorf("env = %v", env)
